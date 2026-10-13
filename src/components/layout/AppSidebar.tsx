@@ -6,6 +6,7 @@ import { useReminders } from "@/hooks/useReminders";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
+import { ModuleIcons, ChromeIcons } from "@/components/icons/moduleIcons";
 import {
   Chart2,
   Grid1,
@@ -71,126 +72,126 @@ const MODULE_HEADER: Record<
 > = {
   finance: {
     label: "Finance",
-    icon: Bank,
+    icon: ModuleIcons.finance,
     color: "#6366f1",
     from: "from-indigo-500/30",
     to: "to-indigo-500/0",
   },
   material: {
     label: "Material",
-    icon: Box,
+    icon: ModuleIcons.material,
     color: "#10b981",
     from: "from-emerald-500/30",
     to: "to-emerald-500/0",
   },
   followup: {
     label: "Follow-Up",
-    icon: Grid1,
+    icon: ModuleIcons.followup,
     color: "#0d9488",
     from: "from-teal-600/30",
     to: "to-teal-600/0",
   },
   engineering: {
     label: "Engineering",
-    icon: Setting2,
+    icon: ModuleIcons.engineering,
     color: "#f97316",
     from: "from-orange-500/30",
     to: "to-orange-500/0",
   },
   ticket: {
     label: "Ticket",
-    icon: Message2,
+    icon: ModuleIcons.ticket,
     color: "#ec4899",
     from: "from-pink-500/30",
     to: "to-pink-500/0",
   },
   sales: {
     label: "Sales",
-    icon: Shop,
+    icon: ModuleIcons.sales,
     color: "#a855f7",
     from: "from-purple-500/30",
     to: "to-purple-500/0",
   },
   records: {
     label: "Records",
-    icon: Archive,
+    icon: ModuleIcons.records,
     color: "#e11d48",
     from: "from-rose-600/30",
     to: "to-rose-600/0",
   },
   civilworkdpr: {
     label: "Civil Work DPR",
-    icon: TimelineIcon,
+    icon: ModuleIcons.civilWorkDpr,
     color: "#0891b2",
     from: "from-cyan-600/30",
     to: "to-cyan-600/0",
   },
   "sales-automation": {
     label: "Sales Automation",
-    icon: Volume,
+    icon: ModuleIcons.salesAutomation,
     color: "#f59e0b",
     from: "from-amber-500/30",
     to: "to-amber-500/0",
   },
   crm: {
     label: "CRM",
-    icon: Buildings2,
+    icon: ModuleIcons.crm,
     color: "#0ea5e9",
     from: "from-sky-500/30",
     to: "to-sky-500/0",
   },
   loan: {
     label: "Loan",
-    icon: MoneyRecive,
+    icon: ModuleIcons.loan,
     color: "#22c55e",
     from: "from-green-500/30",
     to: "to-green-500/0",
   },
   "fixed-asset": {
     label: "Fixed Asset",
-    icon: Cpu,
+    icon: ModuleIcons.fixedAsset,
     color: "#eab308",
     from: "from-yellow-500/30",
     to: "to-yellow-500/0",
   },
   maintenance: {
     label: "Maintenance",
-    icon: Wrench,
+    icon: ModuleIcons.maintenance,
     color: "#65a30d",
     from: "from-lime-500/30",
     to: "to-lime-500/0",
   },
   "hr-payroll": {
     label: "HR and Payroll",
-    icon: Profile2User,
+    icon: ModuleIcons.hrPayroll,
     color: "#eab308",
     from: "from-yellow-500/30",
     to: "to-yellow-500/0",
   },
   admin: {
     label: "Admin",
-    icon: ShieldTick,
+    icon: ModuleIcons.admin,
     color: "#3b82f6",
     from: "from-blue-500/30",
     to: "to-blue-500/0",
   },
   super_admin: {
     label: "Super Admin",
-    icon: Crown,
+    icon: ModuleIcons.superAdmin,
     color: "#eab308",
     from: "from-yellow-500/30",
     to: "to-yellow-500/0",
   },
   dba: {
     label: "DBA",
-    icon: Data,
+    icon: ModuleIcons.dba,
     color: "#10b981",
     from: "from-emerald-500/30",
     to: "to-emerald-500/0",
   },
   user: {
     label: "Profile",
-    icon: User,
+    icon: ModuleIcons.profile,
     color: "#94a3b8",
     from: "from-slate-500/30",
     to: "to-slate-500/0",
@@ -474,56 +475,20 @@ export const AppSidebar = () => {
 
   return (
     <div className="h-full w-full flex flex-col py-2 bg-transparent">
+      {/* A ruled sheet margin: square, ink border, faint grid. The module's own hue stays - as a bar across the top,
+          a tint behind the header, and the marker on the active item. */}
       <aside
-        className="relative flex-1 flex flex-col bg-sidebar"
+        className="relative flex-1 flex flex-col"
         style={{
-          borderTopLeftRadius: 20,
-          borderBottomLeftRadius: 20,
+          backgroundColor: "hsl(var(--card))",
+          backgroundImage:
+            "linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+          border: "1.5px solid hsl(var(--foreground))",
           overflow: "hidden",
-          isolation: "isolate",
-          clipPath: "inset(0 0 0 0 round 20px 0 0 20px)",
         }}
       >
-        {/* ── Module-colored radial glow at top ────────────────────────────────── */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={resolvedKey + "-bg"}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
-            className="absolute top-0 left-0 right-0 h-14 pointer-events-none z-0"
-            style={{
-              background: `radial-gradient(ellipse at 30% 0%, ${accentColor}2A 0%, transparent 100%)`,
-            }}
-          />
-        </AnimatePresence>
-
-        {/* ── Left accent stripe — fades at top & dissolves well before bottom curve */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={resolvedKey + "-stripe"}
-            initial={{ opacity: 0, scaleY: 0 }}
-            animate={{ opacity: 1, scaleY: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-            className="absolute left-0 top-0 bottom-0 w-px pointer-events-none z-10"
-            style={{
-              background: `linear-gradient(to bottom, transparent 12%, ${accentColor}40 22%, ${accentColor}90 35%, ${accentColor}90 65%, ${accentColor}40 78%, transparent 88%)`,
-              transformOrigin: "top",
-              borderRadius: 20,
-            }}
-          />
-        </AnimatePresence>
-
-        {/* ── Fading right border ───────────────────────────────────────────────── */}
-        <div
-          className="absolute top-0 right-0 bottom-0 w-px pointer-events-none z-30"
-          style={{
-            background:
-              "linear-gradient(to bottom, hsl(var(--sidebar-border)) 0%, hsl(var(--sidebar-border)) 55%, transparent 100%)",
-          }}
-        />
+        <div className="absolute top-0 left-0 right-0 z-30 transition-colors duration-300" style={{ height: 3, background: accentColor }} />
 
         {/* ── Module header ────────────────────────────────────────────────────── */}
         {header && (
@@ -534,30 +499,19 @@ export const AppSidebar = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
-              className="relative z-20 flex items-center gap-3 px-4 py-3.5 overflow-hidden"
+              className="relative z-20 flex items-center gap-3 px-4 pt-4 pb-3 overflow-hidden"
+              style={{ background: `${accentColor}1F`, borderBottom: "1px solid hsl(var(--foreground))" }}
             >
-              {/* Header inner glow */}
+              {/* Icon tile */}
               <div
-                className="absolute inset-0 pointer-events-none"
-                style={{
-                  background: `linear-gradient(135deg, ${accentColor}22 0%, transparent 60%)`,
-                }}
-              />
-              {/* Icon badge */}
-              <motion.div
-                whileHover={{ scale: 1.08 }}
-                className="relative z-10 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-sm"
-                style={{
-                  background: `${accentColor}28`,
-                  color: accentColor,
-                  border: `1px solid ${accentColor}40`,
-                }}
+                className="relative z-10 w-7 h-7 flex items-center justify-center shrink-0"
+                style={{ color: accentColor, border: `1.5px solid ${accentColor}`, background: "hsl(var(--card))" }}
               >
                 <header.icon size={14} strokeWidth={2.2} />
-              </motion.div>
+              </div>
               {/* Label */}
               <span
-                className="relative z-10 text-[0.6875rem] font-bold tracking-widest uppercase"
+                className="relative z-10 font-heading text-[0.6875rem] font-bold tracking-[0.16em] uppercase"
                 style={{ color: accentColor }}
               >
                 {header.label}
@@ -574,8 +528,8 @@ export const AppSidebar = () => {
           transition={{ duration: 0.2, ease: "easeOut", delay: 0.06 }}
           className="relative z-10 flex-1 overflow-y-auto p-2 sidebar-scroll"
         >
-          <p className="px-2 pb-2 text-[0.625rem] font-bold uppercase tracking-widest text-sidebar-foreground/40">
-            Menu
+          <p className="px-2 pt-1 pb-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Index
           </p>
           <SidebarNav
             items={getNavItems()}
@@ -585,53 +539,15 @@ export const AppSidebar = () => {
         </motion.div>
 
         {/* ── Footer ──────────────────────────────────────────────────────────── */}
-        <div className="bg-sidebar/80 backdrop-blur-sm h-16 flex items-center justify-center">
-          {/* Collapse — same size/style as expand button, rose accent */}
+        <div className="h-14 flex items-center justify-center" style={{ borderTop: "1px solid hsl(var(--border))" }}>
           <motion.button
             onClick={() => setCollapsed(true)}
-            initial={{ opacity: 0, scale: 0.6 }}
-            animate={{ opacity: 1, scale: 1 }}
-            whileHover={{ scale: 1.14 }}
-            whileTap={{ scale: 0.88 }}
-            transition={{ type: "spring", stiffness: 440, damping: 26 }}
-            className="relative flex items-center justify-center w-8 h-8 rounded-full border transition-colors duration-150"
-            style={{
-              background: "rgba(244,63,94,0.12)",
-              borderColor: "rgba(244,63,94,0.35)",
-              color: "#f43f5e",
-            }}
+            whileTap={{ scale: 0.92 }}
+            className="relative flex items-center justify-center w-8 h-8 text-foreground hover:bg-primary/10 transition-colors duration-150"
+            style={{ border: "1px solid hsl(var(--foreground))" }}
             title="Collapse menu"
           >
-            {/* Inner sonar ring */}
-            <motion.span
-              className="absolute inset-0 rounded-full pointer-events-none"
-              animate={{
-                boxShadow: [
-                  "0 0 0 0px rgba(244,63,94,0.80)",
-                  "0 0 0 5px rgba(244,63,94,0)",
-                  "0 0 0 0px rgba(244,63,94,0.80)",
-                ],
-              }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-            />
-            {/* Outer sonar ring */}
-            <motion.span
-              className="absolute inset-0 rounded-full pointer-events-none"
-              animate={{
-                boxShadow: [
-                  "0 0 0 0px rgba(244,63,94,0.55)",
-                  "0 0 0 9px rgba(244,63,94,0)",
-                  "0 0 0 0px rgba(244,63,94,0.55)",
-                ],
-              }}
-              transition={{
-                duration: 1.8,
-                repeat: Infinity,
-                ease: "easeOut",
-                delay: 0.32,
-              }}
-            />
-            <ArrowLeft2 size={13} />
+            <ChromeIcons.left size={15} />
           </motion.button>
         </div>
       </aside>

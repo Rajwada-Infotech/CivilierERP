@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
@@ -1752,10 +1752,10 @@ export default function MaterialExpenseBooking() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Invoice"]} />
-      <FinanceShell
-        title="Invoice"
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Invoices"
         subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
-        icon={Receipt}
         action={
           view === "list" ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1771,16 +1771,16 @@ export default function MaterialExpenseBooking() {
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Download size={13} />
-                <span className="hidden sm:inline">Download Template</span>
+                <span className="hidden sm:inline">Template</span>
               </button>
               <button
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1788,9 +1788,9 @@ export default function MaterialExpenseBooking() {
               {rights.canCreate && (
                 <Button
                   onClick={openNew}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
+                  className="gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
                 >
-                  <Plus size={13} /> New Invoice
+                  <Plus size={13} /> New invoice
                 </Button>
               )}
             </div>
@@ -1799,33 +1799,21 @@ export default function MaterialExpenseBooking() {
       >
         {/* Form View */}
         {view === "form" && (
-          <Card className="border-border shadow-sm" onKeyDown={preventEnterSubmit}>
-            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
-              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
-              <div className="flex items-center gap-3 min-w-0">
-                <button
-                  type="button"
-                  onClick={cancelForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  <ArrowLeft size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-                <span className="text-indigo-500/40">|</span>
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-indigo-500/[0.18] border border-indigo-500/30 shrink-0">
-                    <Receipt size={12} className="text-indigo-400" />
-                  </div>
-                  <h2 className="text-sm font-heading font-bold text-foreground truncate">
-                    {isEditing ? "Edit Invoice" : "New Invoice"}
-                  </h2>
-                  {form.bookingReference && (
-                    <span className="hidden sm:inline font-mono text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md shrink-0">
-                      {form.bookingReference}
-                    </span>
-                  )}
-                </div>
-              </div>
+          <Card className="border-foreground bg-card shadow-none" onKeyDown={preventEnterSubmit}>
+            <div className="flex items-center gap-3 px-5 sm:px-6 py-3.5 min-w-0" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <button
+                type="button"
+                onClick={cancelForm}
+                className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <ArrowLeft size={14} />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="h-4 w-px shrink-0" style={{ background: "hsl(var(--border))" }} />
+              <h2 className="font-heading text-sm font-bold text-foreground truncate">{isEditing ? "Edit invoice" : "New invoice"}</h2>
+              {form.bookingReference && (
+                <span className="hidden sm:inline font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground shrink-0">{form.bookingReference}</span>
+              )}
             </div>
 
             <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
@@ -1836,16 +1824,16 @@ export default function MaterialExpenseBooking() {
                 {/* ── Sub-section: Party & Project ── */}
                 <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center shrink-0">
-                      <SlidersHorizontal size={12} className="text-indigo-500" />
+                    <div className="w-6 h-6 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
+                      <SlidersHorizontal size={12} className="text-foreground" />
                     </div>
-                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+                    <p className="font-heading text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-foreground">
                       Party &amp; Project
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <Building2 size={11} className="shrink-0" />
                         Company
                         <span className="text-destructive">*</span>
@@ -1887,7 +1875,7 @@ export default function MaterialExpenseBooking() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <FolderKanban size={11} className="shrink-0" />
                         Project
                       </p>
@@ -1935,7 +1923,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <CalendarDays size={11} className="shrink-0" />
                         Year
                       </p>
@@ -1961,7 +1949,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <User size={11} className="shrink-0" />
                         {vendorLabel}
                       </p>
@@ -2021,7 +2009,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <ShoppingCart size={11} className="shrink-0" />
                         Filter by PO
                       </p>
@@ -2164,7 +2152,7 @@ export default function MaterialExpenseBooking() {
                         selectedDoc.kind === "PO" ||
                         selectedDoc.kind === "GRN") && (
                         <div
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"}`}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-foreground/40 bg-primary/10 text-foreground" : "border-foreground/40 bg-primary/10 text-foreground"}`}
                         >
                           <span className="shrink-0">←</span>
                           <span className="font-mono font-semibold">
@@ -2188,7 +2176,7 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-primary/10 text-foreground" : selectedDoc.kind === "GRN" ? "bg-primary/10 text-foreground" : "bg-primary/10 text-foreground"}`}
                           >
                             {selectedDoc.kind === "WORK_DONE"
                               ? "Work Done"
@@ -2252,7 +2240,7 @@ export default function MaterialExpenseBooking() {
                     </Field>
                     <Field label="Payment Term">
                       <select
-                        className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
+                        className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:border-foreground transition"
                         value={form.paymentTermId ?? ""}
                         onChange={(e) => {
                           // Due Date is derived by the live effect above
@@ -2509,8 +2497,8 @@ export default function MaterialExpenseBooking() {
                               }}
                               className={`px-3 py-2.5 rounded-lg border text-sm font-medium text-center transition-colors ${
                                 active
-                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                  : "border-border text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+                                  ? "border-foreground/40 bg-primary/10 text-foreground"
+                                  : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
                               }`}
                             >
                               {opt.label}
@@ -2588,7 +2576,7 @@ export default function MaterialExpenseBooking() {
                   onChange={(e) => set("remarks", e.target.value)}
                   placeholder="Optional notes or internal comments…"
                   rows={3}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none text-foreground placeholder:text-muted-foreground"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:border-foreground resize-none text-foreground placeholder:text-muted-foreground"
                 />
               </div>
 
@@ -2610,16 +2598,12 @@ export default function MaterialExpenseBooking() {
                   form.bookingReference.trim()
                 );
                 return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
                     <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                       {saved ? (
-                        <span className="text-emerald-500 font-medium">
-                          Saved!
-                        </span>
+                        <span className="font-medium text-foreground">Saved</span>
                       ) : ebCanSave ? (
-                        <span className="text-emerald-500 font-medium">
-                          Ready to save
-                        </span>
+                        <span className="font-medium text-foreground">Ready to save</span>
                       ) : (
                         "Fill in the required fields to save"
                       )}
@@ -2629,29 +2613,23 @@ export default function MaterialExpenseBooking() {
                         type="button"
                         onClick={resetForm}
                         disabled={saving || saved || !ebIsDirty}
-                        className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                        className="flex-1 sm:flex-none px-4 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
                         <RotateCcw size={12} /> Reset
                       </button>
                       <button
                         onClick={handleSave}
                         disabled={saving || saved || !ebCanSave}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                        className="flex-1 sm:flex-none px-5 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground hover:bg-foreground/85 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
                       >
                         {saved ? (
-                          <Check size={14} />
+                          <Check size={13} />
                         ) : saving ? (
-                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
                         ) : (
-                          <Save size={14} />
+                          <Save size={13} />
                         )}
-                        {saved
-                          ? "Saved!"
-                          : saving
-                            ? "Saving…"
-                            : isEditing
-                              ? "Update Booking"
-                              : "Save Invoice"}
+                        {saved ? "Saved" : saving ? "Saving…" : isEditing ? "Update invoice" : "Save invoice"}
                       </button>
                     </div>
                   </div>
@@ -2674,14 +2652,14 @@ export default function MaterialExpenseBooking() {
             )}
             {loading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
-                <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                Loading bookings…
+                <div className="w-6 h-6 border-2 border-foreground border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading invoices…
               </div>
             )}
             {!loading && (
               <>
-                <Card className="border-border shadow-sm">
-                  <CardHeader className="pb-3 border-b border-border">
+                <Card className="border-foreground bg-card shadow-none">
+                  <CardHeader className="pb-3 border-b border-foreground">
                     <BookingListToolbar
                       totalRecords={totalRecords}
                       statusFilter={statusFilter}
@@ -2744,34 +2722,17 @@ export default function MaterialExpenseBooking() {
                       <div className="rounded-md [&>div]:[scrollbar-width:none] [&>div]:[-ms-overflow-style:none] [&>div::-webkit-scrollbar]:hidden">
                         <Table>
                           <TableHeader>
-                            <TableRow className="bg-muted/30">
-                              <TableHead className="text-xs font-heading w-[20%]">
-                                Booking Ref
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[16%]">
-                                Vendor
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[12%] hidden xl:table-cell">
-                                Company / Project
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[10%] text-right">
-                                Basic Amt
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[9%] text-right hidden md:table-cell">
-                                GST
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[12%] text-right">
-                                Net Amt
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
-                                Doc
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[9%]">
-                                Status
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[10%] text-right">
-                                Actions
-                              </TableHead>
+                            <TableRow>
+                              <TableHead className="w-[4%]">No.</TableHead>
+                              <TableHead className="w-[18%]">Invoice</TableHead>
+                              <TableHead className="w-[16%]">Vendor</TableHead>
+                              <TableHead className="w-[12%] hidden xl:table-cell">Company / project</TableHead>
+                              <TableHead className="w-[10%] text-right">Basic</TableHead>
+                              <TableHead className="w-[7%] text-right hidden md:table-cell">GST</TableHead>
+                              <TableHead className="w-[11%] text-right">Net</TableHead>
+                              <TableHead className="w-[11%] hidden lg:table-cell">Against</TableHead>
+                              <TableHead className="w-[9%]">Status</TableHead>
+                              <TableHead className="w-[8%]" />
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -2783,119 +2744,59 @@ export default function MaterialExpenseBooking() {
                               // page's own "Amount Payable (After TDS)" figure, instead of
                               // showing the pre-TDS gross like this row used to.
                               const effectiveNet = computeEffectiveNet(rec);
+                              const isDraft = rec.status === "Draft";
+                              // For GRN records, derive original base from grnTotalAmount
+                              // since rec.basicAmount may be stale from old saves.
+                              const basic = (() => {
+                                if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
+                                  const gstRate = (rec.igstRate ?? 0) > 0 ? rec.igstRate ?? 0 : (rec.cgstRate ?? 0) + (rec.sgstRate ?? 0);
+                                  const base = gstRate > 0 ? rec.grnTotalAmount / (1 + gstRate / 100) : rec.grnTotalAmount;
+                                  return Math.round(base * 100) / 100;
+                                }
+                                return rec.basicAmount;
+                              })();
                               return (
                                 <TableRow
-                                  key={
-                                    rec.id
-                                      ? `booking-row-${rec.id}`
-                                      : `booking-row-${index}`
-                                  }
-                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 cursor-pointer ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  key={rec.id ? `booking-row-${rec.id}` : `booking-row-${index}`}
+                                  className={`cursor-pointer align-top ${isDraft ? "opacity-75" : ""}`}
                                   onClick={() => openPreview(rec)}
                                 >
-                                  <TableCell className="py-3">
-                                    {rec.status === "Draft" ? (
-                                      <p
-                                        className="text-[0.6875rem] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
-                                        title={rec.bookingReference || ""}
-                                      >
-                                        {rec.bookingReference || "—"}
-                                      </p>
-                                    ) : (
-                                      <p
-                                        className="font-mono text-[0.6875rem] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
-                                        title={rec.bookingReference || ""}
-                                      >
-                                        {rec.bookingReference || "—"}
-                                      </p>
-                                    )}
-                                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
-                                      {rec.bookingDate && (
-                                        <span>{rec.bookingDate}</span>
-                                      )}
-                                      {rec.docTypeName ? (
-                                        <span className="opacity-60">
-                                          · {rec.docTypeName}
-                                        </span>
-                                      ) : null}
-                                      {rec.emi?.enabled ? (
-                                        <span className="inline-flex items-center gap-0.5 text-[0.5625rem] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
-                                          <CreditCard size={8} />
-                                          {rec.emi.installmentCount}x
-                                        </span>
-                                      ) : null}
-                                    </p>
+                                  <TableCell className="py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">
+                                    {String((page - 1) * PAGE_SIZE + index + 1).padStart(2, "0")}
                                   </TableCell>
-                                  <TableCell className="text-xs max-w-[120px] py-3 text-foreground/80">
-                                    <p className="truncate">{rec.supplier || "—"}</p>
+                                  <TableCell className="py-3">
+                                    <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground leading-tight max-w-[190px] truncate" title={rec.bookingReference || ""}>
+                                      {rec.bookingReference || "—"}
+                                    </p>
+                                    <p className="text-[0.6875rem] text-muted-foreground mt-1.5 truncate">
+                                      {[rec.bookingDate, rec.docTypeName].filter(Boolean).join(" · ") || "—"}
+                                    </p>
+                                    {rec.emi?.enabled ? (
+                                      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1">
+                                        EMI · {rec.emi.installmentCount} installments
+                                      </p>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell className="py-3 max-w-[150px]">
+                                    <p className="text-[0.8125rem] font-semibold text-foreground truncate">{rec.supplier || "—"}</p>
                                     {rec.supplierGstRegistered !== undefined ? (
-                                      <span
-                                        className={`inline-flex items-center mt-1 text-[0.5625rem] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
-                                          rec.supplierGstRegistered
-                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                            : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
-                                        }`}
-                                      >
-                                        {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
-                                      </span>
+                                      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1.5">
+                                        {rec.supplierGstRegistered ? "GST bill" : "Non-GST bill"}
+                                      </p>
                                     ) : null}
                                   </TableCell>
                                   <TableCell className="hidden xl:table-cell py-3">
-                                    <p className="text-xs truncate max-w-[110px]">
-                                      {rec.companyName || "—"}
-                                    </p>
-                                    <p className="text-[0.625rem] text-muted-foreground truncate max-w-[110px]">
-                                      {rec.projectName || "—"}
-                                    </p>
+                                    <p className="text-[0.75rem] text-foreground truncate max-w-[130px]">{rec.companyName || "—"}</p>
+                                    <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[130px]">{rec.projectName || "—"}</p>
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
-                                    {rec.status === "Draft" ? (
-                                      <span className="text-muted-foreground/50">
-                                        —
-                                      </span>
-                                    ) : (
-                                      (() => {
-                                        // For GRN records, derive original base from grnTotalAmount
-                                        // since rec.basicAmount may be stale from old saves.
-                                        if (
-                                          rec.eSourceType === "GRN" &&
-                                          rec.grnTotalAmount != null
-                                        ) {
-                                          const gstRate =
-                                            (rec.igstRate ?? 0) > 0
-                                              ? rec.igstRate ?? 0
-                                              : (rec.cgstRate ?? 0) +
-                                                (rec.sgstRate ?? 0);
-                                          const base =
-                                            gstRate > 0
-                                              ? rec.grnTotalAmount /
-                                                (1 + gstRate / 100)
-                                              : rec.grnTotalAmount;
-                                          return `₹${fmt(Math.round(base * 100) / 100)}`;
-                                        }
-                                        return `₹${fmt(rec.basicAmount)}`;
-                                      })()
-                                    )}
+                                  <TableCell className="py-3 text-right whitespace-nowrap text-[0.75rem] tabular-nums text-muted-foreground">
+                                    {isDraft ? "—" : `₹${fmt(basic)}`}
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                    {rec.status === "Draft" ? (
-                                      "—"
-                                    ) : (rec.igstRate ?? 0) > 0 ? (
-                                      <span title="IGST (interstate)">
-                                        {rec.igstRate}%
-                                      </span>
-                                    ) : (
-                                      `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`
-                                    )}
+                                  <TableCell className="py-3 text-right text-[0.75rem] tabular-nums text-muted-foreground hidden md:table-cell">
+                                    {isDraft ? "—" : (rec.igstRate ?? 0) > 0 ? <span title="IGST (interstate)">{rec.igstRate}%</span> : `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`}
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs font-semibold text-right py-3">
-                                    {rec.status === "Draft" ? (
-                                      <span className="text-amber-500 dark:text-amber-400">
-                                        ₹{fmt(effectiveNet)}
-                                      </span>
-                                    ) : (
-                                      `₹${fmt(effectiveNet)}`
-                                    )}
+                                  <TableCell className="py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">
+                                    ₹{fmt(effectiveNet)}
                                   </TableCell>
                                   <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
                                     <LinkedDocBadge
@@ -2906,19 +2807,11 @@ export default function MaterialExpenseBooking() {
                                     />
                                   </TableCell>
                                   <TableCell className="py-3">
-                                    {rec.status === "Draft" ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25">
-                                        <Package
-                                          size={10}
-                                          className="shrink-0"
-                                        />
-                                        Pending Items
-                                      </span>
-                                    ) : null}
+                                    {isDraft ? <div className="mb-1"><SheetMark text="Items pending" tone="waiting" /></div> : null}
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
-                                      fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
+                                      fallback={<SheetMark text={rec.status || "—"} tone={statusTone(rec.status || "")} />}
                                       preloaded={expenseApprovalTrails.get(String(rec.id)) ?? null}
                                       preloadedLoading={expenseApprovalTrailsLoading}
                                     />
@@ -2932,22 +2825,23 @@ export default function MaterialExpenseBooking() {
                                         submitOnly
                                         onSuccess={() => fetchRecords(page)}
                                       />
-                                      <button data-row-view
+                                      <button
+                                        data-row-view
                                         type="button"
-                                        className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                        className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                                         onClick={() => openPreview(rec)}
                                         title="Preview"
                                       >
-                                        <Eye size={15} />
+                                        <Eye size={12} />
                                       </button>
                                       {rights.canDelete && (
                                         <button
                                           type="button"
-                                          className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                                          className="p-1.5 border border-destructive/30 text-destructive/70 hover:text-destructive hover:border-destructive transition-colors"
                                           onClick={() => requestDelete(rec.id)}
                                           title="Delete"
                                         >
-                                          <Trash2 size={15} />
+                                          <Trash2 size={12} />
                                         </button>
                                       )}
                                     </div>
@@ -2958,7 +2852,7 @@ export default function MaterialExpenseBooking() {
                             {filteredRecords.length === 0 && (
                               <TableRow>
                                 <TableCell
-                                  colSpan={9}
+                                  colSpan={10}
                                   className="text-center py-14 text-muted-foreground text-sm"
                                 >
                                   {statusFilter !== "All"
@@ -3039,7 +2933,7 @@ export default function MaterialExpenseBooking() {
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 }

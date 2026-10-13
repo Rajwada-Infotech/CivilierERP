@@ -12,7 +12,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { toast } from "sonner";
@@ -29,24 +29,7 @@ import {
   type BalanceSummary,
   type PassbookEntry,
 } from "@/api/balanceEnquiryApi";
-import {
-  Wallet,
-  Landmark,
-  X,
-  RefreshCw,
-  ArrowDownLeft,
-  ArrowUpRight,
-  ArrowLeftRight,
-  FileText,
-  ChevronDown,
-  TrendingUp,
-  TrendingDown,
-  Receipt,
-  Loader2,
-  CreditCard,
-  Eye,
-  EyeOff,
-} from "lucide-react";
+import { X, RefreshCw, ChevronDown, Loader2, Eye, EyeOff } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
 
 function fmtDate(d: string | null | undefined): string {
@@ -91,17 +74,17 @@ function datePreset(key: "today" | "week" | "month" | "fy" | "all"): { from: str
   return { from: "", to: "" };
 }
 
-const SOURCE_META: Record<string, { label: string; icon: React.ElementType; color: string; bg: string }> = {
-  NewPayment: { label: "Payment", icon: ArrowUpRight, color: "text-rose-500", bg: "bg-rose-500/10" },
-  PaymentPosting: { label: "Payment", icon: ArrowUpRight, color: "text-rose-500", bg: "bg-rose-500/10" },
-  BounceChargePosting: { label: "Bounce Charge", icon: ArrowUpRight, color: "text-rose-500", bg: "bg-rose-500/10" },
-  ReceivedPayment: { label: "Received Payment", icon: ArrowDownLeft, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  FundTransfer: { label: "Fund Transfer", icon: ArrowLeftRight, color: "text-indigo-500", bg: "bg-indigo-500/10" },
-  JournalVoucher: { label: "Journal Voucher", icon: FileText, color: "text-amber-500", bg: "bg-[#ffe2021a]" },
+const SOURCE_LABEL: Record<string, string> = {
+  NewPayment: "Payment",
+  PaymentPosting: "Payment",
+  BounceChargePosting: "Bounce Charge",
+  ReceivedPayment: "Received Payment",
+  FundTransfer: "Fund Transfer",
+  JournalVoucher: "Journal Voucher",
 };
 
 function sourceMeta(sourceType: string) {
-  return SOURCE_META[sourceType] || { label: sourceType, icon: Receipt, color: "text-muted-foreground", bg: "bg-muted" };
+  return { label: SOURCE_LABEL[sourceType] || sourceType };
 }
 
 function docRefFor(t: PassbookEntry): string | null {
@@ -120,8 +103,11 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Balance", accessor: (r) => Number(r.RunningBalance).toFixed(2) },
 ];
 
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 const selectCls =
-  "w-full h-8 pl-8 pr-7 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none";
+  "w-full h-9 pl-2.5 pr-7 bg-card border border-foreground/40 text-xs text-foreground focus:border-foreground outline-none appearance-none disabled:opacity-50";
+const dateCls = "mt-1 w-full lg:w-auto h-9 px-2.5 border border-foreground/40 bg-card text-xs text-foreground focus:border-foreground outline-none";
+const RULE = "1px solid hsl(var(--foreground))";
 
 export default function BalanceEnquiry() {
   const rights = usePageRights("balance-enquiry");
@@ -196,35 +182,34 @@ export default function BalanceEnquiry() {
     if (passbookQuery.error) toast.error((passbookQuery.error as Error).message);
   }, [summaryQuery.error, passbookQuery.error]);
 
+  const sum = summaryQuery.data;
+  const balance = sum?.currentBalance ?? 0;
+  const overdrawn = balance < -0.005;
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Balance Enquiry"]} />
-      <FinanceShell
-        title="Balance Enquiry"
-        subtitle="Bank passbook — running balance across every payment, receipt, transfer and voucher"
-        icon={Wallet}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Balance enquiry"
+        subtitle="A bank account's passbook: every payment, receipt, transfer and voucher, with the balance after each."
         action={
           <button
             onClick={refreshAll}
             disabled={loading}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
           >
-            <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
           </button>
         }
       >
         {/* ── Company / Bank selectors ─────────────────────────────────────── */}
-        <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60 space-y-3">
+        <div className="bg-card px-4 py-4 space-y-4" style={{ border: RULE }}>
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1 min-w-0">
-              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">Company</label>
+              <label className={LBL}>Company</label>
               <div className="relative mt-1">
-                <Landmark size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <select
-                  value={companyId}
-                  onChange={(e) => setCompanyId(e.target.value)}
-                  className={selectCls}
-                >
+                <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} className={selectCls}>
                   <option value="">All Companies</option>
                   {companies.map((c) => (
                     <option key={c.id} value={String(c.id)}>{c.label}</option>
@@ -234,14 +219,14 @@ export default function BalanceEnquiry() {
               </div>
             </div>
             <div className="flex-1 sm:flex-[2] min-w-0">
-              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">Bank Account</label>
+              <label className={LBL}>Bank account</label>
               <div className="relative mt-1">
-                <CreditCard size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                 <select
                   value={bankId ?? ""}
                   onChange={(e) => setBankId(e.target.value ? Number(e.target.value) : null)}
                   disabled={loadingBanks || banks.length === 0}
-                  className={selectCls}
+                  className={`${selectCls} font-semibold`}
+                  style={{ borderColor: "hsl(var(--foreground))" }}
                 >
                   {banks.length === 0 && <option value="">No bank accounts found</option>}
                   {banks.map((b) => (
@@ -255,59 +240,53 @@ export default function BalanceEnquiry() {
             </div>
           </div>
 
-          {/* Quick date-range presets + custom From/To. Presets WRAP onto
-              their own line(s) on narrow screens instead of scrolling — no
-              scrollbar to ever show. */}
+          {/* Range keys + custom From/To */}
           <div className="flex flex-col lg:flex-row lg:items-end gap-3">
             <div className="flex-1 min-w-0">
-              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
-              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                {([
-                  ["today", "Today"],
-                  ["week", "7 Days"],
-                  ["month", "This Month"],
-                  ["fy", "This FY"],
-                  ["all", "All Time"],
-                ] as const).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => applyPreset(key)}
-                    className={`shrink-0 px-3 py-1.5 rounded-full text-[0.6875rem] font-medium border transition-all whitespace-nowrap ${
-                      activePreset === key
-                        ? "btn-module text-white border-primary"
-                        : "bg-background text-muted-foreground border-border hover:border-primary/50"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <label className={LBL}>Range</label>
+              <div className="mt-1">
+                <div className="seg flex-wrap">
+                  {([
+                    ["today", "Today"],
+                    ["week", "7 days"],
+                    ["month", "This month"],
+                    ["fy", "This year"],
+                    ["all", "All time"],
+                  ] as const).map(([key, label]) => (
+                    <button key={key} onClick={() => applyPreset(key)} aria-pressed={activePreset === key} className={activePreset === key ? "on" : undefined}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="flex flex-wrap items-end gap-2">
               <div className="flex-1 min-w-[140px] lg:flex-none">
-                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">From</label>
+                <label className={LBL}>From</label>
                 <DateInput
                   value={fromDate}
                   onChange={(e) => { setFromDate(e.target.value); setActivePreset("custom"); }}
                   max={toDate || undefined}
-                  className="mt-1 w-full lg:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+                  className={dateCls}
                 />
               </div>
               <div className="flex-1 min-w-[140px] lg:flex-none">
-                <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">To</label>
+                <label className={LBL}>To</label>
                 <DateInput
                   value={toDate}
                   onChange={(e) => { setToDate(e.target.value); setActivePreset("custom"); }}
                   min={fromDate || undefined}
-                  className="mt-1 w-full lg:w-auto h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
+                  className={dateCls}
                 />
               </div>
               {(fromDate || toDate) && (
                 <button
                   onClick={() => { setFromDate(""); setToDate(""); setActivePreset("all"); }}
-                  className="h-8 shrink-0 flex items-center gap-1 px-2.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+                  title="Clear dates"
+                  aria-label="Clear dates"
+                  className="h-9 w-9 shrink-0 flex items-center justify-center border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                 >
-                  <X size={11} />
+                  <X size={12} />
                 </button>
               )}
             </div>
@@ -315,86 +294,79 @@ export default function BalanceEnquiry() {
         </div>
 
         {!bankId ? (
-          <div className="glass rounded-xl ring-1 ring-border/60 py-16 flex flex-col items-center justify-center gap-2 text-muted-foreground">
-            <Wallet size={22} className="opacity-40" />
-            <p className="text-sm">{loadingBanks ? "Loading bank accounts…" : "No bank account to show — select a company with a bank account, or add one in Bank Master."}</p>
+          <div className="bg-card py-16 px-4 text-center text-sm text-muted-foreground" style={{ border: RULE }}>
+            {loadingBanks ? "Loading bank accounts…" : "No bank account to show. Select a company with a bank account, or add one in Bank Master."}
           </div>
         ) : (
           <>
-            {/* ── Hero: current balance + account card ─────────────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <div className="lg:col-span-2 glass rounded-2xl ring-1 ring-border/60 p-4 sm:p-5 flex flex-col justify-center relative overflow-hidden">
-                <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-primary/10 blur-2xl pointer-events-none" />
-                <div className="flex items-center justify-between relative">
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">Current Balance</p>
-                  <button
-                    onClick={() => setShowBalance((v) => !v)}
-                    title={showBalance ? "Hide balance" : "Show balance"}
-                    className="p-1.5 rounded-full border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                  >
-                    {showBalance ? <Eye size={13} /> : <EyeOff size={13} />}
-                  </button>
+            {/* ── The balance, the account it belongs to, and the period's movement ── */}
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="flex flex-col md:flex-row">
+                <div className="flex-1 min-w-0 px-4 py-5">
+                  <div className="flex items-center gap-2">
+                    <p className="label" style={overdrawn ? { color: "var(--red)" } : undefined}>{overdrawn ? "Current balance · overdrawn" : "Current balance"}</p>
+                    <button
+                      onClick={() => setShowBalance((v) => !v)}
+                      title={showBalance ? "Hide balance" : "Show balance"}
+                      aria-label={showBalance ? "Hide balance" : "Show balance"}
+                      className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {showBalance ? <Eye size={13} /> : <EyeOff size={13} />}
+                    </button>
+                  </div>
+                  <p className="figure break-all" style={{ fontSize: "clamp(28px, 4vw, 44px)", marginTop: 8, color: overdrawn && showBalance ? "var(--red)" : undefined }}>
+                    {summaryQuery.isFetching && !sum ? (
+                      <Loader2 size={26} className="animate-spin text-muted-foreground" />
+                    ) : showBalance ? (
+                      formatINR(balance)
+                    ) : (
+                      "•••••••"
+                    )}
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--graphite)", marginTop: 8 }}>
+                    {sum?.lastTransactionDate ? `Last activity ${fmtDate(sum.lastTransactionDate)}` : "No activity yet"}
+                  </p>
                 </div>
-                <p className="text-3xl sm:text-4xl font-bold font-heading text-foreground mt-1 tabular-nums relative break-all">
-                  {summaryQuery.isFetching && !summaryQuery.data ? (
-                    <Loader2 size={26} className="animate-spin text-muted-foreground" />
-                  ) : showBalance ? (
-                    formatINR(summaryQuery.data?.currentBalance ?? 0)
-                  ) : (
-                    "•••••••"
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1.5 relative">
-                  {bank?.BName}{bank?.BBranch ? ` · ${bank.BBranch}` : ""}
-                  {summaryQuery.data?.lastTransactionDate ? ` · Last activity ${fmtDate(summaryQuery.data.lastTransactionDate)}` : ""}
-                </p>
+
+                {/* Account particulars */}
+                <div className="md:w-[300px] shrink-0 px-4 py-5 border-t md:border-t-0 md:border-l border-foreground space-y-3">
+                  {[
+                    { l: bank?.BAccountType || "Bank account", v: [bank?.BName, bank?.BBranch].filter(Boolean).join(" · ") || "—", fig: false },
+                    { l: "Account number", v: maskAccountNumber(bank?.BAccountNumber), fig: true },
+                    { l: "IFSC", v: bank?.BIfscCode || "—", fig: true },
+                  ].map((x) => (
+                    <div key={x.l} className="min-w-0">
+                      <p className={LBL}>{x.l}</p>
+                      <p className={`mt-1 text-[0.8125rem] text-foreground break-words ${x.fig ? "font-heading font-semibold tabular-nums tracking-wide" : "font-medium"}`}>{x.v}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              {/* Account "card" */}
-              <div className="rounded-2xl p-4 sm:p-5 relative overflow-hidden text-white flex flex-col justify-between min-h-[128px]"
-                   style={{ background: "linear-gradient(135deg, #1e1b4b 0%, #4c1d95 55%, #6d28d9 100%)" }}>
-                <div className="absolute -bottom-10 -right-10 w-40 h-40 rounded-full bg-white/10 blur-2xl pointer-events-none" />
-                <div className="flex items-center justify-between relative">
-                  <span className="text-[0.625rem] uppercase tracking-widest text-white/60 font-heading">{bank?.BAccountType || "Bank Account"}</span>
-                  <Landmark size={16} className="text-white/70" />
-                </div>
-                <div className="relative">
-                  <p className="font-mono text-sm tracking-wider">{maskAccountNumber(bank?.BAccountNumber)}</p>
-                  <p className="text-[0.625rem] text-white/60 mt-1">{bank?.BIfscCode || "—"}</p>
-                </div>
+              <div className="statrow four" style={{ padding: "16px 16px 18px", borderTop: RULE }}>
+                {[
+                  { label: "Opening balance", value: formatINR(sum?.windowOpeningBalance ?? 0), note: "at the start of the range" },
+                  // Bank is an asset account (see backend/routes/balanceEnquiry.js) —
+                  // a Debit increases it (money in), a Credit decreases it (money out).
+                  { label: "Money in", value: formatINR(sum?.periodDebit ?? 0), note: "receipts and transfers in" },
+                  { label: "Money out", value: formatINR(sum?.periodCredit ?? 0), note: "payments and transfers out" },
+                  { label: "Transactions", value: String(sum?.periodTxnCount ?? 0), note: "in the range" },
+                ].map((x) => (
+                  <div key={x.label}>
+                    <p className="label">{x.label}</p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
+                ))}
               </div>
-            </div>
-
-            {/* ── Stat tiles ─────────────────────────────────────────────────── */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {[
-                { label: "Opening Balance", value: formatINR(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
-                // Bank is an asset account (see backend/routes/balanceEnquiry.js) —
-                // a Debit increases it (money in), a Credit decreases it (money out).
-                { label: "Money In", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
-                { label: "Money Out", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
-                { label: "Transactions", value: String(summaryQuery.data?.periodTxnCount ?? 0), icon: Receipt, color: "text-amber-500", bg: "bg-[#ffe2021a]", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
-              ].map(({ label, value, icon: Icon, color, bg, ring, borderL }) => (
-                <div key={label} className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}>
-                  <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-                    <Icon size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-lg font-bold font-heading text-foreground leading-none truncate">{value}</p>
-                    <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
-                  </div>
-                </div>
-              ))}
             </div>
 
             {/* ── Passbook ───────────────────────────────────────────────────── */}
-            <div className="glass rounded-xl ring-1 ring-border/60 overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-4 border-b border-border/60">
-                <p className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                  <Receipt size={12} /> Transactions
-                  <span className="ml-1 text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full normal-case tracking-normal font-normal">
-                    {transactions.length}
-                  </span>
+            <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+                <p className="flex items-baseline gap-2.5">
+                  <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Passbook</span>
+                  <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{transactions.length} entries</span>
                 </p>
                 <ExportMenu
                   data={transactions as unknown as Record<string, unknown>[]}
@@ -415,38 +387,31 @@ export default function BalanceEnquiry() {
               ) : (
                 <>
                 {transactions.length >= 2000 && (
-                  <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-[#ffe2021a] border-b border-amber-500/20">
-                    Showing first 2,000 transactions — apply a date filter to narrow results.
+                  <div className="px-4 py-2 text-xs text-foreground" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
+                    Showing the first 2,000 transactions. Narrow the date range to see the rest.
                   </div>
                 )}
-                <div className="divide-y divide-border/50 max-h-[560px] overflow-y-auto">
+
+                {/* Phone: one entry per line */}
+                <div className="md:hidden divide-y divide-border/60 max-h-[560px] overflow-y-auto">
                   {transactions.map((t) => {
                     const meta = sourceMeta(t.SourceType);
-                    const Icon = meta.icon;
                     const isDebit = Number(t.DebitAmount) > 0; // Dr = money in for a bank (asset)
                     const amount = isDebit ? Number(t.DebitAmount) : Number(t.CreditAmount);
                     const ref = docRefFor(t);
                     return (
-                      <div key={t.EntryId} className="flex items-center gap-2.5 sm:gap-3 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors">
-                        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center shrink-0 ${meta.bg} ${meta.color}`}>
-                          <Icon size={15} />
-                        </div>
+                      <div key={t.EntryId} className="flex items-start gap-3 px-4 py-3">
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-foreground truncate">
-                            {t.Narration || meta.label}
-                          </p>
-                          <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
-                            <span>{fmtDate(t.VoucherDate)}</span>
-                            <span className="opacity-60">· {meta.label}</span>
-                            {ref && <span className="opacity-60 font-mono">· {ref}</span>}
-                            {t.CostCenterName && <span className="opacity-60">· {t.CostCenterName}</span>}
+                          <p className="text-xs font-semibold text-foreground truncate">{t.Narration || meta.label}</p>
+                          <p className="text-[0.625rem] text-muted-foreground mt-1 tabular-nums">
+                            {fmtDate(t.VoucherDate)} · {meta.label}{ref ? ` · ${ref}` : ""}{t.CostCenterName ? ` · ${t.CostCenterName}` : ""}
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className={`text-sm font-bold font-heading tabular-nums ${isDebit ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                          <p className="font-heading text-sm font-semibold tabular-nums text-foreground">
                             {isDebit ? "+" : "−"}{formatINR(amount)}
                           </p>
-                          <p className="text-[0.625rem] text-muted-foreground mt-0.5 tabular-nums">
+                          <p className={`font-heading text-[0.625rem] mt-0.5 tabular-nums ${Number(t.RunningBalance) < 0 ? "text-destructive" : "text-muted-foreground"}`}>
                             Bal {formatINR(t.RunningBalance)}
                           </p>
                         </div>
@@ -454,12 +419,53 @@ export default function BalanceEnquiry() {
                     );
                   })}
                 </div>
+
+                {/* Wider screens: ruled the way a passbook is */}
+                <div className="hidden md:block max-h-[620px] overflow-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-card z-10">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left w-[104px]">Date</th>
+                        <th className="px-3 py-2.5 text-left">Particulars</th>
+                        <th className="px-3 py-2.5 text-left w-[150px]">Reference</th>
+                        <th className="px-3 py-2.5 text-right w-[130px] border-l border-border/60">Money in</th>
+                        <th className="px-3 py-2.5 text-right w-[130px]">Money out</th>
+                        <th className="px-4 py-2.5 text-right w-[140px] border-l border-border/60">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map((t) => {
+                        const meta = sourceMeta(t.SourceType);
+                        const debit = Number(t.DebitAmount);
+                        const credit = Number(t.CreditAmount);
+                        const ref = docRefFor(t);
+                        return (
+                          <tr key={t.EntryId} className="align-top">
+                            <td className="px-4 py-2.5 tabular-nums text-muted-foreground whitespace-nowrap">{fmtDate(t.VoucherDate)}</td>
+                            <td className="px-3 py-2.5 min-w-0">
+                              <p className="text-foreground font-medium leading-snug">{t.Narration || meta.label}</p>
+                              <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground mt-1">
+                                {meta.label}{t.CostCenterName ? ` · ${t.CostCenterName}` : ""}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2.5 font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground break-all">{ref || "—"}</td>
+                            <td className="px-3 py-2.5 text-right font-heading tabular-nums text-foreground border-l border-border/60">{debit > 0 ? formatINR(debit) : ""}</td>
+                            <td className="px-3 py-2.5 text-right font-heading tabular-nums text-foreground">{credit > 0 ? formatINR(credit) : ""}</td>
+                            <td className={`px-4 py-2.5 text-right font-heading font-semibold tabular-nums border-l border-border/60 ${Number(t.RunningBalance) < 0 ? "text-destructive" : "text-foreground"}`}>
+                              {formatINR(t.RunningBalance)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
                 </>
               )}
             </div>
           </>
         )}
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 }

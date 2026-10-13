@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Notification } from "iconsax-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import {
   RefreshCw,
   ShoppingCart,
@@ -179,20 +180,13 @@ export const ReminderBell = () => {
       <button
         ref={bellButtonRef}
         onClick={handleNotificationClick}
-        className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
+        className="relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+        title="Reminders"
       >
-        <Notification
-          size={20}
-          variant={scoped.length > 0 ? "Bold" : "Outline"}
-          className={scoped.length > 0 ? "animate-jingle-periodic" : ""}
-          color={scoped.length > 0 ? "#f59e0b" : "hsl(var(--muted-foreground))"}
-        />
+        <ChromeIcons.bell size={18} style={{ color: scoped.length > 0 ? "hsl(var(--foreground))" : undefined }} />
         {scoped.length > 0 && (
-          <span className="absolute top-1.5 right-1.5 flex h-4 w-4">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-600 text-[0.625rem] font-bold text-white items-center justify-center border-2 border-background">
-              {scoped.length}
-            </span>
+          <span className="absolute -top-0.5 -right-1 min-w-[15px] h-[15px] px-0.5 flex items-center justify-center bg-destructive text-destructive-foreground font-heading text-[0.5625rem] font-semibold tabular-nums leading-none">
+            {scoped.length > 99 ? "99+" : scoped.length}
           </span>
         )}
       </button>

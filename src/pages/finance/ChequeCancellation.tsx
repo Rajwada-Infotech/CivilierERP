@@ -8,7 +8,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Button } from "@/components/ui/button";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -67,7 +67,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 ];
 
 const searchInputCls =
-  "w-full h-8 pl-8 pr-7 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none";
+  "w-full h-9 pl-8 pr-7 bg-card border border-foreground/40 text-xs focus:border-foreground outline-none";
 
 export default function ChequeCancellation() {
   const rights = usePageRights("cheque-cancellation");
@@ -221,7 +221,7 @@ export default function ChequeCancellation() {
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     }).length;
     return [
-      { label: "Total Cancelled", value: String(cancelledList.length), icon: Ban, bg: "bg-rose-500/10", color: "text-rose-500", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
+      { label: "Total Cancelled", value: String(cancelledList.length), icon: Ban, bg: "bg-destructive/10", color: "text-destructive", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
       { label: "Cancelled This Month", value: String(thisMonth), icon: CalendarClock, bg: "bg-[#ffe2021a]", color: "text-amber-500", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
       { label: "Total Amount", value: formatINR(totalAmount), icon: Wallet, bg: "bg-primary/10", color: "text-primary", ring: "ring-primary/15", borderL: "border-l-primary" },
     ];
@@ -230,52 +230,51 @@ export default function ChequeCancellation() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Cheque Cancellation"]} />
-      <FinanceShell
-        title="Cheque Cancellation"
-        subtitle="Search, review, and cancel cheques tied to payment entries"
-        icon={Ban}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Cheque cancellation"
+        subtitle="Find a cheque, see what it is tied to, and cancel it. One at a time or many together."
         action={
           <button
             onClick={() => loadCancelled()}
             disabled={loadingList}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
           >
-            <RefreshCw size={11} className={loadingList ? "animate-spin" : ""} /> Refresh
+            <RefreshCw size={12} className={loadingList ? "animate-spin" : ""} /> Refresh
           </button>
         }
       >
-        {/* ── Stat tiles ─────────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {stats.map(({ label, value, icon: Icon, bg, color, ring, borderL }) => (
-            <div
-              key={label}
-              className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
-            >
-              <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-                <Icon size={16} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-lg font-bold font-heading text-foreground leading-none truncate">{value}</p>
-                <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
-              </div>
+        {/* ── Figures ────────────────────────────────────────────────────────── */}
+        <div className="statrow">
+          {stats.map(({ label, value }) => (
+            <div key={label}>
+              <p className="label">{label}</p>
+              <p className="figure" style={{ fontSize: "clamp(22px, 2.4vw, 32px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</p>
             </div>
           ))}
         </div>
 
         {/* ── Tabs ───────────────────────────────────────────────────────────── */}
         <Tabs defaultValue="search" className="w-full">
-          <TabsList className="h-9 w-full sm:w-auto">
-            <TabsTrigger value="search" className="text-xs gap-1.5"><Search size={12} /> Search &amp; Cancel</TabsTrigger>
-            <TabsTrigger value="bulk" className="text-xs gap-1.5"><Layers size={12} /> Bulk Cancel</TabsTrigger>
-            <TabsTrigger value="list" className="text-xs gap-1.5">
-              <Ban size={12} /> Cancelled Cheques
-              <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-muted text-[0.625rem] leading-none">{cancelledList.length}</span>
-            </TabsTrigger>
+          <TabsList className="h-auto w-full sm:w-auto p-0 bg-transparent justify-start gap-0" style={{ borderBottom: "1px solid hsl(var(--foreground))", borderRadius: 0 }}>
+            {[
+              { v: "search", l: "Find and cancel" },
+              { v: "bulk", l: "Cancel several" },
+              { v: "list", l: `Cancelled · ${cancelledList.length}` },
+            ].map((x) => (
+              <TabsTrigger
+                key={x.v}
+                value={x.v}
+                className="px-4 py-2.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground border-b-2 border-transparent -mb-px bg-transparent shadow-none data-[state=active]:border-foreground data-[state=active]:text-foreground data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                {x.l}
+              </TabsTrigger>
+            ))}
           </TabsList>
 
           {/* ── Tab: Search & Cancel ───────────────────────────────────────── */}
           <TabsContent value="search" className="mt-3">
-            <div className="glass rounded-xl px-5 py-4 space-y-4 ring-1 ring-border/60">
+            <div className="px-4 py-4 space-y-4 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
               <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                 <div className="relative flex-1 sm:max-w-xs">
                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -295,7 +294,7 @@ export default function ChequeCancellation() {
                 <Button
                   onClick={runSearch}
                   disabled={searching}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
+                  className="gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
                 >
                   {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Search
                 </Button>
@@ -308,34 +307,18 @@ export default function ChequeCancellation() {
               )}
 
               {results.map((row) => (
-                <div key={rowKey(row)} className="rounded-xl border border-border overflow-hidden">
+                <div key={rowKey(row)} className="overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
                   {/* Header: cheque + bank/lot chips + status */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-muted/20 border-b border-border">
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                      <span className="font-mono font-bold text-foreground">Chq {row.PChequeNo}</span>
-                      <span className="flex items-center gap-1 text-muted-foreground">
-                        <Landmark size={11} className="text-primary/70" /> {row.BankName ?? "—"}
-                        {row.PChequeAccountNumber ? ` · ${row.PChequeAccountNumber}` : ""}
-                      </span>
-                      <span className="flex items-center gap-1 text-muted-foreground">
-                        <Layers size={11} className="text-amber-500" /> Lot {row.LotNumber ?? row.PChequeLotNumber ?? "—"}
-                      </span>
+                  <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                    <div className="min-w-0">
+                      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        {row.BankName ?? "—"}{row.PChequeAccountNumber ? ` · ${row.PChequeAccountNumber}` : ""} · Lot {row.LotNumber ?? row.PChequeLotNumber ?? "—"}
+                      </p>
+                      <p className="font-heading text-lg font-bold tabular-nums tracking-tight text-foreground mt-1">Cheque {row.PChequeNo}</p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {row.PPaymentID == null && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[0.6875rem] font-semibold">
-                          Not linked to a payment
-                        </span>
-                      )}
-                      {row.PIsChequeCancelled ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold">
-                          <Ban size={11} /> Cancelled Cheque
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-semibold">
-                          <CheckCircle2 size={11} /> Active
-                        </span>
-                      )}
+                    <div className="flex items-center gap-3 shrink-0">
+                      {row.PPaymentID == null && <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Not tied to a payment</span>}
+                      <SheetMark text={row.PIsChequeCancelled ? "Cancelled" : "Active"} tone={row.PIsChequeCancelled ? "stopped" : "done"} />
                     </div>
                   </div>
 
@@ -354,25 +337,25 @@ export default function ChequeCancellation() {
                         { label: "IFSC", value: row.PChequeIfsc },
                       ].map((f) => (
                         <div key={f.label} className="min-w-0">
-                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground/80">{f.label}</p>
-                          <p className="font-medium text-foreground truncate">{f.value || "—"}</p>
+                          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{f.label}</p>
+                          <p className="text-[0.8125rem] font-medium text-foreground truncate mt-1">{f.value || "—"}</p>
                         </div>
                       ))}
                     </div>
                   )}
 
                   {!row.PIsChequeCancelled && rights.canCreate && (
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 px-4 py-3 border-t border-border bg-muted/10">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 px-4 py-3" style={{ borderTop: "1px solid hsl(var(--border))" }}>
                       <input
                         value={reason}
                         onChange={(e) => setReason(e.target.value)}
                         placeholder="Reason for cancellation (optional)"
-                        className="text-xs px-3 h-8 rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary flex-1"
+                        className="text-xs px-3 h-9 border border-foreground/40 bg-card focus:outline-none focus:border-foreground flex-1"
                       />
                       <button
                         onClick={() => handleCancel(row)}
                         disabled={cancellingId === rowKey(row)}
-                        className="h-8 flex items-center justify-center gap-1.5 px-4 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 disabled:opacity-50 transition-all whitespace-nowrap"
+                        className="h-9 flex items-center justify-center gap-1.5 px-4 bg-destructive text-destructive-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-destructive/90 disabled:opacity-50 transition-colors whitespace-nowrap"
                       >
                         {cancellingId === rowKey(row) ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
                         Cancel Cheque
@@ -386,7 +369,7 @@ export default function ChequeCancellation() {
 
           {/* ── Tab: Bulk Cancel ───────────────────────────────────────────── */}
           <TabsContent value="bulk" className="mt-3">
-            <div className="glass rounded-xl px-5 py-4 space-y-4 ring-1 ring-border/60">
+            <div className="px-4 py-4 space-y-4 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
               <p className="text-xs text-muted-foreground">
                 Paste multiple cheque numbers (comma, space, or newline separated), then check them before cancelling.
               </p>
@@ -400,13 +383,13 @@ export default function ChequeCancellation() {
                     if (e.key === "Enter") runBulkSearch();
                   }}
                   placeholder="Cheque numbers — e.g. 100234, 100235, 100236"
-                  className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-border bg-input/70 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
+                  className="flex-1 min-w-0 px-3 py-2 border border-foreground/40 bg-card text-xs font-heading tabular-nums focus:outline-none focus:border-foreground transition-colors"
                 />
                 <div className="flex sm:flex-col gap-2 sm:w-36 shrink-0">
                   <button
                     onClick={runBulkSearch}
                     disabled={bulkSearching || !bulkInput.trim()}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg btn-module text-white text-xs font-medium disabled:opacity-50 transition-all"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground/85 disabled:opacity-50 transition-colors"
                   >
                     {bulkSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Check
                   </button>
@@ -417,7 +400,7 @@ export default function ChequeCancellation() {
                         setBulkResults([]);
                         setBulkReason("");
                       }}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                     >
                       <X size={13} /> Clear
                     </button>
@@ -426,23 +409,17 @@ export default function ChequeCancellation() {
               </div>
 
               {bulkResults.length > 0 && (
-                <div className="rounded-xl border border-border overflow-hidden">
+                <div className="overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
                   {/* Summary strip */}
-                  <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-muted/20 border-b border-border">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-semibold">
-                      <CheckCircle2 size={11} /> {validBulkEntries.length} ready
-                    </span>
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-3 py-2.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                    <SheetMark text={`${validBulkEntries.length} ready`} tone="done" />
                     {bulkResults.some((r) => r.found && r.alreadyCancelled) && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-500 text-[0.6875rem] font-semibold">
-                        <Ban size={11} /> {bulkResults.filter((r) => r.found && r.alreadyCancelled).length} already cancelled
-                      </span>
+                      <SheetMark text={`${bulkResults.filter((r) => r.found && r.alreadyCancelled).length} already cancelled`} tone="stopped" />
                     )}
                     {bulkResults.some((r) => !r.found) && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[0.6875rem] font-semibold">
-                        <XCircle size={11} /> {bulkResults.filter((r) => !r.found).length} not found
-                      </span>
+                      <SheetMark text={`${bulkResults.filter((r) => !r.found).length} not found`} tone="waiting" />
                     )}
-                    <span className="ml-auto text-[0.625rem] text-muted-foreground">{bulkResults.length} checked</span>
+                    <span className="ml-auto text-[0.6875rem] text-muted-foreground">{bulkResults.length} checked</span>
                   </div>
 
                   {/* Result rows */}
@@ -455,7 +432,7 @@ export default function ChequeCancellation() {
                           key={r.chequeNo}
                           className={`flex items-center gap-3 px-3 py-2 text-xs ${state === "missing" ? "opacity-60" : ""}`}
                         >
-                          <span className="font-mono font-semibold text-foreground w-24 shrink-0">{r.chequeNo}</span>
+                          <span className="font-heading tabular-nums font-semibold text-foreground w-24 shrink-0">{r.chequeNo}</span>
                           <span className="flex-1 min-w-0 truncate text-muted-foreground">
                             {!r.payment
                               ? "—"
@@ -463,39 +440,30 @@ export default function ChequeCancellation() {
                                 ? `Not linked to a payment · Lot ${r.payment.LotNumber ?? r.payment.PChequeLotNumber ?? "—"}`
                                 : `${r.payment.DocNo ?? "—"} · ${formatINR(r.payment.PAmount)}`}
                           </span>
-                          {state === "missing" && (
-                            <span className="inline-flex items-center gap-1 text-muted-foreground shrink-0">
-                              <XCircle size={11} /> No matching payment or cheque
-                            </span>
-                          )}
-                          {state === "cancelled" && (
-                            <span className="inline-flex items-center gap-1 text-rose-500 shrink-0">
-                              <Ban size={11} /> Already cancelled
-                            </span>
-                          )}
-                          {state === "ready" && (
-                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 shrink-0">
-                              <CheckCircle2 size={11} /> Ready
-                            </span>
-                          )}
+                          <span className="shrink-0">
+                            <SheetMark
+                              text={state === "missing" ? "Not found" : state === "cancelled" ? "Already cancelled" : "Ready"}
+                              tone={state === "missing" ? "waiting" : state === "cancelled" ? "stopped" : "done"}
+                            />
+                          </span>
                         </div>
                       );
                     })}
                   </div>
 
                   {/* Action bar */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-3 border-t border-border bg-muted/10">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-3" style={{ borderTop: "1px solid hsl(var(--border))" }}>
                     <input
                       value={bulkReason}
                       onChange={(e) => setBulkReason(e.target.value)}
                       placeholder="Reason for bulk cancellation (optional)"
-                      className="text-xs px-3 h-8 rounded-lg border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary flex-1"
+                      className="text-xs px-3 h-9 border border-foreground/40 bg-card focus:outline-none focus:border-foreground flex-1"
                     />
                     {rights.canCreate && (
                       <button
                         onClick={runBulkCancel}
                         disabled={bulkCancelling || !validBulkEntries.length}
-                        className="h-8 flex items-center justify-center gap-1.5 px-4 rounded-lg bg-rose-600 text-white text-xs font-medium hover:bg-rose-700 disabled:opacity-50 transition-all whitespace-nowrap"
+                        className="h-9 flex items-center justify-center gap-1.5 px-4 bg-destructive text-destructive-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-destructive/90 disabled:opacity-50 transition-colors whitespace-nowrap"
                       >
                         {bulkCancelling ? <Loader2 size={12} className="animate-spin" /> : <Ban size={12} />}
                         Cancel {validBulkEntries.length} Valid Entr{validBulkEntries.length === 1 ? "y" : "ies"}
@@ -509,7 +477,7 @@ export default function ChequeCancellation() {
 
           {/* ── Tab: Cancelled Cheques ─────────────────────────────────────── */}
           <TabsContent value="list" className="mt-3">
-            <div className="glass rounded-xl px-5 py-4 space-y-3 ring-1 ring-border/60">
+            <div className="px-4 py-4 space-y-3 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
                 <div className="relative flex-1 sm:max-w-xs">
                   <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -543,12 +511,12 @@ export default function ChequeCancellation() {
               ) : cancelledList.length === 0 ? (
                 <div className="text-center py-12 text-sm text-muted-foreground">No cheques have been cancelled yet.</div>
               ) : (
-                <div className="overflow-x-auto rounded-xl border border-border">
+                <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="border-b border-border bg-muted/10">
+                      <tr>
                         {["Cheque No", "Lot", "Bank", "A/C Number", "Payment Doc", "Company", "Project", "Amount", "Reason", "Cancelled By", "Cancelled At"].map((h) => (
-                          <th key={h} className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                          <th key={h} className="px-3 py-3 text-left whitespace-nowrap">
                             {h}
                           </th>
                         ))}
@@ -556,11 +524,11 @@ export default function ChequeCancellation() {
                     </thead>
                     <tbody>
                       {cancelledList.map((r) => (
-                        <tr key={r.CCId} className="border-b border-border/50 last:border-0 hover:bg-muted/10">
-                          <td className="px-3 py-3 font-mono align-middle">{r.ChequeNo}</td>
+                        <tr key={r.CCId}>
+                          <td className="px-3 py-3 font-heading tabular-nums font-semibold text-foreground align-middle">{r.ChequeNo}</td>
                           <td className="px-3 py-3 align-middle">{r.ChequeLotNumber ?? "—"}</td>
                           <td className="px-3 py-3 align-middle">{r.BankName ?? "—"}</td>
-                          <td className="px-3 py-3 font-mono align-middle">{r.AccountNumber ?? "—"}</td>
+                          <td className="px-3 py-3 font-heading tabular-nums align-middle">{r.AccountNumber ?? "—"}</td>
                           {r.PaymentId == null ? (
                             <td className="px-3 py-3 align-middle text-muted-foreground italic" colSpan={4}>
                               Cancelled directly from cheque book — never issued against a payment
@@ -570,7 +538,7 @@ export default function ChequeCancellation() {
                               <td className="px-3 py-3 align-middle">{r.DocNo ?? "—"}</td>
                               <td className="px-3 py-3 align-middle">{r.PCompanyName ?? r.PCompany ?? "—"}</td>
                               <td className="px-3 py-3 align-middle">{r.PProject ?? "—"}</td>
-                              <td className="px-3 py-3 align-middle">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
+                              <td className="px-3 py-3 font-heading tabular-nums font-semibold text-foreground align-middle whitespace-nowrap">{r.PAmount != null ? formatINR(r.PAmount) : "—"}</td>
                             </>
                           )}
                           <td className="px-3 py-3 text-muted-foreground align-middle">{r.Reason ?? "—"}</td>
@@ -585,7 +553,7 @@ export default function ChequeCancellation() {
             </div>
           </TabsContent>
         </Tabs>
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 }
