@@ -2152,7 +2152,7 @@ export default function MaterialExpenseBooking() {
                         selectedDoc.kind === "PO" ||
                         selectedDoc.kind === "GRN") && (
                         <div
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"}`}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-foreground/40 bg-primary/10 text-foreground" : "border-foreground/40 bg-primary/10 text-foreground"}`}
                         >
                           <span className="shrink-0">←</span>
                           <span className="font-mono font-semibold">
@@ -2176,7 +2176,7 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-foreground text-foreground" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-primary/10 text-foreground" : selectedDoc.kind === "GRN" ? "bg-primary/10 text-foreground" : "bg-primary/10 text-foreground"}`}
                           >
                             {selectedDoc.kind === "WORK_DONE"
                               ? "Work Done"
@@ -2240,7 +2240,7 @@ export default function MaterialExpenseBooking() {
                     </Field>
                     <Field label="Payment Term">
                       <select
-                        className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
+                        className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:border-foreground transition"
                         value={form.paymentTermId ?? ""}
                         onChange={(e) => {
                           // Due Date is derived by the live effect above
@@ -2497,8 +2497,8 @@ export default function MaterialExpenseBooking() {
                               }}
                               className={`px-3 py-2.5 rounded-lg border text-sm font-medium text-center transition-colors ${
                                 active
-                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                  : "border-border text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+                                  ? "border-foreground/40 bg-primary/10 text-foreground"
+                                  : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
                               }`}
                             >
                               {opt.label}
@@ -2576,7 +2576,7 @@ export default function MaterialExpenseBooking() {
                   onChange={(e) => set("remarks", e.target.value)}
                   placeholder="Optional notes or internal comments…"
                   rows={3}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none text-foreground placeholder:text-muted-foreground"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:border-foreground resize-none text-foreground placeholder:text-muted-foreground"
                 />
               </div>
 
@@ -2598,16 +2598,12 @@ export default function MaterialExpenseBooking() {
                   form.bookingReference.trim()
                 );
                 return (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-4" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
                     <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                       {saved ? (
-                        <span className="text-emerald-500 font-medium">
-                          Saved!
-                        </span>
+                        <span className="font-medium text-foreground">Saved</span>
                       ) : ebCanSave ? (
-                        <span className="text-emerald-500 font-medium">
-                          Ready to save
-                        </span>
+                        <span className="font-medium text-foreground">Ready to save</span>
                       ) : (
                         "Fill in the required fields to save"
                       )}
@@ -2617,29 +2613,23 @@ export default function MaterialExpenseBooking() {
                         type="button"
                         onClick={resetForm}
                         disabled={saving || saved || !ebIsDirty}
-                        className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                        className="flex-1 sm:flex-none px-4 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
                         <RotateCcw size={12} /> Reset
                       </button>
                       <button
                         onClick={handleSave}
                         disabled={saving || saved || !ebCanSave}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                        className="flex-1 sm:flex-none px-5 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground hover:bg-foreground/85 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
                       >
                         {saved ? (
-                          <Check size={14} />
+                          <Check size={13} />
                         ) : saving ? (
-                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span className="w-3.5 h-3.5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
                         ) : (
-                          <Save size={14} />
+                          <Save size={13} />
                         )}
-                        {saved
-                          ? "Saved!"
-                          : saving
-                            ? "Saving…"
-                            : isEditing
-                              ? "Update Booking"
-                              : "Save Invoice"}
+                        {saved ? "Saved" : saving ? "Saving…" : isEditing ? "Update invoice" : "Save invoice"}
                       </button>
                     </div>
                   </div>
