@@ -60,7 +60,7 @@ export const useTheme = () => {
 
 const getInitialTheme = (): Theme => {
   const stored = localStorage.getItem("civilier-theme") as Theme | null;
-  return stored && themes.includes(stored) ? stored : "dark";
+  return stored && themes.includes(stored) ? stored : "sage";
 };
 
 // Apply theme to <html> element.
