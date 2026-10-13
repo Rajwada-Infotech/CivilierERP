@@ -1,3 +1,11 @@
+// No database in CI: the pure functions tested here don't touch it, so a
+// stand-in db (any sql.* type is a harmless placeholder) keeps the suite
+// independent of backend/.env.
+jest.mock("../db", () => {
+  const type = () => "type";
+  const sql = new Proxy({}, { get: (_t, k) => (k === "Transaction" ? class { async begin() {} async commit() {} async rollback() {} request() { throw new Error("no database in tests"); } } : Object.assign(type, { toString: () => String(k) })) });
+  return { sql, getPool: () => { throw new Error("no database in tests"); }, connectDB: async () => {}, closeDB: async () => {} };
+});
 const {
   conveyedReason,
   ResaleError,
