@@ -2633,3 +2633,43 @@ select[aria-hidden="true"] {
     box-shadow: 0 0 0 2px var(--mod-from), 0 10px 24px -14px var(--mod-from) !important;
     background: color-mix(in srgb, var(--mod-from) 6%, hsl(var(--card))) !important;
 }
+
+/* BW: the module sidebar is a plain matte graphite panel. The panel and
+   its items paint with --card / --foreground / --border, so re-point those tokens inside it. */
+[data-theme="bw"] .app-sidebar {
+    --card: 0 0% 29%;
+    --foreground: 0 0% 95%;
+    --muted-foreground: 0 0% 72%;
+    --border: 0 0% 40%;
+    --primary: 0 0% 95%;
+    --sidebar-foreground: 0 0% 90%;
+    color: hsl(var(--foreground));
+    background-color: #3f4245 !important;
+    /* plain matte graphite: a barely-there top-to-bottom sheen + fine seamless grain, no pattern */
+    background-image:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(0, 0, 0, 0.06) 100%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.08'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>") !important;
+    background-size: 100% 100%, 160px 160px !important;
+    border-color: hsl(0 0% 18%) !important;
+}
+/* Module header + accents: a deep module hue (e.g. Finance blue) is unreadable on stone — go light. */
+[data-theme="bw"] .app-sidebar .sb-head {
+    background: rgba(0, 0, 0, 0.22) !important;
+    border-bottom-color: hsl(0 0% 22%) !important;
+}
+[data-theme="bw"] .app-sidebar .sb-head-label { color: hsl(0 0% 97%) !important; }
+[data-theme="bw"] .app-sidebar .sb-head-icon {
+    color: hsl(0 0% 97%) !important;
+    border-color: hsl(0 0% 85%) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+[data-theme="bw"] .app-sidebar > .absolute.top-0 { background: hsl(0 0% 92%) !important; }
+[data-theme="bw"] .app-sidebar [style*="inset 3px"] {
+    background: rgba(255, 255, 255, 0.10) !important;
+    box-shadow: inset 3px 0 0 hsl(0 0% 96%) !important;
+}
+[data-theme="bw"] .app-sidebar .tabular-nums[style*="color"] { color: hsl(0 0% 75%) !important; }
+[data-theme="bw"] .app-sidebar .hover\:bg-primary\/10:hover,
+[data-theme="bw"] .app-sidebar [class*="hover:bg-"]:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}

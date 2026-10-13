@@ -478,7 +478,7 @@ export const AppSidebar = () => {
       {/* A ruled sheet margin: square, ink border, faint grid. The module's own hue stays - as a bar across the top,
           a tint behind the header, and the marker on the active item. */}
       <aside
-        className="relative flex-1 flex flex-col"
+        className="app-sidebar relative flex-1 flex flex-col"
         style={{
           backgroundColor: "hsl(var(--card))",
           backgroundImage:
@@ -499,19 +499,19 @@ export const AppSidebar = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
-              className="relative z-20 flex items-center gap-3 px-4 pt-4 pb-3 overflow-hidden"
+              className="sb-head relative z-20 flex items-center gap-3 px-4 pt-4 pb-3 overflow-hidden"
               style={{ background: `${accentColor}1F`, borderBottom: "1px solid hsl(var(--foreground))" }}
             >
               {/* Icon tile */}
               <div
-                className="relative z-10 w-7 h-7 flex items-center justify-center shrink-0"
+                className="sb-head-icon relative z-10 w-7 h-7 flex items-center justify-center shrink-0"
                 style={{ color: accentColor, border: `1.5px solid ${accentColor}`, background: "hsl(var(--card))" }}
               >
                 <header.icon size={14} strokeWidth={2.2} />
               </div>
               {/* Label */}
               <span
-                className="relative z-10 font-heading text-[0.6875rem] font-bold tracking-[0.16em] uppercase"
+                className="sb-head-label relative z-10 font-heading text-[0.6875rem] font-bold tracking-[0.16em] uppercase"
                 style={{ color: accentColor }}
               >
                 {header.label}
