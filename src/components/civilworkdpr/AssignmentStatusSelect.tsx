@@ -48,7 +48,7 @@ export function AssignmentStatusSelect({
   if (options.length <= 1) {
     return (
       <span
-        className={`inline-block font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 whitespace-nowrap ${meta.className}`}
+        className={`inline-block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 whitespace-nowrap ${meta.className}`}
       >
         {meta.label}
       </span>
@@ -60,7 +60,7 @@ export function AssignmentStatusSelect({
       value={status}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate(e.target.value as AssignmentStatus)}
-      className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 bg-card cursor-pointer focus:outline-none disabled:opacity-50 ${meta.className}`}
+      className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 bg-card cursor-pointer focus:outline-none disabled:opacity-50 ${meta.className}`}
     >
       {options.map((s) => (
         <option key={s} value={s}>

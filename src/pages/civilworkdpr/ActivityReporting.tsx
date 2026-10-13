@@ -89,8 +89,8 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-medium border ${
-        count > 0 ? "border-foreground text-foreground" : "border-dashed border-foreground/40 text-muted-foreground"
+      className={`inline-flex items-center gap-1.5 text-[0.6875rem] whitespace-nowrap underline-offset-2 hover:underline ${
+        count > 0 ? "font-semibold text-foreground" : "text-muted-foreground"
       }`}
     >
       <Camera size={12} />
@@ -269,15 +269,15 @@ function ChainGroupList({
                           className="cursor-pointer"
                         >
                           <td className="px-5 py-3">
-                            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                              {row.sequenceNo}. {row.activityName}
+                            <span className="text-[0.8125rem] font-medium text-foreground flex items-center gap-2">
+                              <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground w-6 shrink-0">{row.sequenceNo}</span>
+                              {row.activityName}
                               <QcBadge qcStatus={row.qcStatus} />
                               <AttemptBadge attemptNo={row.attemptNo} />
                             </span>
                           </td>
                           <td className="px-3 py-3">
                             <span className="flex items-center gap-1.5 text-xs text-foreground">
-                              <UserRound size={11} className="text-muted-foreground shrink-0" />
                               {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
                             </span>
                           </td>
@@ -292,8 +292,7 @@ function ChainGroupList({
                             <AssignmentPrioritySelect rungId={row.rungId} priority={row.priority} />
                           </td>
                           <td className="px-3 py-3">
-                            <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                              <CalendarDays size={11} className="text-muted-foreground shrink-0" />
+                            <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap tabular-nums">
                               {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </span>
                             {(() => {
@@ -315,7 +314,6 @@ function ChainGroupList({
                               <div className="flex flex-col gap-0.5">
                                 {row.materials.map((m, i) => (
                                   <span key={i} className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                                    <Package size={11} className="text-muted-foreground shrink-0" />
                                     {m.name}
                                     <span className="text-muted-foreground">
                                       · {m.quantity}
