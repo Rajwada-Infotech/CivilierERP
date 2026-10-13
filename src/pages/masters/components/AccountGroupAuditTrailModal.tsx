@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fmtIstDateTime } from "@/lib/istTime";
-import { History, PlusCircle, Pencil, Trash2 } from "lucide-react";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { getAuditTrail, type AuditTrailEntry } from "@/api/auditTrailApi";
@@ -11,10 +11,10 @@ function fmtDateTime(value: string) {
   return fmtIstDateTime(value, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-const ACTION_META: Record<AuditTrailEntry["Action"], { label: string; icon: typeof PlusCircle; className: string }> = {
-  CREATE: { label: "Created", icon: PlusCircle, className: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
-  UPDATE: { label: "Updated", icon: Pencil, className: "text-amber-600 dark:text-amber-400 bg-[#ffe2021a]" },
-  DELETE: { label: "Deleted", icon: Trash2, className: "text-red-600 dark:text-red-400 bg-red-500/10" },
+const ACTION_META: Record<AuditTrailEntry["Action"], { label: string; tone: "done" | "waiting" | "stopped" }> = {
+  CREATE: { label: "Created", tone: "done" },
+  UPDATE: { label: "Updated", tone: "waiting" },
+  DELETE: { label: "Deleted", tone: "stopped" },
 };
 
 function summarizeDetails(entry: AuditTrailEntry): string {
@@ -80,12 +80,7 @@ export function AccountGroupAuditTrailModal({ open, onClose }: Props) {
       cell: ({ getValue }) => {
         const action = getValue() as AuditTrailEntry["Action"];
         const meta = ACTION_META[action];
-        const Icon = meta.icon;
-        return (
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${meta.className}`}>
-            <Icon size={11} /> {meta.label}
-          </span>
-        );
+        return <SheetMark text={meta.label} tone={meta.tone} />;
       },
     },
     {
@@ -123,11 +118,12 @@ export function AccountGroupAuditTrailModal({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="sheet-frame sm:max-w-4xl max-h-[85vh] overflow-y-auto" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-1.5">
-            <History size={16} /> Account Group — Audit Trail
-          </DialogTitle>
+          <div className="pb-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Account groups</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Audit trail</DialogTitle>
+          </div>
         </DialogHeader>
 
         <DataTable
