@@ -32,3 +32,18 @@ test("check character generation matches", () => {
   const made = `19ZZTST1234Z1Z${gstinCheckChar("19ZZTST1234Z1Z")}`;
   expect(checkGstin(made, { pan: "ZZTST1234Z" }).error).toBeUndefined();
 });
+
+describe("place of supply (property: where it is)", () => {
+  const { placeOfSupply } = require("../services/gstin");
+  test("project and company GSTINs in the same state: CGST + SGST, state named from the code", () => {
+    expect(placeOfSupply({ projectGst: "19AALFR5460J1ZO", companyGst: "19BPQPH6856K1Z5" })).toMatchObject({ name: "West Bengal", code: "19", intraState: true });
+  });
+  test("project registered in another state: IGST", () => {
+    expect(placeOfSupply({ projectGst: "27AAPFU0939F1ZV", companyGst: "19BPQPH6856K1Z5" })).toMatchObject({ name: "Maharashtra", intraState: false });
+  });
+  test("no project GSTIN: typed states, else assumed in-state", () => {
+    expect(placeOfSupply({ companyGst: "19BPQPH6856K1Z5", projectState: "Odisha", companyState: "West Bengal" }).intraState).toBe(false);
+    expect(placeOfSupply({ companyGst: "19BPQPH6856K1Z5" })).toMatchObject({ name: "West Bengal", intraState: true });
+    expect(placeOfSupply({})).toMatchObject({ name: null, intraState: true });
+  });
+});
