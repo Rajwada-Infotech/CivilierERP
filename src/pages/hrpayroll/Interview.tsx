@@ -5,7 +5,8 @@ import { UserTick } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell, HR_PAYROLL_ACCENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrError, HrSkeleton, hrCard } from "@/components/hrpayroll/HrUi";
+import { HrPayrollShell, HR_PAYROLL_ACCENT, HR_PAYROLL_ACCENT as ACCENT } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
@@ -76,6 +77,9 @@ const InterviewPage: React.FC = () => {
   });
 
   const rows: InterviewRow[] = Array.isArray(data) ? data : [];
+  // Pipeline filter (display only — the export still covers every row).
+  const [stageFilter, setStageFilter] = useState<InterviewStatus | "ALL">("ALL");
+  const shownRows = stageFilter === "ALL" ? rows : rows.filter((r) => r.Status === stageFilter);
   const candidates: CandidateRow[] = Array.isArray(candidateData) ? candidateData : [];
   const companies: EmployeeCompanyOption[] = Array.isArray(companyData) ? companyData : [];
 
@@ -160,17 +164,33 @@ const InterviewPage: React.FC = () => {
     remarks: r.Remarks || "",
   }));
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading interviews...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load interviews.</div>;
+  if (isLoading) return <HrSkeleton rows={2} />;
+  if (error) return <HrError text="Failed to load interviews." />;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "HR and Payroll", "Interview"]} />
       <HrPayrollShell title="Interview" subtitle="Schedule interviews and record their outcome" icon={UserTick}>
         <div className="space-y-6">
+          {/* ── Hiring pipeline: tap a stage to filter the list below ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 rounded-2xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
+            {([["ALL", "All interviews", ACCENT] as const, ...(["PENDING", "HOLD", "SELECTED", "REJECTED"] as InterviewStatus[]).map((st) => [st, STATUS_META[st].label, st === "SELECTED" ? "#16a34a" : st === "REJECTED" ? "#dc2626" : st === "HOLD" ? "#d97706" : "#64748b"] as const)]).map(([key, label, color]) => {
+              const n = key === "ALL" ? rows.length : rows.filter((r) => r.Status === key).length;
+              const on = stageFilter === key;
+              return (
+                <button key={key} type="button" onClick={() => setStageFilter(key as InterviewStatus | "ALL")}
+                  className={`rounded-xl border px-3.5 py-2.5 text-left transition-all ${on ? "shadow-md bg-card" : "bg-card/70 border-border hover:bg-card"}`}
+                  style={on ? { borderColor: color, boxShadow: `0 0 0 1.5px ${color}` } : undefined}>
+                  <p className="text-xl font-heading font-bold tabular-nums leading-tight" style={{ color }}>{n}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
+                </button>
+              );
+            })}
+          </div>
+
           {/* ── Form ── */}
           {(rights.canCreate || (editingId && rights.canEdit)) && (
-            <form onSubmit={handleSubmit} className="bg-card border border-border rounded-xl p-5 space-y-5">
+            <form onSubmit={handleSubmit} className={`${hrCard} p-5 space-y-5`}>
               <div className="flex items-center justify-between">
                 <h3 className="font-heading font-semibold text-foreground text-sm">
                   {editingId ? "Edit Interview" : "Schedule Interview"}
@@ -287,12 +307,12 @@ const InterviewPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 && (
+                  {shownRows.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No records yet. Schedule one above.</td>
                     </tr>
                   )}
-                  {rows.map((r) => (
+                  {shownRows.map((r) => (
                     <tr key={r.InterviewId} className="border-b border-border/60 hover:bg-muted/20">
                       <td className="px-4 py-2.5 font-mono text-xs">{r.DocNo}</td>
                       <td className="px-4 py-2.5">

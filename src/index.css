@@ -774,32 +774,32 @@
 ────────────────────────────────────────────────────────────────────────── */
 
 /* Material — emerald */
-[data-module="material"]       { --ring: 160 84% 39%; --accent-foreground: 160 84% 28%; }
-.dark [data-module="material"] { --ring: 160 84% 45%; --accent-foreground: 160 84% 65%; }
+[data-module="material"]       { --ring: 140 80% 40%; --accent-foreground: 140 80% 26%; }
+.dark [data-module="material"] { --ring: 140 80% 46%; --accent-foreground: 140 80% 70%; }
 
 /* Finance — indigo */
-[data-module="finance"]       { --ring: 239 84% 67%; --accent-foreground: 239 84% 40%; }
-.dark [data-module="finance"] { --ring: 239 84% 67%; --accent-foreground: 239 84% 80%; }
+[data-module="finance"]       { --ring: 243 80% 50%; --accent-foreground: 243 80% 36%; }
+.dark [data-module="finance"] { --ring: 243 80% 56%; --accent-foreground: 243 80% 80%; }
 
 /* Engineering — orange */
-[data-module="engineering"]       { --ring: 25 95% 53%; --accent-foreground: 25 95% 35%; }
-.dark [data-module="engineering"] { --ring: 25 95% 53%; --accent-foreground: 25 95% 68%; }
+[data-module="engineering"]       { --ring: 24 80% 50%; --accent-foreground: 24 80% 36%; }
+.dark [data-module="engineering"] { --ring: 24 80% 56%; --accent-foreground: 24 80% 80%; }
 
 /* Follow-up — teal */
-[data-module="followup"]       { --ring: 174 82% 31%; --accent-foreground: 174 82% 22%; }
-.dark [data-module="followup"] { --ring: 174 82% 31%; --accent-foreground: 174 72% 55%; }
+[data-module="followup"]       { --ring: 164 80% 40%; --accent-foreground: 164 80% 26%; }
+.dark [data-module="followup"] { --ring: 164 80% 46%; --accent-foreground: 164 80% 70%; }
 
 /* Ticket — pink */
-[data-module="ticket"]       { --ring: 330 81% 60%; --accent-foreground: 330 81% 38%; }
-.dark [data-module="ticket"] { --ring: 330 81% 60%; --accent-foreground: 330 81% 76%; }
+[data-module="ticket"]       { --ring: 318 80% 50%; --accent-foreground: 318 80% 36%; }
+.dark [data-module="ticket"] { --ring: 318 80% 56%; --accent-foreground: 318 80% 80%; }
 
 /* Sales — purple */
-[data-module="sales"]       { --ring: 271 91% 65%; --accent-foreground: 271 91% 38%; }
-.dark [data-module="sales"] { --ring: 271 91% 65%; --accent-foreground: 271 91% 80%; }
+[data-module="sales"]       { --ring: 265 80% 50%; --accent-foreground: 265 80% 36%; }
+.dark [data-module="sales"] { --ring: 265 80% 56%; --accent-foreground: 265 80% 80%; }
 
 /* Admin — blue */
-[data-module="admin"]       { --ring: 217 91% 60%; --accent-foreground: 217 91% 38%; }
-.dark [data-module="admin"] { --ring: 217 91% 60%; --accent-foreground: 217 91% 76%; }
+[data-module="admin"]       { --ring: 222 80% 50%; --accent-foreground: 222 80% 36%; }
+.dark [data-module="admin"] { --ring: 222 80% 56%; --accent-foreground: 222 80% 80%; }
 
 /* ── CRM dialog theme ──────────────────────────────────────────────────────
    The shared <DialogContent accent="crm"> gets the `.crm-dialog` class (see
@@ -985,21 +985,21 @@
   --mod-to: hsl(var(--primary));
   --mod-shadow: hsl(var(--primary) / 0.25);
 }
-[data-module="finance"]          { --mod-from: #6366f1; --mod-via: #8b5cf6; --mod-to: #a855f7; --mod-shadow: rgba(99,102,241,.25); }
-[data-module="material"]         { --mod-from: #10b981; --mod-via: #2dd4bf; --mod-to: #06b6d4; --mod-shadow: rgba(16,185,129,.25); }
-[data-module="fixed-asset"]      { --mod-from: #eab308; --mod-via: #f59e0b; --mod-to: #ea580c; --mod-shadow: rgba(234,179,8,.25); }
-[data-module="loan"]             { --mod-from: #22c55e; --mod-via: #10b981; --mod-to: #0d9488; --mod-shadow: rgba(34,197,94,.25); }
-[data-module="engineering"]      { --mod-from: #f97316; --mod-via: #f59e0b; --mod-to: #ea580c; --mod-shadow: rgba(249,115,22,.25); }
-[data-module="civilworkdpr"]     { --mod-from: #0891b2; --mod-via: #0ea5e9; --mod-to: #2563eb; --mod-shadow: rgba(8,145,178,.25); }
-[data-module="followup"]         { --mod-from: #0d9488; --mod-via: #10b981; --mod-to: #0891b2; --mod-shadow: rgba(13,148,136,.25); }
-[data-module="ticket"]           { --mod-from: #ec4899; --mod-via: #fb7185; --mod-to: #d946ef; --mod-shadow: rgba(236,72,153,.25); }
-[data-module="sales"]            { --mod-from: #a855f7; --mod-via: #8b5cf6; --mod-to: #d946ef; --mod-shadow: rgba(168,85,247,.25); }
-[data-module="sales-automation"] { --mod-from: #f59e0b; --mod-via: #fb923c; --mod-to: #ea580c; --mod-shadow: rgba(245,158,11,.25); }
-[data-module="crm"]              { --mod-from: #0ea5e9; --mod-via: #22d3ee; --mod-to: #3b82f6; --mod-shadow: rgba(14,165,233,.25); }
-[data-module="maintenance"]      { --mod-from: #65a30d; --mod-via: #22c55e; --mod-to: #059669; --mod-shadow: rgba(101,163,13,.25); }
-[data-module="hr-payroll"]       { --mod-from: #eab308; --mod-via: #f59e0b; --mod-to: #f97316; --mod-shadow: rgba(234,179,8,.25); }
-[data-module="records"]          { --mod-from: #e11d48; --mod-via: #ec4899; --mod-to: #f43f5e; --mod-shadow: rgba(225,29,72,.25); }
-[data-module="admin"]            { --mod-from: #3b82f6; --mod-via: #6366f1; --mod-to: #0ea5e9; --mod-shadow: rgba(59,130,246,.25); }
+[data-module="finance"]          { --mod-from: #2419e6; --mod-via: #5c3cec; --mod-to: #8d5ff2; --mod-shadow: rgba(36,25,230,.28); }
+[data-module="material"]         { --mod-from: #14b84b; --mod-via: #16df74; --mod-to: #2feea2; --mod-shadow: rgba(20,184,75,.28); }
+[data-module="fixed-asset"]      { --mod-from: #a57e12; --mod-via: #ccb414; --mod-to: #eded1d; --mod-shadow: rgba(165,126,18,.28); }
+[data-module="loan"]             { --mod-from: #43a512; --mod-via: #39cc14; --mod-to: #2aed1d; --mod-shadow: rgba(67,165,18,.28); }
+[data-module="engineering"]      { --mod-from: #e66b19; --mod-via: #ec9a3c; --mod-to: #f2c15f; --mod-shadow: rgba(230,107,25,.28); }
+[data-module="civilworkdpr"]     { --mod-from: #14a2b8; --mod-via: #16a9df; --mod-to: #2fa2ee; --mod-shadow: rgba(20,162,184,.28); }
+[data-module="followup"]         { --mod-from: #14b88c; --mod-via: #16dfc4; --mod-to: #2feeee; --mod-shadow: rgba(20,184,140,.28); }
+[data-module="ticket"]           { --mod-from: #e619a8; --mod-via: #ec3ca0; --mod-to: #f25f9e; --mod-shadow: rgba(230,25,168,.28); }
+[data-module="sales"]            { --mod-from: #6e19e6; --mod-via: #9d3cec; --mod-to: #c35ff2; --mod-shadow: rgba(110,25,230,.28); }
+[data-module="sales-automation"] { --mod-from: #e6195d; --mod-via: #ec3c5f; --mod-to: #f25f68; --mod-shadow: rgba(230,25,93,.28); }
+[data-module="crm"]              { --mod-from: #1990e6; --mod-via: #3c8bec; --mod-to: #5f8df2; --mod-shadow: rgba(25,144,230,.28); }
+[data-module="maintenance"]      { --mod-from: #88a512; --mod-via: #8fcc14; --mod-to: #8ced1d; --mod-shadow: rgba(136,165,18,.28); }
+[data-module="hr-payroll"]       { --mod-from: #ca19e6; --mod-via: #ec3cec; --mod-to: #f25fde; --mod-shadow: rgba(202,25,230,.28); }
+[data-module="records"]          { --mod-from: #e61919; --mod-via: #ec533c; --mod-to: #f2865f; --mod-shadow: rgba(230,25,25,.28); }
+[data-module="admin"]            { --mod-from: #1957e6; --mod-via: #3c59ec; --mod-to: #5f64f2; --mod-shadow: rgba(25,87,230,.28); }
 
 .btn-module {
   background-color: var(--mod-from);
@@ -2556,4 +2556,121 @@ select[aria-hidden="true"] {
 :has(> :not(select):is(button, div) .lucide-chevron-down) > svg.lucide-chevron-down.absolute,
 :has(> :not(select):is(button, div) .lucide-chevrons-up-down) > svg.lucide-chevron-down.absolute {
     display: none !important;
+}
+
+/* Dropdown hover / highlighted / checked rows follow the ACTIVE MODULE's colour (--mod-from is set on
+   <body data-module>, so portalled lists inherit it): SearchableSelect, Radix Select, dropdown menus. */
+.ss-opt-active,
+[role="option"][data-highlighted],
+[role="option"]:focus-visible,
+[role="menuitem"][data-highlighted],
+[role="menuitem"]:focus,
+[role="menuitemcheckbox"][data-highlighted],
+[role="menuitemradio"][data-highlighted] {
+    background-color: color-mix(in srgb, var(--mod-from, hsl(var(--primary))) 14%, transparent) !important;
+    color: hsl(var(--foreground)) !important;
+}
+.mod-text,
+[role="option"] [data-radix-select-item-indicator] svg,
+[role="option"] .lucide-check { color: var(--mod-from, hsl(var(--primary))) !important; }
+
+/* ═══════════ HR & Payroll — module design layer (scoped: only inside this module) ═══════════
+   Same markup every HR page already renders (cards, MasterPage forms & tables, badges, inputs);
+   this only restyles it — softer, rounder cards, module-tinted tables, focus and controls. */
+[data-module="hr-payroll"] main :is(.rounded-xl.border, .rounded-lg.border):is([class*="bg-card"]) {
+    border-radius: 1rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -14px color-mix(in srgb, var(--mod-from) 40%, transparent);
+}
+/* Card headers (border-b strips at the top of a card) get a faint module tint */
+[data-module="hr-payroll"] main [class*="bg-card"] > :first-child:is(.border-b) {
+    background: color-mix(in srgb, var(--mod-from) 5%, transparent) !important;
+}
+/* Tables: tinted header, module-coloured row hover, comfortable rows */
+[data-module="hr-payroll"] main table thead tr {
+    background: color-mix(in srgb, var(--mod-from) 6%, transparent) !important;
+}
+[data-module="hr-payroll"] main table thead th {
+    color: color-mix(in srgb, var(--mod-from) 55%, hsl(var(--muted-foreground))) !important;
+    letter-spacing: 0.08em;
+}
+[data-module="hr-payroll"] main table tbody tr { transition: background-color .15s ease; }
+[data-module="hr-payroll"] main table tbody tr:hover {
+    background: color-mix(in srgb, var(--mod-from) 5%, transparent) !important;
+}
+/* Inputs / selects / textareas: module focus ring, rounder */
+[data-module="hr-payroll"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea) {
+    border-radius: 0.65rem;
+}
+[data-module="hr-payroll"] main :is(input, select, textarea, button[role="combobox"]):focus-visible {
+    outline: none !important;
+    border-color: color-mix(in srgb, var(--mod-from) 55%, transparent) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--mod-from) 18%, transparent) !important;
+}
+/* Checkboxes, radios and switches in the module colour */
+[data-module="hr-payroll"] :is(main, [role="dialog"]) :is(input[type="checkbox"], input[type="radio"], input[type="range"]) {
+    accent-color: var(--mod-from);
+}
+[data-module="hr-payroll"] [role="switch"][data-state="checked"],
+[data-module="hr-payroll"] button[role="checkbox"][data-state="checked"] {
+    background-color: var(--mod-from) !important;
+    border-color: var(--mod-from) !important;
+}
+/* Section labels inside forms (MasterPage "section" headers) */
+[data-module="hr-payroll"] main [data-section-label],
+[data-module="hr-payroll"] main .text-\[0\.625rem\].uppercase.tracking-widest.font-heading {
+    color: color-mix(in srgb, var(--mod-from) 65%, hsl(var(--muted-foreground)));
+}
+/* Status pills: rounder, a touch bolder */
+[data-module="hr-payroll"] main :is(span, div).rounded-full.border.text-\[0\.6875rem\] { font-weight: 600; padding-inline: 0.6rem; }
+/* Empty-state rows read as a calm placeholder, not a blank strip */
+[data-module="hr-payroll"] main table tbody td[colspan] {
+    padding-block: 2.5rem !important;
+    color: hsl(var(--muted-foreground));
+    background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--mod-from) 3%, transparent) 10px 20px);
+}
+/* HR tab cards: active card gets a module-coloured outline */
+[data-module="hr-payroll"] .hr-tab-card[data-state="active"] {
+    box-shadow: 0 0 0 2px var(--mod-from), 0 10px 24px -14px var(--mod-from) !important;
+    background: color-mix(in srgb, var(--mod-from) 6%, hsl(var(--card))) !important;
+}
+
+/* BW: the module sidebar is a dark matte brick wall. The panel and
+   its items paint with --card / --foreground / --border, so re-point those tokens inside it. */
+[data-theme="bw"] .app-sidebar {
+    --card: 0 0% 29%;
+    --foreground: 0 0% 95%;
+    --muted-foreground: 0 0% 72%;
+    --border: 0 0% 40%;
+    --primary: 0 0% 95%;
+    --sidebar-foreground: 0 0% 90%;
+    color: hsl(var(--foreground));
+    background-color: #1c1d1f !important;
+    /* dark matte brick wall: soft top-down light falloff + seamless brick tile + fine grain */
+    background-image:
+        radial-gradient(120% 60% at 50% 0%, rgba(255, 255, 255, 0.06) 0%, rgba(0, 0, 0, 0.35) 100%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.10'/></feComponentTransfer></filter><rect width='100%25' height='100%25' filter='url(%23g)'/></svg>"),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='32'><rect width='64' height='32' fill='%23121314'/><g fill='%232a2c2f'><rect x='1' y='1' width='30' height='14' rx='1'/><rect x='33' y='1' width='30' height='14' rx='1'/><rect x='-15' y='17' width='30' height='14' rx='1'/><rect x='17' y='17' width='30' height='14' rx='1'/><rect x='49' y='17' width='30' height='14' rx='1'/></g><g fill='%23ffffff' fill-opacity='0.035'><rect x='1' y='1' width='30' height='2'/><rect x='33' y='1' width='30' height='2'/><rect x='17' y='17' width='30' height='2'/><rect x='-15' y='17' width='30' height='2'/><rect x='49' y='17' width='30' height='2'/></g></svg>") !important;
+    background-size: 100% 100%, 160px 160px, 64px 32px !important;
+    border-color: hsl(0 0% 18%) !important;
+}
+/* Module header + accents: a deep module hue (e.g. Finance blue) is unreadable on stone — go light. */
+[data-theme="bw"] .app-sidebar .sb-head {
+    background: rgba(0, 0, 0, 0.22) !important;
+    border-bottom-color: hsl(0 0% 22%) !important;
+}
+[data-theme="bw"] .app-sidebar .sb-head-label { color: hsl(0 0% 97%) !important; }
+[data-theme="bw"] .app-sidebar .sb-head-icon {
+    color: hsl(0 0% 97%) !important;
+    border-color: hsl(0 0% 85%) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+}
+[data-theme="bw"] .app-sidebar > .absolute.top-0 { background: hsl(0 0% 92%) !important; }
+[data-theme="bw"] .app-sidebar [style*="inset 3px"] {
+    background: rgba(255, 255, 255, 0.10) !important;
+    box-shadow: inset 3px 0 0 hsl(0 0% 96%) !important;
+}
+[data-theme="bw"] .app-sidebar .tabular-nums[style*="color"] { color: hsl(0 0% 75%) !important; }
+[data-theme="bw"] .app-sidebar .hover\:bg-primary\/10:hover,
+[data-theme="bw"] .app-sidebar [class*="hover:bg-"]:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
 }
