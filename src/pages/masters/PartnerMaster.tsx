@@ -1,10 +1,9 @@
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { MasterPage, type DataChangeEvent, type RecordWithId } from "@/components/MasterPage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Handshake } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   getPartners,
@@ -74,21 +73,17 @@ const PartnerMaster: React.FC = () => {
   };
 
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
-    status: (value) => (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}>
-        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-emerald-500" : "bg-red-500"}`} />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
+    status: (value) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "none"} />,
+    partnerCode: (value) => <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{String(value ?? "") || "—"}</span>,
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load Partner Master.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load Partner Master.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Partner Master"]} />
-      <FinanceShell title="Partner Master" subtitle="Firm partners — a Capital and a Current Account ledger, created together" icon={Handshake}>
+      <SheetShell eyebrow="CivilierERP · Masters" title="Partners" subtitle="The firm's partners. Each gets a Capital ledger and a Current Account ledger, created together.">
         <MasterPage
           title="Partner"
           fields={[
@@ -147,7 +142,7 @@ const PartnerMaster: React.FC = () => {
             ],
           } : undefined}
         />
-      </FinanceShell>
+      </SheetShell>
     </>
   );
 };
