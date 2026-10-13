@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // WARNING_AFTER_MS + COUNTDOWN_SECONDS*1000. Adjust these two constants to
 // change the idle policy app-wide.
 const WARNING_AFTER_MS = 44 * 60 * 1000; // 44 minutes of inactivity -> show warning
-const COUNTDOWN_SECONDS = 60;            // 1 minute to respond before auto-logout
+const COUNTDOWN_SECONDS = 20;            // 20 seconds to respond before auto-logout
 const TICK_MS = 1000;
 
 // Shared across browser tabs: activity in ANY tab (same origin) resets the
