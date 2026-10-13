@@ -62,11 +62,11 @@ function DisableDialog({
 
   return (
     <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-card border border-border rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+      <div className="bg-card p-6 w-full max-w-sm mx-4" style={{ border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.14)" }}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 shrink-0">
-              <AlertTriangle size={18} className="text-rose-500" />
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-destructive/10 border border-destructive/40 shrink-0">
+              <AlertTriangle size={18} className="text-destructive" />
             </div>
             <div>
               <p className="text-sm font-heading font-semibold text-foreground">
@@ -86,11 +86,11 @@ function DisableDialog({
           </button>
         </div>
 
-        <div className="rounded-xl border border-border bg-muted/30 p-4 mb-5 space-y-2 text-sm">
+        <div className="border border-foreground/40 p-4 mb-5 space-y-2 text-sm">
           {paidCount > 0 && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Already paid</span>
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="font-semibold text-foreground">
                 {paidCount} installment{paidCount !== 1 ? "s" : ""}
               </span>
             </div>
@@ -101,13 +101,13 @@ function DisableDialog({
                 <span className="text-muted-foreground">
                   Unpaid installments
                 </span>
-                <span className="font-semibold text-rose-500">
+                <span className="font-semibold text-destructive">
                   {unpaidCount} will be removed
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Remaining amount</span>
-                <span className="font-mono font-semibold text-foreground">
+                <span className="font-heading tabular-nums font-semibold text-foreground">
                   ₹{fmt(remainingAmount)}
                 </span>
               </div>
@@ -133,7 +133,7 @@ function DisableDialog({
             type="button"
             onClick={onClose}
             disabled={disabling}
-            className="flex-1 px-4 py-2 rounded-xl border border-border text-sm font-medium hover:bg-muted/50 transition-colors disabled:opacity-50"
+            className="flex-1 px-4 py-2.5 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
@@ -141,7 +141,7 @@ function DisableDialog({
             type="button"
             onClick={handle}
             disabled={disabling}
-            className="flex-1 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+            className="flex-1 px-4 py-2.5 bg-destructive hover:bg-destructive/90 text-destructive-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {disabling ? (
               <>
@@ -226,14 +226,14 @@ export function EmiSection({
         />
       )}
 
-      <div className="rounded-2xl border border-border overflow-hidden shadow-sm">
+      <div className="border border-foreground overflow-hidden bg-card">
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4 bg-gradient-to-r from-muted/60 to-muted/20">
+        <div className="flex items-center justify-between gap-3 px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 shrink-0">
+            <div className="flex items-center justify-center w-[22px] h-[22px] rounded-full shrink-0 text-foreground" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
               <CreditCard
                 size={16}
-                className="text-violet-600 dark:text-violet-400"
+                className="text-foreground"
               />
             </div>
             <div>
@@ -287,7 +287,7 @@ export function EmiSection({
                   <span className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     Total
                   </span>
-                  <span className="text-sm font-bold font-mono text-foreground">
+                  <span className="text-sm font-bold font-heading tabular-nums text-foreground">
                     ₹{fmt(totalScheduled)}
                   </span>
                 </div>
@@ -295,10 +295,10 @@ export function EmiSection({
                   <span className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     Paid
                   </span>
-                  <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  <span className="text-sm font-bold text-foreground">
                     {paidCount}/{displaySchedule.length}
                     {paidAmount > 0 && (
-                      <span className="font-mono text-[0.6875rem] ml-1">
+                      <span className="font-heading tabular-nums text-[0.6875rem] ml-1">
                         (₹{fmt(paidAmount)})
                       </span>
                     )}
@@ -309,7 +309,7 @@ export function EmiSection({
                     Remaining
                   </span>
                   <span
-                    className={`text-sm font-bold font-mono ${allPaid ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500 dark:text-rose-400"}`}
+                    className={`text-sm font-bold font-heading tabular-nums ${allPaid ? "text-foreground" : "text-destructive"}`}
                   >
                     {allPaid ? "Fully Paid" : `₹${fmt(remainingAmount)}`}
                   </span>
@@ -353,7 +353,7 @@ export function EmiSection({
                         type="number"
                         value={emi.emiAmount || ""}
                         readOnly
-                        className="pl-7 bg-muted/30 font-mono cursor-not-allowed"
+                        className="pl-7 bg-muted/30 font-heading tabular-nums cursor-not-allowed"
                         placeholder="Auto-calculated"
                       />
                     </div>
@@ -372,25 +372,25 @@ export function EmiSection({
               {/* Read-only pills — edit mode */}
               {isEditMode && (
                 <div className="flex flex-wrap gap-3 text-xs">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/60 border border-border text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-muted-foreground">
                     <Hash size={11} />
                     <span className="font-semibold text-foreground">
                       {emi.installmentCount}
                     </span>
                     &nbsp;installments
                   </span>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/60 border border-border text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-muted-foreground">
                     <Banknote size={11} />₹
-                    <span className="font-mono font-semibold text-foreground">
+                    <span className="font-heading tabular-nums font-semibold text-foreground">
                       {fmt(emi.emiAmount)}
                     </span>
                     /mo
                   </span>
                   {emi.startDate && (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/60 border border-border text-muted-foreground">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-muted-foreground">
                       <CalendarDays size={11} />
                       First due:&nbsp;
-                      <span className="font-mono font-semibold text-foreground">
+                      <span className="font-heading tabular-nums font-semibold text-foreground">
                         {emi.startDate}
                       </span>
                     </span>
@@ -411,7 +411,7 @@ export function EmiSection({
 
               {/* Payment page hint */}
               {isEditMode && displaySchedule.length > 0 && (
-                <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-400 text-xs">
+                <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl border border-foreground/40 text-foreground text-xs">
                   <Hash size={12} className="shrink-0 mt-0.5" />
                   Each installment reference below appears as a separate option
                   in the Payment page. Select the installment ref there to
@@ -435,14 +435,14 @@ export function EmiSection({
                       <span className="text-[0.625rem] text-muted-foreground flex items-center gap-1">
                         <Hash size={9} />
                         Refs linked to{" "}
-                        <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                        <span className="font-heading tabular-nums font-semibold text-foreground">
                           {baseDocNo}
                         </span>
                       </span>
                     )}
                   </div>
 
-                  <div className="rounded-xl border border-border overflow-hidden">
+                  <div className="border border-foreground overflow-hidden">
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-muted/50 border-b border-border">
@@ -482,40 +482,40 @@ export function EmiSection({
                               key={row.installmentNo}
                               className={`transition-colors ${
                                 isPaid
-                                  ? "bg-emerald-50/40 dark:bg-emerald-900/10"
+                                  ? "bg-primary/10"
                                   : isNext
                                     ? "bg-amber-50/40 dark:bg-amber-900/10"
                                     : "bg-background hover:bg-muted/20"
                               }`}
                             >
-                              <td className="px-3 py-2.5 font-mono text-muted-foreground font-semibold">
+                              <td className="px-3 py-2.5 font-heading tabular-nums text-muted-foreground font-semibold">
                                 {row.installmentNo}
                               </td>
                               <td className="px-3 py-2.5">
-                                <span className="font-mono text-[0.6875rem] bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-800 px-2 py-0.5 rounded-md">
+                                <span className="font-heading tabular-nums text-[0.6875rem] bg-primary/10 text-foreground border border-foreground/40 px-2 py-0.5 rounded-md">
                                   {row.refNumber ||
                                     `EMI-${String(row.installmentNo).padStart(2, "0")}`}
                                 </span>
                               </td>
-                              <td className="px-3 py-2.5 font-mono text-foreground">
+                              <td className="px-3 py-2.5 font-heading tabular-nums text-foreground">
                                 {row.dueDate}
                               </td>
-                              <td className="px-3 py-2.5 font-mono text-right font-semibold text-foreground">
+                              <td className="px-3 py-2.5 font-heading tabular-nums text-right font-semibold text-foreground">
                                 ₹{fmt(row.amount)}
                               </td>
                               <td className="px-3 py-2.5 hidden sm:table-cell">
                                 {isPaid ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-heading font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700">
+                                  <span className="inline-flex items-center gap-1 rounded-none px-2 py-0.5 text-[0.625rem] font-heading font-semibold text-foreground border border-foreground/40">
                                     <CheckCircle2 size={9} />
                                     Paid
                                   </span>
                                 ) : isNext ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-heading font-semibold bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700">
+                                  <span className="inline-flex items-center gap-1 rounded-none px-2 py-0.5 text-[0.625rem] font-heading font-semibold bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700">
                                     <Clock3 size={9} />
                                     Next Due
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-heading bg-muted text-muted-foreground border border-border">
+                                  <span className="inline-flex items-center gap-1 rounded-none px-2 py-0.5 text-[0.625rem] font-heading bg-muted text-muted-foreground border border-border">
                                     <Clock3 size={9} />
                                     Pending
                                   </span>
@@ -527,16 +527,16 @@ export function EmiSection({
                       </tbody>
                     </table>
 
-                    <div className="bg-muted/40 border-t border-border px-4 py-2.5 flex items-center justify-between">
+                    <div className="border-t border-foreground px-4 py-2.5 flex items-center justify-between">
                       <span className="text-[0.6875rem] text-muted-foreground font-heading">
                         {displaySchedule.length} installments · {paidCount} paid
                         {remainingAmount > 0 && !allPaid && (
-                          <span className="ml-2 text-rose-500">
+                          <span className="ml-2 text-destructive">
                             · ₹{fmt(remainingAmount)} remaining
                           </span>
                         )}
                       </span>
-                      <span className="font-mono text-sm font-bold text-foreground">
+                      <span className="font-heading tabular-nums text-sm font-bold text-foreground">
                         ₹{fmt(totalScheduled)}
                       </span>
                     </div>

@@ -2,7 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,43 +65,23 @@ const DIGITAL_REF_LABEL: Record<string, string> = {
   Card: "Card Reference / Auth Code",
 };
 
-const STATUS_CFG: Record<string, { text: string; bar: string }> = {
-  Draft:    { text: "text-muted-foreground", bar: "bg-border" },
-  Pending:  { text: "text-amber-700",  bar: "bg-amber-500" },
-  Approved: { text: "text-emerald-700", bar: "bg-emerald-500" },
-  Rejected: { text: "text-rose-700",   bar: "bg-rose-500" },
-};
-
 function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CFG[status] ?? STATUS_CFG.Draft;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[0.625rem] font-semibold uppercase tracking-wider", cfg.text)}>
-      <span className={cn("w-[3px] h-3 rounded-[1px]", cfg.bar)} />
-      {status}
-    </span>
-  );
+  return <SheetMark text={status || "—"} tone={statusTone(status || "")} />;
 }
 
 function TypeBadge({ type }: { type: FundTransferType }) {
-  const isInter = type === "Inter";
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-sm border font-mono text-[0.625rem] font-semibold uppercase tracking-wider",
-        isInter ? "border-violet-300 text-violet-700 bg-violet-50/50" : "border-border text-muted-foreground bg-card",
-      )}
-    >
-      <span className={cn("w-[3px] h-3 rounded-[1px]", isInter ? "bg-violet-500" : "bg-border")} />
-      {isInter ? "Inter · Loan" : "Intra"}
+    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+      {type === "Inter" ? "Inter-company · loan" : "Intra-company"}
     </span>
   );
 }
 
-// Signature element: a literal source → amount → destination flow, instead of
-// stacked "A (Co) → B (Co)" text. Reused in the desktop table, mobile cards,
-// and as a live preview inside the New Transfer dialog. `compact` drops the
-// amount chip and shrinks type, for the table's tighter row height.
-function FlowConnector({
+// The money's path, drawn the way the page draws everything else: the account it leaves and the account it enters,
+// each in an inked box, joined by an arrow that carries the amount. The arrow is dashed for an inter-company
+// transfer (a loan). Side by side on a wide screen, stacked on a narrow one. `compact` is the one-line form used
+// on the phone cards.
+function MoneyPath({
   sourceLabel,
   destLabel,
   sourceSub,
@@ -118,37 +98,60 @@ function FlowConnector({
   type: FundTransferType;
   compact?: boolean;
 }) {
-  const rail = type === "Inter" ? "border-violet-400" : "border-border";
-  const node = type === "Inter" ? "bg-violet-500" : "bg-foreground/40";
+  const dashed = type === "Inter";
+  const ink = "hsl(var(--foreground))";
+
+  if (compact) {
+    return (
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-2">
+        <div className="min-w-0">
+          <p className="text-[0.8125rem] font-semibold text-foreground truncate">{sourceLabel}</p>
+          {sourceSub && <p className="text-[0.6875rem] text-muted-foreground truncate">{sourceSub}</p>}
+        </div>
+        <svg width="34" height="14" viewBox="0 0 34 14" aria-hidden="true" className="mt-1 shrink-0">
+          <line x1="0" y1="7" x2="26" y2="7" stroke={ink} strokeWidth="1.2" strokeDasharray={dashed ? "4 3" : undefined} />
+          <path d="M25 2.5 L33 7 L25 11.5 Z" fill={ink} />
+        </svg>
+        <div className="min-w-0">
+          <p className="text-[0.8125rem] font-semibold text-foreground truncate">{destLabel}</p>
+          {destSub && <p className="text-[0.6875rem] text-muted-foreground truncate">{destSub}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  const Account = ({ tag, name, sub }: { tag: string; name: string; sub?: string | null }) => (
+    <div className="min-w-0 px-3.5 py-3" style={{ border: `1px solid ${ink}`, background: "hsl(var(--card))" }}>
+      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{tag}</p>
+      <p className="text-sm font-semibold text-foreground mt-1.5 break-words">{name}</p>
+      {sub && <p className="text-[0.6875rem] text-muted-foreground mt-0.5 break-words">{sub}</p>}
+    </div>
+  );
+
   return (
-    <div className={cn("flex items-center gap-2 min-w-0 font-mono", amount && "mt-2")}>
-      <div className="min-w-0 text-right shrink-0">
-        <p className={cn("font-semibold text-foreground truncate", compact ? "text-[0.6875rem] max-w-[100px]" : "text-xs max-w-[140px]")}>{sourceLabel}</p>
-        {sourceSub && !compact && <p className="text-[0.625rem] text-muted-foreground truncate max-w-[140px]">{sourceSub}</p>}
+    <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(110px,0.9fr)_minmax(0,1fr)] items-stretch gap-0">
+      <Account tag="From" name={sourceLabel} sub={sourceSub} />
+
+      {/* wide: a horizontal arrow with the amount written above it */}
+      <div className="hidden md:flex flex-col justify-center px-2">
+        <p className="font-heading text-[0.75rem] font-semibold tabular-nums text-foreground text-center whitespace-nowrap mb-1 min-h-[1.1em]">{amount ?? ""}</p>
+        <div className="flex items-center">
+          <span className="flex-1" style={{ borderTop: `1.2px ${dashed ? "dashed" : "solid"} ${ink}` }} />
+          <svg width="9" height="10" viewBox="0 0 9 10" aria-hidden="true" className="shrink-0"><path d="M0 0 L9 5 L0 10 Z" fill={ink} /></svg>
+        </div>
+        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground text-center mt-1.5">{dashed ? "as a loan" : "transfer"}</p>
       </div>
 
-      <div className="relative flex-1 min-w-[36px] flex items-center">
-        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", node)} />
-        <div className={cn("flex-1 border-t border-dashed", rail)} />
-        {amount && (
-          <span
-            className={cn(
-              "absolute left-1/2 -translate-x-1/2 -top-2 px-1 bg-card font-semibold tabular-nums whitespace-nowrap",
-              compact ? "text-[0.625rem]" : "text-[0.6875rem]",
-              type === "Inter" ? "text-violet-700" : "text-foreground",
-            )}
-          >
-            {amount}
-          </span>
-        )}
-        <ArrowLeftRight size={compact ? 8 : 9} className={cn("shrink-0", type === "Inter" ? "text-violet-500" : "text-muted-foreground")} />
-        <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", node)} />
+      {/* narrow: the same arrow, pointing down */}
+      <div className="md:hidden flex items-center gap-3 pl-5 py-1">
+        <div className="flex flex-col items-center">
+          <span style={{ height: 18, borderLeft: `1.2px ${dashed ? "dashed" : "solid"} ${ink}` }} />
+          <svg width="10" height="9" viewBox="0 0 10 9" aria-hidden="true"><path d="M0 0 L10 0 L5 9 Z" fill={ink} /></svg>
+        </div>
+        {amount && <span className="font-heading text-[0.75rem] font-semibold tabular-nums text-foreground">{amount}</span>}
       </div>
 
-      <div className="min-w-0 shrink-0">
-        <p className={cn("font-semibold truncate", type === "Inter" ? "text-violet-700" : "text-foreground", compact ? "text-[0.6875rem] max-w-[100px]" : "text-xs max-w-[140px]")}>{destLabel}</p>
-        {destSub && !compact && <p className="text-[0.625rem] text-muted-foreground truncate max-w-[140px]">{destSub}</p>}
-      </div>
+      <Account tag="To" name={destLabel} sub={destSub} />
     </div>
   );
 }
@@ -163,7 +166,7 @@ function LoanLink({ loanId, loanNo, status }: { loanId: number; loanNo: string |
   return (
     <button
       onClick={(e) => { e.stopPropagation(); navigate(`/loan/sanction?view=${loanId}`); }}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-violet-400/20 bg-violet-500/5 text-[0.625rem] font-mono text-violet-600 hover:bg-violet-500/15 transition-colors"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-muted/60 text-[0.625rem] font-heading tabular-nums text-foreground hover:bg-primary/10 transition-colors"
       title="Open in Loan Sanction"
     >
       <Landmark size={9} /> {loanNo || `LN-${loanId}`}{status ? ` · ${status}` : ""} <ExternalLink size={9} />
@@ -198,9 +201,9 @@ const FT_EXPORT_COLUMNS: ExportColumn[] = [
 
 function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
-      <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
-      <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
+    <div className="py-2.5 min-w-0" style={{ borderBottom: "1px solid hsl(var(--border) / 0.6)" }}>
+      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <div className={cn("text-sm text-foreground mt-1 break-words", mono && "font-heading tabular-nums font-semibold")}>{value}</div>
     </div>
   );
 }
@@ -296,38 +299,28 @@ function TransferDetailDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden">
-        <DialogHeader className="px-6 py-4 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-              <ArrowLeftRight size={15} className="text-primary" />
-            </div>
+      <DialogContent className="sheet-frame max-w-xl p-0 gap-0 overflow-hidden" style={{ margin: 0 }}>
+        <DialogHeader className="px-6 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <div className="flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <DialogTitle className="text-sm font-semibold font-heading font-mono">
-                {detail?.DocNo || `FT-${ftId}`}
-              </DialogTitle>
-              <DialogDescription className="text-[0.6875rem] mt-0.5">Fund Transfer details</DialogDescription>
+              <DialogDescription className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Fund transfer{detail ? ` · ${detail.TransferType === "Inter" ? "inter-company, as a loan" : "intra-company"}` : ""}
+              </DialogDescription>
+              <DialogTitle className="font-heading text-lg font-bold tabular-nums tracking-tight mt-1">{detail?.DocNo || `FT-${ftId}`}</DialogTitle>
             </div>
-            {detail && (
-              <div className="ml-auto flex items-center gap-1.5">
-                <TypeBadge type={detail.TransferType} />
-                <StatusBadge status={detail.Status} />
-              </div>
-            )}
+            {detail && <StatusBadge status={detail.Status} />}
           </div>
         </DialogHeader>
 
         {!loading && detail && (
-          <div className="flex items-center gap-1 px-6 pt-3 border-b border-border">
+          <div className="flex items-center px-6" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
             {(["details", "posting"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setDetailTab(tab)}
                 className={cn(
-                  "px-3 py-2 text-xs font-heading font-semibold border-b-2 -mb-px transition-colors capitalize",
-                  detailTab === tab
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
+                  "px-4 py-2.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] border-b-2 -mb-px transition-colors",
+                  detailTab === tab ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
                 {tab === "posting" ? "Posting" : "Details"}
@@ -343,15 +336,10 @@ function TransferDetailDialog({
           </div>
         ) : detailTab === "posting" ? (
           <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
-            <div className="flex items-center gap-2">
-              <BookOpen size={14} className="text-primary" />
-              <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                Journal Entry — Fund Transfer Posting
-              </span>
-            </div>
+            <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Journal entry</p>
 
             {postingLoading || !posting ? (
-              <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">
+              <div className="border border-dashed border-foreground/40 py-10 text-center text-xs text-muted-foreground">
                 Loading posting details…
               </div>
             ) : (
@@ -360,8 +348,8 @@ function TransferDetailDialog({
                   const totalDebit = v.rows.filter((r) => r.side === "debit").reduce((s, r) => s + r.amount, 0);
                   const totalCredit = v.rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
                   return (
-                    <div key={vi} className="rounded-xl border border-border overflow-hidden">
-                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-4 py-2.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                    <div key={vi} className="overflow-hidden bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 font-heading text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold gap-2" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
                         <span>
                           {v.companyName ? `${v.companyName} — ` : ""}Account
                           {v.jvNo ? ` · ${v.jvNo}` : ""}
@@ -372,37 +360,34 @@ function TransferDetailDialog({
                       {v.rows.map((row, ri) => (
                         <div key={ri} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 border-b border-border/50 last:border-0 items-center gap-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span className={cn("inline-block w-1.5 h-1.5 rounded-full flex-shrink-0", row.side === "debit" ? "bg-emerald-500" : "bg-rose-500")} />
+                            <span className={cn("inline-block w-1.5 h-1.5 rounded-full flex-shrink-0", row.side === "debit" ? "bg-foreground" : "bg-destructive")} />
                             <span className="text-xs text-foreground truncate">{row.label}</span>
                           </div>
-                          <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                          <span className="text-xs text-right font-heading tabular-nums text-foreground">
                             {row.side === "debit" ? formatINR(row.amount) : ""}
                           </span>
-                          <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                          <span className="text-xs text-right font-heading tabular-nums text-destructive">
                             {row.side === "credit" ? formatINR(row.amount) : ""}
                           </span>
                         </div>
                       ))}
-                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-2">
-                        <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
-                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{formatINR(totalDebit)}</span>
-                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{formatINR(totalCredit)}</span>
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-3 text-xs font-bold gap-2" style={{ borderTop: "2px solid hsl(var(--foreground))" }}>
+                        <span className="font-heading uppercase tracking-[0.12em] text-muted-foreground text-[0.5625rem]">Total</span>
+                        <span className="text-right text-foreground font-heading tabular-nums">{formatINR(totalDebit)}</span>
+                        <span className="text-right text-destructive font-heading tabular-nums">{formatINR(totalCredit)}</span>
                       </div>
                     </div>
                   );
                 })}
 
                 {posting.isPosted ? (
-                  <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                    <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                    <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                      Posted to General Ledger. Entries are visible in the Trial Balance.
-                    </p>
-                  </div>
+                  <p className="flex items-center gap-2 text-xs text-foreground">
+                    <SheetMark text="Posted" tone="done" /> Posted to the General Ledger. The entries show in the Trial Balance.
+                  </p>
                 ) : (
-                  <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                    <AlertCircle size={13} className="text-muted-foreground flex-shrink-0" />
-                    <p className="text-xs text-muted-foreground">
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <span className="mt-0.5"><SheetMark text="Preview" tone="waiting" /></span>
+                    <p>
                       Not yet posted — this is a preview of what will post once the transfer is Approved.
                       {posting.transferType === "Inter" && " Inter-company transfers post two vouchers, one per company."}
                     </p>
@@ -413,8 +398,8 @@ function TransferDetailDialog({
           </div>
         ) : (
           <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
-            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 overflow-x-auto">
-              <FlowConnector
+            <div>
+              <MoneyPath
                 sourceLabel={detail.SourceBankName || "—"}
                 sourceSub={detail.SourceCompanyName}
                 destLabel={detail.DestinationBankName || "—"}
@@ -425,38 +410,45 @@ function TransferDetailDialog({
             </div>
 
             {detail.TransferType === "Inter" && detail.LinkedLoanId && (
-              <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-violet-400/20 bg-violet-500/5">
+              <div className="flex items-center justify-between gap-3 px-3.5 py-2.5" style={{ border: "1px dashed hsl(var(--foreground))" }}>
                 <span className="text-xs text-muted-foreground">Booked as an inter-company loan</span>
                 <LoanLink loanId={detail.LinkedLoanId} loanNo={detail.LinkedLoanNo} status={detail.LinkedLoanStatus} />
               </div>
             )}
 
-            <div>
-              <DetailRow label="Transfer Date" value={fmtDate(detail.TransferDate)} />
-              <DetailRow label="Created By" value={detail.CreatedByName || detail.CreatedBy || "—"} />
-              <DetailRow label="Amount" value={<span className="font-mono font-semibold">{formatINR(detail.Amount || 0)}</span>} />
-              <DetailRow label="Source Company" value={detail.SourceCompanyName || "—"} />
-              <DetailRow label="Source Bank" value={detail.SourceBankName || "—"} />
-              <DetailRow label="Destination Company" value={detail.DestinationCompanyName || "—"} />
-              <DetailRow label="Destination Bank" value={detail.DestinationBankName || "—"} />
-              <DetailRow label="Payment Mode" value={detail.Mode || "—"} />
-              {(detail.Mode === "Cheque" || detail.Mode === "Post-Dated Cheque") && (
+            <div className="grid grid-cols-2 gap-x-6">
+              <DetailRow label="Amount" value={formatINR(detail.Amount || 0)} mono />
+              <DetailRow label="Transfer date" value={fmtDate(detail.TransferDate)} />
+              <DetailRow label="Paid by" value={detail.Mode || "—"} />
+              {(detail.Mode === "Cheque" || detail.Mode === "Post-Dated Cheque") ? (
                 <>
-                  <DetailRow label="Cheque No" value={detail.ChequeNo || "—"} mono />
-                  <DetailRow label="Cheque Lot" value={detail.ChequeLotNumber || "—"} mono />
-                  <DetailRow label="Cheque Date" value={fmtDate(detail.ChequeDate)} />
+                  <DetailRow label="Cheque no." value={detail.ChequeNo || "—"} mono />
+                  <DetailRow label="Cheque lot" value={detail.ChequeLotNumber || "—"} mono />
+                  <DetailRow label="Cheque date" value={fmtDate(detail.ChequeDate)} />
                 </>
-              )}
-              {detail.Mode && !["Cheque", "Post-Dated Cheque", "Cash"].includes(detail.Mode) && detail.DigitalRefNumber && (
-                <DetailRow label="Reference No" value={detail.DigitalRefNumber} mono />
-              )}
-              <div className="py-2 border-b border-border/60">
+              ) : detail.Mode && detail.Mode !== "Cash" && detail.DigitalRefNumber ? (
+                <DetailRow label="Reference no." value={detail.DigitalRefNumber} mono />
+              ) : null}
+              <DetailRow label="Created by" value={detail.CreatedByName || detail.CreatedBy || "—"} />
+              <DetailRow label="Created on" value={fmtDate(detail.CreatedAt)} />
+              <DetailRow
+                label="Ledger"
+                value={
+                  detail.Status === "Approved"
+                    ? <SheetMark text={detail.PostedToGL ? "Posted" : "Not posted"} tone={detail.PostedToGL ? "done" : "stopped"} />
+                    : <span className="text-muted-foreground">Posts once approved</span>
+                }
+              />
+            </div>
+
+            <div>
+              <div className="py-1">
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">Narration / Remarks</span>
+                  <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground shrink-0">Narration / remarks</span>
                   {canEditRemarks && !editingRemarks && (
                     <button
                       onClick={startEditRemarks}
-                      className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-primary hover:underline"
+                      className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground underline underline-offset-2"
                     >
                       <Pencil size={11} /> {detail.Narration ? "Edit" : "Add"}
                     </button>
@@ -496,37 +488,23 @@ function TransferDetailDialog({
                   </p>
                 )}
               </div>
-              <DetailRow label="Created By" value={detail.CreatedBy || "—"} />
-              <DetailRow label="Created At" value={fmtDate(detail.CreatedAt)} />
-              <DetailRow
-                label="GL Posting"
-                value={
-                  detail.Status === "Approved" ? (
-                    <span className={cn("inline-flex items-center gap-1", detail.PostedToGL ? "text-emerald-700" : "text-rose-700")}>
-                      <ShieldCheck size={13} /> {detail.PostedToGL ? "Posted" : "Not posted"}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">Pending approval</span>
-                  )
-                }
-              />
             </div>
           </div>
         )}
 
-        <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20 flex items-center justify-between sm:justify-between">
+        <DialogFooter className="px-6 py-3.5 flex items-center justify-between sm:justify-between" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
           {detail && onEdit && canEditAll(detail) && (
             <button
               onClick={() => onEdit(detail)}
               title={editTitle(detail.Status)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10 transition-colors"
             >
               <Pencil size={13} /> Edit
             </button>
           )}
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors ml-auto"
+            className="px-4 py-2 bg-foreground text-card border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground/85 transition-colors ml-auto"
           >
             Close
           </button>
@@ -550,17 +528,11 @@ function ModeChip({
 }) {
   if (!mode) return <span className="text-muted-foreground text-xs">—</span>;
   const isCheque = mode === "Cheque" || mode === "Post-Dated Cheque";
+  const ref = isCheque ? (chequeNo ? `Chq #${chequeNo}` : "") : digitalRefNumber || "";
   return (
-    <span className="inline-flex items-center gap-1 text-xs">
-      <span className="font-medium text-foreground">{mode}</span>
-      {isCheque && chequeNo && (
-        <span className="text-muted-foreground font-mono">· #{chequeNo}</span>
-      )}
-      {!isCheque && digitalRefNumber && (
-        <span className="text-muted-foreground font-mono truncate max-w-[100px]" title={digitalRefNumber}>
-          · {digitalRefNumber}
-        </span>
-      )}
+    <span className="inline-flex items-baseline gap-2">
+      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{mode}</span>
+      {ref && <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground truncate max-w-[130px]" title={ref}>{ref}</span>}
     </span>
   );
 }
@@ -972,59 +944,60 @@ export default function FundTransfer() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Fund Transfer"]} />
-      <FinanceShell
-        title="Fund Transfer"
-        subtitle="Move cash between bank accounts — intra-company, or inter-company as a loan"
-        icon={ArrowLeftRight}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Fund transfers"
+        subtitle="Move money from one bank account to another within the same company."
         action={
           <div className="flex items-center gap-2">
-            <button
-              onClick={load}
-              disabled={loading}
-              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
-            >
-              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-            </button>
             {rights.canCreate && (
               <Button
                 onClick={() => setDialogOpen(true)}
-                className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg gradient-accent transition-all"
+                className="gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 h-auto"
               >
                 <Plus size={13} />
-                <span className="hidden sm:inline">New Fund Transfer</span>
+                <span className="hidden sm:inline">New transfer</span>
               </Button>
             )}
+            <button
+              onClick={load}
+              disabled={loading}
+              title="Refresh"
+              className="w-8 h-8 flex items-center justify-center border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            </button>
           </div>
         }
       >
+        {/* Counts double as filters: the one in force is underlined */}
         {!loading && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border rounded-lg border border-border bg-card mb-5">
+          <div className="statrow four">
             {[
-              { label: "Total Transfers", value: stats.total,    color: "text-foreground", onClick: () => { setStatusFilter(null); setTypeFilter(null); }, active: !statusFilter && !typeFilter },
-              { label: "Approved",        value: stats.approved, color: "text-foreground", onClick: () => toggleStatusFilter("Approved"), active: statusFilter === "Approved" },
-              { label: "Pending",         value: stats.pending,  color: stats.pending > 0 ? "text-amber-700" : "text-foreground", onClick: () => toggleStatusFilter("Pending"), active: statusFilter === "Pending" },
-              { label: "Inter-Company",   value: stats.inter,    color: stats.inter > 0 ? "text-violet-700" : "text-foreground", onClick: () => toggleTypeFilter("Inter"), active: typeFilter === "Inter" },
-            ].map(({ label, value, color, onClick, active }) => (
-              <button
-                key={label}
-                onClick={onClick}
-                className={cn("px-4 py-3 text-left transition-colors hover:bg-muted/40", active && "bg-primary/5")}
-              >
-                <p className={cn("text-2xl font-bold leading-none tabular-nums font-mono", color)}>{value}</p>
-                <p className={cn("text-[0.625rem] font-semibold uppercase tracking-wider mt-1.5 font-heading", active ? "text-primary" : "text-muted-foreground")}>{label}</p>
-              </button>
+              { label: "Transfers", value: stats.total, note: "show all", onClick: () => { setStatusFilter(null); setTypeFilter(null); }, active: !statusFilter && !typeFilter },
+              { label: "Approved", value: stats.approved, note: "settled", onClick: () => toggleStatusFilter("Approved"), active: statusFilter === "Approved" },
+              { label: "Pending", value: stats.pending, note: "awaiting approval", onClick: () => toggleStatusFilter("Pending"), active: statusFilter === "Pending" },
+              { label: "Inter-company", value: stats.inter, note: "booked as loans", onClick: () => toggleTypeFilter("Inter"), active: typeFilter === "Inter" },
+            ].map((x) => (
+              <div key={x.label}>
+                <button onClick={x.onClick} className="block w-full text-left" aria-pressed={x.active}>
+                  <span className="label" style={x.active ? { color: "var(--ink)", borderBottom: "2px solid var(--blue)", paddingBottom: 2 } : undefined}>{x.label}</span>
+                  <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)", marginTop: 9 }}>{Number(x.value || 0).toLocaleString("en-IN")}</span>
+                  <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</span>
+                </button>
+              </div>
             ))}
           </div>
         )}
 
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by doc no, company, narration, or status…"
-            className="w-full pl-8 pr-8 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className="w-full pl-8 pr-8 py-2.5 border border-foreground/40 bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors"
           />
           {search && (
             <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -1042,22 +1015,22 @@ export default function FundTransfer() {
         </div>
 
         {(statusFilter || typeFilter) && (
-          <div className="flex items-center gap-1.5 mb-4">
-            <span className="text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground font-heading">Filtered by:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="label">Filtered by</span>
             {statusFilter && (
-              <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-border bg-muted text-[0.6875rem] font-medium text-foreground hover:bg-muted/60">
+              <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none border border-border bg-muted text-[0.6875rem] font-medium text-foreground hover:bg-muted/60">
                 {statusFilter} <X size={10} />
               </button>
             )}
             {typeFilter && (
-              <button onClick={() => setTypeFilter(null)} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-violet-400/30 bg-violet-500/10 text-[0.6875rem] font-medium text-violet-700 hover:bg-violet-500/20">
+              <button onClick={() => setTypeFilter(null)} className="inline-flex items-center gap-1 px-2 py-1 border border-foreground font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10">
                 {typeFilter === "Inter" ? "Inter-Company" : "Intra-Company"} <X size={10} />
               </button>
             )}
           </div>
         )}
 
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
           <div className="md:hidden divide-y divide-border">
             {loading ? (
               <div className="py-16 text-center">
@@ -1078,143 +1051,156 @@ export default function FundTransfer() {
                 <div
                   key={t.FTId}
                   onClick={() => setSelectedFTId(t.FTId)}
-                  className="px-4 py-3.5 hover:bg-muted/20 transition-colors cursor-pointer"
+                  className="px-4 py-3.5 hover:bg-primary/[0.06] transition-colors cursor-pointer"
                 >
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
-                        {t.DocNo || `FT-${t.FTId}`}
-                      </span>
-                      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(t.TransferDate)}</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">{t.DocNo || `FT-${t.FTId}`}</p>
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1 tabular-nums">{fmtDate(t.TransferDate)}</p>
                     </div>
-                    <span className="font-mono text-sm font-semibold text-foreground tabular-nums shrink-0">
-                      {formatINR(t.Amount || 0)}
-                    </span>
+                    <StatusBadge status={t.Status} />
                   </div>
-                  <div className="mb-2 overflow-x-auto">
-                    <FlowConnector
+                  <p className="font-heading text-xl font-semibold tabular-nums tracking-tight text-foreground mt-2.5">{formatINR(t.Amount || 0)}</p>
+                  <div className="mt-3 pt-3" style={{ borderTop: "1px solid hsl(var(--border) / 0.6)" }}>
+                    <MoneyPath
                       sourceLabel={t.SourceBankName || "—"}
                       sourceSub={t.SourceCompanyName}
                       destLabel={t.DestinationBankName || "—"}
                       destSub={t.DestinationCompanyName}
                       type={t.TransferType}
+                      compact
                     />
                   </div>
+                  <div className="flex items-center justify-between gap-2 flex-wrap mt-3">
+                    <TypeBadge type={t.TransferType} />
+                    <ModeChip mode={t.Mode} chequeNo={t.ChequeNo} digitalRefNumber={t.DigitalRefNumber} />
+                  </div>
                   {t.TransferType === "Inter" && t.LinkedLoanId && (
-                    <div className="mb-2">
+                    <div className="mt-2">
                       <LoanLink loanId={t.LinkedLoanId} loanNo={t.LinkedLoanNo} status={t.LinkedLoanStatus} />
                     </div>
                   )}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <TypeBadge type={t.TransferType} />
-                    <StatusBadge status={t.Status} />
-                    <ModeChip mode={t.Mode} chequeNo={t.ChequeNo} digitalRefNumber={t.DigitalRefNumber} />
-                  </div>
                 </div>
               ))
             )}
           </div>
 
-          <table className="w-full text-sm hidden md:table">
+          <table className="w-full text-sm hidden md:table" style={{ borderCollapse: "collapse" }}>
             <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Doc No</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Type</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">From → To</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Mode</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground font-heading">Status</th>
-                <th className="w-10 px-2 py-3" />
+              <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+                {[
+                  { h: "No.", right: false },
+                  { h: "Transfer", right: false },
+                  { h: "Date", right: false },
+                  { h: "From", right: false },
+                  { h: "", right: false },
+                  { h: "To", right: false },
+                  { h: "By", right: false },
+                  { h: "Amount", right: true },
+                  { h: "Status", right: false },
+                  { h: "", right: true },
+                ].map((c, i) => (
+                  <th key={i} className={`px-3 py-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground ${c.right ? "text-right" : "text-left"}`}>
+                    {c.h}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={10} className="py-16 text-center">
                     <Loader2 className="h-6 w-6 animate-spin inline text-muted-foreground" />
                     <p className="text-sm text-muted-foreground mt-2">Loading transfers…</p>
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-20 text-center">
+                  <td colSpan={10} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <ArrowLeftRight size={36} className="opacity-20" />
-                      <p className="text-sm font-medium">
-                        {search ? "No transfers match your search" : "No fund transfers yet"}
-                      </p>
+                      <p className="text-sm font-medium">{search ? "No transfers match your search" : "No fund transfers yet"}</p>
                       {!search && rights.canCreate && (
                         <button
                           onClick={() => setDialogOpen(true)}
-                          className="flex items-center gap-1.5 mt-1 px-4 py-2 rounded-lg gradient-accent text-white text-xs font-semibold"
+                          className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
                         >
-                          <Plus size={12} /> Create First Transfer
+                          <Plus size={12} /> Create first transfer
                         </button>
                       )}
                     </div>
                   </td>
                 </tr>
               ) : (
-                filtered.map((t) => (
-                  <tr
-                    key={t.FTId}
-                    onClick={() => setSelectedFTId(t.FTId)}
-                    className="hover:bg-muted/30 transition-colors group cursor-pointer"
-                  >
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs bg-muted px-2 py-1 rounded text-foreground">
-                        {t.DocNo || `FT-${t.FTId}`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground">{fmtDate(t.TransferDate)}</td>
-                    <td className="px-4 py-3"><TypeBadge type={t.TransferType} /></td>
-                    <td className="px-4 py-3 text-sm">
-                      <FlowConnector
-                        sourceLabel={t.SourceBankName || "—"}
-                        destLabel={t.DestinationBankName || "—"}
-                        type={t.TransferType}
-                        compact
-                      />
-                      {t.TransferType === "Inter" && t.LinkedLoanId && (
-                        <div className="mt-1">
-                          <LoanLink loanId={t.LinkedLoanId} loanNo={t.LinkedLoanNo} status={t.LinkedLoanStatus} />
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ModeChip mode={t.Mode} chequeNo={t.ChequeNo} digitalRefNumber={t.DigitalRefNumber} />
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium text-foreground tabular-nums">
-                      {formatINR(t.Amount || 0)}
-                    </td>
-                    <td className="px-4 py-3"><StatusBadge status={t.Status} /></td>
-                    <td className="px-2 py-3 text-right">
-                      {canEditRow(t) && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); startEditById(t.FTId); }}
-                          title={editTitle(t.Status)}
-                          className="w-7 h-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                filtered.map((t, i) => {
+                  const inter = t.TransferType === "Inter";
+                  const ref = t.ChequeNo ? `Chq #${t.ChequeNo}` : t.DigitalRefNumber;
+                  return (
+                    <tr
+                      key={t.FTId}
+                      onClick={() => setSelectedFTId(t.FTId)}
+                      className="hover:bg-primary/[0.06] transition-colors cursor-pointer align-top"
+                      style={{ borderBottom: "1px solid hsl(var(--border) / 0.6)" }}
+                    >
+                      <td className="px-3 py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">{String(i + 1).padStart(2, "0")}</td>
+                      <td className="px-3 py-3">
+                        <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground whitespace-nowrap">{t.DocNo || `FT-${t.FTId}`}</p>
+                        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1.5">{inter ? "Inter-company" : "Intra-company"}</p>
+                      </td>
+                      <td className="px-3 py-3 text-[0.75rem] text-foreground tabular-nums whitespace-nowrap">{fmtDate(t.TransferDate)}</td>
+                      {/* The money's path: out of one account, along the arrow, into the other */}
+                      <td className="px-3 py-3">
+                        <p className="text-[0.8125rem] font-semibold text-foreground truncate max-w-[190px]">{t.SourceBankName || "—"}</p>
+                        {t.SourceCompanyName && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[190px]">{t.SourceCompanyName}</p>}
+                      </td>
+                      <td className="px-1 py-3" style={{ width: 54 }}>
+                        <svg width="46" height="16" viewBox="0 0 46 16" aria-hidden="true" style={{ display: "block", marginTop: 2 }}>
+                          <line x1="0" y1="8" x2="38" y2="8" stroke="hsl(var(--foreground))" strokeWidth="1.2" strokeDasharray={inter ? "4 3" : undefined} />
+                          <path d="M37 3.5 L45 8 L37 12.5 Z" fill="hsl(var(--foreground))" />
+                        </svg>
+                      </td>
+                      <td className="px-3 py-3">
+                        <p className="text-[0.8125rem] font-semibold text-foreground truncate max-w-[190px]">{t.DestinationBankName || "—"}</p>
+                        {t.DestinationCompanyName && <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[190px]">{t.DestinationCompanyName}</p>}
+                        {inter && t.LinkedLoanId && (
+                          <div className="mt-1.5">
+                            <LoanLink loanId={t.LinkedLoanId} loanNo={t.LinkedLoanNo} status={t.LinkedLoanStatus} />
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t.Mode || "—"}</p>
+                        {ref && <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground mt-1.5 truncate max-w-[130px]">{ref}</p>}
+                      </td>
+                      <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">{formatINR(t.Amount || 0)}</td>
+                      <td className="px-3 py-3"><SheetMark text={t.Status || "—"} tone={statusTone(t.Status || "")} /></td>
+                      <td className="px-2 py-3 text-right">
+                        {canEditRow(t) && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startEditById(t.FTId); }}
+                            title={editTitle(t.Status)}
+                            className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
 
           {!loading && filtered.length > 0 && (search || statusFilter || typeFilter) && (
-            <div className="px-4 py-2.5 border-t border-border bg-muted/20">
-              <p className="text-xs text-muted-foreground">
+            <div className="px-3 py-2.5" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Showing {filtered.length} of {transfers.length} transfers
               </p>
             </div>
           )}
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {selectedFTId != null && (
         <TransferDetailDialog ftId={selectedFTId} onClose={() => setSelectedFTId(null)} onUpdated={load} onEdit={startEdit} />
@@ -1222,14 +1208,12 @@ export default function FundTransfer() {
 
       {/* ── New Fund Transfer Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="max-w-4xl p-0 gap-0 flex flex-col max-h-[96dvh] overflow-hidden" onKeyDown={preventEnterSubmit}>
-          <DialogHeader className="shrink-0 px-4 sm:px-7 py-3 sm:py-4 border-b border-border bg-gradient-to-br from-primary/5 via-transparent to-transparent">
+        <DialogContent className="sheet-frame max-w-4xl p-0 gap-0 flex flex-col max-h-[96dvh] overflow-hidden" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
+          <DialogHeader className="shrink-0 px-4 sm:px-7 py-3 sm:py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
-                <ArrowLeftRight size={18} className="text-primary" />
-              </div>
               <div className="min-w-0">
-                <DialogTitle className="text-base font-semibold font-heading">{editingId ? "Edit Fund Transfer" : "New Fund Transfer"}</DialogTitle>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Fund transfer</p>
+                <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{editingId ? "Edit transfer" : "New transfer"}</DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
                   {editingId
                     ? "Every field can be changed. An approved transfer has its GL posting reversed and goes back for approval; a pending one stays pending and its approval restarts."
@@ -1255,12 +1239,10 @@ export default function FundTransfer() {
 
             {/* Source / Destination panels */}
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 sm:gap-4 items-stretch">
-              <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-2.5">
-                <p className="flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-widest text-muted-foreground font-heading">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60" /> From
-                </p>
+              <div className="p-3 sm:p-3.5 space-y-2.5 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">From</p>
                 <div className="space-y-1.5">
-                  <label className="text-[0.6875rem] font-medium text-muted-foreground">Company *</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Company *</label>
                   <Select value={sourceCompanyId || undefined} onValueChange={setSourceCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder="Select company…" />
@@ -1273,7 +1255,7 @@ export default function FundTransfer() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[0.6875rem] font-medium text-muted-foreground">Bank Account *</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Bank Account *</label>
                   <Select value={sourceBankId || undefined} onValueChange={setSourceBankId} disabled={!sourceCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder={sourceCompanyId ? "Select bank…" : "Select a company first"} />
@@ -1294,18 +1276,21 @@ export default function FundTransfer() {
               {/* Swap connector — a rotated chevron stack on mobile (stacked
                   panels read top-to-bottom), the full icon on desktop where
                   panels sit side by side. */}
-              <div className="flex md:flex-col items-center justify-center py-0.5 md:py-0">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-muted flex items-center justify-center shrink-0 ring-1 ring-border/60">
-                  <ArrowLeftRight size={14} className="text-muted-foreground rotate-90 md:rotate-0" />
-                </div>
+              <div className="flex md:flex-col items-center justify-center" aria-hidden="true">
+                <svg width="30" height="12" viewBox="0 0 30 12" className="hidden md:block">
+                  <line x1="0" y1="6" x2="22" y2="6" stroke="hsl(var(--foreground))" strokeWidth="1.2" />
+                  <path d="M21 1.5 L29 6 L21 10.5 Z" fill="hsl(var(--foreground))" />
+                </svg>
+                <svg width="12" height="22" viewBox="0 0 12 22" className="md:hidden">
+                  <line x1="6" y1="0" x2="6" y2="14" stroke="hsl(var(--foreground))" strokeWidth="1.2" />
+                  <path d="M1.5 13 L10.5 13 L6 21 Z" fill="hsl(var(--foreground))" />
+                </svg>
               </div>
 
-              <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-2.5">
-                <p className="flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-widest text-muted-foreground font-heading">
-                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500/60" /> To
-                </p>
+              <div className="p-3 sm:p-3.5 space-y-2.5 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">To</p>
                 <div className="space-y-1.5">
-                  <label className="text-[0.6875rem] font-medium text-muted-foreground">Company *</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Company *</label>
                   <Select
                     value={destCompanyId || undefined}
                     onValueChange={setDestCompanyId}
@@ -1324,7 +1309,7 @@ export default function FundTransfer() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[0.6875rem] font-medium text-muted-foreground">Bank Account *</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Bank Account *</label>
                   <Select value={destBankId || undefined} onValueChange={setDestBankId} disabled={!destCompanyId}>
                     <SelectTrigger className="h-9 text-sm bg-background">
                       <SelectValue placeholder={destCompanyId ? "Select bank…" : "Select a company first"} />
@@ -1344,11 +1329,13 @@ export default function FundTransfer() {
             </div>
 
             {(sourceBankId || destBankId) && (
-              <div className="rounded-lg border border-dashed border-border bg-muted/20 px-3.5 sm:px-4 py-2 overflow-x-auto">
-                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-1">Preview</p>
-                <FlowConnector
-                  sourceLabel={banks.find((b) => String(b.BId) === sourceBankId)?.BName || "Source bank"}
-                  destLabel={banks.find((b) => String(b.BId) === destBankId)?.BName || "Destination bank"}
+              <div>
+                <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground mb-2">What will move</p>
+                <MoneyPath
+                  sourceLabel={banks.find((b) => String(b.BId) === sourceBankId)?.BName || "Not chosen yet"}
+                  sourceSub={companies.find((c) => String(c.id) === sourceCompanyId)?.label}
+                  destLabel={banks.find((b) => String(b.BId) === destBankId)?.BName || "Not chosen yet"}
+                  destSub={companies.find((c) => String(c.id) === destCompanyId)?.label}
                   amount={amount && Number(amount) > 0 ? formatINR(Number(amount)) : undefined}
                   type={transferType}
                 />
@@ -1361,20 +1348,21 @@ export default function FundTransfer() {
                 here can't be claimed there and vice versa); choosing a
                 digital mode just asks for the settlement reference. */}
             <div className="space-y-2">
-              <p className="flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-widest text-muted-foreground font-heading">
+              <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">
                 <Wallet size={11} /> Payment Mode *
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-0">
                 {PAYMENT_MODES.map((m) => (
                   <button
                     key={m}
                     type="button"
+                    aria-pressed={mode === m}
                     onClick={() => handleModeChange(m)}
                     className={cn(
-                      "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                      "-ml-px first:ml-0 -mt-px px-3.5 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border transition-colors",
                       mode === m
-                        ? "border-primary bg-primary/10 text-primary shadow-sm"
-                        : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80",
+                        ? "relative z-[1] bg-foreground text-card border-foreground"
+                        : "bg-card text-muted-foreground border-foreground/40 hover:text-foreground hover:bg-primary/10",
                     )}
                   >
                     {m}
@@ -1396,13 +1384,13 @@ export default function FundTransfer() {
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-medium text-muted-foreground">Cheque Lot</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Cheque Lot</label>
                       <div className="relative">
                         <BookOpen size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                         <select
                           value={chequeLotId ? String(chequeLotId) : ""}
                           onChange={(e) => handleLotSelect(e.target.value)}
-                          className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                          className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary font-heading tabular-nums"
                         >
                           <option value="">— Select lot —</option>
                           {chequeLots.map((lot) => (
@@ -1426,14 +1414,14 @@ export default function FundTransfer() {
                   {chequeLotId && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                       <div className="space-y-1.5">
-                        <label className="text-[0.6875rem] font-medium text-muted-foreground">Cheque Number *</label>
+                        <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Cheque Number *</label>
                         <div className="relative">
                           <Hash size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                           <select
                             value={chequeNo}
                             onChange={(e) => handleChequeSelect(e.target.value)}
                             disabled={loadingCheques || validatingCheque}
-                            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-mono"
+                            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-heading tabular-nums"
                           >
                             <option value="">— Select cheque number —</option>
                             {availableCheques.map((c) => (
@@ -1455,7 +1443,7 @@ export default function FundTransfer() {
                         )}
                       </div>
                       <div className="space-y-1.5">
-                        <label className="text-[0.6875rem] font-medium text-muted-foreground">
+                        <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                           {isPostDated ? "Post-Dated Cheque Date *" : "Cheque Date *"}
                         </label>
                         <div className="relative">
@@ -1479,19 +1467,19 @@ export default function FundTransfer() {
                     validUntil.setMonth(validUntil.getMonth() + 3);
                     const isExpired = validUntil < new Date();
                     return isExpired ? (
-                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/30 text-xs text-red-600 dark:text-red-400">
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-destructive/10 border border-destructive/40 text-xs text-destructive">
                         <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                         <span>Cheque dated {fmt(chequeD)} expired on <strong>{fmt(validUntil)}</strong>. Please obtain a new cheque.</span>
                       </div>
                     ) : (
-                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/60 border border-border text-xs text-foreground">
                         <CalendarClock size={13} className="shrink-0 mt-0.5" />
                         <span>PDC scheduled for {fmt(chequeD)} — valid until <strong>{fmt(validUntil)}</strong>.</span>
                       </div>
                     );
                   })()}
                   {isPostDated && !chequeDate && (
-                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-violet-600 dark:text-violet-400">
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/60 border border-border text-xs text-foreground">
                       <Info size={13} className="shrink-0 mt-0.5" />
                       <span>Post-dated cheques are generally valid for <strong>3 months</strong> from the cheque date.</span>
                     </div>
@@ -1501,7 +1489,7 @@ export default function FundTransfer() {
 
               {isDigitalMode && (
                 <div className="mt-1 space-y-1.5">
-                  <label className="text-[0.6875rem] font-medium text-muted-foreground">{DIGITAL_REF_LABEL[mode] ?? "Reference Number"}</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{DIGITAL_REF_LABEL[mode] ?? "Reference Number"}</label>
                   <Input
                     className="h-9"
                     value={digitalRefNumber}
@@ -1523,8 +1511,8 @@ export default function FundTransfer() {
               <div className="space-y-1.5">
                 <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-mono pointer-events-none">₹</span>
-                  <Input type="number" min={0} step="0.01" className="h-9 font-mono pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-heading tabular-nums pointer-events-none">₹</span>
+                  <Input type="number" min={0} step="0.01" className="h-9 font-heading tabular-nums pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
                 </div>
               </div>
             </div>
@@ -1535,8 +1523,8 @@ export default function FundTransfer() {
             </div>
 
             {transferType === "Inter" && (
-              <div className="flex items-start gap-2.5 pl-3.5 sm:pl-4 pr-3.5 sm:pr-4 py-2.5 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-violet-500">
-                <Landmark size={14} className="shrink-0 mt-0.5 text-violet-600" />
+              <div className="flex items-start gap-2.5 pl-3.5 sm:pl-4 pr-3.5 sm:pr-4 py-2.5 rounded-lg border border-border bg-muted/20 text-xs text-muted-foreground border-l-[3px] border-l-foreground/40">
+                <Landmark size={14} className="shrink-0 mt-0.5 text-foreground" />
                 <span>
                   <span className="font-semibold text-foreground">Creates a Loan Sanction record on approval.</span> The
                   source company becomes the lender, the destination company the borrower — no interest, single
@@ -1546,17 +1534,17 @@ export default function FundTransfer() {
             )}
           </div>
 
-          <DialogFooter className="shrink-0 px-4 sm:px-7 py-3 border-t border-border bg-muted/20">
+          <DialogFooter className="shrink-0 px-4 sm:px-7 py-3" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
             <button
               onClick={() => { setDialogOpen(false); if (editingId) resetForm(); }}
-              className="w-full sm:w-auto px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+              className="w-full sm:w-auto px-4 py-2.5 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={submit}
               disabled={saving}
-              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-5 py-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground/85 transition-all disabled:opacity-50"
             >
               {saving && <Loader2 size={13} className="animate-spin" />}
               {editingId ? "Save Changes" : "Submit for Approval"}

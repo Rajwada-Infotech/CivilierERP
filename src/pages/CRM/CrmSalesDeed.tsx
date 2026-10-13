@@ -1485,9 +1485,9 @@ const CrmSalesDeed: React.FC = () => {
           </div>
         }
       >
-        <div className="flex gap-4 h-[calc(100vh-220px)]">
+        <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-220px)]">
           {/* List (Left Pane) */}
-          <div className="w-80 shrink-0 flex flex-col gap-2">
+          <div className="w-full md:w-80 shrink-0 flex flex-col gap-2">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
@@ -1495,8 +1495,8 @@ const CrmSalesDeed: React.FC = () => {
                 placeholder="Search deeds... (Enter to search)"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
-            <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-            <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
+            <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
+            <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5 max-h-[45vh] md:max-h-none">
               {isLoading ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
               ) : filtered.length === 0 ? (
@@ -1535,7 +1535,7 @@ const CrmSalesDeed: React.FC = () => {
           </div>
 
           {/* Detail (Right Pane) */}
-          <div className="flex-1 overflow-y-auto thin-scroll space-y-4">
+          <div className="flex-1 min-w-0 overflow-y-auto thin-scroll space-y-4">
             {detailId == null ? (
               <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                 Select a deed to view details

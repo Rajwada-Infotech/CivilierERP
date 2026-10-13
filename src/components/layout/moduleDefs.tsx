@@ -1,20 +1,5 @@
 import React from "react";
-import {
-  Bank,
-  Box,
-  Cpu,
-  Grid1,
-  Message2,
-  ShoppingCart,
-  Chart21,
-  Archive,
-  VideoPlay,
-  Shield,
-  MoneyRecive,
-  Profile2User,
-} from "iconsax-react";
-import { HardHat, Wrench } from "lucide-react";
-import { TimelineIcon } from "@/components/icons/TimelineIcon";
+import { ModuleIcons } from "@/components/icons/moduleIcons";
 import type { Module } from "@/contexts/module.utils";
 
 // The one list of modules — id, icon, name, colour — that the desktop module strip, the top bar's
@@ -23,14 +8,8 @@ import type { Module } from "@/contexts/module.utils";
 //
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime (kept equal to `color`).
 
-// iconsax icons take a `variant` prop ("Bold"/"Outline"); lucide's HardHat doesn't know that prop but
-// happily ignores extra ones via its ...rest spread, so this adapter gives it the same call signature as
-// the iconsax icons so it drops into MODULES without special-casing the render.
+// Icons come from components/icons/moduleIcons (Tabler), shared with the sidebar headers.
 export type ModuleIcon = React.ElementType;
-
-type AdapterProps = { size?: number; variant?: string; className?: string; style?: React.CSSProperties; color?: string };
-const HardHatIcon: React.FC<AdapterProps> = ({ variant: _variant, ...rest }) => <HardHat {...rest} />;
-const WrenchIcon: React.FC<AdapterProps> = ({ variant: _variant, ...rest }) => <Wrench {...rest} />;
 
 export type ModuleDef = {
   id: NonNullable<Module>;
@@ -45,141 +24,141 @@ export type ModuleDef = {
 export const MODULES: ModuleDef[] = [
   {
     id: "finance",
-    icon: Bank,
+    icon: ModuleIcons.finance,
     label: "Finance",
     desc: "Ledger, payments & BRS",
-    color: "#6366f1",
-    bg: "rgba(99,102,241,0.22)",
-    ringRgb: "99,102,241",
+    color: "#2419e6",
+    bg: "rgba(36,25,230,0.20)",
+    ringRgb: "36,25,230",
   },
   {
     id: "material",
-    icon: Box,
+    icon: ModuleIcons.material,
     label: "Material",
     desc: "GRN, PO & inventory",
-    color: "#10b981",
-    bg: "rgba(16,185,129,0.22)",
-    ringRgb: "16,185,129",
+    color: "#14b84b",
+    bg: "rgba(20,184,75,0.20)",
+    ringRgb: "20,184,75",
   },
   {
     id: "fixed-asset",
-    icon: Cpu,
+    icon: ModuleIcons.fixedAsset,
     label: "Fixed Asset",
     desc: "Tagging, records & depreciation",
-    color: "#eab308",
-    bg: "rgba(234,179,8,0.22)",
-    ringRgb: "234,179,8",
+    color: "#a57e12",
+    bg: "rgba(165,126,18,0.20)",
+    ringRgb: "165,126,18",
   },
   {
     id: "loan",
-    icon: MoneyRecive,
+    icon: ModuleIcons.loan,
     label: "Loan",
     desc: "Loan management",
-    color: "#22c55e",
-    bg: "rgba(34,197,94,0.22)",
-    ringRgb: "34,197,94",
+    color: "#43a512",
+    bg: "rgba(67,165,18,0.20)",
+    ringRgb: "67,165,18",
   },
   {
     id: "engineering",
-    icon: HardHatIcon,
+    icon: ModuleIcons.engineering,
     label: "Engineering",
     desc: "Projects, work orders & site",
-    color: "#f97316",
-    bg: "rgba(249,115,22,0.22)",
-    ringRgb: "249,115,22",
+    color: "#e66b19",
+    bg: "rgba(230,107,25,0.20)",
+    ringRgb: "230,107,25",
   },
   {
     id: "civilworkdpr",
-    icon: TimelineIcon,
+    icon: ModuleIcons.civilWorkDpr,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
-    color: "#0891b2",
-    bg: "rgba(8,145,178,0.22)",
-    ringRgb: "8,145,178",
+    color: "#14a2b8",
+    bg: "rgba(20,162,184,0.20)",
+    ringRgb: "20,162,184",
   },
   {
     id: "followup",
-    icon: Grid1,
+    icon: ModuleIcons.followup,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
-    color: "#0d9488",
-    bg: "rgba(13,148,136,0.18)",
-    ringRgb: "13,148,136",
+    color: "#14b88c",
+    bg: "rgba(20,184,140,0.20)",
+    ringRgb: "20,184,140",
   },
   {
     id: "ticket",
-    icon: Message2,
+    icon: ModuleIcons.ticket,
     label: "Ticket",
     desc: "Support & issue tracking",
-    color: "#ec4899",
-    bg: "rgba(236,72,153,0.22)",
-    ringRgb: "236,72,153",
+    color: "#e619a8",
+    bg: "rgba(230,25,168,0.20)",
+    ringRgb: "230,25,168",
   },
   {
     id: "sales",
-    icon: ShoppingCart,
+    icon: ModuleIcons.sales,
     label: "Sales",
     desc: "Sale orders & payments",
-    color: "#a855f7",
-    bg: "rgba(168,85,247,0.22)",
-    ringRgb: "168,85,247",
+    color: "#6e19e6",
+    bg: "rgba(110,25,230,0.20)",
+    ringRgb: "110,25,230",
   },
   {
     id: "sales-automation",
-    icon: VideoPlay,
+    icon: ModuleIcons.salesAutomation,
     label: "Sales Automation",
     desc: "Campaigns, leads & bookings",
-    color: "#f59e0b",
-    bg: "rgba(245,158,11,0.22)",
-    ringRgb: "245,158,11",
+    color: "#e6195d",
+    bg: "rgba(230,25,93,0.20)",
+    ringRgb: "230,25,93",
   },
   {
     id: "crm",
-    icon: Chart21,
+    icon: ModuleIcons.crm,
     label: "CRM",
     desc: "Applications, bookings & agreements",
-    color: "#0ea5e9",
-    bg: "rgba(14,165,233,0.22)",
-    ringRgb: "14,165,233",
+    color: "#1990e6",
+    bg: "rgba(25,144,230,0.20)",
+    ringRgb: "25,144,230",
   },
   {
     id: "maintenance",
-    icon: WrenchIcon,
+    icon: ModuleIcons.maintenance,
     label: "Maintenance",
     desc: "Upkeep, repairs & servicing",
-    color: "#65a30d",
-    bg: "rgba(101,163,13,0.22)",
-    ringRgb: "101,163,13",
+    color: "#88a512",
+    bg: "rgba(136,165,18,0.20)",
+    ringRgb: "136,165,18",
   },
   {
     id: "hr-payroll",
-    icon: Profile2User,
+    icon: ModuleIcons.hrPayroll,
     label: "HR and Payroll",
     desc: "Employees, attendance & payroll",
-    color: "#eab308",
-    bg: "rgba(234,179,8,0.22)",
-    ringRgb: "234,179,8",
+    color: "#ca19e6",
+    bg: "rgba(202,25,230,0.20)",
+    ringRgb: "202,25,230",
   },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records",
-    icon: Archive,
+    icon: ModuleIcons.records,
     label: "Records",
     desc: "Every attachment, in one place",
-    color: "#e11d48",
-    bg: "rgba(225,29,72,0.18)",
-    ringRgb: "225,29,72",
+    color: "#e61919",
+    bg: "rgba(230,25,25,0.20)",
+    ringRgb: "230,25,25",
   },
 ];
 
 export const ADMIN_MODULE: ModuleDef = {
   id: "admin",
-  icon: Shield,
+  icon: ModuleIcons.admin,
   label: "Admin",
   desc: "Users, rights & configuration",
-  color: "#3b82f6",
-  bg: "rgba(59,130,246,0.22)",
-  ringRgb: "59,130,246",
+  color: "#1957e6",
+  bg: "rgba(25,87,230,0.20)",
+  ringRgb: "25,87,230",
 };
 
 /** Every module, regular ones in strip order, Admin last. */

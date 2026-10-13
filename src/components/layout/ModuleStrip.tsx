@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { MODULES, ADMIN_MODULE } from "./moduleDefs";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module, firstAccessibleAdminPath, hasAnyAdminPageRight, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
@@ -113,54 +113,17 @@ export const ModuleStrip: React.FC = () => {
         className="h-full w-full flex flex-col py-2"
         style={{ paddingLeft: 4, paddingRight: 4 }}
       >
-        {/* ── Inner oval pill strip (fully rounded top + bottom) ───────────── */}
+        {/* ── The strip: a ruled sheet margin (square, ink border, faint grid) ── */}
         <div
-          className="relative flex-1 flex flex-col overflow-hidden rounded-[28px]"
-          style={
-            isDark
-              ? {
-                  background: "rgba(15, 17, 26, 0.52)",
-                  border: "1px solid rgba(255,255,255,0.13)",
-                  boxShadow:
-                    "0 2px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.10)",
-                  backdropFilter: "blur(22px) saturate(160%)",
-                  WebkitBackdropFilter: "blur(22px) saturate(160%)",
-                }
-              : {
-                  background: "rgba(255,255,255,0.42)",
-                  border: "1px solid rgba(255,255,255,0.65)",
-                  boxShadow:
-                    "0 2px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.85)",
-                  backdropFilter: "blur(22px) saturate(180%)",
-                  WebkitBackdropFilter: "blur(22px) saturate(180%)",
-                }
-          }
+          className="relative flex-1 flex flex-col overflow-hidden"
+          style={{
+            backgroundColor: "hsl(var(--card))",
+            backgroundImage:
+              "linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px)",
+            backgroundSize: "24px 24px",
+            border: "1.5px solid hsl(var(--foreground))",
+          }}
         >
-          {/* Dot-grid overlay */}
-          <div
-            className="absolute inset-0 pointer-events-none z-0"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, hsl(var(--foreground) / 0.10) 1px, transparent 1px)",
-              backgroundSize: "14px 14px",
-            }}
-          />
-
-          {/* Top radial glow — tracks active module color */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeModuleItem.id as string}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-              className="absolute top-0 left-0 right-0 h-36 pointer-events-none z-0"
-              style={{
-                background: `radial-gradient(ellipse at 50% 0%, rgba(${activeRingRgb},0.45) 0%, rgba(${activeRingRgb},0.15) 40%, transparent 70%)`,
-              }}
-            />
-          </AnimatePresence>
-
           {/* ── Logo / Refresh button ──────────────────────────────────────── */}
           <div className="relative z-10 flex justify-center items-center pt-5 pb-5">
             <motion.button
@@ -184,8 +147,8 @@ export const ModuleStrip: React.FC = () => {
             </motion.button>
           </div>
 
-          {/* Divider below logo */}
-          <div className="mx-3 mb-1 h-px bg-gradient-to-r from-transparent via-foreground/30 to-transparent relative z-10" />
+          {/* Rule below logo */}
+          <div className="mb-1 h-px relative z-10" style={{ background: "hsl(var(--foreground))" }} />
 
           {/* ── Scrollable icon region — regular + admin modules. Scrolls
               internally (instead of overflowing the pill) once there are
@@ -212,44 +175,7 @@ export const ModuleStrip: React.FC = () => {
 
             {/* ── Separator between ticket and admin ────────────────────────────── */}
             {adminItems.length > 0 && (
-              <div className="flex flex-col items-center my-1.5">
-                {/* Top line */}
-                <div
-                  className="w-px h-5"
-                  style={{
-                    background: `linear-gradient(to bottom, transparent, rgba(${activeRingRgb},0.6))`,
-                  }}
-                />
-                {/* Pulsing dot — subtle, no scale change, just opacity + soft glow */}
-                <motion.div
-                  className="rounded-full"
-                  style={{
-                    width: 5,
-                    height: 5,
-                    background: activeModuleItem.color,
-                  }}
-                  animate={{
-                    opacity: [0.45, 1, 0.45],
-                    boxShadow: [
-                      `0 0 0px rgba(${activeRingRgb},0)`,
-                      `0 0 5px 1px rgba(${activeRingRgb},0.70)`,
-                      `0 0 0px rgba(${activeRingRgb},0)`,
-                    ],
-                  }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                />
-                {/* Bottom line */}
-                <div
-                  className="w-px h-5"
-                  style={{
-                    background: `linear-gradient(to top, transparent, rgba(${activeRingRgb},0.6))`,
-                  }}
-                />
-              </div>
+              <div className="my-2 mx-3" style={{ borderTop: "1px dashed hsl(var(--border))" }} />
             )}
 
             {/* ── Admin icon (only for admin-tier) ──────────────────────────── */}
@@ -288,9 +214,7 @@ export const ModuleStrip: React.FC = () => {
                 <div
                   className="absolute inset-x-0 bottom-0 top-0"
                   style={{
-                    background: isDark
-                      ? "linear-gradient(to bottom, transparent, rgba(15,17,26,0.92) 75%)"
-                      : "linear-gradient(to bottom, transparent, rgba(255,255,255,0.92) 75%)",
+                    background: "linear-gradient(to bottom, transparent, hsl(var(--card)) 75%)",
                   }}
                 />
                 <motion.div
@@ -298,10 +222,10 @@ export const ModuleStrip: React.FC = () => {
                   transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
                   className="relative flex items-center justify-center pb-1"
                 >
-                  <ChevronDown
+                  <ChromeIcons.down
                     size={13}
                     strokeWidth={2.6}
-                    style={{ color: isDark ? "rgba(244,245,249,0.55)" : "rgba(20,22,31,0.42)" }}
+                    style={{ color: "hsl(var(--muted-foreground))" }}
                   />
                 </motion.div>
               </motion.div>
@@ -321,44 +245,11 @@ export const ModuleStrip: React.FC = () => {
                   onClick={() => setCollapsed(false)}
                   whileHover={{ scale: 1.14 }}
                   whileTap={{ scale: 0.88 }}
-                  className="relative flex items-center justify-center w-8 h-8 rounded-full
-                    bg-primary/10 hover:bg-primary/20 border border-primary/30
-                    text-primary transition-colors duration-150"
+                  className="relative flex items-center justify-center w-8 h-8 text-foreground hover:bg-primary/10 transition-colors duration-150"
+                  style={{ border: "1px solid hsl(var(--foreground))" }}
                   title="Expand menu"
                 >
-                  {/* Sonar rings — explicit RGBA, high opacity for all-theme visibility */}
-                  <motion.span
-                    className="absolute inset-0 rounded-full"
-                    animate={{
-                      boxShadow: [
-                        "0 0 0 0px rgba(99,102,241,0.85)",
-                        "0 0 0 5px rgba(99,102,241,0)",
-                        "0 0 0 0px rgba(99,102,241,0.85)",
-                      ],
-                    }}
-                    transition={{
-                      duration: 1.8,
-                      repeat: Infinity,
-                      ease: "easeOut",
-                    }}
-                  />
-                  <motion.span
-                    className="absolute inset-0 rounded-full"
-                    animate={{
-                      boxShadow: [
-                        "0 0 0 0px rgba(99,102,241,0.55)",
-                        "0 0 0 9px rgba(99,102,241,0)",
-                        "0 0 0 0px rgba(99,102,241,0.55)",
-                      ],
-                    }}
-                    transition={{
-                      duration: 1.8,
-                      repeat: Infinity,
-                      ease: "easeOut",
-                      delay: 0.32,
-                    }}
-                  />
-                  <ChevronRight size={13} strokeWidth={2.4} />
+                  <ChromeIcons.right size={15} />
                 </motion.button>
               )}
             </AnimatePresence>
@@ -386,38 +277,21 @@ export const ModuleStrip: React.FC = () => {
                   pointerEvents: "none",
                 }}
               >
-                {/* Explicit colors instead of the --popover/--card tokens —
-                    those sit only a shade lighter than --background in this
-                    theme, so the tooltip used to nearly vanish against the
-                    page behind it. Matches the strip's own pill background
-                    (also hardcoded rgba, same reason) rather than the washed
-                    -out shared tokens. */}
                 <div
-                  className="rounded-xl shadow-2xl relative"
                   style={{
-                    padding: "8px 14px",
+                    padding: "8px 12px",
                     minWidth: 150,
-                    background: isDark ? "rgba(58,61,86,0.98)" : "rgba(255,255,255,0.98)",
-                    border: isDark ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(15,17,26,0.10)",
-                    boxShadow: isDark
-                      ? "0 8px 28px rgba(0,0,0,0.55)"
-                      : "0 8px 28px rgba(15,17,26,0.18)",
+                    background: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--foreground))",
+                    boxShadow: "4px 4px 0 hsl(var(--foreground) / 0.12)",
                   }}
                 >
-                  <p className="text-[0.75rem] font-semibold leading-snug" style={{ color: isDark ? "#f4f5f9" : "#14161f" }}>
+                  <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-foreground leading-snug">
                     {tooltip.label}
                   </p>
-                  <p className="text-[0.625rem] mt-0.5 leading-snug" style={{ color: isDark ? "rgba(244,245,249,0.62)" : "rgba(20,22,31,0.62)" }}>
+                  <p className="text-[0.6875rem] mt-1 leading-snug text-muted-foreground">
                     {tooltip.desc}
                   </p>
-                  <span
-                    className="absolute top-1/2 -translate-y-1/2 -left-[5px] w-2.5 h-2.5 rotate-45"
-                    style={{
-                      background: isDark ? "rgba(58,61,86,0.98)" : "rgba(255,255,255,0.98)",
-                      borderLeft: isDark ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(15,17,26,0.10)",
-                      borderBottom: isDark ? "1px solid rgba(255,255,255,0.22)" : "1px solid rgba(15,17,26,0.10)",
-                    }}
-                  />
                 </div>
               </motion.div>
             )}
@@ -452,16 +326,7 @@ function IconButton({
   onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onMouseLeave: () => void;
 }) {
-  const { icon: Icon, color, bg, ringRgb } = item;
-
-  // Build valid RGBA strings for each animation phase
-  const ringSolid = `rgba(${ringRgb},0.80)`; // visible at origin
-  const ringFade = `rgba(${ringRgb},0.00)`; // transparent at max spread
-  const ringGlow = `rgba(${ringRgb},0.55)`; // icon drop-shadow
-
-  // 42px ring — margin-based centering avoids CSS transform conflict with framer-motion
-  const D = 42;
-  const C = D / 2; // = 21
+  const { icon: Icon } = item;
 
   return (
     <div className="w-full flex justify-center">
@@ -469,110 +334,25 @@ function IconButton({
         onClick={onClick}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.88 }}
-        transition={{ type: "spring", stiffness: 440, damping: 22 }}
-        className="relative flex items-center justify-center rounded-full cursor-pointer group"
-        style={{ width: 46, height: 46 }}
+        whileTap={{ scale: 0.92 }}
+        className={`relative flex items-center justify-center cursor-pointer transition-colors duration-150 ${isActive ? "" : "hover:bg-primary/10"}`}
+        style={{
+          width: 42,
+          height: 42,
+          background: isActive ? "hsl(var(--foreground))" : undefined,
+          border: isActive ? "1px solid hsl(var(--foreground))" : "1px solid transparent",
+        }}
+        aria-pressed={isActive}
       >
-        {/* ── Active background circle ──────────────────────────────────────── */}
-        <AnimatePresence>
-          {isActive && (
-            <motion.span
-              key="active-bg"
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.5, opacity: 0 }}
-              transition={{ type: "spring", stiffness: 480, damping: 28 }}
-              className="absolute rounded-full pointer-events-none"
-              style={{
-                width: D,
-                height: D,
-                top: "50%",
-                left: "50%",
-                marginTop: -C,
-                marginLeft: -C,
-                background: bg,
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* ── Hover background for inactive ────────────────────────────────── */}
-        {!isActive && (
-          <span
-            className="absolute rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-            style={{
-              width: D,
-              height: D,
-              top: "50%",
-              left: "50%",
-              marginTop: -C,
-              marginLeft: -C,
-              background: "hsl(var(--sidebar-accent))",
-            }}
-          />
-        )}
-
-        {/* ── Sonar pulse rings — proper RGBA keyframes (no appended hex suffix) */}
+        {/* Red-pencil style tick on the active tile, in the theme's primary */}
         {isActive && (
-          <>
-            {/* Inner ring: 0px → 5px spread */}
-            <motion.span
-              className="absolute rounded-full pointer-events-none"
-              style={{
-                width: D,
-                height: D,
-                top: "50%",
-                left: "50%",
-                marginTop: -C,
-                marginLeft: -C,
-              }}
-              animate={{
-                boxShadow: [
-                  `0 0 0 0px ${ringSolid}`,
-                  `0 0 0 5px ${ringFade}`,
-                  `0 0 0 0px ${ringSolid}`,
-                ],
-              }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
-            />
-            {/* Outer ring: 0px → 9px spread, delayed */}
-            <motion.span
-              className="absolute rounded-full pointer-events-none"
-              style={{
-                width: D,
-                height: D,
-                top: "50%",
-                left: "50%",
-                marginTop: -C,
-                marginLeft: -C,
-              }}
-              animate={{
-                boxShadow: [
-                  `0 0 0 0px ${ringGlow}`,
-                  `0 0 0 9px ${ringFade}`,
-                  `0 0 0 0px ${ringGlow}`,
-                ],
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                ease: "easeOut",
-                delay: 0.38,
-              }}
-            />
-          </>
+          <span className="absolute -left-[7px] top-1/2 -translate-y-1/2" style={{ width: 4, height: 18, background: "hsl(var(--primary))" }} />
         )}
-
         <Icon
           size={18}
           variant={isActive ? "Bold" : "Outline"}
-          className="relative z-10 transition-all duration-200"
-          style={{
-            color: isActive ? color : "hsl(var(--muted-foreground))",
-            filter: isActive ? `drop-shadow(0 0 5px ${ringGlow})` : "none",
-          }}
+          className="relative z-10"
+          style={{ color: isActive ? "hsl(var(--card))" : "hsl(var(--muted-foreground))" }}
         />
       </motion.button>
     </div>

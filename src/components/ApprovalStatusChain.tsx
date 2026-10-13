@@ -11,7 +11,6 @@
  */
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, XCircle } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 
@@ -159,7 +158,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
   if (loading) {
     return (
       <div className={cn("flex gap-1 items-center", className)}>
-        <div className="h-4 w-24 rounded-full bg-muted animate-pulse" />
+        <div className="h-3 w-24 bg-muted animate-pulse" />
       </div>
     );
   }
@@ -175,66 +174,56 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
   const currentStep =
     steps.find((s) => s.status !== "Approved") ?? steps[steps.length - 1];
 
-  // ── Fully approved ──────────────────────────────────────────────────────────
+  // A square mark and the level in capitals, in the theme's own tones: solid once every level has approved, hatched
+  // while one is pending, red when a level has rejected.
+  const mark = (tone: "done" | "waiting" | "stopped", title: string, children: React.ReactNode) => {
+    const ink = tone === "stopped" ? "hsl(var(--destructive))" : "hsl(var(--foreground))";
+    return (
+      <span
+        title={title}
+        className={cn("inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap", className)}
+        style={{ color: ink }}
+      >
+        <i
+          className="shrink-0"
+          style={{
+            width: 8,
+            height: 8,
+            border: `1px solid ${ink}`,
+            background:
+              tone === "stopped"
+                ? "hsl(var(--destructive))"
+                : tone === "waiting"
+                  ? "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)"
+                  : "hsl(var(--primary))",
+          }}
+        />
+        {children}
+      </span>
+    );
+  };
+
   if (fullyApproved) {
     const last = steps[steps.length - 1];
-    return (
-      <span
-        title={tooltipText(last)}
-        className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
-          "whitespace-nowrap",
-          "bg-emerald-100 text-emerald-700 border border-emerald-200",
-          "dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800",
-          className,
-        )}
-      >
-        <CheckCircle2 size={10} />
-        {badgeText(last, "Approved")}
-      </span>
-    );
+    return mark("done", tooltipText(last), badgeText(last, "Approved"));
   }
 
-  // ── Rejected ────────────────────────────────────────────────────────────────
   if (rejectedStep) {
-    return (
-      <span
-        title={tooltipText(rejectedStep)}
-        className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
-          "whitespace-nowrap",
-          "bg-red-100 text-red-700 border border-red-200",
-          "dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
-          className,
-        )}
-      >
-        <XCircle size={10} />
-        {badgeText(rejectedStep, "Rejected")}
-      </span>
-    );
+    return mark("stopped", tooltipText(rejectedStep), badgeText(rejectedStep, "Rejected"));
   }
 
-  // ── Pending ─────────────────────────────────────────────────────────────────
   // A page that prints its live DOM (window.print(), e.g. SaleOrder.tsx's
   // preview) has no separate "print HTML" to intercept — whatever's on
   // screen gets printed as-is. "Pending" is a live system state, not
   // something to hand someone as paperwork, so a printed copy reads
   // "Provisional" instead via a print-only swap; the on-screen badge is
   // unaffected (print:hidden / print-only pair, not a prop toggle).
-  return (
-    <span
-      title={tooltipText(currentStep)}
-      className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
-        "whitespace-nowrap",
-        "bg-amber-100 text-amber-700 border border-amber-200",
-        "dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",
-        className,
-      )}
-    >
-      <Clock size={10} />
+  return mark(
+    "waiting",
+    tooltipText(currentStep),
+    <>
       <span className="print:hidden">{badgeText(currentStep, "Pending")}</span>
       <span className="hidden print:inline">{currentStep.label} · Provisional</span>
-    </span>
+    </>,
   );
 }

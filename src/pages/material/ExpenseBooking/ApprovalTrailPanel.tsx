@@ -31,11 +31,11 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
         </p>
         <span
           className={
-            "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.625rem] font-heading " +
+            "inline-flex items-center rounded-none border px-2.5 py-0.5 text-[0.625rem] font-heading " +
             (currentStatus === "Approved"
-              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              ? "bg-primary/10 text-foreground border-foreground/40"
               : currentStatus === "Rejected"
-                ? "bg-red-50 text-red-700 border-red-200"
+                ? "bg-destructive/10 text-destructive border-destructive/40"
                 : currentStatus === "Pending"
                   ? "bg-amber-50 text-amber-700 border-amber-200"
                   : "bg-slate-100 text-slate-600 border-slate-200")
@@ -59,20 +59,20 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                   className={
                     "flex items-center justify-center w-7 h-7 rounded-full border-2 shrink-0 z-10 " +
                     (isDone
-                      ? "border-emerald-500 bg-emerald-50"
+                      ? "border-foreground/40 bg-primary/10"
                       : isRejected
                         ? "border-red-400 bg-red-50"
                         : isActive
-                          ? "border-emerald-500 bg-emerald-500/10"
+                          ? "border-foreground/40 bg-primary/10"
                           : "border-border bg-muted/40")
                   }
                 >
                   {isDone ? (
-                    <CheckCircle2 size={13} className="text-emerald-600" />
+                    <CheckCircle2 size={13} className="text-foreground" />
                   ) : isRejected ? (
                     <XCircle size={13} className="text-red-500" />
                   ) : isActive ? (
-                    <Clock size={13} className="text-emerald-600 dark:text-emerald-400" />
+                    <Clock size={13} className="text-foreground" />
                   ) : (
                     <Shield size={13} className="text-muted-foreground/50" />
                   )}
@@ -81,7 +81,7 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                   <div
                     className={
                       "w-px flex-1 mt-0.5 mb-0.5 " +
-                      (isDone ? "bg-emerald-300" : "bg-border")
+                      (isDone ? "bg-foreground" : "bg-border")
                     }
                     style={{ minHeight: 18 }}
                   />
@@ -95,18 +95,18 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                     className={
                       "text-xs font-heading font-semibold " +
                       (isDone
-                        ? "text-emerald-700"
+                        ? "text-foreground"
                         : isRejected
                           ? "text-red-600"
                           : isActive
-                            ? "text-emerald-600 dark:text-emerald-400"
+                            ? "text-foreground"
                             : "text-muted-foreground")
                     }
                   >
                     Level {step.level} — {step.role}
                   </p>
                   {isActive && (
-                    <span className="text-[0.625rem] rounded-full bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 font-heading">
+                    <span className="text-[0.625rem] rounded-none bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 font-heading">
                       Current
                     </span>
                   )}
@@ -117,7 +117,7 @@ export function ApprovalTrailPanel({ trail, currentStatus }: Props) {
                   </p>
                 )}
                 {step.actionAt && (
-                  <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-mono">
+                  <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading tabular-nums">
                     {new Date(step.actionAt).toLocaleString("en-IN")}
                   </p>
                 )}

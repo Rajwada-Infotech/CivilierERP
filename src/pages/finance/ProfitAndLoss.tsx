@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
@@ -11,18 +11,11 @@ import {
   CalendarDays,
   Building,
   FolderKanban,
-  TrendingUp,
-  TrendingDown,
   Loader2,
   ChevronDown,
   ChevronRight,
   Target,
-  Activity,
-  BarChart2,
-  Layers,
   Minus,
-  ToggleLeft,
-  ToggleRight,
   AlertCircle,
   Info,
 } from "lucide-react";
@@ -80,7 +73,7 @@ const alpha   = (n: number) => String.fromCharCode(96 + n); // 1→a
 function Signed({ amount, className = "" }: { amount: number; className?: string }) {
   const neg = amount < -0.005;
   return (
-    <span className={`tabular-nums ${neg ? "text-red-600 dark:text-red-400" : ""} ${className}`}>
+    <span className={`tabular-nums ${neg ? "text-destructive" : ""} ${className}`}>
       {neg ? "(" : ""}{fmt(amount)}{neg ? ")" : ""}
     </span>
   );
@@ -88,9 +81,9 @@ function Signed({ amount, className = "" }: { amount: number; className?: string
 
 /** % of revenue — muted, right-aligned */
 function PctCell({ amount, base }: { amount: number; base: number }) {
-  if (base === 0) return <span className="text-muted-foreground/40">—</span>;
+  if (base === 0) return <span className="text-muted-foreground/50">—</span>;
   const v = (Math.abs(amount) / Math.abs(base)) * 100;
-  return <span className="text-muted-foreground/70 tabular-nums">{v.toFixed(1)}%</span>;
+  return <span className="text-muted-foreground tabular-nums">{v.toFixed(1)}%</span>;
 }
 
 // ─── Company-type label resolver ─────────────────────────────────────────────
@@ -132,56 +125,6 @@ function revenueLabel(cls: EntityClass): string {
   return "Revenue from Operations";
 }
 
-// ─── KPI Card ────────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label, amount, icon: Icon, variant, subtitle,
-}: {
-  label: string;
-  amount: number;
-  icon: React.ElementType;
-  // Omit variant to auto-color by sign (profit=green, loss=red) — every
-  // real profit-line metric (Gross Profit, EBITDA, PBT) should do this so a
-  // loss actually reads as a loss, not plain gray. Pass "neutral" only for
-  // metrics that aren't a profit/loss figure at all (e.g. top-line Revenue).
-  variant?: "profit" | "loss" | "neutral";
-  subtitle?: string;
-}) {
-  const isProfit = amount >= 0;
-  const colorMap = {
-    profit:  "from-emerald-500/10 to-emerald-500/5 border-emerald-500/20",
-    loss:    "from-red-500/10 to-red-500/5 border-red-500/20",
-    neutral: "from-primary/8 to-primary/3 border-primary/15",
-  };
-  const iconColorMap = {
-    profit:  "text-emerald-500",
-    loss:    "text-red-500",
-    neutral: "text-primary",
-  };
-  const resolvedVariant = variant === "neutral" ? "neutral" : isProfit ? "profit" : "loss";
-
-  return (
-    <div className={`relative flex-1 min-w-[150px] rounded-xl border bg-gradient-to-br p-3.5 ${colorMap[resolvedVariant]} transition-all duration-200 hover:shadow-md`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1 truncate">{label}</p>
-          <p className={`text-sm font-bold tabular-nums leading-tight ${
-            resolvedVariant === "neutral"
-              ? "text-foreground"
-              : isProfit ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-          }`}>
-            {amount < -0.005 ? "(" : ""}{fmt(amount)}{amount < -0.005 ? ")" : ""}
-          </p>
-          {subtitle && <p className="text-[0.5625rem] text-muted-foreground/60 mt-0.5">{subtitle}</p>}
-        </div>
-        <div className={`rounded-lg p-1.5 bg-background/60 ${iconColorMap[resolvedVariant]}`}>
-          <Icon size={13} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Statement Sheet chrome ───────────────────────────────────────────────────
 
 function StatementSheet({
@@ -203,22 +146,20 @@ function StatementSheet({
   };
 
   return (
-    <div id="pl-printable" className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+    <div id="pl-printable" className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
       {/* Letterhead */}
-      <div className="px-6 pt-5 pb-4 text-center border-b border-border bg-gradient-to-b from-muted/30 to-transparent">
-        <div className="flex items-center justify-center gap-2 mb-1">
-          {entityType && (
-            <span className="text-[0.5625rem] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium uppercase tracking-wider">
-              {classLabels[entityClass]} · {entityType}
-            </span>
-          )}
-        </div>
-        <h2 className="text-sm font-heading font-bold tracking-wide text-foreground uppercase mt-1">
-          {companyName || "Consolidated — All Companies"}
+      <div className="px-6 pt-5 pb-4 text-center" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        {entityType && (
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground mb-2">
+            {classLabels[entityClass]} · {entityType}
+          </p>
+        )}
+        <h2 className="font-heading text-sm font-bold tracking-[0.1em] text-foreground uppercase">
+          {companyName || "Consolidated: all companies"}
         </h2>
-        <h3 className="text-xs font-semibold text-foreground mt-1.5">{statementName}</h3>
-        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{periodLabel}</p>
-        <p className="text-[0.5625rem] text-muted-foreground/55 mt-1">
+        <h3 className="font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-foreground mt-2">{statementName}</h3>
+        <p className="text-[0.75rem] text-muted-foreground mt-1 tabular-nums">{periodLabel}</p>
+        <p className="text-[0.625rem] text-muted-foreground mt-1">
           (All amounts in Indian Rupees ₹, unless otherwise stated) · As per Schedule III, Division II, Companies Act 2013
         </p>
       </div>
@@ -269,11 +210,11 @@ function StructuredStatement({
     (printExpandAll || openKey === rowKey) && heads.length > 0 ? (
       <tr>
         <td colSpan={showPrior ? 6 : 5} className="pb-2">
-          <div className="ml-8 border-l-2 border-primary/20 pl-3 space-y-0.5 py-1">
+          <div className="ml-8 pl-3 space-y-1 py-1" style={{ borderLeft: "1px solid hsl(var(--foreground))" }}>
             {heads.map((h) => (
-              <div key={h.id ?? h.name} className="flex items-center justify-between text-[0.625rem] text-muted-foreground group">
+              <div key={h.id ?? h.name} className="flex items-center justify-between text-[0.6875rem] text-muted-foreground group">
                 <span className="truncate pr-3 group-hover:text-foreground transition-colors">{h.name}</span>
-                <span className="tabular-nums shrink-0 font-medium">{fmt(h.amount)}</span>
+                <span className="font-heading tabular-nums shrink-0 font-medium text-foreground">{fmt(h.amount)}</span>
               </div>
             ))}
           </div>
@@ -292,29 +233,29 @@ function StructuredStatement({
     return (
       <>
         <tr
-          className={`${clickable ? "cursor-pointer hover:bg-muted/30" : ""} ${emphasis ? "bg-muted/20" : ""} transition-colors`}
+          className={`r-line ${clickable ? "r-click cursor-pointer" : ""}`}
           onClick={() => clickable && toggle(rowKey!)}
         >
-          <td className="py-1.5 pr-1.5 text-[0.625rem] text-muted-foreground align-top w-7 font-mono">{numeral}.</td>
+          <td className="py-1.5 pr-1.5 text-[0.625rem] text-muted-foreground align-top w-7 font-heading font-semibold tabular-nums">{numeral}.</td>
           <td className={`py-1.5 pr-3 text-xs text-foreground ${emphasis ? "font-semibold" : ""}`}>
             {label}
             {formula && <span className="text-[0.625rem] text-muted-foreground ml-1">{formula}</span>}
             {clickable && (
               printExpandAll || openKey === rowKey
-                ? <ChevronDown size={10} className="inline ml-1.5 -mt-0.5 text-primary/60" />
-                : <ChevronRight size={10} className="inline ml-1.5 -mt-0.5 text-muted-foreground/60" />
+                ? <ChevronDown size={11} className="inline ml-1.5 -mt-0.5 text-foreground" />
+                : <ChevronRight size={11} className="inline ml-1.5 -mt-0.5 text-foreground" />
             )}
           </td>
           <td className="py-1.5 text-right text-[0.625rem] text-muted-foreground/50 w-20 pr-2">
             {rowKey && heads?.length ? (
-              <span className="text-[0.5625rem] italic">Note</span>
+              <span className="text-[0.5625rem]">Note</span>
             ) : null}
           </td>
-          <td className={`py-1.5 text-right text-xs tabular-nums whitespace-nowrap w-32 ${emphasis ? "font-semibold text-foreground" : "text-foreground"}`}>
+          <td className={`py-1.5 text-right font-heading text-xs tabular-nums whitespace-nowrap w-32 ${emphasis ? "font-semibold text-foreground" : "text-foreground"}`}>
             <Signed amount={amount} />
           </td>
           {showPrior && (
-            <td className="py-1.5 text-right text-xs tabular-nums whitespace-nowrap w-32 text-muted-foreground/70">
+            <td className="py-1.5 text-right font-heading text-xs tabular-nums whitespace-nowrap w-32 text-muted-foreground">
               {priorAmount !== undefined ? <Signed amount={priorAmount} /> : "—"}
             </td>
           )}
@@ -336,26 +277,26 @@ function StructuredStatement({
     return (
       <>
         <tr
-          className={`${clickable ? "cursor-pointer hover:bg-muted/30" : ""} transition-colors`}
+          className={`r-line ${clickable ? "r-click cursor-pointer" : ""}`}
           onClick={() => clickable && toggle(rowKey)}
         >
-          <td className="py-1 pr-1.5 text-[0.625rem] text-muted-foreground/60 align-top w-7 pl-5 font-mono">({letter})</td>
+          <td className="py-1 pr-1.5 text-[0.625rem] text-muted-foreground align-top w-7 pl-5 font-heading tabular-nums">({letter})</td>
           <td className="py-1 pr-3 text-[0.6875rem] text-foreground">
             {label}
             {clickable && (
               printExpandAll || openKey === rowKey
-                ? <ChevronDown size={9} className="inline ml-1.5 -mt-0.5 text-primary/60" />
-                : <ChevronRight size={9} className="inline ml-1.5 -mt-0.5 text-muted-foreground/50" />
+                ? <ChevronDown size={11} className="inline ml-1.5 -mt-0.5 text-foreground" />
+                : <ChevronRight size={11} className="inline ml-1.5 -mt-0.5 text-foreground" />
             )}
           </td>
           <td className="py-1 text-right text-[0.625rem] text-muted-foreground/40 w-20 pr-2">
             {clickable ? <span className="text-[0.5625rem]">{heads.length}</span> : null}
           </td>
-          <td className="py-1 text-right text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap w-32">
+          <td className="py-1 text-right font-heading text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap w-32">
             <Signed amount={amount} />
           </td>
           {showPrior && (
-            <td className="py-1 text-right text-[0.6875rem] tabular-nums text-muted-foreground/70 whitespace-nowrap w-32">
+            <td className="py-1 text-right font-heading text-[0.6875rem] tabular-nums text-muted-foreground whitespace-nowrap w-32">
               {priorAmount !== undefined ? <Signed amount={priorAmount} /> : "—"}
             </td>
           )}
@@ -375,44 +316,24 @@ function StructuredStatement({
     variant?: "normal" | "subtotal" | "grand";
     formula?: string;
   }) => {
-    const isProfit = amount >= 0;
-    // A single mid-tone/10 tint (no separate dark: override needed) instead
-    // of pairing a near-white -50 shade with a near-black -950 shade — the
-    // -50 one was winning even in dark mode here, rendering as a flat gray
-    // bar instead of a red/green tint.
-    const grandStyle = variant === "grand"
-      ? isProfit
-        ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10"
-        : "text-red-700 dark:text-red-400 bg-red-500/10"
-      : "";
-    // The double-rule divider above a grand-total row should read as part of
-    // that row's profit/loss color, not a flat neutral white/gray line
-    // clashing against a red- or green-tinted background.
-    const doubleBorderColor = variant === "grand"
-      ? isProfit ? "border-emerald-500/40" : "border-red-500/40"
-      : "border-foreground/40";
-
+    // Sub-totals sit on an ink rule; the closing figure on a heavy one. A loss is the only figure in red (it carries its brackets too).
     return (
-      <tr className={`${isDouble ? `border-t-2 border-double ${doubleBorderColor}` : "border-t border-border/70"} ${grandStyle}`}>
-        <td className="py-1.5 pr-1.5 w-7" />
-        <td className={`py-1.5 pr-3 text-xs font-bold text-foreground ${variant === "grand" ? "text-[0.6875rem]" : ""}`}>
+      <tr className={isDouble || variant === "grand" ? "r-total" : "r-sub"}>
+        <td className="py-2 pr-1.5 w-7" />
+        <td className={`py-2 pr-3 text-foreground ${variant === "grand" ? "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.12em]" : "text-xs font-bold"}`}>
           {label}
-          {formula && <span className="text-[0.625rem] font-normal text-muted-foreground ml-1">{formula}</span>}
+          {formula && <span className="text-[0.625rem] font-normal normal-case tracking-normal text-muted-foreground ml-1.5">{formula}</span>}
         </td>
-        <td className="py-1.5 w-20 pr-2" />
-        <td className={`py-1.5 text-right text-xs font-bold tabular-nums whitespace-nowrap w-32 ${
-          variant === "grand"
-            ? isProfit ? "text-emerald-700 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-            : "text-foreground"
-        }`}>
+        <td className="py-2 w-20 pr-2" />
+        <td className={`py-2 text-right font-heading font-bold tabular-nums whitespace-nowrap w-32 text-foreground ${variant === "grand" ? "text-[0.8125rem]" : "text-xs"}`}>
           <Signed amount={amount} />
         </td>
         {showPrior && (
-          <td className="py-1.5 text-right text-xs font-bold tabular-nums whitespace-nowrap w-32 text-muted-foreground/70">
+          <td className="py-2 text-right font-heading text-xs font-semibold tabular-nums whitespace-nowrap w-32 text-muted-foreground">
             {priorAmount !== undefined ? <Signed amount={priorAmount} /> : "—"}
           </td>
         )}
-        <td className="py-1.5 text-right text-[0.625rem] tabular-nums text-muted-foreground/50 whitespace-nowrap w-16">
+        <td className="py-2 text-right font-heading text-[0.625rem] tabular-nums text-muted-foreground whitespace-nowrap w-16">
           <PctCell amount={amount} base={base} />
         </td>
       </tr>
@@ -422,16 +343,14 @@ function StructuredStatement({
   const SectionSpacer = ({ label }: { label: string }) => (
     <tr>
       <td colSpan={showPrior ? 6 : 5} className="pt-3 pb-1">
-        <span className="text-xs font-semibold text-foreground">{label}</span>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-foreground">{label}</span>
       </td>
     </tr>
   );
 
   const DividerRow = () => (
     <tr>
-      <td colSpan={showPrior ? 6 : 5} className="py-1">
-        <div className="border-t border-dashed border-border/40" />
-      </td>
+      <td colSpan={showPrior ? 6 : 5} className="py-1.5" />
     </tr>
   );
 
@@ -451,23 +370,23 @@ function StructuredStatement({
     >
       <table className="w-full border-collapse min-w-[600px]">
         <thead>
-          <tr className="border-b-2 border-foreground/20">
+          <tr>
             <th className="pb-2.5 pr-1.5 text-left w-7" />
-            <th className="pb-2.5 pr-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
+            <th className="pb-2.5 pr-3 text-left">
               Particulars
             </th>
-            <th className="pb-2.5 pr-2 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-20">
+            <th className="pb-2.5 pr-2 text-right w-20">
               Note
             </th>
-            <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-32">
+            <th className="pb-2.5 text-right w-32">
               {showPrior ? "Current ₹" : "Amount ₹"}
             </th>
             {showPrior && (
-              <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 w-32">
+              <th className="pb-2.5 text-right w-32">
                 {priorPeriodLabel} ₹
               </th>
             )}
-            <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/50 w-16">
+            <th className="pb-2.5 text-right w-16">
               % Rev
             </th>
           </tr>
@@ -580,8 +499,8 @@ function StructuredStatement({
       </table>
 
       {/* ── Notes to Accounts reference ── */}
-      <div className="mt-4 pt-3 border-t border-border/50">
-        <p className="text-[0.5625rem] text-muted-foreground/50 italic">
+      <div className="mt-4 pt-3" style={{ borderTop: "1px solid hsl(var(--border))" }}>
+        <p className="text-[0.625rem] text-muted-foreground leading-relaxed">
           The accompanying notes form an integral part of these financial statements. Click any row with a chevron (›) to expand and view individual ledger head details.
         </p>
       </div>
@@ -616,16 +535,16 @@ function ClassicStatement({
       <div className="overflow-x-auto">
         <table className="w-full border-collapse min-w-[600px]">
           <thead>
-            <tr className="border-b-2 border-foreground/25">
-              <th className="pb-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground pr-3">
+            <tr>
+              <th className="pb-2.5 text-left pr-3">
                 Expenditure (Dr.)
               </th>
-              <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Amount ₹</th>
+              <th className="pb-2.5 text-right w-28">Amount ₹</th>
               <th className="w-6" />
-              <th className="pb-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border pl-4 pr-3">
+              <th className="pb-2.5 text-left border-l border-border pl-4 pr-3">
                 Income (Cr.)
               </th>
-              <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Amount ₹</th>
+              <th className="pb-2.5 text-right w-28">Amount ₹</th>
             </tr>
           </thead>
           <tbody>
@@ -640,12 +559,12 @@ function ClassicStatement({
                 const e = expenses[i];
                 const inc = income[i];
                 return (
-                  <tr key={i} className="align-top border-b border-border/25 hover:bg-muted/20 transition-colors">
+                  <tr key={i} className="r-line align-top">
                     <td className="py-1.5 pr-3 text-[0.6875rem] text-foreground">{e ? `To ${e.groupName}` : ""}</td>
-                    <td className="py-1.5 text-right text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap">{e ? fmt(e.total) : ""}</td>
+                    <td className="py-1.5 text-right font-heading text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap">{e ? fmt(e.total) : ""}</td>
                     <td className="border-r border-border/30" />
                     <td className="py-1.5 pr-3 text-[0.6875rem] text-foreground border-l border-border/30 pl-4">{inc ? `By ${inc.groupName}` : ""}</td>
-                    <td className="py-1.5 text-right text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap">{inc ? fmt(inc.total) : ""}</td>
+                    <td className="py-1.5 text-right font-heading text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap">{inc ? fmt(inc.total) : ""}</td>
                   </tr>
                 );
               })
@@ -653,11 +572,11 @@ function ClassicStatement({
 
             {/* Net Profit carried forward — balancing entry on Dr side */}
             {isProfit && (
-              <tr className="border-t border-border">
-                <td className="py-1.5 pr-3 text-[0.6875rem] font-semibold text-emerald-700 dark:text-emerald-400">
+              <tr className="r-sub-soft">
+                <td className="py-1.5 pr-3 text-[0.6875rem] font-semibold text-foreground">
                   To Net Profit c/f
                 </td>
-                <td className="py-1.5 text-right text-[0.6875rem] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                <td className="py-1.5 text-right font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground whitespace-nowrap">
                   {fmt(totals.netProfit)}
                 </td>
                 <td /><td className="border-l border-border/30" /><td />
@@ -666,26 +585,26 @@ function ClassicStatement({
 
             {/* Net Loss carried forward — balancing entry on Cr side */}
             {!isProfit && Math.abs(totals.netProfit) > 0.005 && (
-              <tr className="border-t border-border">
+              <tr className="r-sub-soft">
                 <td /><td /><td />
-                <td className="border-l border-border/30 pl-4 py-1.5 text-[0.6875rem] font-semibold text-red-700 dark:text-red-400">
+                <td className="border-l border-border/30 pl-4 py-1.5 text-[0.6875rem] font-semibold text-destructive">
                   By Net Loss c/f
                 </td>
-                <td className="py-1.5 text-right text-[0.6875rem] font-semibold tabular-nums text-red-700 dark:text-red-400 whitespace-nowrap">
+                <td className="py-1.5 text-right font-heading text-[0.6875rem] font-semibold tabular-nums text-destructive whitespace-nowrap">
                   {fmt(Math.abs(totals.netProfit))}
                 </td>
               </tr>
             )}
 
             {/* Grand total row — both sides must match */}
-            <tr className="border-t-2 border-double border-foreground/35">
+            <tr className="r-total">
               <td className="py-2 pr-3 text-xs font-bold text-foreground">Total</td>
-              <td className="py-2 text-right text-xs font-bold tabular-nums text-foreground whitespace-nowrap">
+              <td className="py-2 text-right font-heading text-xs font-bold tabular-nums text-foreground whitespace-nowrap">
                 {fmt(Math.max(totals.income, totals.expenses))}
               </td>
               <td />
               <td className="border-l border-border/30 pl-4 py-2 text-xs font-bold text-foreground">Total</td>
-              <td className="py-2 text-right text-xs font-bold tabular-nums text-foreground whitespace-nowrap">
+              <td className="py-2 text-right font-heading text-xs font-bold tabular-nums text-foreground whitespace-nowrap">
                 {fmt(Math.max(totals.income, totals.expenses))}
               </td>
             </tr>
@@ -700,14 +619,7 @@ function ClassicStatement({
 
 function QuickFYButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className={`px-2.5 h-7 rounded-md text-[0.625rem] font-medium transition-all ${
-        active
-          ? "btn-module text-white shadow-sm"
-          : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50"
-      }`}
-    >
+    <button onClick={onClick} aria-pressed={active} className={active ? "on" : undefined}>
       {label}
     </button>
   );
@@ -839,89 +751,93 @@ export default function ProfitAndLoss() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Profit & Loss"]} />
-      <FinanceShell
-        title="Profit & Loss"
-        subtitle="Statement of Income & Expenditure as per Schedule III, Companies Act 2013"
-        icon={TrendingUp}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Profit and loss"
+        subtitle={
+          [periodLabel, data?.companyName || (companyId ? null : "All companies")].filter(Boolean).join(" · ") ||
+          "What the business earned and spent over a period."
+        }
+        action={
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              onClick={() => setShowComparison((v) => !v)}
+              aria-pressed={showComparison}
+              className={`flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground transition-colors ${showComparison ? "bg-foreground text-card" : "text-foreground hover:bg-primary/10"}`}
+            >
+              Against prior year
+            </button>
+            <button onClick={fetchData} disabled={loading} className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border border-foreground transition-colors text-foreground hover:bg-primary/10 disabled:opacity-50">
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
+        }
       >
 
-        {/* ── Filter Toolbar ── */}
-        <div className="mb-5 rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+        {/* ── Filters ── */}
+        <div className="bg-card px-4 py-4 space-y-4" style={{ border: "1px solid hsl(var(--foreground))" }}>
 
-          {/* Quick FY Buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mr-1">Quick Select</span>
-            <QuickFYButton
-              label={`FY ${fyYear}–${String(fyYear + 1).slice(-2)}`}
-              active={isActiveFy}
-              onClick={() => { setFrom(`${fyYear}-04-01`); setTo(`${fyYear + 1}-03-31`); }}
-            />
-            <QuickFYButton label="Q1 Apr–Jun" active={from === `${fyYear}-04-01` && to === `${fyYear}-06-30`} onClick={() => setQ(1)} />
-            <QuickFYButton label="Q2 Jul–Sep" active={from === `${fyYear}-07-01` && to === `${fyYear}-09-30`} onClick={() => setQ(2)} />
-            <QuickFYButton label="Q3 Oct–Dec" active={from === `${fyYear}-10-01` && to === `${fyYear}-12-31`} onClick={() => setQ(3)} />
-            <QuickFYButton label="Q4 Jan–Mar" active={from === `${fyYear + 1}-01-01` && to === `${fyYear + 1}-03-31`} onClick={() => setQ(4)} />
-
-            {/* Comparison toggle */}
-            <div className="ml-auto flex items-center gap-2">
-              <button
-                onClick={() => setShowComparison((v) => !v)}
-                className={`flex items-center gap-1.5 h-7 px-3 rounded-md text-[0.625rem] font-medium transition-all border ${
-                  showComparison
-                    ? "bg-primary/10 border-primary/30 text-primary"
-                    : "bg-background border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {showComparison ? <ToggleRight size={12} /> : <ToggleLeft size={12} />}
-                vs Prior Year
-              </button>
+          {/* Period keys */}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Period</span>
+            <div className="seg flex-wrap">
+              <QuickFYButton
+                label={`FY ${fyYear}–${String(fyYear + 1).slice(-2)}`}
+                active={isActiveFy}
+                onClick={() => { setFrom(`${fyYear}-04-01`); setTo(`${fyYear + 1}-03-31`); }}
+              />
+              <QuickFYButton label="Q1 Apr–Jun" active={from === `${fyYear}-04-01` && to === `${fyYear}-06-30`} onClick={() => setQ(1)} />
+              <QuickFYButton label="Q2 Jul–Sep" active={from === `${fyYear}-07-01` && to === `${fyYear}-09-30`} onClick={() => setQ(2)} />
+              <QuickFYButton label="Q3 Oct–Dec" active={from === `${fyYear}-10-01` && to === `${fyYear}-12-31`} onClick={() => setQ(3)} />
+              <QuickFYButton label="Q4 Jan–Mar" active={from === `${fyYear + 1}-01-01` && to === `${fyYear + 1}-03-31`} onClick={() => setQ(4)} />
             </div>
           </div>
 
           {/* Date + Filters row */}
           <div className="flex flex-wrap items-end gap-3">
 
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+            <div className="flex flex-col gap-1">
+              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1">
                 <CalendarDays size={9} /> From
               </span>
               <DateInput value={from}
                 onChange={(e) => setFrom(e.target.value)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
               />
             </div>
 
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+            <div className="flex flex-col gap-1">
+              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1">
                 <CalendarDays size={9} /> To
               </span>
               <DateInput value={to}
                 onChange={(e) => setTo(e.target.value)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
               />
             </div>
 
-            <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+            <div className="flex flex-col gap-1 min-w-[160px]">
+              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1">
                 <Building size={9} /> Company
               </span>
               <select
                 value={companyId ?? ""}
                 onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
               >
                 <option value="">All Companies</option>
                 {companies.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
             </div>
 
-            <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+            <div className="flex flex-col gap-1 min-w-[160px]">
+              <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1">
                 <FolderKanban size={9} /> Project
               </span>
               <select
                 value={projectId ?? ""}
                 onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : null)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
               >
                 <option value="">All Projects</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
@@ -929,14 +845,14 @@ export default function ProfitAndLoss() {
             </div>
 
             {costCentres.length > 0 && (
-              <div className="flex flex-col gap-0.5 min-w-[160px]">
-                <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <div className="flex flex-col gap-1 min-w-[160px]">
+                <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1">
                   <Target size={9} /> Cost Centre
                 </span>
                 <select
                   value={costCentreId ?? ""}
                   onChange={(e) => setCostCentreId(e.target.value ? Number(e.target.value) : null)}
-                  className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
                 >
                   <option value="">All Cost Centres</option>
                   {costCentres.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -944,15 +860,8 @@ export default function ProfitAndLoss() {
               </div>
             )}
 
-            {/* Action buttons */}
-            <div className="flex items-end gap-2 ml-auto">
-              <button
-                onClick={fetchData}
-                className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
-              >
-                <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh
-              </button>
-              {rights.canExport && data && (
+            {rights.canExport && data && (
+              <div className="ml-auto">
                 <ExportMenu
                   title="Profit & Loss"
                   filename="profit-and-loss"
@@ -960,8 +869,8 @@ export default function ProfitAndLoss() {
                   data={exportRows}
                   onPrint={() => window.print()}
                 />
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -972,7 +881,7 @@ export default function ProfitAndLoss() {
           </div>
         )}
         {error && (
-          <div className="flex items-center gap-2 py-6 px-4 rounded-xl bg-red-50/50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400 text-sm">
+          <div className="flex items-center gap-2 py-4 px-4 border border-destructive text-destructive text-sm">
             <AlertCircle size={14} className="shrink-0" /> {error}
           </div>
         )}
@@ -982,104 +891,55 @@ export default function ProfitAndLoss() {
 
           /* ── KPI Summary Bar (structured view only) ── */
           const showKpi = data.presentation === "structured" && st;
-          const netFigure = data.totals.netProfit;
 
           return (
             <>
-              {/* KPI Bar */}
+              {/* Figures */}
               {showKpi && st && (
-                <div className="mb-5">
-                  {/* Profit/Loss headline */}
-                  <div className={`mb-3 rounded-xl border p-4 flex items-center justify-between gap-4 bg-gradient-to-r ${
-                    st.netProfit >= 0
-                      ? "from-emerald-500/10 to-emerald-500/5 border-emerald-500/25"
-                      : "from-red-500/10 to-red-500/5 border-red-500/25"
-                  }`}>
-                    <div>
-                      <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-0.5">
-                        {st.netProfit >= 0 ? "Net Profit After Tax" : "Net Loss After Tax"}
-                      </p>
-                      <p className={`text-2xl font-bold tabular-nums tracking-tight ${
-                        st.netProfit >= 0
-                          ? "text-emerald-700 dark:text-emerald-400"
-                          : "text-red-700 dark:text-red-400"
-                      }`}>
-                        {st.netProfit < 0 ? "(" : ""}{fmt(st.netProfit)}{st.netProfit < 0 ? ")" : ""}
-                      </p>
-                      <p className="text-[0.625rem] text-muted-foreground/60 mt-0.5">{periodLabel}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {/* Net profit margin badge */}
-                      {st.totalRevenue !== 0 && (
-                        <div className={`rounded-lg px-3 py-2 text-center ${
-                          st.netProfit >= 0
-                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                            : "bg-red-500/15 text-red-700 dark:text-red-400"
-                        }`}>
-                          <p className="text-[0.5625rem] font-heading uppercase tracking-widest opacity-70">Net Margin</p>
-                          <p className="text-lg font-bold">{pct(st.netProfit, st.totalRevenue)}</p>
+                <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+                  <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                    {[
+                      { label: "Revenue from operations", amount: st.revenueFromOperations.total, note: `plus ${fmt(st.otherIncome.total)} other income`, signed: false },
+                      { label: st.grossProfit < -0.005 ? "Gross loss" : "Gross profit", amount: st.grossProfit, note: `margin ${pct(st.grossProfit, st.revenueFromOperations.total)}`, signed: true },
+                      { label: "Indirect expenses", amount: st.indirectTotal, note: `including tax ${fmt(st.taxExpense.total)}`, signed: false },
+                      { label: st.netProfit < -0.005 ? "Net loss" : "Net profit", amount: st.netProfit, note: `margin ${pct(st.netProfit, st.totalRevenue)}`, signed: true },
+                    ].map((x) => {
+                      // A loss is the one figure that turns red
+                      const red = x.signed && x.amount < -0.005;
+                      return (
+                        <div key={x.label}>
+                          <p className="label" style={red ? { color: "var(--red)" } : undefined}>{x.label}</p>
+                          <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: red ? "var(--red)" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {red ? `(${fmt(x.amount)})` : fmt(x.amount)}
+                          </p>
+                          <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
                         </div>
-                      )}
-                      {st.netProfit >= 0
-                        ? <TrendingUp size={32} className="text-emerald-500/40" />
-                        : <TrendingDown size={32} className="text-red-500/40" />
-                      }
-                    </div>
+                      );
+                    })}
                   </div>
 
-                  {/* Sub KPI cards */}
-                  <div className="flex flex-wrap gap-3">
-                    <KpiCard
-                      label="Revenue from Operations"
-                      amount={st.revenueFromOperations.total}
-                      icon={BarChart2}
-                      variant="neutral"
-                      subtitle={`+ ${fmt(st.otherIncome.total)} other income`}
-                    />
-                    <KpiCard
-                      label="Gross Profit / (Loss)"
-                      amount={st.grossProfit}
-                      icon={Layers}
-                      subtitle={`Margin: ${pct(st.grossProfit, st.revenueFromOperations.total)}`}
-                    />
-                    <KpiCard
-                      label="Net Profit / (Loss)"
-                      amount={st.netProfit}
-                      icon={Activity}
-                      subtitle={`Margin: ${pct(st.netProfit, st.totalRevenue)}`}
-                    />
-                    <KpiCard
-                      label="Indirect Expenses"
-                      amount={st.indirectTotal}
-                      icon={Target}
-                      variant="neutral"
-                      subtitle={`Incl. Tax: ${fmt(st.taxExpense.total)}`}
-                    />
-                  </div>
-
-                  {/* Comparison note */}
+                  {/* Against the prior year */}
                   {showComparison && priorLoading && (
-                    <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 size={11} className="animate-spin" /> Loading prior year data…
+                    <div className="px-4 py-3 flex items-center gap-2 text-xs text-muted-foreground" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+                      <Loader2 size={11} className="animate-spin" /> Loading prior year…
                     </div>
                   )}
                   {showComparison && !priorLoading && priorData && pst && (
-                    <div className="mt-3 flex flex-wrap gap-2 items-center">
-                      <span className="text-[0.625rem] text-muted-foreground/60 font-heading uppercase tracking-wider">vs Prior Year:</span>
+                    <div className="px-4 py-3 flex flex-wrap items-baseline gap-x-6 gap-y-2" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Against prior year</span>
                       {[
                         { label: "Revenue", cur: st.totalRevenue, pri: pst.totalRevenue },
-                        { label: "Gross Profit", cur: st.grossProfit, pri: pst.grossProfit },
-                        { label: "PAT", cur: st.netProfit, pri: pst.netProfit },
+                        { label: "Gross profit", cur: st.grossProfit, pri: pst.grossProfit },
+                        { label: "Net profit", cur: st.netProfit, pri: pst.netProfit },
                       ].map(({ label, cur, pri }) => {
                         const delta = cur - pri;
                         const isUp = delta >= 0;
                         return (
-                          <span key={label} className={`flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full border ${
-                            isUp
-                              ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-400"
-                              : "bg-red-50/50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-400"
-                          }`}>
-                            {label}: {isUp ? "▲" : "▼"} {fmt(Math.abs(delta))}
+                          <span key={label} className="text-[0.75rem] text-muted-foreground">
+                            {label}{" "}
+                            <span className={`font-heading font-semibold tabular-nums ${isUp ? "text-foreground" : "text-destructive"}`}>
+                              {isUp ? "▲" : "▼"} {fmt(Math.abs(delta))}
+                            </span>
                           </span>
                         );
                       })}
@@ -1120,7 +980,7 @@ export default function ProfitAndLoss() {
 
               {/* Entity-type info note */}
               {data.entityType && (
-                <div className="mt-4 flex items-start gap-2 text-[0.625rem] text-muted-foreground/60">
+                <div className="mt-4 flex items-start gap-2 text-[0.6875rem] text-muted-foreground">
                   <Info size={11} className="shrink-0 mt-0.5" />
                   <span>
                     <strong>{data.entityType}</strong> · Presenting as{" "}
@@ -1144,7 +1004,7 @@ export default function ProfitAndLoss() {
           </div>
         )}
 
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── Print styles ──
           #pl-printable sits many levels deep inside the app's layout tree
@@ -1156,7 +1016,14 @@ export default function ProfitAndLoss() {
           on everything, then `visibility: visible` back on just the target
           and its descendants, works regardless of nesting depth. ── */}
       <style>{`
+        #pl-printable tbody tr { border: 0 !important; background: transparent !important; }
+        #pl-printable tbody tr.r-line { border-bottom: 1px solid hsl(var(--border) / 0.7) !important; }
+        #pl-printable tbody tr.r-click:hover { background: var(--blue-wash) !important; }
+        #pl-printable tbody tr.r-sub { border-top: 1px solid hsl(var(--foreground)) !important; }
+        #pl-printable tbody tr.r-sub-soft { border-top: 1px solid hsl(var(--border)) !important; }
+        #pl-printable tbody tr.r-total { border-top: 2px solid hsl(var(--foreground)) !important; border-bottom: 1px solid hsl(var(--foreground)) !important; }
         @media print {
+          #pl-printable tbody tr[class] { border-color: #000 !important; }
           body * { visibility: hidden !important; }
           #pl-printable, #pl-printable * { visibility: visible !important; }
           /* The dark theme's --foreground/--muted-foreground resolve to

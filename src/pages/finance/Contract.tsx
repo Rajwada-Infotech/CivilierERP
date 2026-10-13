@@ -26,7 +26,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Input } from "@/components/ui/input";
@@ -81,17 +81,8 @@ const emptyForm = () => ({
 // ── Status badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const s = (status || "Draft").toLowerCase();
-  const cfg =
-    s === "active"   ? "bg-violet-500/10 text-violet-600 border-violet-200 dark:border-violet-800" :
-    s === "expired"  ? "bg-red-500/10 text-red-500 border-red-200 dark:border-red-800" :
-    s === "draft"    ? "bg-[#ffe2021a] text-amber-600 border-amber-200 dark:border-amber-800" :
-    s === "deleted"  ? "bg-red-900/10 text-red-400 border-red-900/20" :
-                       "bg-muted text-muted-foreground border-border";
-  return (
-    <span className={`inline-flex items-center text-[0.625rem] font-heading uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold border ${cfg}`}>
-      {status || "Draft"}
-    </span>
-  );
+  const tone = s === "active" || s === "approved" ? "done" : s === "expired" || s === "deleted" || s === "rejected" ? "stopped" : "waiting";
+  return <SheetMark text={status || "Draft"} tone={tone} />;
 }
 
 // ── File attachment helpers ────────────────────────────────────────────────────
@@ -102,7 +93,7 @@ function AttachmentRow({ att, onRemove, readOnly }: { att: Attachment; onRemove:
     <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-muted/20">
       {isImage
         ? <img src={att.url} alt={att.name} className="w-8 h-8 object-cover rounded" />
-        : <div className="w-8 h-8 flex items-center justify-center rounded bg-violet-500/10 text-violet-600"><FileText size={14} /></div>
+        : <div className="w-8 h-8 flex items-center justify-center rounded bg-muted/60 text-foreground"><FileText size={14} /></div>
       }
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-foreground truncate">{att.name}</p>
@@ -435,7 +426,7 @@ export default function Contract() {
       header: "Contract No",
       size: 150,
       cell: ({ row }: any) => (
-        <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400">
+        <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground">
           {row.original.DocNo || "—"}
         </span>
       ),
@@ -550,25 +541,42 @@ export default function Contract() {
     return (
       <>
         <Breadcrumbs items={["Dashboard", "Finance", "Contracts"]} />
-        <FinanceShell
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
           title="Contracts"
           subtitle="Create and manage contracts"
-          icon={FileText}
           action={
             <button
               onClick={goToCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all hover:shadow-lg "
+              className="inline-flex items-center gap-1.5 shrink-0 bg-foreground text-card hover:bg-foreground/85 font-heading font-semibold uppercase tracking-[0.1em] text-[0.625rem] px-3 sm:px-4 py-2 transition-colors"
             >
               <Plus size={13} />
               New Contract
             </button>
           }
         >
-          <Card className="border-border shadow-sm">
-            <CardHeader className="pb-3 border-b border-border">
+          {!listLoading && (
+            <div className="statrow four">
+              {[
+                { label: "Contracts", value: contracts.length.toLocaleString("en-IN"), note: "in the register" },
+                { label: "Active", value: contracts.filter((c) => /^(active|approved)$/i.test(c.Status || "")).length.toLocaleString("en-IN"), note: "in force" },
+                { label: "Draft or pending", value: contracts.filter((c) => /^(draft|pending)$/i.test(c.Status || "Draft")).length.toLocaleString("en-IN"), note: "not yet in force" },
+                { label: "Contract value", value: fmtAmt(contracts.reduce((sum, c) => sum + (Number(c.ContractAmount) || 0), 0)), note: "all contracts listed" },
+              ].map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(20px, 2.2vw, 30px)", marginTop: 9, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Card className="border-foreground bg-card shadow-none">
+            <CardHeader className="pb-3 border-b border-foreground">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <CardTitle className="text-base font-semibold">Contract Register</CardTitle>
+                  <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Contract register</CardTitle>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {contracts.length} record{contracts.length !== 1 ? "s" : ""}
                   </p>
@@ -579,7 +587,7 @@ export default function Contract() {
                     value={searchQ}
                     onChange={(e) => setSearchQ(e.target.value)}
                     placeholder="Search contract, company…"
-                    className="pl-9 h-9 text-sm focus-visible:ring-violet-500/30 focus-visible:ring-offset-0"
+                    className="pl-9 h-9 text-sm focus-visible:ring-offset-0"
                   />
                 </div>
               </div>
@@ -612,7 +620,7 @@ export default function Contract() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </FinanceShell>
+        </SheetShell>
       </>
     );
   }
@@ -624,22 +632,22 @@ export default function Contract() {
     return (
       <>
         <Breadcrumbs items={["Dashboard", "Finance", "Contracts", editingId ? "Edit" : "New"]} />
-        <FinanceShell
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
           title={editingId ? "Edit Contract" : "New Contract"}
           subtitle={form.docNo || "Auto-numbered on save"}
-          icon={FileText}
           action={
             <div className="flex items-center gap-2">
               <button
                 onClick={() => { resetForm(); setViewMode("list"); }}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition"
+                className="inline-flex items-center gap-1.5 h-9 px-4 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10 transition-colors"
               >
                 <ArrowLeft size={14} /> Cancel
               </button>
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={saveMutation.isPending}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg btn-module text-white text-sm font-semibold hover:shadow-lg transition disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 h-9 px-4 bg-foreground text-card hover:bg-foreground/85 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors disabled:opacity-50"
               >
                 {saveMutation.isPending ? "Saving…" : editingId ? "Update Contract" : "Create Contract"}
               </button>
@@ -649,9 +657,9 @@ export default function Contract() {
           <div className="space-y-6" onKeyDown={preventEnterSubmit}>
 
             {/* ── Document Info ──────────────────────────────────────────────── */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border">
-                <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+            <Card className="border-foreground bg-card shadow-none">
+              <CardHeader className="pb-3 border-b border-foreground">
+                <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">
                   Document Info
                 </CardTitle>
               </CardHeader>
@@ -744,9 +752,9 @@ export default function Contract() {
             </Card>
 
             {/* ── Contract Details ───────────────────────────────────────────── */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border">
-                <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+            <Card className="border-foreground bg-card shadow-none">
+              <CardHeader className="pb-3 border-b border-foreground">
+                <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">
                   Contract Details
                 </CardTitle>
               </CardHeader>
@@ -835,7 +843,7 @@ export default function Contract() {
                       {(() => {
                         const t = selectedContactDetail.type;
                         const cfg = t === "V"
-                          ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"
+                          ? "bg-muted/60 text-foreground border-foreground"
                           : t === "S"
                           ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                           : t === "C"
@@ -926,9 +934,9 @@ export default function Contract() {
             </Card>
 
             {/* ── Attachments ────────────────────────────────────────────────── */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border">
-                <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+            <Card className="border-foreground bg-card shadow-none">
+              <CardHeader className="pb-3 border-b border-foreground">
+                <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">
                   Attachments
                 </CardTitle>
               </CardHeader>
@@ -954,10 +962,10 @@ export default function Contract() {
             </Card>
 
             {/* ── Terms & Conditions ─────────────────────────────────────────── */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border">
+            <Card className="border-foreground bg-card shadow-none">
+              <CardHeader className="pb-3 border-b border-foreground">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+                  <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">
                     Terms &amp; Conditions
                   </CardTitle>
                   <div className="relative">
@@ -983,8 +991,8 @@ export default function Contract() {
                               return (
                                 <button key={tc.id}
                                   onClick={() => setSelectedTCs((prev) => isSel ? prev.filter((s) => s.id !== tc.id) : [...prev, tc])}
-                                  className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSel ? "bg-violet-500/[0.05]" : ""}`}>
-                                  <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSel ? "bg-violet-500 border-violet-500" : "border-border"}`}>
+                                  className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSel ? "bg-primary/10" : ""}`}>
+                                  <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSel ? "bg-foreground border-foreground" : "border-border"}`}>
                                     {isSel && <Check size={10} className="text-primary-foreground" />}
                                   </span>
                                   <span className="flex-1 min-w-0">
@@ -1012,7 +1020,7 @@ export default function Contract() {
                   <div className="space-y-2">
                     {selectedTCs.map((tc, idx) => (
                       <div key={tc.id} className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400 text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
+                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-muted/60 text-foreground text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
                           {idx + 1}
                         </span>
                         <div className="flex-1 min-w-0">
@@ -1034,7 +1042,7 @@ export default function Contract() {
               </CardContent>
             </Card>
           </div>
-        </FinanceShell>
+        </SheetShell>
       </>
     );
   }
@@ -1052,25 +1060,25 @@ export default function Contract() {
     return (
       <>
         <Breadcrumbs items={["Dashboard", "Finance", "Contracts", c.DocNo || "Detail"]} />
-        <FinanceShell
+        <SheetShell
+          eyebrow="CivilierERP · Finance"
           title={c.DocNo || "Contract"}
           subtitle={`${fmtDate(c.DocDate)} · ${c.FinYear || ""}`}
-          icon={FileText}
           action={
             <div className="flex items-center gap-2">
               <button onClick={() => setViewMode("list")}
-                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-muted transition">
+                className="inline-flex items-center gap-1.5 h-9 px-4 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10 transition-colors">
                 <ArrowLeft size={14} /> Back
               </button>
               {c.Status !== "Pending" && c.Status !== "Approved" && (
                 <button onClick={() => goToEdit(c)}
-                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg btn-module text-white text-sm font-semibold hover:shadow-lg transition">
+                  className="inline-flex items-center gap-1.5 h-9 px-4 bg-foreground text-card hover:bg-foreground/85 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors">
                   Edit
                 </button>
               )}
               <button
                 onClick={() => setDeleteConfirmId(c.ContractId)}
-                className="h-9 px-4 rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition">
+                className="h-9 px-4 border border-destructive/50 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-destructive hover:bg-destructive/10 transition-colors">
                 Delete
               </button>
             </div>
@@ -1102,9 +1110,9 @@ export default function Contract() {
             </div>
 
             {/* Contract details card */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border">
-                <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Contract Details</CardTitle>
+            <Card className="border-foreground bg-card shadow-none">
+              <CardHeader className="pb-3 border-b border-foreground">
+                <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Contract Details</CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -1118,7 +1126,7 @@ export default function Contract() {
                   </div>
                   <div>
                     <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Contract Amount</p>
-                    <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">{fmtAmt(c.ContractAmount)}</p>
+                    <p className="text-sm font-semibold text-foreground">{fmtAmt(c.ContractAmount)}</p>
                   </div>
                   <div className="col-span-2 sm:col-span-3">
                     <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Period</p>
@@ -1152,10 +1160,10 @@ export default function Contract() {
                 amounts post to in the General Ledger / Trial Balance — no
                 separate account group needed, this is just the transparency
                 view for that same money. ── */}
-            <Card className="border-border shadow-sm">
-              <CardHeader className="pb-3 border-b border-border">
-                <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-                  <Wallet size={14} className="text-violet-500" />
+            <Card className="border-foreground bg-card shadow-none">
+              <CardHeader className="pb-3 border-b border-foreground">
+                <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground flex items-center gap-2">
+                  <Wallet size={14} className="text-foreground" />
                   Contract Ledger
                 </CardTitle>
               </CardHeader>
@@ -1170,7 +1178,7 @@ export default function Contract() {
                       {[
                         ["Total Advance", fmtAmt(contractLedgerData.summary.TotalAdvance), "text-emerald-600 dark:text-emerald-400"],
                         ["Allocated", fmtAmt(contractLedgerData.summary.TotalAllocated), "text-amber-600 dark:text-amber-400"],
-                        ["Unallocated Balance", fmtAmt(contractLedgerData.summary.UnallocatedBalance), "text-violet-600 dark:text-violet-400"],
+                        ["Unallocated Balance", fmtAmt(contractLedgerData.summary.UnallocatedBalance), "text-foreground"],
                         ["Documented (Invoiced/Booked)", fmtAmt(contractLedgerData.summary.TotalDocumented), "text-foreground"],
                       ].map(([label, value, cls]) => (
                         <div key={String(label)} className="rounded-xl border border-border bg-muted/10 px-3 py-2.5">
@@ -1247,9 +1255,9 @@ export default function Contract() {
 
             {/* Parties */}
             {detailParties.length > 0 && (
-              <Card className="border-border shadow-sm">
-                <CardHeader className="pb-3 border-b border-border">
-                  <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Parties</CardTitle>
+              <Card className="border-foreground bg-card shadow-none">
+                <CardHeader className="pb-3 border-b border-foreground">
+                  <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Parties</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-4">
                   <div className="flex flex-wrap gap-2">
@@ -1274,9 +1282,9 @@ export default function Contract() {
 
             {/* Attachments */}
             {atts.length > 0 && (
-              <Card className="border-border shadow-sm">
-                <CardHeader className="pb-3 border-b border-border">
-                  <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+              <Card className="border-foreground bg-card shadow-none">
+                <CardHeader className="pb-3 border-b border-foreground">
+                  <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">
                     Attachments ({atts.length})
                   </CardTitle>
                 </CardHeader>
@@ -1290,9 +1298,9 @@ export default function Contract() {
 
             {/* T&C */}
             {c.TermsAndConditions && (
-              <Card className="border-border shadow-sm">
-                <CardHeader className="pb-3 border-b border-border">
-                  <CardTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Terms &amp; Conditions</CardTitle>
+              <Card className="border-foreground bg-card shadow-none">
+                <CardHeader className="pb-3 border-b border-foreground">
+                  <CardTitle className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Terms &amp; Conditions</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-4">
                   <p className="text-sm text-muted-foreground whitespace-pre-wrap">{c.TermsAndConditions}</p>
@@ -1316,7 +1324,7 @@ export default function Contract() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </FinanceShell>
+        </SheetShell>
       </>
     );
   }

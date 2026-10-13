@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { PanelLeftOpen } from "lucide-react";
+import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
 import { ModuleStrip } from "./ModuleStrip";
@@ -188,10 +188,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               <button
                 onClick={() => setHomeNavOpen(true)}
                 title="Open modules"
-                className="fixed z-50 flex items-center justify-center w-9 h-9 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors shadow-sm"
-                style={{ top: 66, left: 14 }}
+                className="fixed z-50 flex items-center justify-center bg-card text-foreground hover:bg-primary/10 transition-colors"
+                // A slim tab on the left edge, half-way down: clear of the Home sheet's title block and its text.
+                style={{ top: "50%", left: 0, width: 20, height: 52, transform: "translateY(-50%)", border: "1px solid hsl(var(--foreground))", borderLeft: 0 }}
               >
-                <PanelLeftOpen size={16} />
+                <ChromeIcons.right size={15} />
               </button>
             )}
 
@@ -290,9 +291,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               >
                 <div
                   className={
-                    !effectiveIsHome && !isMobile
-                      ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
-                      : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
+                    isHome
+                      ? "transition-opacity duration-300 min-w-0 overflow-x-clip"
+                      : !effectiveIsHome && !isMobile
+                        ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background min-w-0 overflow-x-clip"
+                        : "p-4 md:p-6 transition-opacity duration-300 min-w-0 overflow-x-clip"
                   }
                   style={{ opacity: moduleSwitching ? 0 : 1 }}
                 >

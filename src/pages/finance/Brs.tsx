@@ -16,7 +16,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark, statusTone, Dimension } from "@/components/sheet/Sheet";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { toast } from "sonner";
@@ -99,120 +99,59 @@ function isCancelled(e: BrsEntry): boolean {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-const TYPE_PILL_META: Record<BrsSourceType, { label: string; icon: React.ElementType; className: string }> = {
-  RECEIVED: {
-    label: "Received",
-    icon: ArrowDownLeft,
-    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  },
-  CRM_RECEIVED: {
-    label: "Received",
-    icon: ArrowDownLeft,
-    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  },
-  PAYMENT: {
-    label: "Payment",
-    icon: ArrowUpRight,
-    className: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
-  },
-  FUND_TRANSFER_OUT: {
-    label: "Transfer Out",
-    icon: ArrowLeftRight,
-    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
-  },
-  FUND_TRANSFER_IN: {
-    label: "Transfer In",
-    icon: ArrowLeftRight,
-    className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
-  },
-  LOAN_DISBURSED: {
-    label: "Loan Given",
-    icon: Banknote,
-    className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20",
-  },
-  LOAN_RECEIVED: {
-    label: "Loan Received",
-    icon: Banknote,
-    className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20",
-  },
+// What kind of entry it is, as a glyph and a capital label. Direction is the useful part on a bank statement: money in
+// (down into the account), money out (up and away), or moved between accounts.
+const TYPE_PILL_META: Record<BrsSourceType, { label: string; icon: React.ElementType }> = {
+  RECEIVED: { label: "Received", icon: ArrowDownLeft },
+  CRM_RECEIVED: { label: "Received", icon: ArrowDownLeft },
+  PAYMENT: { label: "Payment", icon: ArrowUpRight },
+  FUND_TRANSFER_OUT: { label: "Transfer out", icon: ArrowLeftRight },
+  FUND_TRANSFER_IN: { label: "Transfer in", icon: ArrowLeftRight },
+  LOAN_DISBURSED: { label: "Loan given", icon: Banknote },
+  LOAN_RECEIVED: { label: "Loan received", icon: Banknote },
 };
 
 function TypePill({ type }: { type: BrsSourceType }) {
   const meta = TYPE_PILL_META[type] ?? TYPE_PILL_META.PAYMENT;
   const Icon = meta.icon;
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-medium border whitespace-nowrap ${meta.className}`}>
-      <Icon size={9} strokeWidth={2.5} className="shrink-0" />
+    <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground whitespace-nowrap">
+      <Icon size={10} strokeWidth={2.2} className="shrink-0 text-foreground" />
       {meta.label}
     </span>
   );
 }
 
+// Reconciliation state: solid once it is seen in the passbook, hatched while it is not, red when the bank returned it.
 function ClearBadge({ cleared, bounced, cancelled }: { cleared: boolean; bounced: boolean; cancelled?: boolean }) {
-  if (cancelled) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
-        <Ban size={10} className="shrink-0" />
-        Cheque Cancelled
-      </span>
-    );
-  }
-  if (bounced) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800">
-        <Ban size={10} className="shrink-0" />
-        Bounced
-      </span>
-    );
-  }
-  if (cleared) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-        Clear
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.6875rem] font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-      Unclear
-    </span>
-  );
+  if (cancelled) return <SheetMark text="Cheque cancelled" tone="stopped" />;
+  if (bounced) return <SheetMark text="Bounced" tone="stopped" />;
+  if (cleared) return <SheetMark text="Clear" tone="done" />;
+  return <SheetMark text="Unclear" tone="waiting" />;
 }
 
 function PayStatusBadge({ status }: { status: string | null }) {
-  if (!status || status === "Draft")
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-muted text-muted-foreground border border-border">Draft</span>;
-  if (status === "Approved")
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/20"><ShieldCheck size={9} strokeWidth={2.5} />Approved</span>;
-  if (status === "Pending")
-    return <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border border-amber-500/20"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />Pending</span>;
-  if (status === "Rejected")
-    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />Rejected</span>;
-  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold bg-muted text-muted-foreground border border-border">{status}</span>;
+  const text = status || "Draft";
+  return <SheetMark text={text} tone={statusTone(text)} />;
 }
 
+// The tick against the passbook: an inked square once it is cleared.
 function PassbookCheck({ checked, loading, onChange }: { checked: boolean; loading: boolean; onChange: () => void }) {
   return (
     <button
       onClick={onChange}
       disabled={loading}
+      aria-pressed={checked}
       title={checked ? "Cleared — click to revert to Unclear" : "Mark as Clear"}
-      className={`
-        relative flex items-center justify-center w-5 h-5 rounded border-2 transition-all duration-150
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50
-        ${loading ? "opacity-40 cursor-wait" : "cursor-pointer"}
-        ${checked
-          ? "bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/30"
-          : "bg-transparent border-border hover:border-emerald-400 hover:bg-emerald-500/5"
-        }
-      `}
+      className={`relative flex items-center justify-center w-5 h-5 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 ${
+        loading ? "opacity-40 cursor-wait" : "cursor-pointer"
+      } ${checked ? "bg-foreground text-card" : "bg-transparent hover:bg-primary/10"}`}
+      style={{ border: "1.5px solid hsl(var(--foreground))" }}
     >
       {loading ? (
-        <RotateCw size={10} className="animate-spin text-white" />
+        <RotateCw size={10} className="animate-spin" />
       ) : checked ? (
-        <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-white stroke-[2]">
+        <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-current stroke-[2]">
           <path d="M1 4l2.5 2.5L9 1" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ) : null}
@@ -242,17 +181,15 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onKeyDown={preventEnterSubmit}>
+      <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         {/* Header */}
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
-            <Ban size={18} className="text-red-500" />
-          </div>
           <div>
-            <h2 className="text-base font-bold text-foreground font-heading">Mark as Bounced</h2>
+            <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-destructive">Returned by the bank</p>
+            <h2 className="text-lg font-bold text-foreground font-heading tracking-tight mt-1">Mark as bounced</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               {entry.DocNo ?? entry.TxnId ?? `${entry.SourceType} #${entry.SourceID}`}
-              {entry.ChequeNo && <> · Cheque <span className="font-mono">{entry.ChequeNo}</span></>}
+              {entry.ChequeNo && <> · Cheque <span className="font-heading tabular-nums">{entry.ChequeNo}</span></>}
             </p>
           </div>
           <button onClick={onClose} className="ml-auto text-muted-foreground hover:text-foreground transition-colors">
@@ -261,14 +198,14 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
         </div>
 
         {/* Payment summary */}
-        <div className="rounded-xl bg-red-500/[0.06] border border-red-500/20 px-4 py-3 space-y-1.5">
+        <div className="rounded-xl bg-destructive/10 border border-destructive/40 px-4 py-3 space-y-1.5">
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Payee / Party</span>
             <span className="font-medium text-foreground truncate max-w-[180px]">{entry.PaymentName || "—"}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Amount</span>
-            <span className="font-mono font-semibold text-foreground">{formatINR(entry.Amount)}</span>
+            <span className="font-heading tabular-nums font-semibold text-foreground">{formatINR(entry.Amount)}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Bank</span>
@@ -281,7 +218,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
           {entry.ChequeNo && (
             <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">Cheque No.</span>
-              <span className="font-mono text-foreground">{entry.ChequeNo}</span>
+              <span className="font-heading tabular-nums text-foreground">{entry.ChequeNo}</span>
             </div>
           )}
         </div>
@@ -289,24 +226,24 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
         {/* Bounce date */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Bounce / Return Date <span className="text-red-500">*</span>
+            Bounce / Return Date <span className="text-destructive">*</span>
           </label>
           <DateInput
             value={bounceDate}
             onChange={(e) => setBounceDate(e.target.value)}
-            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-red-400 outline-none"
+            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-destructive/30 outline-none"
           />
         </div>
 
         {/* Bounce reason */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Reason for Return <span className="text-red-500">*</span>
+            Reason for Return <span className="text-destructive">*</span>
           </label>
           <select
             value={bounceReason}
             onChange={(e) => setBounceReason(e.target.value)}
-            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-red-400 outline-none appearance-none"
+            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-destructive/30 outline-none appearance-none"
           >
             <option value="">— Select reason —</option>
             {bounceReasons.map((r) => (
@@ -325,7 +262,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
             onChange={(e) => setBounceRemarks(e.target.value)}
             placeholder="Additional notes e.g. bank memo number, follow-up action…"
             rows={2}
-            className="w-full px-3 py-2 bg-input/70 border border-border rounded-lg text-sm resize-none focus:ring-1 focus:ring-red-400 outline-none"
+            className="w-full px-3 py-2 bg-input/70 border border-border rounded-lg text-sm resize-none focus:ring-1 focus:ring-destructive/30 outline-none"
           />
         </div>
 
@@ -333,14 +270,14 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
         <div className="flex gap-2 pt-1">
           <button
             onClick={onClose}
-            className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex-1 h-9 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={() => onConfirm(bounceDate, bounceReason, bounceRemarks)}
             disabled={saving || !bounceDate || !bounceReason}
-            className="flex-1 h-9 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+            className="flex-1 h-9 bg-destructive hover:bg-destructive/90 text-destructive-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
             {saving ? <RotateCw size={13} className="animate-spin" /> : <Ban size={13} />}
             Confirm Bounce
@@ -372,16 +309,14 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onKeyDown={preventEnterSubmit}>
+      <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
-            <CheckCircle2 size={18} className="text-emerald-500" />
-          </div>
           <div>
-            <h2 className="text-base font-bold text-foreground font-heading">Mark as Clear</h2>
+            <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Seen in the passbook</p>
+            <h2 className="text-lg font-bold text-foreground font-heading tracking-tight mt-1">Mark as clear</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               {entry.DocNo ?? entry.TxnId ?? `${entry.SourceType} #${entry.SourceID}`}
-              {entry.ChequeNo && <> · Cheque <span className="font-mono">{entry.ChequeNo}</span></>}
+              {entry.ChequeNo && <> · Cheque <span className="font-heading tabular-nums">{entry.ChequeNo}</span></>}
             </p>
           </div>
           <button onClick={onClose} className="ml-auto text-muted-foreground hover:text-foreground transition-colors">
@@ -389,14 +324,14 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
           </button>
         </div>
 
-        <div className="rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20 px-4 py-3 space-y-1.5">
+        <div className="rounded-xl bg-primary/10 border border-foreground/40 px-4 py-3 space-y-1.5">
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Payee / Party</span>
             <span className="font-medium text-foreground truncate max-w-[180px]">{entry.PaymentName || "—"}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Amount</span>
-            <span className="font-mono font-semibold text-foreground">{formatINR(entry.Amount)}</span>
+            <span className="font-heading tabular-nums font-semibold text-foreground">{formatINR(entry.Amount)}</span>
           </div>
           <div className="flex justify-between text-xs">
             <span className="text-muted-foreground">Bank</span>
@@ -406,12 +341,12 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
 
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Bank Clearing Date <span className="text-red-500">*</span>
+            Bank Clearing Date <span className="text-destructive">*</span>
           </label>
           <DateInput
             value={bankClearingDate}
             onChange={(e) => setBankClearingDate(e.target.value)}
-            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-emerald-400 outline-none"
+            className="w-full h-9 px-3 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-foreground/20 outline-none"
           />
           <p className="text-[0.6875rem] text-muted-foreground">The date this transaction actually cleared in the bank passbook.</p>
         </div>
@@ -419,14 +354,14 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
         <div className="flex gap-2 pt-1">
           <button
             onClick={onClose}
-            className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex-1 h-9 border border-foreground/40 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={() => onConfirm(bankClearingDate)}
             disabled={saving || !bankClearingDate}
-            className="flex-1 h-9 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+            className="flex-1 h-9 rounded-lg bg-foreground hover:bg-foreground/85 text-card text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
             {saving ? <RotateCw size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
             Confirm Clear
@@ -466,14 +401,14 @@ function BounceDetailPanel({ entry }: { entry: BrsEntry }) {
       <button
         ref={btnRef}
         onClick={open}
-        className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-red-600 dark:text-red-400 hover:text-red-700 transition-colors"
+        className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-destructive hover:text-destructive transition-colors"
       >
         <Info size={11} />
         Details
       </button>
       {show && createPortal(
-        <div style={style} className="bg-card border border-red-200 dark:border-red-800 rounded-xl shadow-xl p-4 space-y-2 text-xs">
-          <p className="font-semibold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+        <div style={style} className="bg-card border border-destructive/40 rounded-xl shadow-xl p-4 space-y-2 text-xs">
+          <p className="font-semibold text-destructive flex items-center gap-1.5">
             <Ban size={12} /> Bounce Details
           </p>
           <div className="space-y-1.5">
@@ -488,7 +423,7 @@ function BounceDetailPanel({ entry }: { entry: BrsEntry }) {
             {entry.ChequeNo && (
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground shrink-0">Cheque No.</span>
-                <span className="font-mono text-foreground">{entry.ChequeNo}</span>
+                <span className="font-heading tabular-nums text-foreground">{entry.ChequeNo}</span>
               </div>
             )}
             {entry.BounceRemarks && (
@@ -738,11 +673,11 @@ export default function Brs() {
       value: String(clearCount),
       sub: formatINR(clearAmount),
       icon: CheckCircle2,
-      ring: "ring-emerald-500/20",
-      bg: "bg-emerald-500/10",
-      blob: "bg-emerald-500",
-      borderL: "border-l-emerald-500",
-      color: "text-emerald-500",
+      ring: "ring-foreground/30",
+      bg: "bg-primary/10",
+      blob: "bg-foreground",
+      borderL: "border-l-foreground/40",
+      color: "text-foreground",
     },
     {
       label: "Unclear",
@@ -760,11 +695,11 @@ export default function Brs() {
       value: String(bounceCount),
       sub: formatINR(bounceAmount),
       icon: Ban,
-      ring: "ring-red-500/20",
-      bg: "bg-red-500/10",
-      blob: "bg-red-500",
-      borderL: "border-l-red-500",
-      color: "text-red-500",
+      ring: "ring-destructive/30",
+      bg: "bg-destructive/10",
+      blob: "bg-destructive",
+      borderL: "border-l-destructive/40",
+      color: "text-destructive",
     },
     {
       label: "Total Entries",
@@ -785,10 +720,10 @@ export default function Brs() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "BRS"]} />
-      <FinanceShell
-        title="Bank Reconciliation Statement"
-        subtitle="Verify payments against your bank passbook — tick to confirm, mark bounced for dishonoured cheques"
-        icon={ShieldCheck}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Bank reconciliation"
+        subtitle="Check each entry against the bank passbook: tick the ones that appear in it, and mark a returned cheque as bounced."
         action={
           <div className="flex items-center gap-2 shrink-0">
             <ExportMenu
@@ -808,8 +743,7 @@ export default function Brs() {
             <button
               onClick={fetchData}
               disabled={loading}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
-              style={{ color: "#818cf8" }}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               <span className="hidden sm:inline">Refresh</span>
@@ -819,62 +753,54 @@ export default function Brs() {
       >
 
         {/* ── Stats ──────────────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {stats.map(({ label, value, sub, icon: Icon, ring, bg, blob, borderL, color }) => (
-            <div
-              key={label}
-              className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL} ${label === "Bounced" && bounceCount > 0 ? "ring-red-500/30" : ""}`}
-            >
-              <div className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`} />
-              <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
-                <Icon size={16} />
+        <div className={stats.length === 4 ? "statrow four" : "statrow"}>
+          {stats.map(({ label, value, sub }) => {
+            const hot = label === "Bounced" && bounceCount > 0;
+            return (
+              <div key={label}>
+                <p className="label" style={hot ? { color: "var(--red)" } : undefined}>{label}</p>
+                <p className="figure" style={{ fontSize: "clamp(22px, 2.4vw, 32px)", marginTop: 9, color: hot ? "var(--red)" : undefined }}>{value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</p>
               </div>
-              <div className="min-w-0">
-                <p className="text-lg font-bold font-heading text-foreground leading-none">{value}</p>
-                <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">{label}</p>
-                <p className="text-[0.6875rem] text-muted-foreground font-mono mt-0.5 truncate">{sub}</p>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* ── Bounce alert banner ─────────────────────────────────────────────── */}
+        {/* ── Bounced cheques: the one red note on the page ────────────────────── */}
         {bounceCount > 0 && (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/[0.08] border border-red-500/25">
-            <AlertTriangle size={15} className="text-red-500 shrink-0" />
-            <p className="text-sm text-red-700 dark:text-red-400 font-medium">
-              {bounceCount} payment{bounceCount !== 1 ? "s" : ""} flagged as bounced/dishonoured totalling{" "}
-              <span className="font-mono font-bold">{formatINR(bounceAmount)}</span>.
-              {" "}Use the <strong>Bounced</strong> filter to review and take action.
+          <div className="flex items-center gap-3 px-4 py-3" style={{ border: "1px solid var(--red)", background: "var(--red-wash)" }}>
+            <AlertTriangle size={15} className="shrink-0" style={{ color: "var(--red)" }} />
+            <p className="text-sm font-medium" style={{ color: "var(--red)" }}>
+              {bounceCount} payment{bounceCount !== 1 ? "s" : ""} returned by the bank, totalling{" "}
+              <span className="font-heading tabular-nums font-bold">{formatINR(bounceAmount)}</span>. Use the <strong>Bounced</strong> filter to review them.
             </p>
           </div>
         )}
 
-        {/* ── Progress bar ───────────────────────────────────────────────────── */}
+        {/* ── How far the reconciliation has got: cleared is solid, the rest is still to be found in the passbook ── */}
         {total > 0 && (
-          <div className="glass rounded-xl px-5 py-3.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Reconciliation progress</span>
-              <span className="text-xs font-bold text-foreground tabular-nums">
-                {reconcileRate}% · {clearCount}/{total}
-              </span>
+          <div>
+            <div className="flex items-baseline justify-between gap-3 mb-2">
+              <span className="label" style={{ color: "var(--ink)" }}>Reconciled</span>
+              <span className="figure" style={{ fontSize: 22 }}>{reconcileRate}<span style={{ fontSize: "0.55em", fontWeight: 500, marginLeft: 2 }}>%</span></span>
             </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-700 ease-out"
-                style={{
-                  width: `${reconcileRate}%`,
-                  background: reconcileRate === 100
-                    ? "linear-gradient(90deg,#10b981,#34d399)"
-                    : "linear-gradient(90deg,#f59e0b,#10b981)",
-                }}
-              />
+            <div className="flex" style={{ height: 22, border: "1.5px solid var(--ink)", background: "var(--sheet)" }} role="img" aria-label={`${reconcileRate} percent reconciled`}>
+              <div className="bar-grow" style={{ width: `${reconcileRate}%`, background: "var(--blue)" }} />
+              <div className="hatch" style={{ flex: 1 }} />
+            </div>
+            <div className="flex">
+              <div style={{ width: `${Math.min(Math.max(reconcileRate, 22), 78)}%`, minWidth: 0 }}>
+                <Dimension from={0} to={100} text={`${clearCount} clear`} color="var(--blue)" />
+              </div>
+              <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                {total - clearCount > 0 && <Dimension from={0} to={100} text={`${total - clearCount} to go`} />}
+              </div>
             </div>
           </div>
         )}
 
         {/* ── Filters ────────────────────────────────────────────────────────── */}
-        <div className="glass rounded-xl px-5 py-4 space-y-3">
+        <div className="px-4 py-4 space-y-3 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
           {/* Row 1: search + bank */}
           <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
             <div className="relative flex-1 sm:min-w-[180px] sm:max-w-xs">
@@ -883,7 +809,7 @@ export default function Brs() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, bank, cheque, txn ID…"
-                className="w-full h-8 pl-8 pr-7 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                className="w-full h-8 pl-8 pr-7 bg-card border border-foreground/40 text-xs focus:border-foreground outline-none"
               />
               {search && (
                 <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -897,7 +823,7 @@ export default function Brs() {
               <select
                 value={bankId ?? ""}
                 onChange={(e) => setBankId(e.target.value || undefined)}
-                className={`h-8 w-full sm:w-auto pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
+                className={`h-8 w-full sm:w-auto pl-7 pr-8 bg-card border text-xs appearance-none focus:border-foreground outline-none cursor-pointer ${bankId ? "border-foreground text-foreground font-semibold" : "border-foreground/40"}`}
               >
                 <option value="">All Banks</option>
                 {allBanks.map((b) => (
@@ -916,7 +842,7 @@ export default function Brs() {
               <DateInput
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="h-8 w-full sm:w-auto pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                className="h-8 w-full sm:w-auto pl-7 pr-3 bg-card border border-foreground/40 text-xs focus:border-foreground outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
             </div>
 
@@ -927,7 +853,7 @@ export default function Brs() {
               <DateInput
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="h-8 w-full sm:w-auto pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                className="h-8 w-full sm:w-auto pl-7 pr-3 bg-card border border-foreground/40 text-xs focus:border-foreground outline-none cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
               />
             </div>
 
@@ -941,54 +867,34 @@ export default function Brs() {
               </button>
             )}
 
-            {/* Dummy Bank filter pill */}
+            {/* Dummy Bank: shown or hidden */}
             <button
               onClick={() => setHideDummyBank((v) => !v)}
-              className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
-                !hideDummyBank
-                  ? "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/30 font-semibold"
-                  : "bg-transparent text-muted-foreground border-border hover:bg-muted"
+              aria-pressed={!hideDummyBank}
+              className={`px-3 h-8 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors border ${
+                !hideDummyBank ? "bg-foreground text-card border-foreground" : "bg-card text-muted-foreground border-foreground/40 hover:text-foreground"
               }`}
             >
-              Dummy Bank
+              Dummy bank
             </button>
 
-            {/* Status filter pills */}
-            <div className="flex flex-wrap gap-1.5 sm:ml-auto">
-              {(["", "clear", "unclear", "bounced"] as const).map((s) => {
-                const label = s === "" ? "All" : s === "clear" ? "✓ Clear" : s === "unclear" ? "○ Unclear" : "⚠ Bounced";
-                const active = statusFilter === s;
-                return (
-                  <button
-                    key={s}
-                    onClick={() => setStatusFilter(s)}
-                    className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
-                      active
-                        ? s === "clear"
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold"
-                          : s === "unclear"
-                            ? "bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold"
-                            : s === "bounced"
-                              ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30 font-semibold"
-                              : "bg-primary/10 text-primary border-primary/30 font-semibold"
-                        : "bg-transparent text-muted-foreground border-border hover:bg-muted"
-                    }`}
-                  >
-                    {label}
-                    {s === "bounced" && bounceCount > 0 && (
-                      <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[0.5625rem] font-bold">{bounceCount}</span>
-                    )}
-                  </button>
-                );
-              })}
+            {/* Status: one ruled bar, the choice in force inked in */}
+            <div className="seg sm:ml-auto" style={{ flexWrap: "wrap" }}>
+              {(["", "clear", "unclear", "bounced"] as const).map((s) => (
+                <button key={s} onClick={() => setStatusFilter(s)} className={statusFilter === s ? "on" : undefined}>
+                  {s === "" ? "All" : s === "clear" ? "Clear" : s === "unclear" ? "Unclear" : "Bounced"}
+                  {s === "bounced" && bounceCount > 0 && <span style={{ marginLeft: 6, color: statusFilter === s ? undefined : "var(--red)" }}>{bounceCount}</span>}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
         {/* ── Table ──────────────────────────────────────────────────────────── */}
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/20 rounded-t-xl">
-            <p className="text-xs text-muted-foreground">
+        <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="flex items-baseline justify-between gap-3 px-3 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <h2 className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">Statement</h2>
+            <p className="text-xs text-muted-foreground ml-auto">
               <span className="font-semibold text-foreground">{filtered.length}</span>{" "}
               entr{filtered.length === 1 ? "y" : "ies"}
               {total !== filtered.length && ` (${total} server-side)`}
@@ -1019,9 +925,9 @@ export default function Brs() {
                     key={key}
                     className={`px-4 py-3.5 transition-colors ${
                       cancelled || bounced
-                        ? "bg-red-500/[0.05] border-l-2 border-l-red-500/50"
+                        ? "bg-destructive/10 border-l-2 border-l-destructive/40"
                         : cleared
-                          ? "bg-emerald-500/[0.03]"
+                          ? "bg-primary/10"
                           : ""
                     }`}
                   >
@@ -1046,26 +952,26 @@ export default function Brs() {
                           <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">{entry.PaymentName}</p>
                         )}
                         {entry.DocNo && (
-                          <span className="inline-block font-mono text-[0.625rem] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20">
+                          <span className="inline-block font-heading tabular-nums text-[0.625rem] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20">
                             {entry.DocNo}
                           </span>
                         )}
                         {entry.BankName && (
                           <div className="flex items-center gap-1 mt-1.5">
-                            <Landmark size={9} className="text-blue-400 shrink-0" />
+                            <Landmark size={9} className="text-foreground shrink-0" />
                             <span className="text-[0.625rem] text-muted-foreground truncate">{entry.BankName}</span>
                           </div>
                         )}
                         {entry.Mode && (
                           <p className="text-[0.625rem] text-muted-foreground mt-0.5 capitalize">
                             {entry.Mode}
-                            {entry.ChequeNo && <span className="font-mono ml-1 text-muted-foreground/60">#{entry.ChequeNo}</span>}
+                            {entry.ChequeNo && <span className="font-heading tabular-nums ml-1 text-muted-foreground/60">#{entry.ChequeNo}</span>}
                           </p>
                         )}
                       </div>
                       {/* Amount + BRS on the right */}
                       <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
-                        <span className={`text-sm font-mono font-bold ${bounced || cancelled ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
+                        <span className={`text-sm font-heading tabular-nums font-bold ${bounced || cancelled ? "text-destructive line-through decoration-red-500/60" : "text-foreground"}`}>
                           {formatINR(entry.Amount)}
                         </span>
                         <ClearBadge cleared={cleared} bounced={bounced} cancelled={cancelled} />
@@ -1076,7 +982,7 @@ export default function Brs() {
                                 (when it was ticked in the app) — genuinely
                                 separate dates, never merged. */}
                             {entry.BankClearingDate && (
-                              <p className="text-[0.625rem] text-emerald-600 dark:text-emerald-400 font-medium">
+                              <p className="text-[0.625rem] text-foreground font-medium">
                                 {fmt(entry.BankClearingDate)} <span className="text-muted-foreground/70 font-normal">(bank)</span>
                               </p>
                             )}
@@ -1097,9 +1003,9 @@ export default function Brs() {
                     <div className="mt-2.5 pl-8">
                       {bounced ? (
                         entry.ReplacementDocNo ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[0.625rem] font-semibold text-emerald-700 dark:text-emerald-400">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-primary/10 border border-foreground/40 text-[0.625rem] font-semibold text-foreground">
                             <ArrowRight size={10} className="shrink-0" />
-                            <span className="font-mono">{entry.ReplacementDocNo}</span>
+                            <span className="font-heading tabular-nums">{entry.ReplacementDocNo}</span>
                           </span>
                         ) : (
                           <button
@@ -1113,12 +1019,12 @@ export default function Brs() {
                       ) : entry.OriginalDocNo ? (
                         <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#ffe2021a] border border-amber-500/25 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-400">
                           <CornerDownRight size={10} className="shrink-0" />
-                          <span className="font-mono">{entry.OriginalDocNo}</span>
+                          <span className="font-heading tabular-nums">{entry.OriginalDocNo}</span>
                         </span>
                       ) : entry.ChequeNo && !cleared ? (
                         <button
                           onClick={() => setBounceEntry(entry)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors"
                         >
                           <Ban size={10} />
                           Mark Bounced
@@ -1138,22 +1044,22 @@ export default function Brs() {
             <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/10">
+                <tr>
                   <th className="px-3 py-3 text-center w-10">
-                    <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">✓</span>
+                    <span>✓</span>
                   </th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[72px]">Type</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[130px]">Company / Party</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Bank</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[90px]">Date</th>
-                  <th className="px-3 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">Amount</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell w-[110px]">Mode / Cheque</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[82px]">Status</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[90px]">BRS</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[90px] hidden xl:table-cell">Bank Clearance</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[130px] hidden xl:table-cell">Cleared On</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[110px] hidden xl:table-cell">Cleared By</th>
-                  <th className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-[140px]">Action</th>
+                  <th className="px-3 py-3 text-left w-[72px]">Type</th>
+                  <th className="px-3 py-3 text-left w-[130px]">Company / Party</th>
+                  <th className="px-3 py-3 text-left hidden lg:table-cell w-[110px]">Bank</th>
+                  <th className="px-3 py-3 text-left hidden lg:table-cell w-[90px]">Date</th>
+                  <th className="px-3 py-3 text-right w-[90px]">Amount</th>
+                  <th className="px-3 py-3 text-left hidden lg:table-cell w-[110px]">Mode / Cheque</th>
+                  <th className="px-3 py-3 text-left w-[82px]">Status</th>
+                  <th className="px-3 py-3 text-left w-[90px]">BRS</th>
+                  <th className="px-3 py-3 text-left w-[90px] hidden xl:table-cell">Bank Clearance</th>
+                  <th className="px-3 py-3 text-left w-[130px] hidden xl:table-cell">Cleared On</th>
+                  <th className="px-3 py-3 text-left w-[110px] hidden xl:table-cell">Cleared By</th>
+                  <th className="px-3 py-3 text-left w-[140px]">Action</th>
                 </tr>
               </thead>
 
@@ -1185,13 +1091,7 @@ export default function Brs() {
                   return (
                     <tr
                       key={key}
-                      className={`transition-colors ${
-                        cancelled || bounced
-                          ? "bg-red-500/[0.05] hover:bg-red-500/[0.09] border-l-2 border-l-red-500/50"
-                          : cleared
-                            ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.07]"
-                            : "hover:bg-muted/30"
-                      }`}
+                      style={cancelled || bounced ? { boxShadow: "inset 3px 0 0 hsl(var(--destructive))" } : undefined}
                     >
                       <td className="px-3 py-4 text-center align-middle">
                         <PassbookCheck
@@ -1213,20 +1113,11 @@ export default function Brs() {
                           </p>
                         )}
                         {entry.DocNo && (
-                          <span className="inline-block font-mono text-[0.625rem] px-1.5 py-0.5 mt-1 rounded bg-primary/10 text-primary border border-primary/20 truncate max-w-full">
-                            {entry.DocNo}
-                          </span>
+                          <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground mt-1 truncate">{entry.DocNo}</p>
                         )}
                       </td>
                       <td className="px-3 py-4 hidden lg:table-cell align-middle">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
-                            <Landmark size={10} className="text-blue-500" />
-                          </div>
-                          <span className="text-xs text-foreground truncate max-w-[80px]">
-                            {entry.BankName || "—"}
-                          </span>
-                        </div>
+                        <span className="block text-xs text-foreground truncate max-w-[110px]">{entry.BankName || "—"}</span>
                       </td>
                       <td className="px-3 py-4 hidden lg:table-cell align-middle">
                         <span className="text-xs text-muted-foreground tabular-nums">
@@ -1234,17 +1125,13 @@ export default function Brs() {
                         </span>
                       </td>
                       <td className="px-3 py-4 text-right align-middle">
-                        <span className={`text-xs font-mono font-semibold ${bounced || cancelled ? "text-red-600 dark:text-red-400 line-through decoration-red-500/60" : "text-foreground"}`}>
+                        <span className={`font-heading text-[0.8125rem] tabular-nums font-semibold ${bounced || cancelled ? "text-destructive line-through" : "text-foreground"}`}>
                           {formatINR(entry.Amount)}
                         </span>
                       </td>
                       <td className="px-3 py-4 hidden lg:table-cell align-middle">
-                        <span className="text-xs text-foreground capitalize">{entry.Mode || "—"}</span>
-                        {entry.ChequeNo && (
-                          <p className="font-mono text-[0.625rem] text-muted-foreground/70 mt-0.5 truncate">
-                            #{entry.ChequeNo}
-                          </p>
-                        )}
+                        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{entry.Mode || "—"}</span>
+                        {entry.ChequeNo && <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground mt-1 truncate">Chq #{entry.ChequeNo}</p>}
                       </td>
                       <td className="px-3 py-4 align-middle">
                         <PayStatusBadge status={entry.PayStatus} />
@@ -1261,7 +1148,7 @@ export default function Brs() {
                           in the app — the two can genuinely differ by days. */}
                       <td className="px-3 py-4 hidden xl:table-cell align-middle">
                         {cleared && entry.BankClearingDate ? (
-                          <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                          <p className="text-xs text-foreground font-medium tabular-nums">
                             {fmt(entry.BankClearingDate)}
                           </p>
                         ) : (
@@ -1292,30 +1179,30 @@ export default function Brs() {
                       <td className="px-3 py-4 align-middle">
                         {bounced ? (
                           entry.ReplacementDocNo ? (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[0.625rem] font-semibold text-emerald-700 dark:text-emerald-400 overflow-hidden max-w-full">
-                              <ArrowRight size={10} className="shrink-0" />
-                              <span className="font-mono truncate">{entry.ReplacementDocNo}</span>
+                            <span className="inline-flex items-center gap-1.5 font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground overflow-hidden max-w-full" title="Replaced by this payment">
+                              <ArrowRight size={11} className="shrink-0" />
+                              <span className="truncate">{entry.ReplacementDocNo}</span>
                             </span>
                           ) : (
                             <button
                               onClick={() => handleReissue(entry)}
                               title="Create a replacement payment for this bounced cheque"
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors whitespace-nowrap"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] border border-foreground text-foreground hover:bg-primary/10 transition-colors whitespace-nowrap"
                             >
                               <CornerDownRight size={11} />
                               Re-issue
                             </button>
                           )
                         ) : entry.OriginalDocNo ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#ffe2021a] border border-amber-500/25 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-400 overflow-hidden max-w-full">
-                            <CornerDownRight size={10} className="shrink-0" />
-                            <span className="font-mono truncate">{entry.OriginalDocNo}</span>
+                          <span className="inline-flex items-center gap-1.5 font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground overflow-hidden max-w-full" title="Re-issued in place of this payment">
+                            <CornerDownRight size={11} className="shrink-0" />
+                            <span className="truncate">{entry.OriginalDocNo}</span>
                           </span>
                         ) : entry.ChequeNo && !cleared ? (
                           <button
                             onClick={() => setBounceEntry(entry)}
                             title="Mark this cheque as bounced / dishonoured"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-red-300 dark:border-red-700/60 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] border border-destructive/50 text-destructive hover:bg-destructive/10 transition-colors whitespace-nowrap"
                           >
                             <Ban size={10} />
                             Mark Bounced
@@ -1332,54 +1219,30 @@ export default function Brs() {
 
           {/* ── Pagination ─────────────────────────────────────────────────── */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/10 rounded-b-xl">
-              <p className="text-xs text-muted-foreground tabular-nums">
-                Page {page} of {totalPages} · {total} total
+            <div className="flex items-center justify-between gap-3 flex-wrap px-3 py-3" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+              <p className="label">
+                Page {page} of {totalPages} · {total} in all
               </p>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1 || loading}
-                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                >
-                  <ChevronLeft size={14} />
+              <div className="seg">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1 || loading} className="disabled:opacity-40" aria-label="Previous page">
+                  <ChevronLeft size={13} />
                 </button>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages || loading}
-                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-                >
-                  <ChevronRight size={14} />
+                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages || loading} className="disabled:opacity-40" aria-label="Next page">
+                  <ChevronRight size={13} />
                 </button>
               </div>
             </div>
           )}
         </div>
 
-        {/* ── Legend ─────────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center gap-4 mt-4 px-1">
-          <span className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-            <span className="inline-flex items-center gap-1 font-medium text-foreground">
-              <span className="w-3.5 h-3.5 rounded border-2 border-emerald-500 bg-emerald-500 inline-flex items-center justify-center">
-                <svg viewBox="0 0 10 8" className="w-2 h-2 fill-none stroke-white stroke-[2]">
-                  <path d="M1 4l2.5 2.5L9 1" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-              Tick
-            </span>{" "}
-            — confirmed in your bank passbook (Clear)
-          </span>
-          <span className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-            <span className="inline-flex items-center gap-1 font-medium text-foreground">
-              <Ban size={11} className="text-red-500" /> Bounce
-            </span>{" "}
-            — dishonoured / returned by bank
-          </span>
-          <p className="text-[0.6875rem] text-muted-foreground ml-auto">
-            Showing payments with a linked bank account
-          </p>
+        {/* ── Key ─────────────────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.6875rem] text-muted-foreground">
+          <span className="inline-flex items-center gap-2"><SheetMark text="Clear" tone="done" /> seen in the bank passbook</span>
+          <span className="inline-flex items-center gap-2"><SheetMark text="Unclear" tone="waiting" /> not yet seen</span>
+          <span className="inline-flex items-center gap-2"><SheetMark text="Bounced" tone="stopped" /> returned by the bank</span>
+          <span className="ml-auto">Only payments with a linked bank account are listed.</span>
         </div>
-      </FinanceShell>
+      </SheetShell>
 
       {/* ── Bounce Modal (portal) ──────────────────────────────────────────── */}
       {bounceEntry && (

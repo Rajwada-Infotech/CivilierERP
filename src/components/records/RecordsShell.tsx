@@ -11,7 +11,7 @@ interface RecordsShellProps {
   children: React.ReactNode;
 }
 
-const ACCENT = "#e11d48"; // rose — distinct from Sales Automation (amber)
+const ACCENT = "#e61919"; // records — see the module palette in index.css
 
 export const RecordsShell: React.FC<RecordsShellProps> = ({
   title,

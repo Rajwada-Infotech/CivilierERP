@@ -127,12 +127,23 @@ export function preventEnterSubmit(e: React.KeyboardEvent<HTMLElement>) {
  * draft still sits in localStorage silently hijacks the link into always
  * opening the form instead of the list.
  */
+// The reload belongs to the page that was open when it happened. The browser keeps reporting the navigation as a
+// "reload" for as long as the tab lives, so without these two guards every later visit to a form page inside the app
+// would count as a reload and reopen its draft.
+const pathAtLoad = typeof window !== "undefined" ? window.location.pathname : "";
+let reloadUsed = false;
+
 export function wasPageReloaded(): boolean {
   try {
+    if (reloadUsed) return false;
     const [entry] = performance.getEntriesByType(
       "navigation",
     ) as PerformanceNavigationTiming[];
-    return entry?.type === "reload";
+    if (entry?.type !== "reload") return false;
+    if (window.location.pathname !== pathAtLoad) return false;
+    // Used up after this tick (not at once, so a development double-run of the same effect still agrees).
+    setTimeout(() => { reloadUsed = true; }, 0);
+    return true;
   } catch {
     return false;
   }

@@ -5,7 +5,11 @@ import { GlassShell } from "@/components/dashboard/GlassShell";
 // Single source of truth for the HR and Payroll module's accent — change
 // this one value (and its twins in ModuleStrip.tsx / AppSidebar.tsx) to
 // re-theme the whole module.
-export const HR_PAYROLL_ACCENT = "#eab308"; // yellow-500
+// "Royal Orchid" — the widest unused gap on the colour wheel (~285–325°), between Sales' purple
+// (271°) and Ticket's pink (330°), so it can't be mistaken for any other module.
+export const HR_PAYROLL_ACCENT = "#ca19e6";
+/** Deep orchid → orchid → light orchid glow, for hero / call-to-action surfaces. */
+export const HR_GRADIENT = "linear-gradient(135deg, #ca19e6 0%, #ec3cec 60%, #f25fde 100%)";
 
 interface HrPayrollShellProps {
   title: string;
