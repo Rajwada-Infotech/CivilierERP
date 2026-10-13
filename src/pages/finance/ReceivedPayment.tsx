@@ -621,9 +621,10 @@ export default function ReceivedPaymentPage() {
   // that link into always opening the form instead of the list).
   useEffect(() => {
     if (!wasPageReloaded()) return;
-    const hasContent = Object.keys(EMPTY_FORM).some(
-      (k) => String((form as any)[k] ?? "") !== String((EMPTY_FORM as any)[k] ?? ""),
-    );
+    // Only what a person types counts. The financial year, document number and mode are filled in by the page
+    // itself, so a draft holding nothing but those is an untouched form, not work in progress.
+    const typed = ["customerName", "amount", "remarks", "transactionId", "checkNumber", "bankName", "depositBankId", "contractId"] as const;
+    const hasContent = typed.some((k) => String((form as any)[k] ?? "").trim() !== "");
     if (hasContent) setView("form");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
