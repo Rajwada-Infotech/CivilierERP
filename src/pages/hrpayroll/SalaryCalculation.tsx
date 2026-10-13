@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Calculator } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_PAYROLL_ACCENT as ACCENT } from "@/components/hrpayroll/HrPayrollShell";
+import { HrAvatar, HrBreakup, HrEmpty, HrStepHead, hrCard, hrPrimaryBtn, hrPrimaryStyle } from "@/components/hrpayroll/HrUi";
 import { getEmployees, getEmployeeSalaryBreakup, type SalaryBreakupResult } from "@/api/employeeMasterApi";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -52,14 +53,12 @@ const SalaryCalculation: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "HR and Payroll", "Salary Calculation"]} />
       <HrPayrollShell title="Salary Calculation" subtitle="Calculate an employee's salary breakup from their CTC and assigned Salary Structure" icon={Calculator}>
         <div className="space-y-5">
-          <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-border bg-muted/20">
-              <h2 className="font-heading font-semibold text-foreground text-sm">Select Employee</h2>
-            </div>
-            <div className="p-5 flex flex-wrap items-end gap-3">
-              <div style={{ minWidth: 260 }}>
+          <div className={`${hrCard} p-5`}>
+            <HrStepHead n={1} title="Who and when" hint="Pick an employee and the date to calculate on" />
+            <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_12rem_auto] gap-3 items-end">
+              <div className="min-w-0">
                 <label className={labelBase}>Employee</label>
-                <SearchableNativeSelect value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setResult(null); setErrorMsg(null); }} className={inputBase} disabled={employeesLoading}>
+                <SearchableNativeSelect value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setResult(null); setErrorMsg(null); }} className={inputBase} disabled={employeesLoading} searchPlaceholder="Search name or code…">
                   <option value="">Select...</option>
                   {employees.map((e) => (
                     <option key={e.EmployeeId} value={String(e.EmployeeId)}>
@@ -70,29 +69,39 @@ const SalaryCalculation: React.FC = () => {
               </div>
               <div>
                 <label className={labelBase}>As Of Date</label>
-                <DateInput value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className={inputBase} style={{ width: 170 }} />
+                <DateInput value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className={inputBase} />
               </div>
-              <button onClick={handleCalculate} disabled={!employeeId || loading} className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40">
-                {loading ? "Calculating..." : "Calculate"}
+              <button onClick={handleCalculate} disabled={!employeeId || loading} className={`${hrPrimaryBtn} h-10`} style={hrPrimaryStyle}>
+                <Calculator size={15} /> {loading ? "Calculating..." : "Calculate"}
               </button>
             </div>
+
             {selectedEmployee && (
-              <div className="px-5 pb-4 -mt-2 text-[0.6875rem] text-muted-foreground">
-                CTC: {selectedEmployee.CTCAmount != null ? `₹${Number(selectedEmployee.CTCAmount).toLocaleString("en-IN")} (${selectedEmployee.CTCFrequency})` : "Not set"}
-                {"  ·  "}
-                Salary Structure: {selectedEmployee.SalaryStructureCode || "Not assigned"}
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border p-3" style={{ background: `${ACCENT}0a`, borderColor: `${ACCENT}2e` }}>
+                <HrAvatar name={selectedEmployee.EmployeeName} size={38} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground truncate">{selectedEmployee.EmployeeName}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground font-mono">{selectedEmployee.EmployeeCode}</p>
+                </div>
+                <span className="rounded-full bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
+                  CTC <b className="tabular-nums">{selectedEmployee.CTCAmount != null ? `₹${Number(selectedEmployee.CTCAmount).toLocaleString("en-IN")}` : "Not set"}</b>
+                  {selectedEmployee.CTCAmount != null && <span className="text-muted-foreground"> / {selectedEmployee.CTCFrequency}</span>}
+                </span>
+                <span className="rounded-full bg-card border border-border px-2.5 py-1 text-[0.6875rem]">
+                  Structure <b>{selectedEmployee.SalaryStructureCode || "Not assigned"}</b>
+                </span>
               </div>
             )}
           </div>
 
           {errorMsg && (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
               <p className="text-sm text-destructive">{errorMsg}</p>
             </div>
           )}
 
           {result && !result.valid && (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-1">
+            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 space-y-1">
               <p className="text-xs font-heading font-semibold text-destructive">This Salary Structure has validation issues</p>
               {result.errors.map((e, i) => (
                 <p key={i} className="text-sm text-destructive">{e.message}</p>
@@ -100,58 +109,16 @@ const SalaryCalculation: React.FC = () => {
             </div>
           )}
 
+          {!result && !errorMsg && (
+            <div className={hrCard}>
+              <HrEmpty icon={Calculator} title="Pick an employee to see their salary" text="The breakup uses their CTC and assigned Salary Structure — the same engine Payroll Run uses." />
+            </div>
+          )}
+
           {result && result.valid && result.totals && (
-            <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-              <div className="px-5 py-4 border-b border-border bg-muted/20">
-                <h3 className="font-heading font-semibold text-foreground text-sm">{result.EmployeeName}</h3>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                  Structure: {result.SalaryStructureName} (v{result.SalaryStructureVersion})
-                </p>
-              </div>
-              <div className="p-5">
-                <div className="rounded-lg border border-border overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
-                        <th className="text-left px-3 py-2">Salary Head</th>
-                        <th className="text-left px-3 py-2">Type</th>
-                        <th className="text-left px-3 py-2">Calculation</th>
-                        <th className="text-right px-3 py-2">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {result.lines.map((l) => (
-                        <tr key={l.DeductionAdditionId}>
-                          <td className="px-3 py-2 font-medium">{l.HeadName}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{l.HeadType}</td>
-                          <td className="px-3 py-2 text-muted-foreground">{l.Calculation}</td>
-                          <td className="px-3 py-2 text-right font-mono">₹{l.Amount.toLocaleString("en-IN")}</td>
-                        </tr>
-                      ))}
-                      <tr className="bg-muted/20 font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Gross Salary</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{result.totals.GrossSalary.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Total Employee Deduction</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalEmployeeDeduction.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Net Salary</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{result.totals.NetSalary.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="font-semibold">
-                        <td className="px-3 py-2" colSpan={3}>Employer Contribution</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalEmployerContribution.toLocaleString("en-IN")}</td>
-                      </tr>
-                      <tr className="bg-primary/10 font-bold">
-                        <td className="px-3 py-2" colSpan={3}>Total CTC</td>
-                        <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalCTC.toLocaleString("en-IN")}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+            <div className={`${hrCard} p-5`}>
+              <HrStepHead n={2} title={result.EmployeeName} hint={`Structure: ${result.SalaryStructureName} (v${result.SalaryStructureVersion})`} />
+              <HrBreakup lines={result.lines} totals={result.totals} />
             </div>
           )}
         </div>

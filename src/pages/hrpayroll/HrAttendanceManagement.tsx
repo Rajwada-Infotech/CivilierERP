@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
+import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getHrFilterOptions, getHrRecord, getHrRecords, getHrSummary, getNotMarked,
@@ -133,8 +134,8 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                   <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Employee forgot to punch out — confirmed by manager" className={`${inputCls} w-full`} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-                  <div><label className={labelCls}>In Time (IST)</label><input type="datetime-local" value={inV} onChange={(e) => setInV(e.target.value)} className={`${inputCls} w-full`} /></div>
-                  <div><label className={labelCls}>Out Time (IST) — clear to reopen</label><input type="datetime-local" value={outV} onChange={(e) => setOutV(e.target.value)} className={`${inputCls} w-full`} /></div>
+                  <div><label className={labelCls}>In Time (IST)</label><DateTimeInput value={inV} onChange={(e) => setInV(e.target.value)} className={`${inputCls} w-full`} /></div>
+                  <div><label className={labelCls}>Out Time (IST) — clear to reopen</label><DateTimeInput value={outV} onChange={(e) => setOutV(e.target.value)} className={`${inputCls} w-full`} /></div>
                   <button onClick={() => needReason() && saveTimes.mutate()} disabled={saveTimes.isPending} className="h-9 px-4 rounded-lg text-sm font-semibold text-white btn-module inline-flex items-center gap-1.5 disabled:opacity-50">
                     {saveTimes.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
                   </button>
@@ -151,8 +152,8 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
                     {canEdit && edits[b.breakId] ? (
                       <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr_1fr_auto_auto] gap-2 items-center">
                         <span className="font-medium">#{b.no}</span>
-                        <input type="datetime-local" value={edits[b.breakId].start} onChange={(e) => setEdits((p) => ({ ...p, [b.breakId]: { ...p[b.breakId], start: e.target.value } }))} className={inputCls} />
-                        <input type="datetime-local" value={edits[b.breakId].end} onChange={(e) => setEdits((p) => ({ ...p, [b.breakId]: { ...p[b.breakId], end: e.target.value } }))} className={inputCls} />
+                        <DateTimeInput value={edits[b.breakId].start} onChange={(e) => setEdits((p) => ({ ...p, [b.breakId]: { ...p[b.breakId], start: e.target.value } }))} className={inputCls} />
+                        <DateTimeInput value={edits[b.breakId].end} onChange={(e) => setEdits((p) => ({ ...p, [b.breakId]: { ...p[b.breakId], end: e.target.value } }))} className={inputCls} />
                         <button onClick={() => needReason() && saveBreak.mutate({ id: b.breakId, ...edits[b.breakId] })} className="h-9 px-3 rounded-lg border border-border hover:bg-muted inline-flex items-center gap-1"><Save size={13} /> Save</button>
                         <button onClick={() => needReason() && delBreak.mutate(b.breakId)} className="h-9 px-3 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 inline-flex items-center gap-1"><Trash2 size={13} /></button>
                       </div>
@@ -168,8 +169,8 @@ function RecordDialog({ id, canEdit, onClose }: { id: number; canEdit: boolean; 
               </div>
               {canEdit && (
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
-                  <div><label className={labelCls}>Add a missed break — start (IST)</label><input type="datetime-local" value={newStart} onChange={(e) => setNewStart(e.target.value)} className={`${inputCls} w-full`} /></div>
-                  <div><label className={labelCls}>Stop (IST)</label><input type="datetime-local" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className={`${inputCls} w-full`} /></div>
+                  <div><label className={labelCls}>Add a missed break — start (IST)</label><DateTimeInput value={newStart} onChange={(e) => setNewStart(e.target.value)} className={`${inputCls} w-full`} /></div>
+                  <div><label className={labelCls}>Stop (IST)</label><DateTimeInput value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className={`${inputCls} w-full`} /></div>
                   <button onClick={() => newStart && needReason() && addBreak.mutate()} disabled={!newStart || addBreak.isPending} className="h-9 px-3 rounded-lg border border-border hover:bg-muted inline-flex items-center gap-1 disabled:opacity-50"><Plus size={13} /> Add</button>
                 </div>
               )}
@@ -278,8 +279,8 @@ export default function HrAttendanceManagement() {
       >
         {/* Filters */}
         <div className="rounded-xl border border-border bg-card p-4 mb-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          <div><label className={labelCls}>From</label><input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} w-full`} /></div>
-          <div><label className={labelCls}>To</label><input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className={`${inputCls} w-full`} /></div>
+          <div><label className={labelCls}>From</label><DateInput value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} w-full`} /></div>
+          <div><label className={labelCls}>To</label><DateInput value={to} min={from} onChange={(e) => setTo(e.target.value)} className={`${inputCls} w-full`} /></div>
           <div><label className={labelCls}>Employee</label>
             <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className={`${inputCls} w-full`}><option value="">All</option>{opts?.employees.map((e) => <option key={e.id} value={e.id}>{e.label} ({e.code})</option>)}</select></div>
           <div><label className={labelCls}>Company</label>
@@ -349,7 +350,7 @@ export default function HrAttendanceManagement() {
                 ))}
               </div>
               <div><label className={labelCls}>{period === "daily" ? "Date" : period === "weekly" ? "Any day of the week" : "Any day of the month"}</label>
-                <input type="date" value={anchor} max={today} onChange={(e) => e.target.value && setAnchor(e.target.value)} className={inputCls} /></div>
+                <DateInput value={anchor} max={today} onChange={(e) => e.target.value && setAnchor(e.target.value)} className={inputCls} /></div>
               <p className="text-xs text-muted-foreground pb-2">{fmtDateIst(range.from)}{range.from !== range.to ? ` → ${fmtDateIst(range.to)}` : ""}</p>
             </div>
             {summary && (
@@ -390,7 +391,7 @@ export default function HrAttendanceManagement() {
 
         {tab === "missing" && (
           <div className="space-y-3">
-            <div className="max-w-[200px]"><label className={labelCls}>Date</label><input type="date" value={missingDate} max={today} onChange={(e) => e.target.value && setMissingDate(e.target.value)} className={`${inputCls} w-full`} /></div>
+            <div className="max-w-[200px]"><label className={labelCls}>Date</label><DateInput value={missingDate} max={today} onChange={(e) => e.target.value && setMissingDate(e.target.value)} className={`${inputCls} w-full`} /></div>
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-3 text-left">Employee</th><th className="px-4 py-3 text-left">Employee ID</th><th className="px-4 py-3 text-left">Company</th><th className="px-4 py-3 text-left">Department</th></tr></thead>
