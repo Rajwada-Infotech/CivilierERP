@@ -1135,7 +1135,7 @@ const BankMaster: React.FC = () => {
               <p className="font-heading text-[0.625rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: RULE }}>
                 Tag Project(s)
               </p>
-              <p className="text-[0.6875rem] text-muted-foreground leading-relaxed max-w-[110ch]">
+              <p className="text-[0.6875rem] text-muted-foreground leading-relaxed">
                 Optional — leave empty and this bank stays in the shared pool every untagged Project draws from.
                 Tag it to one or more Projects and it becomes the ONLY bank offered for those Projects' work — it
                 disappears from every other Project's bank selection, including ones with no tags of their own.
