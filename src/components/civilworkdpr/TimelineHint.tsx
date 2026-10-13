@@ -53,9 +53,9 @@ export function TimelineHint({
   if (!r) return null;
   const tone =
     r.left < 0
-      ? "text-red-600 dark:text-red-400"
+      ? "text-destructive font-semibold"
       : r.left <= 1
-        ? "text-amber-600 dark:text-amber-400"
+        ? "text-foreground font-semibold"
         : "text-muted-foreground";
   return (
     <span

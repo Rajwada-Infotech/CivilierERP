@@ -40,8 +40,8 @@ export interface AssignmentMaterial {
 export const SOURCE_TYPES = ["CONTRACTOR", "DEVELOPER"] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 export const SOURCE_META: Record<SourceType, { label: string; className: string }> = {
-  CONTRACTOR: { label: "Contractor", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  DEVELOPER: { label: "Developer", className: "bg-violet-500/10 text-violet-600 dark:text-violet-400" },
+  CONTRACTOR: { label: "Contractor", className: "!rounded-none border border-foreground/40 text-foreground" },
+  DEVELOPER: { label: "Developer", className: "!rounded-none border border-dashed border-foreground text-foreground" },
 };
 
 export interface Contractor {
@@ -236,19 +236,19 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // the same badge color wherever it's shown — purely presentational, no
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
-  PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
+  PENDING: { label: "Pending", className: "!rounded-none border border-foreground/30 text-muted-foreground" },
   // Set automatically the moment an engineer is assigned (Work
   // Allocation) — the activity sits here until that engineer reports
   // progress for the first time, which is what actually flips it to
   // IN_PROGRESS (see dependencyActivityAssignment.js's PATCH
   // /:rungId/status autoStatus branch).
-  ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
-  IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400" },
-  CANCELLED: { label: "Cancelled", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
-  APPROVED: { label: "Approved", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" },
-  REWORK: { label: "Rework", className: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" },
-  COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
+  ALLOCATED: { label: "Allocated", className: "!rounded-none border border-foreground/50 text-foreground" },
+  IN_PROGRESS: { label: "In Progress", className: "!rounded-none border border-foreground text-foreground" },
+  HOLD: { label: "Hold", className: "!rounded-none border border-dashed border-foreground text-foreground" },
+  CANCELLED: { label: "Cancelled", className: "!rounded-none border border-destructive text-destructive" },
+  APPROVED: { label: "Approved", className: "!rounded-none border border-foreground bg-foreground text-card" },
+  REWORK: { label: "Rework", className: "!rounded-none border border-dashed border-foreground text-foreground" },
+  COMPLETED: { label: "Completed", className: "!rounded-none border border-foreground bg-foreground text-card" },
 };
 
 // The status dropdown is an In Progress <-> Hold toggle, plus Cancelled —

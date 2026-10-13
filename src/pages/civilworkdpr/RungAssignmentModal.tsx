@@ -30,8 +30,8 @@ import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { applyDefaultDays, changeDays, changeEnd, changeStart, type AllocDates } from "./allocationDates";
 
 const inputCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+  "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed";
+const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1.5 mb-1.5";
 
 // Native <select multiple> renders as a raw OS listbox no amount of CSS can
 // soften — this pairs a styled trigger with a checkbox list in a Radix
@@ -79,7 +79,7 @@ export function UserMultiSelect({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search…"
               autoFocus
-              className="w-full pl-7 pr-2 py-1.5 rounded-md text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+              className="w-full pl-7 pr-2 py-1.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground focus:outline-none"
             />
           </div>
         )}
@@ -91,7 +91,7 @@ export function UserMultiSelect({
           visibleUsers.map((u) => (
             <label
               key={u.id}
-              className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm text-foreground hover:bg-muted cursor-pointer transition-colors"
+              className="flex items-center gap-2.5 px-2.5 py-2 text-sm text-foreground hover:bg-primary/10 cursor-pointer transition-colors"
             >
               <Checkbox checked={selected.includes(u.id)} onCheckedChange={() => toggle(u.id)} />
               {u.name}
@@ -129,7 +129,7 @@ export function ApprovalLevelsEditor({
   const addLevel = () => onChange([...levels, newLevel(levels.length)]);
 
   return (
-    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3.5 space-y-2.5">
+    <div className="border border-dashed border-foreground/40 p-3.5 space-y-2.5">
       <div className="flex items-center justify-between">
         <label className={`${labelCls} mb-0`}>
           <ShieldCheck size={11} /> Approval Setup
@@ -137,7 +137,7 @@ export function ApprovalLevelsEditor({
         <button
           type="button"
           onClick={addLevel}
-          className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
+          className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-foreground underline underline-offset-2"
         >
           <Plus size={11} /> Add Approver Level
         </button>
@@ -169,10 +169,10 @@ export function ApprovalLevelsEditor({
                     type="button"
                     onClick={() => updateLevel(level.id, { mode: level.mode === "any" ? "all" : "any" })}
                     title={level.mode === "any" ? "Any one of them can approve — click to require all" : "All must approve — click to allow any one of them"}
-                    className={`shrink-0 inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full transition-colors ${
+                    className={`shrink-0 inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 border transition-colors ${
                       level.mode === "any"
-                        ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
-                        : "bg-muted text-muted-foreground"
+                        ? "border-dashed border-foreground text-foreground"
+                        : "border-foreground bg-foreground text-card"
                     }`}
                   >
                     <Users size={10} /> {level.mode === "any" ? "Any one" : "All"}
@@ -181,7 +181,7 @@ export function ApprovalLevelsEditor({
                 <button
                   type="button"
                   onClick={() => removeLevel(level.id)}
-                  className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  className="shrink-0 p-1.5 text-muted-foreground hover:text-destructive transition-colors"
                   title="Remove level"
                 >
                   <Trash2 size={12} />
@@ -225,7 +225,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         <FileText size={11} /> Reference Blueprint
       </label>
       {blueprintLoading ? (
-        <div className="rounded-lg border border-border bg-muted/30 h-24 flex items-center justify-center">
+        <div className="border border-foreground/40 h-24 flex items-center justify-center">
           <Loader2 size={16} className="animate-spin text-muted-foreground" />
         </div>
       ) : !blueprint ? (
@@ -236,7 +236,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         <button
           type="button"
           onClick={() => setEditorOpen(true)}
-          className="relative w-full max-w-[240px] rounded-lg border border-border overflow-hidden hover:border-primary/40 transition-colors group"
+          className="relative w-full max-w-[240px] border border-foreground/40 overflow-hidden hover:border-foreground transition-colors group"
         >
           {thumbnailSrc ? (
             <img src={thumbnailSrc} alt="Blueprint" className="w-full h-32 object-cover bg-white" />
@@ -246,7 +246,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
             </div>
           )}
           {annotation && (
-            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-emerald-500/90 text-white">
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card">
               Marked
             </span>
           )}
@@ -449,15 +449,19 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-4xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
-          <div>
-            <h3 className="font-heading font-semibold text-sm text-foreground">{rung.activityName}</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Assign engineers & material</p>
+      <div
+        className="sheet-frame relative w-full max-w-4xl bg-card flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150"
+        style={{ margin: 0, border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.12)" }}
+      >
+        <div className="flex items-end justify-between gap-3 px-6 py-4 shrink-0" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <div className="min-w-0">
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Work allocation · engineers and material</p>
+            <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1 break-words">{rung.activityName}</h3>
           </div>
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Close"
+            className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
           >
             <X size={15} />
           </button>
@@ -502,7 +506,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   className={inputCls}
                 />
                 {startAuto && startDate && (
-                  <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-1">Tentative — worked back from the end date</p>
+                  <p className="text-[0.625rem] text-foreground font-medium mt-1">Tentative: worked back from the end date</p>
                 )}
               </div>
               <div>
@@ -559,7 +563,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   </SearchableNativeSelect>
                   {labourSource && (
                     <span
-                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
+                      className={`shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 ${SOURCE_META[labourSource].className}`}
                     >
                       {SOURCE_META[labourSource].label}
                     </span>
@@ -590,7 +594,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   </SearchableNativeSelect>
                   {materialSource && (
                     <span
-                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}
+                      className={`shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 ${SOURCE_META[materialSource].className}`}
                     >
                       {SOURCE_META[materialSource].label}
                     </span>
@@ -612,7 +616,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   ))}
                 </select>
                 {priority && (
-                  <span className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${PRIORITY_META[priority].className}`}>
+                  <span className={`shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-1 ${PRIORITY_META[priority].className}`}>
                     {priority}
                   </span>
                 )}
@@ -669,7 +673,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   {candidateItems.map((item) => (
                     <div
                       key={item.itemId}
-                      className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/40 px-3 py-2"
+                      className="flex items-center gap-2.5 border border-foreground/40 px-3 py-2"
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground truncate">{item.itemName}</p>
@@ -686,7 +690,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         onChange={(e) =>
                           setQuantities((q) => ({ ...q, [item.itemId]: e.target.value }))
                         }
-                        className="w-20 px-2 py-1.5 rounded-md text-xs bg-background border border-border text-foreground text-right focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                        className="w-20 px-2 py-1.5 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground text-right font-heading tabular-nums focus:outline-none"
                       />
                       {item.uom && <span className="text-[0.625rem] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
                     </div>
@@ -712,30 +716,30 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   {checkpoints.map((cp, i) => (
                     <div
                       key={`${cp.checkpointId ?? "custom"}-${i}`}
-                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border ${
-                        cp.needsRework ? "cp-rework-blink bg-amber-500/10 border-amber-500/50" : "bg-muted/40 border-border/50"
+                      className={`flex items-center gap-2 px-2.5 py-1.5 border ${
+                        cp.needsRework ? "border-destructive" : "border-foreground/30"
                       }`}
                     >
                       <div
-                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                          cp.isChecked ? "bg-emerald-500 border-emerald-500 text-white" : "bg-background border-border text-transparent"
+                        className={`w-4 h-4 border flex items-center justify-center shrink-0 ${
+                          cp.isChecked ? "bg-foreground border-foreground text-card" : "bg-card border-foreground/50 text-transparent"
                         }`}
                       >
                         <Check size={9} strokeWidth={3} />
                       </div>
                       <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
                       {cp.needsRework && (
-                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-destructive shrink-0">
                           Redo — rated Poor
                         </span>
                       )}
                       {cp.isDaily && (
-                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground shrink-0">
                           <CalendarDays size={9} /> Daily
                         </span>
                       )}
                       {cp.minWaitDays != null && cp.minWaitDays > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground shrink-0">
                           <Timer size={9} /> {cp.minWaitDays}d wait
                         </span>
                       )}
@@ -761,11 +765,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
           </div>
         )}
 
-        <div className="flex items-center justify-end gap-2 px-6 py-3.5 border-t border-border shrink-0">
+        <div className="flex items-center justify-end gap-2 px-6 py-3.5 shrink-0" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
           >
             Cancel
           </button>
@@ -773,7 +777,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
             type="button"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending || isLoading}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0 h-9 px-5 bg-foreground text-card border border-foreground"
           >
             {saveMutation.isPending && <Loader2 size={12} className="animate-spin" />}
             Save
