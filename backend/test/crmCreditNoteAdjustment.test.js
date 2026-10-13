@@ -36,7 +36,7 @@ const gst = require("../services/crmGstNotes");
 const pool = { request() { return new (require("../db").sql.Transaction)().request(); } };
 // load() reads the note back through the pool: answer with the note, as issued.
 const noteRow = (extra = {}) => ({ Id: 5, Source: "Adjustment", Status: "Pending", BookingId: 3, InvoiceId: 9, MilestoneId: 4, TotalAmount: 30000, GstAmount: 1428.57,
-  TaxableValue: 28571.43, CustomerId: 1, InvoiceDate: "2026-06-01", InvoiceType: "Milestone", OpenAmount: 100000, OpenRequests: 0, ...extra });
+  TaxableValue: 28571.43, CustomerId: 1, InvoiceDate: "2026-06-01", InvoiceType: "Milestone", InvoiceNo: "INV-2026-00009", BookingActive: true, BookingStatus: "Active", OpenAmount: 100000, OpenRequests: 0, ...extra });
 
 beforeEach(() => { mockState = { log: [], note: noteRow(), milestone: { Id: 4, AmountDue: 100000, AmountPaid: 100000, MilestoneName: "Slab 1" } }; });
 
