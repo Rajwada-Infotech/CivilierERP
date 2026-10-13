@@ -1,9 +1,9 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ShieldCheck, Search, UserRound, CalendarDays, Package, Camera, Loader2, CheckCircle2, RotateCcw, MapPin, AlertTriangle } from "lucide-react";
+import { Search, Camera, Loader2, CheckCircle2, RotateCcw } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -22,6 +22,11 @@ const fmtDate = (d: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 type Verdict = { rating: QcRating | null; note: string };
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 const RATING_OPTIONS: Array<{ value: QcRating; label: string }> = [
   { value: "POOR", label: "Poor" },
@@ -106,72 +111,72 @@ function InspectDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sheet-frame max-w-3xl max-h-[90vh] overflow-y-auto" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle>
-            {row.sequenceNo}. {row.activityName}
-          </DialogTitle>
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-            <MapPin size={11} /> {row.projectName ? `${row.projectName} > ` : ""}{row.scopePath}
-          </p>
+          <div className="pb-3" style={{ borderBottom: RULE }}>
+            <p className={LBL}>Quality check · step {row.sequenceNo}</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{row.activityName}</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              {row.projectName ? `${row.projectName} > ` : ""}{row.scopePath}
+            </p>
+          </div>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-5 gap-y-3">
           {[
             ["Chain", row.alias],
             ["Engineer", row.engineerNames || "—"],
             ["Start", fmtDate(row.startDate)],
             ["End", fmtDate(row.endDate)],
           ].map(([k, v]) => (
-            <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
-              <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{k}</p>
-              <p className="font-semibold text-foreground truncate">{v}</p>
+            <div key={k} className="min-w-0">
+              <p className={LBL}>{k}</p>
+              <p className="text-[0.8125rem] font-medium text-foreground mt-1 break-words">{v}</p>
             </div>
           ))}
         </div>
 
         {history.length > 0 && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs space-y-1">
-            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-amber-600 dark:text-amber-400">Previous QC</p>
+          <div className="px-3 py-2.5 text-xs space-y-1.5" style={{ border: "1px dashed hsl(var(--foreground) / 0.5)" }}>
+            <p className={LBL}>Previous quality checks</p>
             {history.slice(0, 3).map((h) => (
               <p key={h.id} className="text-foreground">
-                <span className="font-semibold">{h.decision === "APPROVED" ? "Approved" : "Rework"}</span>
-                {" · "}{fmtDate(h.qcAt)}{h.qcBy ? ` · ${h.qcBy}` : ""}
-                {h.remarks ? ` — ${h.remarks}` : ""}
+                <span className={`font-semibold ${h.decision === "APPROVED" ? "" : "text-destructive"}`}>{h.decision === "APPROVED" ? "Approved" : "Rework"}</span>
+                <span className="text-muted-foreground tabular-nums">{" · "}{fmtDate(h.qcAt)}{h.qcBy ? ` · ${h.qcBy}` : ""}</span>
+                {h.remarks ? `: ${h.remarks}` : ""}
               </p>
             ))}
           </div>
         )}
 
         <div>
-          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
-            Checklist sign-off ({checkpoints.length})
-          </p>
+          <p className={`${LBL} mb-2`}>Checklist sign-off · {checkpoints.length}</p>
           {isLoading ? (
             <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
           ) : checkpoints.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">This activity has no checkpoints, so it can be approved directly.</p>
+            <p className="text-xs text-muted-foreground">This activity has no checkpoints, so it can be approved directly.</p>
           ) : (
-            <div className="rounded-xl border border-border divide-y divide-border/60">
+            <div className="divide-y divide-border/70" style={{ border: RULE }}>
               {checkpoints.map((c) => {
                 const id = c.id as number;
                 const v = verdicts[id];
                 const isPoor = v?.rating === "POOR";
                 return (
                   <div key={id} className="px-3 py-2.5 space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="flex-1 text-sm font-medium text-foreground">{c.fieldName}</span>
-                      {c.isChecked && <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Engineer ticked</span>}
+                    <div className="flex items-center gap-3">
+                      <span className="flex-1 min-w-0 text-sm font-medium text-foreground">{c.fieldName}</span>
+                      {c.isChecked && <span className={`${LBL} shrink-0`}>Engineer ticked</span>}
                       <select
                         value={v?.rating ?? ""}
                         disabled={!canEdit}
                         onChange={(e) => setVerdict(id, { rating: (e.target.value || null) as QcRating | null })}
-                        className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border focus:outline-none transition-colors ${
+                        aria-label={`Rating for ${c.fieldName}`}
+                        className={`shrink-0 text-xs font-semibold px-2.5 py-1.5 bg-card border focus:outline-none ${
                           isPoor
-                            ? "border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
+                            ? "border-destructive text-destructive"
                             : v?.rating
-                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                              : "border-border text-muted-foreground"
+                              ? "border-foreground text-foreground"
+                              : "border-dashed border-foreground/50 text-muted-foreground"
                         }`}
                       >
                         <option value="">Rate…</option>
@@ -182,7 +187,7 @@ function InspectDialog({
                     </div>
                     {isPoor && (
                       <input
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30"
+                        className="w-full px-2.5 py-1.5 border border-destructive/60 focus:border-destructive bg-card text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
                         placeholder="What's wrong? (optional note)"
                         value={v?.note ?? ""}
                         onChange={(e) => setVerdict(id, { note: e.target.value })}
@@ -195,16 +200,16 @@ function InspectDialog({
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             type="button"
             disabled={!canEdit || upload.isPending}
             onClick={() => fileRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted/60 disabled:opacity-50 transition-colors"
+            className={`${KEY} px-3 py-2 border border-foreground text-foreground hover:bg-primary/10`}
           >
             {upload.isPending ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />} Attach photo
           </button>
-          <span className="text-xs text-muted-foreground">{photoCount} photo{photoCount === 1 ? "" : "s"} on this activity</span>
+          <span className="text-xs text-muted-foreground tabular-nums">{photoCount} photo{photoCount === 1 ? "" : "s"} on this activity</span>
           <input
             ref={fileRef}
             type="file"
@@ -219,7 +224,9 @@ function InspectDialog({
         </div>
 
         <div>
-          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">Remarks</p>
+          <p className={`${LBL} mb-1.5`} style={remarksMissing ? { color: "hsl(var(--destructive))" } : undefined}>
+            Remarks{decision === "REWORK" ? " · required for rework" : ""}
+          </p>
           <textarea
             rows={3}
             value={remarks}
@@ -227,50 +234,54 @@ function InspectDialog({
             disabled={!canEdit}
             onChange={(e) => setRemarks(e.target.value)}
             placeholder="Required when sending back for rework"
-            className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+            className={`w-full px-3 py-2 border bg-card text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none ${
+              remarksMissing ? "border-destructive" : "border-foreground/40 focus:border-foreground"
+            }`}
           />
         </div>
 
         {/* Decision is derived live from the ratings above, not a separate
             manual choice — one Poor anywhere sends it for Rework. */}
         {hasCheckpoints && (
-          <div
-            className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium ${
-              anyPoor
-                ? "bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-400"
-                : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-            }`}
-          >
-            {anyPoor ? <AlertTriangle size={14} className="shrink-0" /> : <CheckCircle2 size={14} className="shrink-0" />}
-            {anyPoor
-              ? "One or more checkpoints rated Poor — this will be sent back for Rework."
-              : allRated
-                ? "Every checkpoint rated Good or better — ready to Approve."
-                : "Rate every checkpoint to continue."}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-xs" style={{ border: `1px solid hsl(var(--${anyPoor ? "destructive" : "foreground"}))` }}>
+            <SheetMark
+              text={anyPoor ? "Rework" : allRated ? "Ready to approve" : "Rating in progress"}
+              tone={anyPoor ? "stopped" : allRated ? "done" : "waiting"}
+            />
+            <span className="text-foreground">
+              {anyPoor
+                ? "One or more checkpoints are rated Poor, so this will be sent back for rework."
+                : allRated
+                  ? "Every checkpoint is rated Good or better."
+                  : "Rate every checkpoint to continue."}
+            </span>
           </div>
         )}
 
         {canEdit && (
-          <div className="flex items-center justify-end gap-2 pt-1">
+          <div className="flex items-center justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+            <button type="button" onClick={onClose} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
+              Close
+            </button>
             <button
               type="button"
               disabled={submitBlocked || decide.isPending}
               title={remarksMissing ? "Add a remark explaining the rework" : hasCheckpoints && !allRated ? "Rate every checkpoint first" : undefined}
               onClick={() => decide.mutate()}
-              className={`inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white transition disabled:opacity-40 shadow-sm ${
+              className={`${KEY} h-9 px-5 border ${
                 decision === "REWORK"
-                  ? "btn-module shadow-fuchsia-500/20"
-                  : "btn-module shadow-emerald-500/20"
+                  ? "bg-destructive text-destructive-foreground border-destructive"
+                  : "bg-foreground text-card border-foreground"
               }`}
             >
               {decide.isPending ? (
-                <Loader2 size={14} className="animate-spin" />
+                <Loader2 size={13} className="animate-spin" />
               ) : decision === "REWORK" ? (
-                <RotateCcw size={14} />
+                <RotateCcw size={13} />
               ) : (
-                <CheckCircle2 size={14} />
+                <CheckCircle2 size={13} />
               )}
-              {decision === "REWORK" ? "Send for Rework" : "Approve"}
+              {decision === "REWORK" ? "Send for rework" : "Approve"}
             </button>
           </div>
         )}
@@ -309,80 +320,76 @@ export default function QualityCheck() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Quality Check"]} />
-      <CivilWorkDprShell
-        title="Quality Check"
-        subtitle="Every activity dragged to 100% complete, ready for inspection"
-        icon={ShieldCheck}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Quality check"
+        subtitle="Every activity brought to 100% complete, waiting for inspection."
       >
-        <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-border/60 flex flex-wrap items-center gap-3">
-            <h3 className="text-sm font-heading font-semibold text-foreground">Completed Activities</h3>
-            <span className="text-[0.6875rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length}</span>
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+            <p className="flex items-baseline gap-2.5">
+              <span className={HEAD}>Waiting for inspection</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{rows.length}</span>
+            </p>
             <div className="relative ml-auto w-full sm:w-72">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search activity, location, engineer…"
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                className="w-full h-9 pl-8 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2 text-left">Activity</th>
-                  <th className="px-4 py-2 text-left">Location</th>
-                  <th className="px-4 py-2 text-left">Engineer</th>
-                  <th className="px-4 py-2 text-left">Start Date</th>
-                  <th className="px-4 py-2 text-left">Material</th>
+                  <th className="px-4 py-2.5 text-left">Activity</th>
+                  <th className="px-4 py-2.5 text-left">Location</th>
+                  <th className="px-4 py-2.5 text-left">Engineer</th>
+                  <th className="px-4 py-2.5 text-left">Start date</th>
+                  <th className="px-4 py-2.5 text-left">Material</th>
                   <th className="w-28" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/50">
+              <tbody>
                 {isLoading ? (
                   <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">Loading…</td></tr>
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                      {rows.length === 0 ? "No activities are Completed right now." : "No activities match your search."}
+                      {rows.length === 0 ? "Nothing is waiting for inspection right now." : "No activities match your search."}
                     </td>
                   </tr>
                 ) : (
                   filtered.map((r) => (
-                    <tr key={r.rungId} className="hover:bg-muted/20">
+                    <tr key={r.rungId}>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-foreground flex items-center gap-1.5">
-                          {r.sequenceNo}. {r.activityName}
+                        <p className="text-[0.8125rem] font-medium text-foreground flex items-center gap-2 flex-wrap">
+                          <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground">{r.sequenceNo}</span>
+                          {r.activityName}
                           <QcBadge qcStatus={r.qcStatus} />
                           <AttemptBadge attemptNo={r.attemptNo} />
                         </p>
-                        <p className="text-[0.6875rem] text-muted-foreground">{r.alias}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{r.alias}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground max-w-[260px]">
                         {r.projectName ? `${r.projectName} > ` : ""}{r.scopePath}
                       </td>
-                      <td className="px-4 py-3 text-xs">
-                        <span className="inline-flex items-center gap-1.5"><UserRound size={11} className="text-muted-foreground" />{r.engineerNames || "—"}</span>
-                      </td>
-                      <td className="px-4 py-3 text-xs whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5"><CalendarDays size={11} className="text-muted-foreground" />{fmtDate(r.startDate)}</span>
-                      </td>
+                      <td className="px-4 py-3 text-xs text-foreground">{r.engineerNames || "—"}</td>
+                      <td className="px-4 py-3 text-xs text-foreground whitespace-nowrap tabular-nums">{fmtDate(r.startDate)}</td>
                       <td className="px-4 py-3 text-xs">
                         {r.materials.length === 0 ? (
                           <span className="text-muted-foreground">—</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5"><Package size={11} className="text-muted-foreground" />{r.materials.length} item{r.materials.length === 1 ? "" : "s"}</span>
+                          <span className="text-foreground tabular-nums">{r.materials.length} item{r.materials.length === 1 ? "" : "s"}</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => setInspecting(r)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-module transition"
-                        >
-                          <ShieldCheck size={12} /> Inspect
+                        <button onClick={() => setInspecting(r)} className={`${KEY} px-3 py-2 bg-foreground text-card border border-foreground`}>
+                          Inspect
                         </button>
                       </td>
                     </tr>
@@ -392,7 +399,7 @@ export default function QualityCheck() {
             </table>
           </div>
         </div>
-      </CivilWorkDprShell>
+      </SheetShell>
 
       {inspecting && <InspectDialog row={inspecting} canEdit={rights.canEdit} onClose={() => setInspecting(null)} />}
     </>
