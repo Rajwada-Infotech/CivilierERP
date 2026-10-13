@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useCallback, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { FinanceShell } from "@/components/finance/FinanceShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
@@ -11,22 +11,13 @@ import {
   CalendarDays,
   Building,
   FolderKanban,
-  Scale,
   Loader2,
   ChevronDown,
   ChevronRight,
   Printer,
-  CheckCircle2,
-  AlertTriangle,
-  TrendingUp,
-  TrendingDown,
-  Banknote,
-  ShieldCheck,
-  Activity,
   Info,
   Minus,
   AlertCircle,
-  Target,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
 
@@ -116,7 +107,7 @@ const r2  = (n: number | null) => n == null ? "—" : n.toFixed(2);
 function Signed({ amount, className = "" }: { amount: number; className?: string }) {
   const neg = amount < -0.005;
   return (
-    <span className={`tabular-nums ${neg ? "text-red-600 dark:text-red-400" : ""} ${className}`}>
+    <span className={`tabular-nums ${neg ? "text-destructive" : ""} ${className}`}>
       {neg ? "(" : ""}{fmt(amount)}{neg ? ")" : ""}
     </span>
   );
@@ -135,46 +126,35 @@ function ratioHealth(key: string, value: number | null): "good" | "warn" | "bad"
   }
 }
 
-const healthColors = {
-  good:    "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/25",
-  warn:    "text-amber-600  dark:text-amber-400  bg-[#ffe2021a]  border-amber-500/25",
-  bad:     "text-red-600    dark:text-red-400    bg-red-500/10    border-red-500/25",
-  neutral: "text-foreground                      bg-muted/40      border-border",
+const HEALTH_MARK: Record<"good" | "warn" | "bad", { text: string; tone: "done" | "waiting" | "stopped" }> = {
+  good: { text: "Healthy", tone: "done" },
+  warn: { text: "Watch", tone: "waiting" },
+  bad:  { text: "Attention", tone: "stopped" },
 };
 
-const healthIconColors = {
-  good: "text-emerald-500",
-  warn: "text-amber-500",
-  bad:  "text-red-500",
-  neutral: "text-muted-foreground",
-};
+// ─── Ratio ────────────────────────────────────────────────────────────────────
 
-// ─── Ratio Card ───────────────────────────────────────────────────────────────
-
-function RatioCard({
-  label, value, formatted, icon: Icon, healthKey, subtitle, benchmark,
+function Ratio({
+  label, value, formatted, healthKey, subtitle, benchmark,
 }: {
   label:      string;
   value:      number | null;
   formatted:  string;
-  icon:       React.ElementType;
   healthKey:  string;
   subtitle?:  string;
   benchmark?: string;
 }) {
   const health = ratioHealth(healthKey, value);
   return (
-    <div className={`flex-1 min-w-[140px] rounded-xl border p-3.5 transition-all hover:shadow-md ${healthColors[health]}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-[0.5625rem] font-heading uppercase tracking-widest opacity-60 mb-1">{label}</p>
-          <p className="text-base font-bold tabular-nums leading-tight">{formatted}</p>
-          {subtitle && <p className="text-[0.5625rem] opacity-60 mt-0.5">{subtitle}</p>}
-          {benchmark && <p className="text-[0.5rem] opacity-50 mt-0.5 italic">{benchmark}</p>}
-        </div>
-        <div className={`rounded-lg p-1.5 bg-background/60 ${healthIconColors[health]}`}>
-          <Icon size={12} />
-        </div>
+    <div>
+      <p className="label">{label}</p>
+      <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: health === "bad" ? "var(--red)" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {formatted}
+      </p>
+      {subtitle && <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{subtitle}</p>}
+      <div className="flex items-center gap-3 flex-wrap" style={{ marginTop: 8 }}>
+        {health !== "neutral" && <SheetMark text={HEALTH_MARK[health].text} tone={HEALTH_MARK[health].tone} />}
+        {benchmark && <span style={{ fontSize: 11, color: "var(--graphite)" }}>{benchmark}</span>}
       </div>
     </div>
   );
@@ -190,15 +170,15 @@ function StatementSheet({
   children:    ReactNode;
 }) {
   return (
-    <div id="bs-printable" className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+    <div id="bs-printable" className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
       {/* Letterhead */}
-      <div className="px-6 pt-5 pb-4 text-center border-b border-border bg-gradient-to-b from-muted/30 to-transparent">
-        <h2 className="text-sm font-heading font-bold tracking-wide text-foreground uppercase">
-          {companyName || "Consolidated — All Companies"}
+      <div className="px-6 pt-5 pb-4 text-center" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        <h2 className="font-heading text-sm font-bold tracking-[0.1em] text-foreground uppercase">
+          {companyName || "Consolidated: all companies"}
         </h2>
-        <h3 className="text-xs font-semibold text-foreground mt-1.5">Balance Sheet</h3>
-        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{asOfLabel}</p>
-        <p className="text-[0.5625rem] text-muted-foreground/50 mt-1">
+        <h3 className="font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-foreground mt-2">Balance Sheet</h3>
+        <p className="text-[0.75rem] text-muted-foreground mt-1 tabular-nums">{asOfLabel}</p>
+        <p className="text-[0.625rem] text-muted-foreground mt-1">
           (All amounts in Indian Rupees ₹, unless otherwise stated)
         </p>
       </div>
@@ -211,11 +191,11 @@ function StatementSheet({
 
 function SectionHeader({ roman, label }: { roman: string; label: string }) {
   return (
-    <tr className="bg-muted/30">
-      <td colSpan={4} className="py-2 px-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[0.625rem] font-mono text-muted-foreground/60">{roman}.</span>
-          <span className="text-xs font-bold text-foreground uppercase tracking-wide">{label}</span>
+    <tr className="r-head">
+      <td colSpan={4} className="py-2.5 px-3">
+        <div className="flex items-baseline gap-2.5">
+          <span className="font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground">{roman}.</span>
+          <span className="font-heading text-xs font-bold text-foreground uppercase tracking-[0.14em]">{label}</span>
         </div>
       </td>
     </tr>
@@ -247,28 +227,28 @@ function GroupRow({
   return (
     <>
       <tr
-        className={`border-b border-border/30 transition-colors ${clickable ? "cursor-pointer hover:bg-muted/25" : ""}`}
+        className={`r-line ${clickable ? "r-click cursor-pointer" : ""}`}
         onClick={() => clickable && onToggle(key)}
       >
         <td className="py-2 pr-3 text-[0.6875rem] text-foreground" style={{ paddingLeft: indent * 4 }}>
           <div className="flex items-center gap-2">
             {clickable ? (
               isOpen
-                ? <ChevronDown size={10} className="text-primary/60 shrink-0" />
-                : <ChevronRight size={10} className="text-muted-foreground/50 shrink-0" />
+                ? <ChevronDown size={11} className="text-foreground shrink-0" />
+                : <ChevronRight size={11} className="text-foreground shrink-0" />
             ) : <span className="w-[10px] shrink-0" />}
             <span className={clickable ? "font-medium" : ""}>{group.groupName}</span>
           </div>
         </td>
         {/* Note ref */}
-        <td className="py-2 px-3 text-right text-[0.5625rem] text-muted-foreground/40 w-16">
+        <td className="py-2 px-3 text-right font-heading text-[0.625rem] tabular-nums text-muted-foreground w-16">
           {showNote && noteNum ? noteNum : ""}
         </td>
         {/* Sub-amount (heads sum) — only shown when there's more than one head to sum */}
-        <td className="py-2 px-3 text-right text-[0.6875rem] tabular-nums text-muted-foreground/70 w-32">
+        <td className="py-2 px-3 text-right font-heading text-[0.6875rem] tabular-nums text-muted-foreground w-32">
           {group.heads.length > 1 ? fmt(group.total) : ""}
         </td>
-        <td className="py-2 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums font-medium text-foreground w-36">
+        <td className="py-2 pl-3 pr-5 text-right font-heading text-[0.6875rem] tabular-nums font-semibold text-foreground w-36">
           {fmt(group.total)}
         </td>
       </tr>
@@ -276,11 +256,11 @@ function GroupRow({
       {isOpen && group.heads.length > 0 && (
         <tr>
           <td colSpan={4} className="pb-1.5">
-            <div className="ml-4 mr-5 border-l-2 border-primary/20 pl-3 py-1 space-y-0.5" style={{ marginLeft: indent * 4 + 8 }}>
+            <div className="ml-4 mr-5 pl-3 py-1 space-y-1" style={{ marginLeft: indent * 4 + 8, borderLeft: "1px solid hsl(var(--foreground))" }}>
               {group.heads.map((h) => (
-                <div key={h.id ?? h.name} className="flex items-center justify-between text-[0.625rem] text-muted-foreground group">
+                <div key={h.id ?? h.name} className="flex items-center justify-between text-[0.6875rem] text-muted-foreground group">
                   <span className="truncate pr-4 group-hover:text-foreground transition-colors">{h.name}</span>
-                  <Signed amount={h.amount} className="shrink-0 font-medium" />
+                  <Signed amount={h.amount} className="shrink-0 font-heading font-medium text-foreground" />
                 </div>
               ))}
             </div>
@@ -322,30 +302,27 @@ function SectionBlock({ label, amount, children }: { label: string; amount: numb
     <>
       <tr>
         <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-          <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">{label}</span>
+          <span className="font-heading text-[0.6875rem] font-bold text-foreground uppercase tracking-[0.1em]">{label}</span>
         </td>
       </tr>
       {children}
-      <tr className="border-t border-border/60">
-        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — {label}</td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(amount)}</td>
+      <tr className="r-sub">
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-[0.6875rem] font-semibold text-foreground">Sub-total: {label}</td>
+        <td className="py-1.5 pl-3 pr-5 text-right font-heading text-xs font-semibold tabular-nums text-foreground w-36">{fmt(amount)}</td>
       </tr>
-      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+      <tr><td colSpan={4} className="py-1.5" /></tr>
     </>
   );
 }
 
 // ─── Grand Total Row ──────────────────────────────────────────────────────────
 
-function GrandTotalRow({ label, amount, variant }: { label: string; amount: number; variant: "liabilities" | "assets" }) {
-  const colors = variant === "liabilities"
-    ? "text-violet-700 dark:text-violet-400"
-    : "text-emerald-700 dark:text-emerald-400";
-
+function GrandTotalRow({ label, amount }: { label: string; amount: number }) {
+  // Closed off the way a statement is: a heavy rule above the total, a rule beneath
   return (
-    <tr className="border-t-2 border-double border-foreground/35">
-      <td colSpan={3} className={`py-2 pl-5 pr-3 text-xs font-bold ${colors}`}>{label}</td>
-      <td className={`py-2 pl-3 pr-5 text-right text-xs font-bold tabular-nums w-36 ${colors}`}>
+    <tr className="r-total">
+      <td colSpan={3} className="py-2.5 pl-5 pr-3 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.12em] text-foreground">{label}</td>
+      <td className="py-2.5 pl-3 pr-5 text-right font-heading text-[0.8125rem] font-bold tabular-nums w-36 text-foreground">
         {fmt(amount)}
       </td>
     </tr>
@@ -380,13 +357,13 @@ function PartnersCapitalBlock({
   // only entries are drawings, an always-zero line is just noise.
   const showCredits = data.partners.some((p) => Math.abs(p.credits) > 0.005);
   const row = (label: string, amount: number, opts: { sub?: boolean; strong?: boolean; neg?: boolean } = {}) => (
-    <tr className={opts.sub ? "border-t border-border/40" : "border-b border-border/20"}>
+    <tr className={opts.sub ? "r-sub-soft" : "r-line"}>
       <td className={`py-1 pl-10 pr-3 text-[0.6875rem] ${opts.strong ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{label}</td>
       <td className="w-16" />
-      <td className="py-1 px-3 text-right text-[0.6875rem] tabular-nums text-muted-foreground/80 w-32">
+      <td className="py-1 px-3 text-right font-heading text-[0.6875rem] tabular-nums text-muted-foreground w-32">
         {!opts.strong && (opts.neg ? `(${fmt(amount)})` : <Signed amount={amount} />)}
       </td>
-      <td className="py-1 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums w-36">
+      <td className="py-1 pl-3 pr-5 text-right font-heading text-[0.6875rem] tabular-nums w-36">
         {opts.strong && <span className="font-semibold"><Signed amount={amount} /></span>}
       </td>
     </tr>
@@ -396,7 +373,7 @@ function PartnersCapitalBlock({
     <>
       <tr>
         <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-          <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">Partners' Capital Account</span>
+          <span className="font-heading text-[0.6875rem] font-bold text-foreground uppercase tracking-[0.1em]">Partners' Capital Account</span>
         </td>
       </tr>
 
@@ -418,25 +395,25 @@ function PartnersCapitalBlock({
             {showCredits && row("Add: Share of Profit / Remuneration / Interest", p.credits)}
             {row("Sub-total", before, { sub: true })}
             {row("Less: Drawings", p.drawings, { neg: true })}
-            {row(`Closing balance — ${p.name}`, p.closing, { sub: true, strong: true })}
+            {row(`Closing balance: ${p.name}`, p.closing, { sub: true, strong: true })}
           </Fragment>
         );
       })}
 
-      <tr className="border-t border-border/40">
+      <tr className="r-sub-soft">
         <td className="py-1.5 pl-8 pr-3 text-[0.6875rem] text-muted-foreground">
           Add: Net Profit / (Loss) for the period <span className="opacity-60">(not yet allocated to partners)</span>
         </td>
         <td className="w-16" />
         <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums font-medium w-36"><Signed amount={data.netProfitCurrent} /></td>
+        <td className="py-1.5 pl-3 pr-5 text-right font-heading text-[0.6875rem] tabular-nums font-medium w-36"><Signed amount={data.netProfitCurrent} /></td>
       </tr>
 
-      <tr className="border-t border-border/60">
-        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital Account</td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36"><Signed amount={data.total} /></td>
+      <tr className="r-sub">
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-[0.6875rem] font-semibold text-foreground">Sub-total: Partners' Capital Account</td>
+        <td className="py-1.5 pl-3 pr-5 text-right font-heading text-xs font-semibold tabular-nums text-foreground w-36"><Signed amount={data.total} /></td>
       </tr>
-      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+      <tr><td colSpan={4} className="py-1.5" /></tr>
     </>
   );
 }
@@ -453,20 +430,20 @@ function ReservesAndSurplusBlock({ data }: { data: ReservesAndSurplus }) {
     <>
       <tr>
         <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-          <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">Reserves &amp; Surplus</span>
+          <span className="font-heading text-[0.6875rem] font-bold text-foreground uppercase tracking-[0.1em]">Reserves &amp; Surplus</span>
         </td>
       </tr>
-      <tr className="border-b border-border/30">
+      <tr className="r-line">
         <td className="py-1.5 pl-8 pr-3 text-[0.6875rem] text-muted-foreground">Retained Earnings b/f (Prior Years)</td>
         <td className="w-16" />
         <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[0.6875rem] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
+        <td className="py-1.5 pl-3 pr-5 text-right font-heading text-[0.6875rem] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
       </tr>
-      <tr className="border-t border-border/60">
-        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Reserves &amp; Surplus</td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
+      <tr className="r-sub">
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-[0.6875rem] font-semibold text-foreground">Sub-total: Reserves &amp; Surplus</td>
+        <td className="py-1.5 pl-3 pr-5 text-right font-heading text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
       </tr>
-      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+      <tr><td colSpan={4} className="py-1.5" /></tr>
     </>
   );
 }
@@ -501,17 +478,17 @@ function VerticalStatement({
     <StatementSheet companyName={data.companyName} asOfLabel={asOfLabel}>
       <table className="w-full border-collapse min-w-[560px]">
         <thead>
-          <tr className="border-b-2 border-foreground/20">
-            <th className="pb-2.5 pl-5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
+          <tr>
+            <th className="pb-2.5 pl-5 text-left">
               Particulars
             </th>
-            <th className="pb-2.5 px-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-16">
+            <th className="pb-2.5 px-3 text-right w-16">
               Note No.
             </th>
-            <th className="pb-2.5 px-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-32">
+            <th className="pb-2.5 px-3 text-right w-32">
               Sub-Total ₹
             </th>
-            <th className="pb-2.5 pl-3 pr-5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-36">
+            <th className="pb-2.5 pl-3 pr-5 text-right w-36">
               Amount ₹
             </th>
           </tr>
@@ -541,7 +518,7 @@ function VerticalStatement({
             <GroupList groups={data.currentLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No current liabilities" noteRef={noteRef} />
           </SectionBlock>
 
-          <GrandTotalRow label="Total Liabilities" amount={data.totals.liabilities} variant="liabilities" />
+          <GrandTotalRow label="Total liabilities" amount={data.totals.liabilities} />
 
           {/* ═══════════════ ASSETS ═══════════════ */}
           <tr><td colSpan={4} className="pt-4" /></tr>
@@ -549,7 +526,7 @@ function VerticalStatement({
 
           <tr>
             <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-              <span className="text-[0.6875rem] font-bold text-foreground uppercase tracking-wide">Fixed Assets</span>
+              <span className="font-heading text-[0.6875rem] font-bold text-foreground uppercase tracking-[0.1em]">Fixed Assets</span>
             </td>
           </tr>
           <tr>
@@ -564,11 +541,11 @@ function VerticalStatement({
             </td>
           </tr>
           <GroupList groups={data.fixedAssets.intangible} openKey={openKey} onToggle={toggle} emptyLabel="No intangible assets" noteRef={noteRef} />
-          <tr className="border-t border-border/60">
-            <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Fixed Assets</td>
-            <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(totalFixedAssets)}</td>
+          <tr className="r-sub">
+            <td colSpan={3} className="py-1.5 pl-8 pr-3 text-[0.6875rem] font-semibold text-foreground">Sub-total: Fixed Assets</td>
+            <td className="py-1.5 pl-3 pr-5 text-right font-heading text-xs font-semibold tabular-nums text-foreground w-36">{fmt(totalFixedAssets)}</td>
           </tr>
-          <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+          <tr><td colSpan={4} className="py-1.5" /></tr>
 
           <SectionBlock label="Investments" amount={totalInvestments}>
             <GroupList groups={data.investments} openKey={openKey} onToggle={toggle} emptyLabel="No investments" noteRef={noteRef} />
@@ -582,39 +559,28 @@ function VerticalStatement({
             <GroupList groups={data.fictitiousAssets} openKey={openKey} onToggle={toggle} emptyLabel="No fictitious assets" noteRef={noteRef} />
           </SectionBlock>
 
-          <GrandTotalRow label="Total Assets" amount={data.totals.assets} variant="assets" />
+          <GrandTotalRow label="Total assets" amount={data.totals.assets} />
 
         </tbody>
       </table>
 
-      {/* Balance check bar */}
-      <div className={`mt-4 mx-0 flex items-center justify-between px-4 py-2.5 rounded-lg border text-xs font-medium ${
-        data.balanced
-          ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-          : "bg-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400"
-      }`}>
-        <div className="flex items-center gap-2">
-          {data.balanced
-            ? <CheckCircle2 size={13} />
-            : <AlertTriangle size={13} />
-          }
-          <span>
-            {data.balanced
-              ? "Balance Sheet is balanced — Total Liabilities = Total Assets"
-              : "Imbalance detected — Total Liabilities ≠ Total Assets. Check for unposted entries."}
-          </span>
-        </div>
-        <span className="tabular-nums font-bold ml-4 shrink-0">
-          Assets: {fmt(data.totals.assets)} · Liabilities: {fmt(data.totals.liabilities)}
-          {!data.balanced && <> · Difference: {fmt(data.totals.difference)}</>}
+      {/* Balance check */}
+      <div className="mt-4 pt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+        <SheetMark
+          text={data.balanced ? "Balanced: total liabilities equal total assets" : "Out of balance: check for unposted entries"}
+          tone={data.balanced ? "done" : "stopped"}
+        />
+        <span className="font-heading text-[0.6875rem] tabular-nums text-foreground">
+          Assets {fmt(data.totals.assets)} · Liabilities {fmt(data.totals.liabilities)}
+          {!data.balanced && <span className="text-destructive font-semibold"> · Difference {fmt(data.totals.difference)}</span>}
         </span>
       </div>
 
       {/* Note */}
-      <div className="mt-3 pt-2.5 border-t border-border/40">
-        <p className="text-[0.5625rem] text-muted-foreground/50 italic">
+      <div className="mt-3 pt-2.5" style={{ borderTop: "1px solid hsl(var(--border))" }}>
+        <p className="text-[0.625rem] text-muted-foreground leading-relaxed">
           Prepared per the classic vertical Balance Sheet format for partnership/proprietorship entities. Every figure is pulled live
-          from the account groups tagged in Account Group Master — click any row (›) to view the underlying ledger heads.
+          from the account groups tagged in Account Group Master; click any row (›) to view the underlying ledger heads.
           Net Profit is pulled from the current Profit &amp; Loss statement; Partners' Drawings are deducted from Partners' Capital.
         </p>
       </div>
@@ -707,92 +673,81 @@ export default function BalanceSheet() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Balance Sheet"]} />
-      <FinanceShell
-        title="Balance Sheet"
-        subtitle="Partners' Capital, Liabilities & Assets — classic vertical format"
-        icon={Scale}
+      <SheetShell
+        eyebrow="CivilierERP · Finance"
+        title="Balance sheet"
+        subtitle={
+          [asOfLabel, data?.companyName || (companyId ? null : "All companies")].filter(Boolean).join(" · ") ||
+          "What the business owns and owes on a given date."
+        }
+        action={
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors"
+            >
+              <Printer size={13} /> <span className="hidden sm:inline">Print</span>
+            </button>
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
+        }
       >
 
-        {/* ── Filter Toolbar ── */}
-        <div className="mb-5 rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+        {/* ── Filters ── */}
+        <div className="mb-5 bg-card px-4 py-4 flex flex-wrap items-end gap-x-4 gap-y-3" style={{ border: "1px solid hsl(var(--foreground))" }}>
+          <div className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1"><CalendarDays size={9} /> As at</span>
+            <DateInput value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+              className="h-9 px-2.5 text-xs bg-card border border-foreground text-foreground font-semibold focus:outline-none"
+            />
+          </div>
 
-          {/* Quick date buttons */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mr-1">As On</span>
+          <div className="seg" style={{ height: 36 }}>
             {[
-              { label: "Today",        fn: setToday },
-              { label: "H1 End (Sep)", fn: setFYMid },
-              { label: "FY End (Mar)", fn: setFYEnd },
-            ].map(({ label, fn }) => (
-              <button
-                key={label}
-                onClick={fn}
-                className="px-2.5 h-7 rounded-md text-[0.625rem] font-medium bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50 transition-all"
-              >
-                {label}
-              </button>
+              { label: "Today",          fn: setToday, on: asOf === new Date().toISOString().slice(0, 10) },
+              { label: "Half-year end",  fn: setFYMid, on: asOf.endsWith("-09-30") },
+              { label: "Year end",       fn: setFYEnd, on: asOf.endsWith("-03-31") },
+            ].map(({ label, fn, on }) => (
+              <button key={label} onClick={fn} aria-pressed={on} className={on ? "on" : undefined}>{label}</button>
             ))}
           </div>
 
-          {/* Filters row */}
-          <div className="flex flex-wrap items-end gap-3">
-
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
-                <CalendarDays size={9} /> As at Date
-              </span>
-              <DateInput value={asOf}
-                onChange={(e) => setAsOf(e.target.value)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-
-            <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
-                <Building size={9} /> Company
-              </span>
-              <select
-                value={companyId ?? ""}
-                onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">All Companies</option>
-                {companies.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
-            </div>
-
-            <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
-                <FolderKanban size={9} /> Project
-              </span>
-              <select
-                value={projectId ?? ""}
-                onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : null)}
-                className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">All Projects</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-            </div>
-
-            <div className="flex items-end gap-2 ml-auto">
-              <button
-                onClick={() => window.print()}
-                className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
-              >
-                <Printer size={12} /> Print
-              </button>
-              <button
-                onClick={fetchData}
-                className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
-              >
-                <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh
-              </button>
-              {rights.canExport && data && (
-                <ExportMenu title="Balance Sheet" filename="balance-sheet" columns={exportColumns} data={exportRows} />
-              )}
-            </div>
+          <div className="flex flex-col gap-1 min-w-[160px]">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1"><Building size={9} /> Company</span>
+            <select
+              value={companyId ?? ""}
+              onChange={(e) => setCompanyId(e.target.value ? Number(e.target.value) : null)}
+              className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
+            >
+              <option value="">All Companies</option>
+              {companies.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
           </div>
+
+          <div className="flex flex-col gap-1 min-w-[160px]">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground flex items-center gap-1"><FolderKanban size={9} /> Project</span>
+            <select
+              value={projectId ?? ""}
+              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : null)}
+              className="h-9 px-2.5 text-xs bg-card border border-foreground/40 text-foreground focus:outline-none focus:border-foreground"
+            >
+              <option value="">All Projects</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </div>
+
+          {rights.canExport && data && (
+            <div className="ml-auto">
+              <ExportMenu title="Balance Sheet" filename="balance-sheet" columns={exportColumns} data={exportRows} />
+            </div>
+          )}
         </div>
 
         {/* ── Loading ── */}
@@ -804,7 +759,7 @@ export default function BalanceSheet() {
 
         {/* ── Error ── */}
         {error && (
-          <div className="flex items-center gap-2 py-5 px-4 rounded-xl bg-red-50/50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400 text-sm">
+          <div className="flex items-center gap-2 py-4 px-4 border border-destructive text-destructive text-sm">
             <AlertCircle size={14} className="shrink-0" /> {error}
           </div>
         )}
@@ -815,124 +770,82 @@ export default function BalanceSheet() {
 
           return (
             <>
-              {/* ── Summary headline ── */}
-              <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-
-                {/* Total Assets card */}
-                <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-emerald-700/60 dark:text-emerald-400/60 mb-1">Total Assets</p>
-                      <p className="text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
-                        {fmt(data.totals.assets)}
+              {/* ── Figures ── */}
+              <div className="mb-5 bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+                <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                  {[
+                    {
+                      label: "Total assets",
+                      value: fmt(data.totals.assets),
+                      note: r ? `Current ${fmt(r.totalCurrentAssets)} · Non-current ${fmt(r.totalNonCurrentAssets)}` : null,
+                      red: false,
+                    },
+                    {
+                      label: "Total liabilities",
+                      value: fmt(data.totals.liabilities),
+                      note: r ? `Partners' capital ${fmt(r.totalEquity)} · Other ${fmt(r.totalCurrentLiabilities + r.totalNonCurrentLiabilities)}` : null,
+                      red: false,
+                    },
+                    {
+                      label: data.balanced ? "Difference" : "Out of balance by",
+                      value: fmt(data.totals.difference),
+                      note: data.balanced ? "liabilities equal assets" : "liabilities and assets do not agree",
+                      red: !data.balanced,
+                    },
+                    {
+                      label: data.netProfit < -0.005 ? "Loss for the period" : "Profit for the period",
+                      value: data.netProfit < -0.005 ? `(${fmt(data.netProfit)})` : fmt(data.netProfit),
+                      note: "carried into partners' capital",
+                      red: data.netProfit < -0.005,
+                    },
+                  ].map((x) => (
+                    <div key={x.label}>
+                      <p className="label" style={x.red ? { color: "var(--red)" } : undefined}>{x.label}</p>
+                      <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: x.red ? "var(--red)" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {x.value}
                       </p>
-                      {r && (
-                        <p className="text-[0.625rem] text-muted-foreground/60 mt-1">
-                          Current: {fmt(r.totalCurrentAssets)} · Non-Current: {fmt(r.totalNonCurrentAssets)}
-                        </p>
-                      )}
+                      {x.note && <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>}
                     </div>
-                    <Scale size={28} className="text-emerald-500/30 shrink-0 mt-1" />
-                  </div>
+                  ))}
                 </div>
 
-                {/* Total Liabilities card */}
-                <div className="rounded-xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 to-violet-500/5 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-violet-700/60 dark:text-violet-400/60 mb-1">Total Liabilities</p>
-                      <p className="text-2xl font-bold tabular-nums text-violet-700 dark:text-violet-400 tracking-tight">
-                        {fmt(data.totals.liabilities)}
-                      </p>
-                      {r && (
-                        <p className="text-[0.625rem] text-muted-foreground/60 mt-1">
-                          Partners' Capital: {fmt(r.totalEquity)} · Other Liabilities: {fmt(r.totalCurrentLiabilities + r.totalNonCurrentLiabilities)}
-                        </p>
-                      )}
-                    </div>
-                    <ShieldCheck size={28} className="text-violet-500/30 shrink-0 mt-1" />
-                  </div>
-                </div>
-              </div>
-
-              {/* ── Net P&L carried ── */}
-              {Math.abs(data.netProfit) > 0.005 && (
-                <div className={`mb-4 flex items-center justify-between px-4 py-2.5 rounded-xl border text-xs ${
-                  data.netProfit >= 0
-                    ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                    : "bg-red-500/5 border-red-500/20 text-red-700 dark:text-red-400"
-                }`}>
-                  <div className="flex items-center gap-2">
-                    {data.netProfit >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                    <span className="font-medium">
-                      {data.netProfit >= 0 ? "Profit" : "Loss"} for the period, pulled into Partners' Capital:
-                    </span>
-                  </div>
-                  <span className="font-bold tabular-nums">
-                    {data.netProfit < 0 ? "(" : ""}{fmt(data.netProfit)}{data.netProfit < 0 ? ")" : ""}
-                  </span>
-                </div>
-              )}
-
-              {/* ── Financial Ratios ── */}
-              {r && (
-                <div className="mb-5">
-                  <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2.5 flex items-center gap-1.5">
-                    <Activity size={9} /> Key Financial Ratios
-                  </p>
-                  <div className="flex flex-wrap gap-3">
-                    <RatioCard
-                      label="Current Ratio"
+                {/* ── Ratios ── */}
+                {r && (
+                  <div className="statrow four" style={{ padding: "16px 16px 18px", borderTop: "1px solid hsl(var(--foreground))" }}>
+                    <Ratio
+                      label="Current ratio"
                       value={r.currentRatio}
                       formatted={r2(r.currentRatio)}
-                      icon={ShieldCheck}
                       healthKey="currentRatio"
-                      subtitle="Current Assets / Current Liabilities"
+                      subtitle="Current assets / current liabilities"
                       benchmark="Ideal ≥ 2.0"
                     />
-                    <RatioCard
-                      label="Quick Ratio"
+                    <Ratio
+                      label="Quick ratio"
                       value={r.quickRatio}
                       formatted={r2(r.quickRatio)}
-                      icon={Activity}
                       healthKey="quickRatio"
-                      subtitle="(Current Assets − Stock) / Current Liabilities"
+                      subtitle="(Current assets − stock) / current liabilities"
                       benchmark="Ideal ≥ 1.0"
                     />
-                    <RatioCard
-                      label="Working Capital"
+                    <Ratio
+                      label="Working capital"
                       value={r.workingCapital}
-                      formatted={fmt(r.workingCapital)}
-                      icon={Banknote}
+                      formatted={r.workingCapital < -0.005 ? `(${fmt(r.workingCapital)})` : fmt(r.workingCapital)}
                       healthKey="workingCapital"
-                      subtitle="Current Assets − Current Liabilities"
+                      subtitle="Current assets − current liabilities"
                     />
-                    <RatioCard
-                      label="Debt / Capital"
+                    <Ratio
+                      label="Debt / capital"
                       value={r.debtToEquity}
                       formatted={r2(r.debtToEquity)}
-                      icon={Target}
                       healthKey="debtToEquity"
-                      subtitle="Total Liabilities / Partners' Capital"
+                      subtitle="Total liabilities / partners' capital"
                       benchmark="Ideal ≤ 1.0"
                     />
                   </div>
-
-                  {/* Ratio interpretation guide */}
-                  <div className="mt-2.5 flex flex-wrap gap-3 text-[0.5625rem] text-muted-foreground/50">
-                    {[
-                      { color: "bg-emerald-500", label: "Healthy" },
-                      { color: "bg-amber-500",   label: "Monitor" },
-                      { color: "bg-red-500",      label: "Attention Needed" },
-                    ].map(({ color, label }) => (
-                      <span key={label} className="flex items-center gap-1">
-                        <span className={`w-2 h-2 rounded-full ${color} opacity-70`} />
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
               {/* ── Refresh overlay ── */}
               {loading && (
@@ -945,7 +858,7 @@ export default function BalanceSheet() {
               <VerticalStatement data={data} asOfLabel={asOfLabel} />
 
               {/* ── Info ── */}
-              <div className="mt-4 flex items-start gap-2 text-[0.625rem] text-muted-foreground/60">
+              <div className="mt-4 flex items-start gap-2 text-[0.6875rem] text-muted-foreground">
                 <Info size={11} className="shrink-0 mt-0.5" />
                 <span>
                   Section classification is heuristic-based on Account Group names — set up Partners Drawings / Fictitious Assets
@@ -964,9 +877,9 @@ export default function BalanceSheet() {
           </div>
         )}
 
-      </FinanceShell>
+      </SheetShell>
 
-      {/* Print styles — #bs-printable is nested deep inside FinanceShell's
+      {/* Print styles — #bs-printable is nested deep inside the page shell's
           layout chrome, not a direct child of body, so a `body > *` selector
           can't isolate it: none of body's actual direct children match
           #bs-printable, so they'd all get hidden — including the ancestor
@@ -976,7 +889,15 @@ export default function BalanceSheet() {
           #bs-printable and its descendants visible again regardless of how
           deep they're nested. */}
       <style>{`
+        #bs-printable tbody tr { border: 0 !important; background: transparent !important; }
+        #bs-printable tbody tr.r-line { border-bottom: 1px solid hsl(var(--border) / 0.7) !important; }
+        #bs-printable tbody tr.r-click:hover { background: var(--blue-wash) !important; }
+        #bs-printable tbody tr.r-sub { border-top: 1px solid hsl(var(--foreground)) !important; }
+        #bs-printable tbody tr.r-sub-soft { border-top: 1px solid hsl(var(--border)) !important; }
+        #bs-printable tbody tr.r-head { border-top: 1px solid hsl(var(--foreground)) !important; border-bottom: 1px solid hsl(var(--foreground)) !important; }
+        #bs-printable tbody tr.r-total { border-top: 2px solid hsl(var(--foreground)) !important; border-bottom: 1px solid hsl(var(--foreground)) !important; }
         @media print {
+          #bs-printable tbody tr[class] { border-color: #000 !important; }
           body * { visibility: hidden !important; }
           #bs-printable, #bs-printable * { visibility: visible !important; }
           /* The dark theme's --foreground/--muted-foreground resolve to
