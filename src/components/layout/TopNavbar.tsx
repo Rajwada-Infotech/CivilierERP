@@ -873,14 +873,9 @@ export const TopNavbar = () => {
             <button
               onClick={() => setNavCollapsed(!navCollapsed)}
               title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="relative z-10 w-8 h-8 flex items-center justify-center text-foreground hover:bg-primary/10 transition-colors duration-150"
-              style={{ border: "1px solid hsl(var(--foreground))" }}
+              className="relative z-10 w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors duration-150"
             >
-              {navCollapsed ? (
-                <ChromeIcons.sidebarExpand size={17} />
-              ) : (
-                <ChromeIcons.sidebarCollapse size={17} />
-              )}
+              <ChromeIcons.menu size={18} />
             </button>
           </div>
 
