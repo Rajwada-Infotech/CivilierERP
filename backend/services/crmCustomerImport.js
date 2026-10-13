@@ -17,6 +17,7 @@ const FIELDS = [
   { key: "AltMobile", label: "Alternate Mobile" },
   { key: "Email", label: "Email" },
   { key: "PanNo", label: "PAN" },
+  { key: "GstNo", label: "GSTIN (registered buyer)" },
   { key: "AadhaarNo", label: "Aadhaar" },
   { key: "DateOfBirth", label: "Date of Birth" },
   { key: "Occupation", label: "Occupation" },
@@ -46,6 +47,7 @@ const FILLABLE = {
   AltMobile: "AltMobile",
   Email: "Email",
   PanNo: "PanNo",
+  GstNo: "GstNo", gstin: "GstNo", gst: "GstNo", gstno: "GstNo", gstnumber: "GstNo",
   AadhaarNo: "AadhaarNo",
   DateOfBirth: "DateOfBirth",
   Occupation: "Occupation",
@@ -249,6 +251,11 @@ function cleanRow(cells) {
   d.CoApplicantMobile = cleanMobile(c.CoApplicantMobile);
   if (d.CoApplicantMobile && !/^\d{10}$/.test(d.CoApplicantMobile)) {
     errors.push(`Co-Applicant Mobile "${c.CoApplicantMobile}" is not a valid number`);
+  }
+  {
+    const g = require("./gstin").checkGstin(c.GstNo, { pan: d.PanNo });
+    if (g.error) errors.push(g.error);
+    else d.GstNo = g.value;
   }
   d.CoApplicantPanNo = cleanPan(c.CoApplicantPanNo);
   if (d.CoApplicantPanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(d.CoApplicantPanNo)) {
@@ -615,6 +622,7 @@ async function insertCrmCustomer(pool, b, actorUserId) {
     .input("coMob", sql.NVarChar(20), nz(b.CoApplicantMobile))
     .input("coPan", sql.NVarChar(20), nz(b.CoApplicantPanNo))
     .input("coRel", sql.NVarChar(50), nz(b.CoApplicantRelation))
+    .input("gst", sql.NVarChar(15), nz(b.GstNo))
     .input("cb", sql.Int, actorUserId)
     .query(`
       INSERT INTO dbo.CrmCustomer
@@ -622,14 +630,14 @@ async function insertCrmCustomer(pool, b, actorUserId) {
          Address, City, State, Pincode,
          CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
          DateOfBirth, InvoiceMode, Notes,
-         CoApplicantName, CoApplicantMobile, CoApplicantPanNo, CoApplicantRelation,
+         CoApplicantName, CoApplicantMobile, CoApplicantPanNo, CoApplicantRelation, GstNo,
          CreatedBy, CreatedAt)
       OUTPUT INSERTED.Id
       VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
               @addr, @city, @state, @pin,
               @curaddr, @curcity, @curstate, @curpin, @cursame,
               @dob, @invmode, @notes,
-              @coName, @coMob, @coPan, @coRel,
+              @coName, @coMob, @coPan, @coRel, @gst,
               @cb, SYSDATETIME())
     `);
   return { id: r.recordset[0].Id, customerNo };

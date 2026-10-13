@@ -651,7 +651,12 @@ function DetailDialog({
         <div className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border bg-card p-4">
             <div>
-              <div className="text-sm font-semibold">{n.CustomerName}</div>
+              <div className="text-sm font-semibold">
+                {n.CustomerName}
+                {n.CustomerGst ? (
+                  <span className="ml-1.5 text-[0.6875rem] font-mono font-normal px-1.5 py-0.5 rounded border border-border">GSTIN {n.CustomerGst}</span>
+                ) : null}
+              </div>
               <div className="text-xs text-muted-foreground mt-0.5">
                 {n.Property} · {n.ProjectName || ""} · Booking {n.BookingNo}
               </div>
@@ -1125,6 +1130,7 @@ const CrmCreditNotes: React.FC = () => {
         "Date",
         "Status",
         "Customer",
+        "Buyer GSTIN",
         "Property",
         "Booking",
         "Against",
@@ -1150,6 +1156,7 @@ const CrmCreditNotes: React.FC = () => {
             String(n.DocDate).slice(0, 10),
             n.Status,
             n.CustomerName || "",
+            n.CustomerGst || "",
             n.Property,
             n.BookingNo,
             n.AgainstRef || "",
@@ -1169,9 +1176,13 @@ const CrmCreditNotes: React.FC = () => {
     ];
     const groups = new Map<string, number[]>();
     for (const n of live) {
+      // GSTR-1: a registered buyer's credit note goes to CDNR (they see it in
+      // their GSTR-2B), an individual's to CDNUR / B2C.
       const key = `${
         kindOf(n) === "invoice"
-          ? "Credit notes on invoices (GSTR-1 credit/debit notes)"
+          ? n.CustomerGst
+            ? "Credit notes — registered buyers (GSTR-1 CDNR)"
+            : "Credit notes — unregistered buyers (GSTR-1 CDNUR / B2C)"
           : "Refund vouchers on advances (GSTR-1 advance adjustment)"
       }|${Number(n.GstRate || 0)}`;
       const g = groups.get(key) || [0, 0, 0, 0, 0, 0];
@@ -1196,11 +1207,11 @@ const CrmCreditNotes: React.FC = () => {
     ];
     downloadBlob(
       await buildWorkbook([
-        { name: "GSTR-1 summary", rows: summary, widths: [52, 8, 10, 16, 14, 14, 14, 16] },
+        { name: "GSTR-1 summary", rows: summary, widths: [58, 8, 10, 16, 14, 14, 14, 16] },
         {
           name: "Credit notes",
           rows: detail,
-          widths: [34, 16, 12, 11, 24, 18, 16, 22, 12, 10, 8, 14, 12, 12, 12, 14, 12, 16, 30],
+          widths: [34, 16, 12, 11, 24, 17, 18, 16, 22, 12, 10, 8, 14, 12, 12, 12, 14, 12, 16, 30],
           freezeBelowRow: 2,
         },
       ]),

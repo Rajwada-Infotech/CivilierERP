@@ -34,7 +34,7 @@ router.use(apiRateLimit);
 const CUSTOMER_SELECT = `
   SELECT
     c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
-    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome,
+    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome, c.GstNo,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
     c.DateOfBirth, c.InvoiceMode,
@@ -382,12 +382,15 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
 
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
+    // A GST-registered buyer's GSTIN (migration 568): checked, PAN must match.
+    const gst = require("../services/gstin").checkGstin(b.GstNo, { pan: b.PanNo });
+    if (gst.error) return res.status(400).json({ error: gst.error });
 
     // The insert is shared with the bulk import (services/crmCustomerImport.js):
     // InvoiceMode defaults to NonInvoice for anything but "Invoice" (CHECK-
     // constrained column), current address follows IsCurrentSameAsPermanent.
     const { insertCrmCustomer } = require("../services/crmCustomerImport");
-    const { id: newId, customerNo } = await insertCrmCustomer(pool, { ...b, Email: email }, actorId(req));
+    const { id: newId, customerNo } = await insertCrmCustomer(pool, { ...b, Email: email, GstNo: gst.value }, actorId(req));
 
     // Eagerly create the "Customer Master" ledger head (dbo.AccountHeadMaster,
     // LHeadType='C') instead of waiting for the first GL-posting event —
@@ -422,6 +425,16 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
+    // GSTIN: changed only when the form sends it ("" clears it); checked
+    // against the PAN being saved (or the one on file).
+    const gstSent = Object.prototype.hasOwnProperty.call(b, "GstNo");
+    let gstValue = null;
+    if (gstSent) {
+      const onFile = b.PanNo ? null : (await pool.request().input("id", sql.Int, id).query("SELECT PanNo FROM dbo.CrmCustomer WHERE Id = @id")).recordset[0]?.PanNo;
+      const gst = require("../services/gstin").checkGstin(b.GstNo, { pan: b.PanNo || onFile });
+      if (gst.error) return res.status(400).json({ error: gst.error });
+      gstValue = gst.value;
+    }
     if (!email) {
       // The portal login is keyed on this email (CrmCustomerPortalUser.Email
       // is NOT NULL), so it can't be cleared while a login exists.
@@ -464,6 +477,8 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
         .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
         .input("dob",       sql.Date,          b.DateOfBirth || null)
         .input("invmode",   sql.NVarChar(20),  b.InvoiceMode === "Invoice" || b.InvoiceMode === "NonInvoice" ? b.InvoiceMode : null)
+        .input("gstset",    sql.Bit,           gstSent ? 1 : 0)
+        .input("gst",       sql.NVarChar(15),  gstValue)
         .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
         .input("ub",        sql.Int,           actorId(req))
         .query(`
@@ -476,6 +491,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
             IsCurrentSameAsPermanent = @cursame,
             DateOfBirth = ISNULL(@dob, DateOfBirth),
             InvoiceMode = ISNULL(@invmode, InvoiceMode),
+            GstNo = CASE WHEN @gstset = 1 THEN @gst ELSE GstNo END,
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);

@@ -204,7 +204,7 @@ const SELECT_NOTE_BASE = `
          b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode, b.ApplicationId,
          rn.DocNo AS ReplacesNo,
          (SELECT TOP 1 x.DocNo FROM dbo.CrmGstNote x WHERE x.ReplacesId = n.Id) AS ReplacedByNo,
-         c.CustomerName, c.CustomerNo, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
+         c.CustomerName, c.CustomerNo, c.GstNo AS CustomerGst, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
          comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
          comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan,
          proj.name AS ProjectName, proj.state AS ProjectState
@@ -227,7 +227,7 @@ const SELECT_NOTE_DETAIL = `
          b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode, b.ApplicationId,
          rn.DocNo AS ReplacesNo,
          (SELECT TOP 1 x.DocNo FROM dbo.CrmGstNote x WHERE x.ReplacesId = n.Id) AS ReplacedByNo,
-         c.CustomerName, c.CustomerNo, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
+         c.CustomerName, c.CustomerNo, c.GstNo AS CustomerGst, c.Address AS CustomerAddress, c.City AS CustomerCity, c.State AS CustomerState, c.Pincode AS CustomerPincode, c.Mobile AS CustomerMobile,
          comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2, comp.city AS CompanyCity, comp.state AS CompanyState,
          comp.pincode AS CompanyPincode, comp.gst_no AS CompanyGst, comp.pan_no AS CompanyPan, comp.logo AS CompanyLogo,
          proj.name AS ProjectName, proj.state AS ProjectState
@@ -333,7 +333,7 @@ function renderPdf(n) {
     doc.fillColor("#000").font(F.bold).fontSize(10).text("Issued to", L, y);
     doc.font(F.regular).fontSize(9).text([n.CustomerName,
       [n.CustomerAddress, n.CustomerCity, n.CustomerState, n.CustomerPincode].filter(Boolean).join(", "),
-      n.CustomerMobile ? `Mobile: ${n.CustomerMobile}` : null].filter(Boolean).join(String.fromCharCode(10)), L, y + 14, { width: W * 0.55 });
+      n.CustomerMobile ? `Mobile: ${n.CustomerMobile}` : null, n.CustomerGst ? `GSTIN: ${n.CustomerGst}` : null].filter(Boolean).join(String.fromCharCode(10)), L, y + 14, { width: W * 0.55 });
     doc.font(F.bold).fontSize(10).text("Property", L + W * 0.6, y);
     doc.font(F.regular).fontSize(9)
       .text(`${n.Property} · ${n.BookingNo}`, L + W * 0.6, y + 14, { width: W * 0.4 })
