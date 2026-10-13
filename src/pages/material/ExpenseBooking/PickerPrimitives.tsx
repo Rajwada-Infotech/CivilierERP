@@ -73,15 +73,14 @@ export function DateField({
 export function SectionHeader({ label }: { label: string }) {
   const Icon = SECTION_ICONS[label];
   return (
-    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+    <div className="flex items-center gap-2.5 pb-1">
       {Icon && (
-        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-emerald-500/10 shrink-0">
-          <Icon size={12} className="text-emerald-500" />
-        </div>
+        <span className="flex items-center justify-center w-[22px] h-[22px] shrink-0 rounded-full text-foreground" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
+          <Icon size={11} />
+        </span>
       )}
-      <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
+      <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-foreground">{label}</p>
+      <span className="flex-1 h-px" style={{ background: "hsl(var(--border))" }} />
     </div>
   );
 }

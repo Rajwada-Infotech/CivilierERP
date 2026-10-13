@@ -14,7 +14,7 @@ export function FormSection({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground border-b border-border/60 pb-1.5">
+      <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-foreground border-b border-border pb-1.5">
         {label}
       </p>
       {children}
@@ -39,7 +39,7 @@ export function Field({
 }) {
   return (
     <div className={`space-y-1.5${className ? ` ${className}` : ""}`}>
-      <Label className="text-xs">
+      <Label className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         {label}
         {required && <span className="text-destructive ml-0.5">*</span>}
       </Label>

@@ -1799,33 +1799,21 @@ export default function MaterialExpenseBooking() {
       >
         {/* Form View */}
         {view === "form" && (
-          <Card className="border-border shadow-sm" onKeyDown={preventEnterSubmit}>
-            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
-              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
-              <div className="flex items-center gap-3 min-w-0">
-                <button
-                  type="button"
-                  onClick={cancelForm}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  <ArrowLeft size={15} />
-                  <span className="hidden sm:inline">Back</span>
-                </button>
-                <span className="text-indigo-500/40">|</span>
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-indigo-500/[0.18] border border-indigo-500/30 shrink-0">
-                    <Receipt size={12} className="text-indigo-400" />
-                  </div>
-                  <h2 className="text-sm font-heading font-bold text-foreground truncate">
-                    {isEditing ? "Edit Invoice" : "New Invoice"}
-                  </h2>
-                  {form.bookingReference && (
-                    <span className="hidden sm:inline font-mono text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md shrink-0">
-                      {form.bookingReference}
-                    </span>
-                  )}
-                </div>
-              </div>
+          <Card className="border-foreground bg-card shadow-none" onKeyDown={preventEnterSubmit}>
+            <div className="flex items-center gap-3 px-5 sm:px-6 py-3.5 min-w-0" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <button
+                type="button"
+                onClick={cancelForm}
+                className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              >
+                <ArrowLeft size={14} />
+                <span className="hidden sm:inline">Back</span>
+              </button>
+              <span className="h-4 w-px shrink-0" style={{ background: "hsl(var(--border))" }} />
+              <h2 className="font-heading text-sm font-bold text-foreground truncate">{isEditing ? "Edit invoice" : "New invoice"}</h2>
+              {form.bookingReference && (
+                <span className="hidden sm:inline font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground shrink-0">{form.bookingReference}</span>
+              )}
             </div>
 
             <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
@@ -1836,16 +1824,16 @@ export default function MaterialExpenseBooking() {
                 {/* ── Sub-section: Party & Project ── */}
                 <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center shrink-0">
-                      <SlidersHorizontal size={12} className="text-indigo-500" />
+                    <div className="w-6 h-6 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
+                      <SlidersHorizontal size={12} className="text-foreground" />
                     </div>
-                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+                    <p className="font-heading text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-foreground">
                       Party &amp; Project
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <Building2 size={11} className="shrink-0" />
                         Company
                         <span className="text-destructive">*</span>
@@ -1887,7 +1875,7 @@ export default function MaterialExpenseBooking() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <FolderKanban size={11} className="shrink-0" />
                         Project
                       </p>
@@ -1935,7 +1923,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <CalendarDays size={11} className="shrink-0" />
                         Year
                       </p>
@@ -1961,7 +1949,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <User size={11} className="shrink-0" />
                         {vendorLabel}
                       </p>
@@ -2021,7 +2009,7 @@ export default function MaterialExpenseBooking() {
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         <ShoppingCart size={11} className="shrink-0" />
                         Filter by PO
                       </p>
@@ -2188,7 +2176,7 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-foreground text-foreground" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
                           >
                             {selectedDoc.kind === "WORK_DONE"
                               ? "Work Done"
