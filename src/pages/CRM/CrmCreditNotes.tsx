@@ -1338,7 +1338,10 @@ const CrmCreditNotes: React.FC = () => {
         return (
           <div className="flex items-center gap-1">
             <button
-              onClick={() => setSelectedId(n.Id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedId(n.Id);
+              }}
               className="h-7 px-2.5 text-xs rounded border border-border hover:bg-muted inline-flex items-center gap-1 text-muted-foreground hover:text-foreground font-medium"
             >
               <Eye size={12} />
@@ -1565,6 +1568,8 @@ const CrmCreditNotes: React.FC = () => {
             data={rows}
             columns={columns}
             searchable={false}
+            paginated={false}
+            onRowClick={(row) => setSelectedId(row.original.Id)}
             loading={isLoading}
             emptyMessage="No credit notes found for the selected period and filters."
             className="rounded-xl border border-border overflow-hidden bg-card"
