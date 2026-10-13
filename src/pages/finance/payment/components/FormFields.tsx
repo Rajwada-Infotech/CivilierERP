@@ -80,7 +80,7 @@ export function AutoFillBanner({
       <div className="flex items-center gap-2 min-w-0">
         <Link2 size={13} className="text-primary shrink-0" />
         <span className="text-xs text-muted-foreground">{label}</span>
-        <span className="font-mono text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md truncate">
+        <span className="font-heading tabular-nums text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md truncate">
           {docNo}
         </span>
       </div>
@@ -103,7 +103,7 @@ export function ModeBadge({ mode }: { mode: string }) {
   };
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-none text-[0.6875rem] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {mode || "—"}
@@ -147,7 +147,7 @@ export function InputField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        className={`w-full ${Icon || prefix ? "pl-8" : "pl-3"} pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60 disabled:opacity-60 disabled:cursor-not-allowed font-mono`}
+        className={`w-full ${Icon || prefix ? "pl-8" : "pl-3"} pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60 disabled:opacity-60 disabled:cursor-not-allowed font-heading tabular-nums`}
       />
     </div>
   );

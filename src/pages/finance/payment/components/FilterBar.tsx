@@ -256,7 +256,7 @@ export function FilterBar({
             Filter expense bookings
           </span>
           {activeCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+            <span className="px-1.5 py-0.5 rounded-none text-[0.625rem] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
               {activeCount} active
             </span>
           )}
@@ -328,7 +328,7 @@ export function FilterBar({
               return (
                 <span
                   key={key}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
                 >
                   {val}
                   <button
