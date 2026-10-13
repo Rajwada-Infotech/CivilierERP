@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell } from "@/components/sheet/Sheet";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
@@ -2674,14 +2674,14 @@ export default function MaterialExpenseBooking() {
             )}
             {loading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
-                <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                Loading bookings…
+                <div className="w-6 h-6 border-2 border-foreground border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading invoices…
               </div>
             )}
             {!loading && (
               <>
-                <Card className="border-border shadow-sm">
-                  <CardHeader className="pb-3 border-b border-border">
+                <Card className="border-foreground bg-card shadow-none">
+                  <CardHeader className="pb-3 border-b border-foreground">
                     <BookingListToolbar
                       totalRecords={totalRecords}
                       statusFilter={statusFilter}
@@ -2744,34 +2744,17 @@ export default function MaterialExpenseBooking() {
                       <div className="rounded-md [&>div]:[scrollbar-width:none] [&>div]:[-ms-overflow-style:none] [&>div::-webkit-scrollbar]:hidden">
                         <Table>
                           <TableHeader>
-                            <TableRow className="bg-muted/30">
-                              <TableHead className="text-xs font-heading w-[20%]">
-                                Booking Ref
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[16%]">
-                                Vendor
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[12%] hidden xl:table-cell">
-                                Company / Project
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[10%] text-right">
-                                Basic Amt
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[9%] text-right hidden md:table-cell">
-                                GST
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[12%] text-right">
-                                Net Amt
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
-                                Doc
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[9%]">
-                                Status
-                              </TableHead>
-                              <TableHead className="text-xs font-heading w-[10%] text-right">
-                                Actions
-                              </TableHead>
+                            <TableRow>
+                              <TableHead className="w-[4%]">No.</TableHead>
+                              <TableHead className="w-[18%]">Invoice</TableHead>
+                              <TableHead className="w-[16%]">Vendor</TableHead>
+                              <TableHead className="w-[12%] hidden xl:table-cell">Company / project</TableHead>
+                              <TableHead className="w-[10%] text-right">Basic</TableHead>
+                              <TableHead className="w-[7%] text-right hidden md:table-cell">GST</TableHead>
+                              <TableHead className="w-[11%] text-right">Net</TableHead>
+                              <TableHead className="w-[11%] hidden lg:table-cell">Against</TableHead>
+                              <TableHead className="w-[9%]">Status</TableHead>
+                              <TableHead className="w-[8%]" />
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -2783,119 +2766,59 @@ export default function MaterialExpenseBooking() {
                               // page's own "Amount Payable (After TDS)" figure, instead of
                               // showing the pre-TDS gross like this row used to.
                               const effectiveNet = computeEffectiveNet(rec);
+                              const isDraft = rec.status === "Draft";
+                              // For GRN records, derive original base from grnTotalAmount
+                              // since rec.basicAmount may be stale from old saves.
+                              const basic = (() => {
+                                if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
+                                  const gstRate = (rec.igstRate ?? 0) > 0 ? rec.igstRate ?? 0 : (rec.cgstRate ?? 0) + (rec.sgstRate ?? 0);
+                                  const base = gstRate > 0 ? rec.grnTotalAmount / (1 + gstRate / 100) : rec.grnTotalAmount;
+                                  return Math.round(base * 100) / 100;
+                                }
+                                return rec.basicAmount;
+                              })();
                               return (
                                 <TableRow
-                                  key={
-                                    rec.id
-                                      ? `booking-row-${rec.id}`
-                                      : `booking-row-${index}`
-                                  }
-                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 cursor-pointer ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  key={rec.id ? `booking-row-${rec.id}` : `booking-row-${index}`}
+                                  className={`cursor-pointer align-top ${isDraft ? "opacity-75" : ""}`}
                                   onClick={() => openPreview(rec)}
                                 >
-                                  <TableCell className="py-3">
-                                    {rec.status === "Draft" ? (
-                                      <p
-                                        className="text-[0.6875rem] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
-                                        title={rec.bookingReference || ""}
-                                      >
-                                        {rec.bookingReference || "—"}
-                                      </p>
-                                    ) : (
-                                      <p
-                                        className="font-mono text-[0.6875rem] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
-                                        title={rec.bookingReference || ""}
-                                      >
-                                        {rec.bookingReference || "—"}
-                                      </p>
-                                    )}
-                                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
-                                      {rec.bookingDate && (
-                                        <span>{rec.bookingDate}</span>
-                                      )}
-                                      {rec.docTypeName ? (
-                                        <span className="opacity-60">
-                                          · {rec.docTypeName}
-                                        </span>
-                                      ) : null}
-                                      {rec.emi?.enabled ? (
-                                        <span className="inline-flex items-center gap-0.5 text-[0.5625rem] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
-                                          <CreditCard size={8} />
-                                          {rec.emi.installmentCount}x
-                                        </span>
-                                      ) : null}
-                                    </p>
+                                  <TableCell className="py-3 font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground">
+                                    {String((page - 1) * PAGE_SIZE + index + 1).padStart(2, "0")}
                                   </TableCell>
-                                  <TableCell className="text-xs max-w-[120px] py-3 text-foreground/80">
-                                    <p className="truncate">{rec.supplier || "—"}</p>
+                                  <TableCell className="py-3">
+                                    <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-foreground leading-tight max-w-[190px] truncate" title={rec.bookingReference || ""}>
+                                      {rec.bookingReference || "—"}
+                                    </p>
+                                    <p className="text-[0.6875rem] text-muted-foreground mt-1.5 truncate">
+                                      {[rec.bookingDate, rec.docTypeName].filter(Boolean).join(" · ") || "—"}
+                                    </p>
+                                    {rec.emi?.enabled ? (
+                                      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1">
+                                        EMI · {rec.emi.installmentCount} installments
+                                      </p>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell className="py-3 max-w-[150px]">
+                                    <p className="text-[0.8125rem] font-semibold text-foreground truncate">{rec.supplier || "—"}</p>
                                     {rec.supplierGstRegistered !== undefined ? (
-                                      <span
-                                        className={`inline-flex items-center mt-1 text-[0.5625rem] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
-                                          rec.supplierGstRegistered
-                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                            : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
-                                        }`}
-                                      >
-                                        {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
-                                      </span>
+                                      <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-1.5">
+                                        {rec.supplierGstRegistered ? "GST bill" : "Non-GST bill"}
+                                      </p>
                                     ) : null}
                                   </TableCell>
                                   <TableCell className="hidden xl:table-cell py-3">
-                                    <p className="text-xs truncate max-w-[110px]">
-                                      {rec.companyName || "—"}
-                                    </p>
-                                    <p className="text-[0.625rem] text-muted-foreground truncate max-w-[110px]">
-                                      {rec.projectName || "—"}
-                                    </p>
+                                    <p className="text-[0.75rem] text-foreground truncate max-w-[130px]">{rec.companyName || "—"}</p>
+                                    <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[130px]">{rec.projectName || "—"}</p>
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
-                                    {rec.status === "Draft" ? (
-                                      <span className="text-muted-foreground/50">
-                                        —
-                                      </span>
-                                    ) : (
-                                      (() => {
-                                        // For GRN records, derive original base from grnTotalAmount
-                                        // since rec.basicAmount may be stale from old saves.
-                                        if (
-                                          rec.eSourceType === "GRN" &&
-                                          rec.grnTotalAmount != null
-                                        ) {
-                                          const gstRate =
-                                            (rec.igstRate ?? 0) > 0
-                                              ? rec.igstRate ?? 0
-                                              : (rec.cgstRate ?? 0) +
-                                                (rec.sgstRate ?? 0);
-                                          const base =
-                                            gstRate > 0
-                                              ? rec.grnTotalAmount /
-                                                (1 + gstRate / 100)
-                                              : rec.grnTotalAmount;
-                                          return `₹${fmt(Math.round(base * 100) / 100)}`;
-                                        }
-                                        return `₹${fmt(rec.basicAmount)}`;
-                                      })()
-                                    )}
+                                  <TableCell className="py-3 text-right whitespace-nowrap text-[0.75rem] tabular-nums text-muted-foreground">
+                                    {isDraft ? "—" : `₹${fmt(basic)}`}
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
-                                    {rec.status === "Draft" ? (
-                                      "—"
-                                    ) : (rec.igstRate ?? 0) > 0 ? (
-                                      <span title="IGST (interstate)">
-                                        {rec.igstRate}%
-                                      </span>
-                                    ) : (
-                                      `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`
-                                    )}
+                                  <TableCell className="py-3 text-right text-[0.75rem] tabular-nums text-muted-foreground hidden md:table-cell">
+                                    {isDraft ? "—" : (rec.igstRate ?? 0) > 0 ? <span title="IGST (interstate)">{rec.igstRate}%</span> : `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`}
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs font-semibold text-right py-3">
-                                    {rec.status === "Draft" ? (
-                                      <span className="text-amber-500 dark:text-amber-400">
-                                        ₹{fmt(effectiveNet)}
-                                      </span>
-                                    ) : (
-                                      `₹${fmt(effectiveNet)}`
-                                    )}
+                                  <TableCell className="py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">
+                                    ₹{fmt(effectiveNet)}
                                   </TableCell>
                                   <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
                                     <LinkedDocBadge
@@ -2906,19 +2829,11 @@ export default function MaterialExpenseBooking() {
                                     />
                                   </TableCell>
                                   <TableCell className="py-3">
-                                    {rec.status === "Draft" ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25">
-                                        <Package
-                                          size={10}
-                                          className="shrink-0"
-                                        />
-                                        Pending Items
-                                      </span>
-                                    ) : null}
+                                    {isDraft ? <div className="mb-1"><SheetMark text="Items pending" tone="waiting" /></div> : null}
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
-                                      fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
+                                      fallback={<SheetMark text={rec.status || "—"} tone={statusTone(rec.status || "")} />}
                                       preloaded={expenseApprovalTrails.get(String(rec.id)) ?? null}
                                       preloadedLoading={expenseApprovalTrailsLoading}
                                     />
@@ -2932,22 +2847,23 @@ export default function MaterialExpenseBooking() {
                                         submitOnly
                                         onSuccess={() => fetchRecords(page)}
                                       />
-                                      <button data-row-view
+                                      <button
+                                        data-row-view
                                         type="button"
-                                        className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                        className="p-1.5 border border-border text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                                         onClick={() => openPreview(rec)}
                                         title="Preview"
                                       >
-                                        <Eye size={15} />
+                                        <Eye size={12} />
                                       </button>
                                       {rights.canDelete && (
                                         <button
                                           type="button"
-                                          className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                                          className="p-1.5 border border-destructive/30 text-destructive/70 hover:text-destructive hover:border-destructive transition-colors"
                                           onClick={() => requestDelete(rec.id)}
                                           title="Delete"
                                         >
-                                          <Trash2 size={15} />
+                                          <Trash2 size={12} />
                                         </button>
                                       )}
                                     </div>
@@ -2958,7 +2874,7 @@ export default function MaterialExpenseBooking() {
                             {filteredRecords.length === 0 && (
                               <TableRow>
                                 <TableCell
-                                  colSpan={9}
+                                  colSpan={10}
                                   className="text-center py-14 text-muted-foreground text-sm"
                                 >
                                   {statusFilter !== "All"
