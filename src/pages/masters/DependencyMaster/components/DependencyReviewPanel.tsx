@@ -1,4 +1,3 @@
-import { CheckCircle2 } from "lucide-react";
 import type { LadderActivity, WorkType } from "@/api/dependencyMasterApi";
 
 interface Props {
@@ -13,44 +12,35 @@ interface Props {
 // out plainly first.
 export function DependencyReviewPanel({ resolvedPath, alias, workType, rungs }: Props) {
   return (
-    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <CheckCircle2 size={14} className="text-primary" />
-        <h3 className="text-xs font-heading font-semibold uppercase tracking-widest text-foreground">
-          Review
-        </h3>
-      </div>
+    <div className="bg-card p-4 space-y-4" style={{ border: "1.5px solid hsl(var(--foreground))" }}>
+      <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground pb-2" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        Review before saving
+      </h3>
 
       <div>
-        <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Path</p>
-        <p className="text-xs font-mono text-foreground">{resolvedPath}</p>
+        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Path</p>
+        <p className="text-xs text-foreground break-words">{resolvedPath}</p>
       </div>
 
       <div className="flex items-center gap-6">
         <div>
-          <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Alias</p>
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Alias</p>
           <p className="text-sm font-medium text-foreground">{alias}</p>
         </div>
         <div>
-          <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Work Type</p>
-          <span
-            className={`text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5 rounded ${
-              workType === "INTERNAL" ? "bg-cyan-600/10 text-cyan-600" : "bg-violet-500/10 text-violet-500"
-            }`}
-          >
-            {workType === "INTERNAL" ? "Internal" : "External"}
-          </span>
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Work type</p>
+          <p className="text-sm font-medium text-foreground">{workType === "INTERNAL" ? "Internal" : "External"}</p>
         </div>
       </div>
 
       <div>
-        <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">
-          Activity Chain ({rungs.length})
+        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
+          Activity chain · {rungs.length}
         </p>
-        <ol className="space-y-1">
+        <ol className="space-y-1.5">
           {rungs.map((r) => (
             <li key={r.sequenceNo} className="flex items-center gap-2 text-xs text-foreground">
-              <span className="w-4 h-4 rounded-full bg-primary/15 text-primary text-[0.5625rem] font-bold flex items-center justify-center shrink-0">
+              <span className="min-w-[1.125rem] h-[1.125rem] px-0.5 bg-foreground text-card font-heading text-[0.5625rem] font-bold tabular-nums flex items-center justify-center shrink-0">
                 {r.sequenceNo}
               </span>
               {r.activityName}

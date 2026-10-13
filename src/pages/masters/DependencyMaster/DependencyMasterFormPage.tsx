@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle, Copy } from "lucide-react";
+import { ArrowLeft, Loader2, Copy } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { Button } from "@/components/ui/button";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { getDependencyMaster } from "@/api/dependencyMasterApi";
 import { useDependencyMasterForm } from "./hooks/useDependencyMasterForm";
 import { ScopeSelector } from "./components/ScopeSelector";
@@ -49,11 +48,11 @@ export default function DependencyMasterFormPage() {
     return (
       <>
         <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency Master", "Edit"]} />
-        <CivilWorkDprShell title="Dependency Master" subtitle="Loading record…" icon={GitBranch}>
+        <SheetShell eyebrow="CivilierERP · Civil Work DPR" title="Dependency master" subtitle="Loading the record…">
           <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
             <Loader2 size={16} className="animate-spin" /> Loading…
           </div>
-        </CivilWorkDprShell>
+        </SheetShell>
       </>
     );
   }
@@ -68,32 +67,29 @@ export default function DependencyMasterFormPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Dependency Master", editingId ? "Edit" : "New"]} />
-      <CivilWorkDprShell
-        title={editingId ? "Edit Dependency" : "New Dependency"}
-        subtitle="Room-level activity chain — task scope, alias, and a strictly linear dependency sequence"
-        icon={GitBranch}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title={editingId ? "Edit dependency" : "New dependency"}
+        subtitle="One room's activity chain: where it is, what it is called, and the strict order its activities follow."
         action={
-          <button
-            onClick={() => navigate("/masters/dependency")}
-            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
+          <button onClick={() => navigate("/masters/dependency")} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2 border border-foreground text-foreground hover:bg-primary/10">
             <ArrowLeft size={13} /> Back to list
           </button>
         }
       >
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 items-start">
           {/* ── Main column — the 4 fillable steps ─────────────────────── */}
-          <div className="space-y-5 min-w-0">
+          <div className="bg-card px-4 py-5 space-y-6 min-w-0" style={{ border: "1px solid hsl(var(--foreground))" }}>
             <div>
-              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
-                1. Task Scope
+              <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground mb-2">
+                1 · Task scope
               </p>
               <ScopeSelector cascade={form.cascade} />
             </div>
 
             <div>
-              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
-                2. Alias
+              <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground mb-2">
+                2 · Alias
               </p>
               <AliasInput
                 active={form.aliasActive}
@@ -105,23 +101,23 @@ export default function DependencyMasterFormPage() {
 
             {form.toggleActive && (
               <div>
-                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
-                  3. Work Type
+                <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground mb-2">
+                  3 · Work type
                 </p>
                 <ScopeToggle active={form.toggleActive} value={form.workType} onChange={form.setWorkType} />
               </div>
             )}
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60">
-                  4. Activity Chain
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+                  4 · Activity chain
                 </p>
                 {!editingId && form.ladderActive && (
                   <button
                     type="button"
                     onClick={() => setCopyModalOpen(true)}
-                    className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-primary hover:text-primary/80 transition-colors"
+                    className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1.5 border border-foreground/40 text-foreground hover:border-foreground hover:bg-primary/10"
                   >
                     <Copy size={11} /> Copy from existing chain
                   </button>
@@ -139,19 +135,18 @@ export default function DependencyMasterFormPage() {
 
           {/* ── Side column — step tracker + live review, sticky ───────── */}
           <div className="lg:sticky lg:top-4 space-y-4">
-            <div className="rounded-xl border border-border p-4">
-              <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2.5">
-                Progress
+            <div className="bg-card p-4" style={{ border: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground mb-3">
+                Progress · {stepDone.filter(Boolean).length} of {STEPS.length}
               </p>
-              <ol className="space-y-2">
+              <ol>
                 {STEPS.map((label, i) => (
-                  <li key={label} className="flex items-center gap-2 text-xs">
-                    {stepDone[i] ? (
-                      <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                    ) : (
-                      <Circle size={14} className="text-muted-foreground/40 shrink-0" />
-                    )}
-                    <span className={stepDone[i] ? "text-foreground" : "text-muted-foreground"}>{label}</span>
+                  <li key={label} className="flex items-center justify-between gap-3 py-2 border-t border-border/70 first:border-t-0 first:pt-0 last:pb-0">
+                    <span className={`text-xs ${stepDone[i] ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                      <span className="font-heading tabular-nums text-muted-foreground mr-2">{i + 1}</span>
+                      {label}
+                    </span>
+                    <SheetMark text={stepDone[i] ? "Done" : "To do"} tone={stepDone[i] ? "done" : "waiting"} />
                   </li>
                 ))}
               </ol>
@@ -165,26 +160,27 @@ export default function DependencyMasterFormPage() {
                 rungs={form.ladder.rungs}
               />
             ) : (
-              <div className="rounded-xl border border-dashed border-border/60 p-4 text-xs text-muted-foreground italic text-center">
+              <div className="p-4 text-xs text-muted-foreground text-center" style={{ border: "1px dashed hsl(var(--foreground) / 0.4)" }}>
                 Review appears here once every step is complete.
               </div>
             )}
 
             <div className="flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => navigate("/masters/dependency")} disabled={form.isSaving}>
+              <button type="button" onClick={() => navigate("/masters/dependency")} disabled={form.isSaving} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10">
                 Cancel
-              </Button>
-              <Button
+              </button>
+              <button
+                type="button"
                 onClick={form.submit}
                 disabled={!form.canSubmit || form.isSaving}
-                className="gradient-civilworkdpr shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90"
+                className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-6 bg-foreground text-card border border-foreground"
               >
                 {form.isSaving ? "Saving…" : editingId ? "Update" : "Save"}
-              </Button>
+              </button>
             </div>
           </div>
         </div>
-      </CivilWorkDprShell>
+      </SheetShell>
 
       <ActivityPickerModal
         open={pickerOpen}
