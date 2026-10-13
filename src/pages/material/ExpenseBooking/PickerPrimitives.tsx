@@ -149,7 +149,7 @@ export function PickerRow({
             {primary}
           </span>
           {badge && (
-            <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+            <span className="text-[0.625rem] px-1.5 py-0.5 rounded-none bg-muted text-muted-foreground border border-border/50">
               {badge}
             </span>
           )}
@@ -223,7 +223,7 @@ export function RateInput({
         step={0.5}
         value={value ?? ""}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className={`pl-7 font-mono ${highlighted ? "border-emerald-500/40 bg-emerald-500/5" : ""}`}
+        className={`pl-7 font-mono ${highlighted ? "border-foreground/40 bg-primary/10" : ""}`}
         placeholder="0"
       />
     </div>
@@ -254,7 +254,7 @@ export function GRNChainBadge({
       {grns.map((g) => (
         <span
           key={g.GRNNo}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-primary/10 text-foreground border border-foreground/40 font-mono whitespace-nowrap"
         >
           <Truck size={9} className="shrink-0" />
           {g.GRNNo}
@@ -297,7 +297,7 @@ export function LinkedDocBadge({
     return (
       <div className="flex flex-col gap-1">
         {linkedPODocNo && (
-          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
+          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-primary/10 text-foreground border border-foreground/40 font-mono whitespace-nowrap">
             <FileText size={9} className="shrink-0" />
             {linkedPODocNo}
           </span>
@@ -306,7 +306,7 @@ export function LinkedDocBadge({
           {grnNos.length > 0 ? grnNos.map((g) => (
             <span
               key={g}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 font-mono whitespace-nowrap"
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-primary/10 text-foreground border border-foreground/40 font-mono whitespace-nowrap"
             >
               <Truck size={9} className="shrink-0" />
               {g}
@@ -319,7 +319,7 @@ export function LinkedDocBadge({
 
   if (eSourceType === "PO" || eSourceType === "WO_PO") {
     return sourceDocNo ? (
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-mono whitespace-nowrap">
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-primary/10 text-foreground border border-foreground/40 font-mono whitespace-nowrap">
         <FileText size={9} className="shrink-0" />
         {sourceDocNo}
       </span>
@@ -328,7 +328,7 @@ export function LinkedDocBadge({
 
   if (eSourceType === "WORK_DONE") {
     return sourceDocNo ? (
-      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 font-mono whitespace-nowrap">
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold bg-primary/10 text-foreground border border-foreground/40 font-mono whitespace-nowrap">
         <Wrench size={9} className="shrink-0" />
         {sourceDocNo}
       </span>
