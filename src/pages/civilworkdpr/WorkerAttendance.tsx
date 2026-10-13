@@ -3,14 +3,9 @@ import { chainFloorDisplay } from "@/lib/floorLabel";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import {
-  Users2,
   Search,
-  Building2,
-  HardHat,
-  ClipboardList,
-  CalendarDays,
   Loader2,
   Plus,
   Save,
@@ -19,8 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  ListChecks,
-  Layers,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -51,19 +44,19 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 export const inputCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
+  "w-full px-3 py-2.5 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none";
 
 // Leaner variant for the filter bar — same look, smaller footprint so
 // Company/Project/Activity/Date fit comfortably in a row without feeling
 // oversized relative to how little text most of them hold.
 const filterInputCls =
-  "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
+  "w-full h-9 px-2.5 text-xs bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none";
 
 export const STATUS_LABEL: Record<AttendanceStatus, string> = { P: "Present", A: "Absent", H: "Half Day" };
 export const STATUS_CLS: Record<AttendanceStatus, string> = {
-  P: "bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-400",
-  A: "bg-red-500/15 border-red-500/40 text-red-700 dark:text-red-400",
-  H: "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-400",
+  P: "!rounded-none bg-card border-foreground text-foreground font-semibold",
+  A: "!rounded-none bg-card border-destructive text-destructive font-semibold",
+  H: "!rounded-none bg-card border-dashed border-foreground text-foreground",
 };
 
 export function todayIso() {
@@ -174,9 +167,9 @@ export function AddWorkerDialog({
           default z-[60] overlay+content — the dialog was still there and
           still worked, it was just invisible under the darker overlay
           ("blacks out the screen"). Harmless when opened standalone. */}
-      <DialogContent className="max-w-md" elevated>
+      <DialogContent className="sheet-frame max-w-md" style={{ margin: 0 }} elevated>
         <DialogHeader>
-          <DialogTitle className="font-heading text-base">Select Worker</DialogTitle>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight pb-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>Select worker</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="relative">
@@ -190,7 +183,7 @@ export function AddWorkerDialog({
             />
           </div>
 
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-border divide-y divide-border/60">
+          <div className="max-h-64 overflow-y-auto divide-y divide-border/70" style={{ border: "1px solid hsl(var(--foreground))" }}>
             {isFetching ? (
               <div className="p-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> Searching…
@@ -203,14 +196,14 @@ export function AddWorkerDialog({
                 return (
                   <label
                     key={w.id}
-                    className={`flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-muted/50 ${already ? "opacity-40 pointer-events-none" : ""}`}
+                    className={`flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer hover:bg-primary/10 ${already ? "opacity-40 pointer-events-none" : ""}`}
                   >
                     <input
                       type="checkbox"
                       checked={selected.has(w.id) || already}
                       disabled={already}
                       onChange={() => toggle(w.id)}
-                      className="accent-cyan-600"
+                      className="accent-foreground"
                     />
                     <span className="flex-1 truncate">{w.name}</span>
                     <span className="text-[0.625rem] text-muted-foreground">{already ? "Already added" : w.contractorName}</span>
@@ -223,14 +216,14 @@ export function AddWorkerDialog({
           <button
             onClick={handleAddSelected}
             disabled={busy || selected.size === 0}
-            className="w-full py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2"
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed w-full h-10 bg-foreground text-card border border-foreground"
           >
             {busy && <Loader2 size={14} className="animate-spin" />}
             Add Selected Workers
           </button>
 
-          <div className="pt-3 border-t border-border/60 space-y-2">
-            <p className="text-[0.625rem] font-heading uppercase tracking-wide text-muted-foreground">Worker not listed? Create new</p>
+          <div className="pt-4 space-y-2" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Worker not listed? Create new</p>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -262,7 +255,7 @@ export function AddWorkerDialog({
             <button
               onClick={handleCreateAndAdd}
               disabled={busy || !newName.trim() || !newContractorId || !aadhaarValid}
-              className="w-full py-2 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-40 flex items-center justify-center gap-2"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed w-full h-10 border border-foreground text-foreground hover:bg-primary/10"
             >
               {busy && <Loader2 size={14} className="animate-spin" />}
               <Plus size={14} /> Create &amp; Add
@@ -315,39 +308,36 @@ function WorkerHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sheet-frame max-w-md" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle className="font-heading text-base truncate">{workerName} — Attendance Record</DialogTitle>
+          <div className="pb-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Attendance record</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1 truncate">{workerName}</DialogTitle>
+          </div>
         </DialogHeader>
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <button onClick={() => shiftMonth(-1)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+            <button onClick={() => shiftMonth(-1)} className="p-1.5 border border-foreground/40 hover:border-foreground text-foreground transition-colors">
               <ChevronLeft size={16} />
             </button>
-            <span className="text-sm font-medium">
+            <span className="font-heading text-sm font-semibold tabular-nums text-foreground">
               {new Date(`${month}-01`).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
             </span>
-            <button onClick={() => shiftMonth(1)} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+            <button onClick={() => shiftMonth(1)} className="p-1.5 border border-foreground/40 hover:border-foreground text-foreground transition-colors">
               <ChevronRight size={16} />
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-2">
-              <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">{counts.P}</p>
-              <p className="text-[0.625rem] text-muted-foreground">Present</p>
-            </div>
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 py-2">
-              <p className="text-lg font-semibold text-red-700 dark:text-red-400">{counts.A}</p>
-              <p className="text-[0.625rem] text-muted-foreground">Absent</p>
-            </div>
-            <div className="rounded-lg border border-amber-500/30 bg-[#ffe2021a] py-2">
-              <p className="text-lg font-semibold text-amber-700 dark:text-amber-400">{counts.H}</p>
-              <p className="text-[0.625rem] text-muted-foreground">Half Day</p>
-            </div>
+          <div className="grid grid-cols-3" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            {([["Present", counts.P, false], ["Absent", counts.A, true], ["Half day", counts.H, false]] as const).map(([label, n, red], i) => (
+              <div key={label} className={`px-3 py-2.5 ${i ? "border-l border-foreground/40" : ""}`}>
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground" style={red && n > 0 ? { color: "hsl(var(--destructive))" } : undefined}>{label}</p>
+                <p className={`font-heading text-xl font-semibold tabular-nums mt-1 ${red && n > 0 ? "text-destructive" : "text-foreground"}`}>{n}</p>
+              </div>
+            ))}
           </div>
 
-          <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border/60">
+          <div className="max-h-72 overflow-y-auto divide-y divide-border/70" style={{ border: "1px solid hsl(var(--foreground))" }}>
             {isFetching ? (
               <div className="p-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                 <Loader2 size={14} className="animate-spin" /> Loading…
@@ -362,9 +352,9 @@ function WorkerHistoryDialog({
                       {new Date(d.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", weekday: "short" })}
                     </p>
                     {d.activityLabel && <p className="text-[0.625rem] text-muted-foreground truncate">{d.activityLabel}</p>}
-                    {d.remarks && <p className="text-[0.625rem] text-muted-foreground truncate italic">— {d.remarks}</p>}
+                    {d.remarks && <p className="text-[0.625rem] text-muted-foreground truncate">{d.remarks}</p>}
                   </div>
-                  <span className={`text-[0.625rem] font-medium px-2 py-1 rounded-full border shrink-0 ${STATUS_CLS[d.status]}`}>
+                  <span className={`font-heading text-[0.5625rem] uppercase tracking-[0.1em] px-2 py-1 border shrink-0 ${STATUS_CLS[d.status]}`}>
                     {STATUS_LABEL[d.status]}
                   </span>
                 </div>
@@ -418,18 +408,20 @@ export const WorkerAttendanceLogGroups: React.FC<{
 
   return (
     <div>
-      <div className="flex items-center justify-end px-4 sm:px-5 py-2.5 border-b border-border bg-muted/10">
-        <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted border border-border shrink-0">
-          {(["date", "activity"] as const).map((mode) => (
+      <div className="flex items-center justify-end gap-3 px-4 py-2.5 border-b border-border">
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Group by</span>
+        <div className="inline-flex border border-foreground shrink-0">
+          {(["date", "activity"] as const).map((mode, i) => (
             <button
               key={mode}
               type="button"
               onClick={() => setGroupBy(mode)}
-              className={`px-2.5 py-1 rounded-md text-[0.6875rem] font-medium transition-colors ${
-                groupBy === mode ? "bg-cyan-600 text-white" : "text-muted-foreground hover:text-foreground"
+              aria-pressed={groupBy === mode}
+              className={`px-3 py-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${i ? "border-l border-foreground" : ""} ${
+                groupBy === mode ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/10"
               }`}
             >
-              {mode === "date" ? "Date-wise" : "Work-wise"}
+              {mode === "date" ? "Date" : "Work"}
             </button>
           ))}
         </div>
@@ -441,7 +433,6 @@ export const WorkerAttendanceLogGroups: React.FC<{
         </div>
       ) : groups.length === 0 ? (
         <div className="p-10 text-center text-muted-foreground">
-          <ClipboardList size={24} className="mx-auto opacity-30 mb-2" />
           <p className="text-sm">{emptyMessage}</p>
         </div>
       ) : (
@@ -449,35 +440,30 @@ export const WorkerAttendanceLogGroups: React.FC<{
           {groups.map((group) => {
             const collapsed = !!collapsedGroups[group.key];
             return (
-              <div key={group.key} className="border-b border-border/60 last:border-0">
+              <div key={group.key} className="border-b border-foreground/30 last:border-0">
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.key)}
-                  className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors text-left"
+                  className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-primary/10 transition-colors text-left"
                 >
                   {collapsed ? (
                     <ChevronRight size={14} className="text-muted-foreground shrink-0" />
                   ) : (
                     <ChevronDown size={14} className="text-muted-foreground shrink-0" />
                   )}
-                  {groupBy === "date" ? (
-                    <CalendarDays size={13} className="text-primary shrink-0" />
-                  ) : (
-                    <ClipboardList size={13} className="text-primary shrink-0" />
-                  )}
-                  <span className="text-sm font-medium text-foreground truncate">{group.label}</span>
+                  <span className="text-sm font-semibold text-foreground truncate">{group.label}</span>
                   {group.sublabel && (
                     <span className="text-xs text-muted-foreground truncate">· {group.sublabel}</span>
                   )}
-                  <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                  <span className="ml-auto font-heading text-[0.625rem] tabular-nums text-muted-foreground shrink-0">
                     {group.rows.length} entr{group.rows.length === 1 ? "y" : "ies"}
                   </span>
                 </button>
 
                 {!collapsed && (
-                  <div className="divide-y divide-border/40 bg-muted/5">
+                  <div className="divide-y divide-border/70 border-t border-border/70">
                     {group.rows.map((row) => (
-                      <div key={row.id} className="flex items-center justify-between gap-3 pl-11 pr-4 sm:pr-5 py-2">
+                      <div key={row.id} className="flex items-center justify-between gap-3 pl-10 pr-4 py-2">
                         <div className="min-w-0">
                           <p className="text-xs text-foreground truncate">{row.workerName}</p>
                           <p className="text-[0.625rem] text-muted-foreground truncate">
@@ -486,7 +472,7 @@ export const WorkerAttendanceLogGroups: React.FC<{
                               : new Date(row.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                           </p>
                         </div>
-                        <span className={`text-[0.625rem] font-medium px-2 py-0.5 rounded-full border shrink-0 ${STATUS_CLS[row.status]}`}>
+                        <span className={`font-heading text-[0.5625rem] uppercase tracking-[0.1em] px-2 py-0.5 border shrink-0 ${STATUS_CLS[row.status]}`}>
                           {STATUS_LABEL[row.status]}
                         </span>
                       </div>
@@ -670,17 +656,16 @@ const WorkerAttendance: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Worker Attendance"]} />
-      <CivilWorkDprShell
-        title="Worker Attendance"
-        subtitle="Centralized attendance history for workers across companies, projects and activities"
-        icon={Users2}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Worker attendance"
+        subtitle="Mark who was on site for an activity on a given day, and look back over what has been recorded."
       >
         {/* ── Filters ── */}
-        <div className="rounded-xl border border-border bg-muted/30 p-4">
+        <div className="bg-card px-4 py-4" style={{ border: "1px solid hsl(var(--foreground))" }}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
-              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
-                <HardHat size={11} /> Company
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Company
               </label>
               <select value={companyId} onChange={(e) => handleCompanyChange(e.target.value)} className={filterInputCls}>
                 <option value="">All Companies</option>
@@ -690,8 +675,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
-                <Building2 size={11} /> Project
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Project
               </label>
               <select
                 value={projectId}
@@ -706,8 +690,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
-                <Layers size={11} /> Floor
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Floor
               </label>
               <select
                 value={floor}
@@ -722,8 +705,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
-                <ClipboardList size={11} /> Activity
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Activity
               </label>
               <select
                 value={rungId}
@@ -738,8 +720,7 @@ const WorkerAttendance: React.FC = () => {
               </select>
             </div>
             <div>
-              <label className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5">
-                <CalendarDays size={11} /> Date
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Date
               </label>
               <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={filterInputCls} />
             </div>
@@ -759,15 +740,12 @@ const WorkerAttendance: React.FC = () => {
 
         {/* ── Selected activity attendance ── */}
         {!rungId ? (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center gap-2 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20">
-              <ListChecks size={15} className="text-muted-foreground shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-heading font-semibold text-foreground">Recent Attendance Log</p>
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                  Select a Company, Project and Activity above to mark attendance — meanwhile, here's what's already been recorded.
-                </p>
-              </div>
+          <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+            <div className="px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Recent attendance</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">
+                Choose a company, project and activity above to mark attendance. Until then, this is what has been recorded.
+              </p>
             </div>
             <WorkerAttendanceLogGroups
               rows={recentLogs}
@@ -776,26 +754,28 @@ const WorkerAttendance: React.FC = () => {
             />
           </div>
         ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
             <button
               type="button"
               onClick={() => setPanelCollapsed((v) => !v)}
-              className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-border bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+              aria-expanded={!panelCollapsed}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-primary/10 transition-colors text-left"
+              style={{ borderBottom: "1px solid hsl(var(--foreground))" }}
             >
               <div className="flex items-center gap-2 min-w-0">
                 {panelCollapsed ? (
-                  <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                  <ChevronRight size={14} className="text-foreground shrink-0" />
                 ) : (
-                  <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                  <ChevronDown size={14} className="text-foreground shrink-0" />
                 )}
                 <div className="min-w-0">
-                  <p className="text-sm font-heading font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
-                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                    {attendanceRows.length} Worker{attendanceRows.length === 1 ? "" : "s"} Allocated
+                  <p className="text-sm font-semibold text-foreground truncate">{selectedActivity?.label ?? "—"}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">
+                    {attendanceRows.length} worker{attendanceRows.length === 1 ? "" : "s"} allocated
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-mono text-muted-foreground shrink-0">
+              <span className="font-heading text-xs font-semibold tabular-nums text-foreground shrink-0">
                 {new Date(date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
               </span>
             </button>
@@ -808,15 +788,14 @@ const WorkerAttendance: React.FC = () => {
               </div>
             ) : attendanceRows.length === 0 ? (
               <div className="p-10 text-center text-muted-foreground">
-                <Users2 size={24} className="mx-auto opacity-30 mb-2" />
-                <p className="text-sm">No workers assigned to this activity yet.</p>
+                <p className="text-sm">No workers are assigned to this activity yet.</p>
               </div>
             ) : (
-              <div className="divide-y divide-border/60">
+              <div className="divide-y divide-border/70">
                 {visibleRows.map((row) => {
                   const status = statusByWorker[row.workerId] ?? "P";
                   return (
-                    <div key={row.workerId} className="flex items-center justify-between gap-3 px-4 sm:px-5 py-2.5">
+                    <div key={row.workerId} className="flex items-center justify-between gap-3 px-4 py-2.5">
                       <div className="min-w-0">
                         <p className="text-sm text-foreground truncate">{row.workerName}</p>
                         <p className="text-[0.625rem] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
@@ -827,7 +806,7 @@ const WorkerAttendance: React.FC = () => {
                           onChange={(e) =>
                             setStatusByWorker((prev) => ({ ...prev, [row.workerId]: e.target.value as AttendanceStatus }))
                           }
-                          className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border ${STATUS_CLS[status]} focus:outline-none`}
+                          className={`text-xs px-2.5 py-1.5 border ${STATUS_CLS[status]} focus:outline-none`}
                         >
                           {(Object.keys(STATUS_LABEL) as AttendanceStatus[]).map((s) => (
                             <option key={s} value={s}>{STATUS_LABEL[s]}</option>
@@ -836,14 +815,14 @@ const WorkerAttendance: React.FC = () => {
                         <button
                           onClick={() => setHistoryTarget({ id: row.workerId, name: row.workerName })}
                           title="Attendance record"
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-cyan-600 hover:bg-cyan-500/10"
+                          className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
                         >
                           <History size={13} />
                         </button>
                         <button
                           onClick={() => handleRemoveWorker(row.workerId)}
                           title="Remove from activity"
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+                          className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
                         >
                           <UserX size={13} />
                         </button>
@@ -854,27 +833,27 @@ const WorkerAttendance: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-t border-border bg-muted/10">
+            <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
               <button
                 onClick={() => setAddWorkerOpen(true)}
-                className="flex items-center gap-1.5 text-sm text-cyan-600 hover:text-cyan-500 font-medium"
+                className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed px-3 py-2 border border-foreground text-foreground hover:bg-primary/10"
               >
-                <Plus size={14} /> Add Worker
+                <Plus size={13} /> Add worker
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || attendanceRows.length === 0 || !rights.canCreate || !isDirty}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium disabled:opacity-40"
+                className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-5 bg-foreground text-card border border-foreground"
               >
                 {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                {isDirty ? "Save Attendance" : "Saved"}
+                {isDirty ? "Save attendance" : "Saved"}
               </button>
             </div>
               </>
             )}
           </div>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
 
       <AddWorkerDialog
         open={addWorkerOpen}
