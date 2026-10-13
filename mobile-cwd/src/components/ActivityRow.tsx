@@ -27,6 +27,11 @@ function ActivityRowView({ a, onPress }: { a: ActivityAssignment; onPress: () =>
         <View style={{ alignItems: "flex-end", gap: 4 }}>
           <StatusPill status={shown} />
           <PriorityBadge priority={a.priority} />
+          {!!a.tagName && (
+            <View style={{ paddingHorizontal: 6, paddingVertical: 1.5, borderRadius: 999, backgroundColor: `${ACCENT}22` }}>
+              <Text style={{ fontSize: 9, fontFamily: fonts.heading.bold, color: ACCENT }}>{a.tagName}</Text>
+            </View>
+          )}
         </View>
       </View>
       {!!autoName && (
