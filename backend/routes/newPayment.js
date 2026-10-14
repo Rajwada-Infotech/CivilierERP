@@ -1573,12 +1573,19 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     // created must be removed and the amount added back to
     // AccountHeadMaster.OnAccountBalance, or that money is permanently lost
     // from the party's on-account pool.
+    // The reversals and the delete run as one unit: a failure part-way used
+    // to leave the ledger reversed (or the on-account money restored) with the
+    // payment still there — or the other way round.
+    const tx = pool.transaction();
+    await tx.begin();
+    let result;
+    try {
     if (linkedOAId) {
-      const ledgerRow = await pool.request().input("OAId", sql.Int, linkedOAId)
+      const ledgerRow = await tx.request().input("OAId", sql.Int, linkedOAId)
         .query("SELECT PartyId, Amount FROM dbo.OnAccountLedger WHERE OAId = @OAId");
       if (ledgerRow.recordset.length) {
         const { PartyId, Amount } = ledgerRow.recordset[0];
-        await pool.request()
+        await tx.request()
           .input("OAId", sql.Int, linkedOAId)
           .input("PartyId", sql.Int, PartyId)
           .input("Amount", sql.Decimal(18, 2), Amount).query(`
@@ -1600,15 +1607,21 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     // already applied to loanSanction.js's DELETE.
     const { reversePostingBySource } = require("../services/generalLedger");
     for (const sourceType of ["NewPayment", "PaymentPosting", "BounceChargePosting", "LoanRepayment"]) {
-      await reversePostingBySource(pool, sourceType, id);
+      await reversePostingBySource(tx, sourceType, id);
     }
 
-    const result = await pool
+    result = await tx
       .request()
       .input("PPaymentID", sql.Int, id)
       .query("DELETE FROM dbo.NewPayment WHERE PPaymentID=@PPaymentID");
     if (!result.rowsAffected[0]) {
+      await tx.rollback();
       return res.status(404).json({ error: "Payment not found" });
+    }
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw txErr;
     }
     if (expenseRef) await _syncBillStatus(pool,expenseRef);
     if (linkedOAId) await bumpCacheVersion("on-account");
