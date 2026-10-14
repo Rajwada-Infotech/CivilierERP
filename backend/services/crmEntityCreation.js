@@ -1166,6 +1166,11 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     // above can't hold rows that don't exist yet, so the second one is
     // stopped by the database's one-active-line rule instead — say so plainly.
     if ((e.number === 2601 || e.number === 2627) && /UX_CrmBooking(Unit_ActiveUnit|Plot_Active)/.test(e.message || "")) {
+      // A double click on Submit lands here too — the unit is taken by this
+      // same application's own booking, not by someone else.
+      const own = (await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId, 10))
+        .query("SELECT TOP 1 BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC").catch(() => ({ recordset: [] }))).recordset[0];
+      if (own) throw new CrmCreationError(`This application already has its booking (${own.BookingNo})`, 409);
       throw new CrmCreationError(`This ${isPlotBooking ? "plot" : "unit"} was just booked by someone else — refresh and choose another`, 409);
     }
     throw e;
