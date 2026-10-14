@@ -1,4 +1,4 @@
--- Migration 560: indexes behind Reporting's project filter (GET
+-- Migration 600: indexes behind Reporting's project filter (GET
 -- /api/dependency-activity-assignment/scope-summary?projectId=). With 400k+
 -- current assignments the per-project aggregates had no way to go from a
 -- project to its assignments except scanning every current row: the existing
@@ -33,5 +33,5 @@ BEGIN
 END
 GO
 
-PRINT '560-reporting-project-filter-indexes applied successfully.';
+PRINT '600-reporting-project-filter-indexes applied successfully.';
 GO
