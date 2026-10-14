@@ -1162,6 +1162,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     await tx.commit();
   } catch (e) {
     await tx.rollback().catch(() => {});
+    // Two bookings of the same free unit / plot at the same moment: the lock
+    // above can't hold rows that don't exist yet, so the second one is
+    // stopped by the database's one-active-line rule instead — say so plainly.
+    if ((e.number === 2601 || e.number === 2627) && /UX_CrmBooking(Unit_ActiveUnit|Plot_Active)/.test(e.message || "")) {
+      throw new CrmCreationError(`This ${isPlotBooking ? "plot" : "unit"} was just booked by someone else — refresh and choose another`, 409);
+    }
     throw e;
   }
   // ── END ATOMIC SECTION ──────────────────────────────────────────────────────
