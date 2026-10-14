@@ -17,6 +17,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API         = "/api/crm/service-tickets";
 const BKG_API     = "/api/crm/bookings";
@@ -80,6 +81,8 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 const CrmServiceTickets: React.FC = () => {
   const qc = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
@@ -351,7 +354,7 @@ const CrmServiceTickets: React.FC = () => {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search ticket, customer, subject... (Enter to search)"
+            placeholder="Search ticket, customer, subject..."
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
         <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}

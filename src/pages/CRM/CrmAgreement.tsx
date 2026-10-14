@@ -23,6 +23,7 @@ import CrmAfsQueryPayment from "@/pages/CRM/CrmAfsQueryPayment";
 import CrmAfsRegistry from "@/pages/CRM/CrmAfsRegistry";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/agreements";
 const USERS_API = "/api/users";
@@ -623,6 +624,8 @@ const CrmAgreement: React.FC = () => {
   const rawIdFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
   const idFilter = rawIdFilter !== null && rawIdFilter > 0 ? rawIdFilter : null;
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -1190,7 +1193,7 @@ const CrmAgreement: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search agreements... (Enter to search)"
+              placeholder="Search agreements..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
           <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />

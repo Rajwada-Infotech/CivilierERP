@@ -20,6 +20,7 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/mutation";
 
@@ -112,6 +113,8 @@ const CrmMutation: React.FC = () => {
   const mutationIdFilter = sp.get("mutationId");
 
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -442,7 +445,7 @@ const CrmMutation: React.FC = () => {
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-                placeholder="Search mutations... (Enter to search)"
+                placeholder="Search mutations..."
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
             <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
