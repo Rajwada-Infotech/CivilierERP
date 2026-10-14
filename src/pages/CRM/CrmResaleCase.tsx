@@ -276,7 +276,7 @@ const CrmResaleCase: React.FC = () => {
         <div className="mt-3 h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={doneCount} aria-valuemax={steps.length}>
           <div className={`h-full ${c.Status === "Rejected" || c.Status === "Cancelled" ? "bg-muted-foreground/40" : "bg-emerald-500"}`} style={{ width: `${Math.round((doneCount / steps.length) * 100)}%` }} />
         </div>
-        {c.Status === "Rejected" && c.RejectionNote && <p className="mt-3 text-sm text-red-600">Rejected: {c.RejectionNote}</p>}
+        {["Rejected", "Cancelled"].includes(c.Status) && c.RejectionNote && <p className="mt-3 text-sm text-red-600">{c.Status === "Rejected" ? "Rejected: " : ""}{c.RejectionNote}</p>}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">

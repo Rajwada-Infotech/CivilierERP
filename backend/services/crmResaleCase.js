@@ -74,9 +74,17 @@ async function sellerFacts(db, r) {
   const uncovered = Math.max(0, Math.round((demandedTotal - onAccount) * 100) / 100);
   const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN (N'Rejected', N'Withdrawn', N'Cancelled')`))[0] || null;
   const openRefund = (await q(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE BookingId IN (${list}) AND Status NOT IN (N'Paid', N'Rejected', N'Cancelled')`))[0] || null;
+  // The seller's money still waiting for Finance: approved after the transfer
+  // it would land on the booking that is then the buyer's.
+  const pendingReceipts = await q(`
+    SELECT COALESCE(rp.RPDocNo, rp.DocNo) AS No, rp.RPAmount AS Amount FROM dbo.ReceivedPayment rp
+    WHERE rp.CrmBookingId IN (${list}) AND rp.RPStatus IN (N'Draft', N'Pending') AND rp.SourceCrmResaleId IS NULL
+    UNION ALL
+    SELECT mr.ReceiptNo, mr.Amount FROM dbo.CrmMoneyReceipt mr
+    WHERE mr.BookingId IN (${list}) AND mr.Status = N'Pending' AND mr.ReceivedPaymentId IS NULL`);
   const loans = await q(`SELECT BankName, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId IN (${list}) AND ISNULL(SanctionStatus, N'') NOT IN (N'Rejected', N'Withdrawn', N'Closed', N'NotApplied')`);
   const agreement = (await q(`SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId IN (${list}) ORDER BY CASE WHEN BookingId = ${Number(r.FromBookingId) || 0} THEN 0 ELSE 1 END`))[0] || null;
-  return { overdue, onAccount, demandedTotal, uncovered, openCancellation, openRefund, loans, agreement };
+  return { overdue, onAccount, demandedTotal, uncovered, openCancellation, openRefund, loans, agreement, pendingReceipts };
 }
 
 async function docsOf(db, id) {
@@ -107,6 +115,7 @@ async function caseState(db, id) {
   }
   if (f.openCancellation) clearanceBlockers.push(`Cancellation ${f.openCancellation.CancellationNo} is open on this property`);
   if (f.openRefund) clearanceBlockers.push(`Refund ${f.openRefund.RefundNo} is open on this property`);
+  if (f.pendingReceipts.length) clearanceBlockers.push(`${f.pendingReceipts.map((x) => x.No || "A payment").join(", ")} waiting for Finance — approve or reject ${f.pendingReceipts.length === 1 ? "it" : "them"} first`);
   if (hasLoan && !verified(docs, "SellerLoanNoc")) clearanceBlockers.push("The seller has a home loan — upload and verify their bank's NOC / closure letter");
 
   // 4 buyer
@@ -178,6 +187,8 @@ async function caseState(db, id) {
             : `Covered by ${fmt(f.onAccount)} paid on account (settles when the full price is in)` },
       { label: "No open cancellation or refund", ok: !f.openCancellation && !f.openRefund,
         hint: [f.openCancellation?.CancellationNo, f.openRefund?.RefundNo].filter(Boolean).join(", ") || null },
+      { label: "No seller payment waiting for Finance", ok: !f.pendingReceipts.length,
+        hint: f.pendingReceipts.length ? `${f.pendingReceipts.map((x) => `${x.No || "receipt"} ₹${Number(x.Amount || 0).toLocaleString("en-IN")}`).join(" · ")} — Finance → Received Payments / Money Receipts` : null },
       hasLoan
         ? { label: "Seller's bank NOC / loan-closure letter verified", ok: verified(docs, "SellerLoanNoc"), doc: "SellerLoanNoc",
             hint: f.loans.length ? `Loan with ${f.loans.map((l) => l.BankName).join(", ")}` : "Marked as having a loan" }
@@ -266,6 +277,7 @@ async function setSellerLoan(db, id, hasLoan, actorUserId) {
 /** Stage 3: the developer's NOC for the transfer (resale only). */
 async function issueNoc(db, id, actorUserId) {
   const st = await caseState(db, id);
+  if (["Rejected", "Cancelled", "Completed"].includes(st.case.Status)) throw new CaseError(`This case is ${st.case.Status}`, 409);
   if (st.case.Kind === "BuyBack") throw new CaseError("A buy-back has no transfer NOC");
   if (st.case.NocIssuedAt) throw new CaseError(`NOC ${st.case.NocNo} is already issued`, 409);
   if (!st.case.SellerClearedAt) throw new CaseError("Confirm the seller clearance first", 409);
@@ -344,6 +356,7 @@ async function issueFeeInvoice(db, id, actorUserId, actorEmail) {
 /** Stage 6b: the buyer's fee payment — a Finance receipt (approved there) credited to the buyer. */
 async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
   const r = await loadCase(db, id);
+  if (["Rejected", "Cancelled", "Completed"].includes(r.Status)) throw new CaseError(`This case is ${r.Status}`, 409);
   if (!r.FeeInvoiceId || r.FeeInvoiceStatus === "Void") throw new CaseError("Issue the fee invoice first", 409);
   if (r.FeeReceivedPaymentId && r.FeeReceiptStatus !== "Rejected") throw new CaseError(`Payment ${r.FeeReceiptNo || ""} is already recorded`, 409);
   const mode = String(b?.PaymentMode || "").trim();

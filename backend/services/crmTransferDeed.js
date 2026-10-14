@@ -394,6 +394,8 @@ async function uploadDutyProof(db, id, file, b, ctx) {
   const amt = Number(b?.AmountPaid);
   if (!(amt > 0)) throw new DeedError("Enter the amount paid");
   const on = String(b?.PaidOn || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) throw new DeedError("The payment date isn't a valid date");
+  if (on > new Date().toISOString().slice(0, 10)) throw new DeedError("The payment date can't be in the future");
   await db.request().input("p", sql.Int, p.Id).input("ref", sql.NVarChar(100), String(b.PaidRef).trim()).input("on", sql.Date, on).input("a", sql.Decimal(18, 2), amt)
     .input("fn", sql.NVarChar(300), file.originalname).input("fb", sql.NVarChar(sql.MAX), file.buffer.toString("base64")).input("mt", sql.NVarChar(150), file.mimetype)
     .input("t", sql.NVarChar(20), ctx.actorType)

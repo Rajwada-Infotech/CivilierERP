@@ -288,8 +288,31 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
 router.put("/:id/cancel", requirePageRight("crm-resales", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
+  const reason = String(req.body?.reason ?? req.body?.note ?? "").trim();
+  if (!reason) return res.status(400).json({ error: "Say why the case is being cancelled" });
   try {
     const pool = getPool();
+    // Money or a tax document already moving on the case is settled first —
+    // cancelling would leave it live with nothing behind it.
+    const live = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT r.Kind, r.Status,
+             np.DocNo AS PayoutNo, np.Status AS PayoutStatus,
+             fi.InvoiceNo AS FeeInvoiceNo, fi.Status AS FeeInvoiceStatus,
+             frp.RPDocNo AS FeeReceiptNo, frp.RPStatus AS FeeReceiptStatus
+      FROM dbo.CrmUnitResale r
+      LEFT JOIN dbo.NewPayment np ON np.PPaymentID = r.PayoutNewPaymentId
+      LEFT JOIN dbo.CrmInvoice fi ON fi.Id = r.FeeInvoiceId
+      LEFT JOIN dbo.ReceivedPayment frp ON frp.RPPaymentID = r.FeeReceivedPaymentId
+      WHERE r.Id = @id AND r.IsActive = 1`)).recordset[0];
+    if (live?.PayoutNo && ["Pending", "Approved"].includes(live.PayoutStatus)) {
+      return res.status(409).json({ error: `Its payout voucher ${live.PayoutNo} is ${live.PayoutStatus === "Approved" ? "already approved" : "with Finance"} — ${live.PayoutStatus === "Approved" ? "the buy-back is paid and can't be cancelled" : "reject it in Finance → Payments first"}.` });
+    }
+    if (live?.FeeReceiptNo && ["Draft", "Pending", "Approved"].includes(live.FeeReceiptStatus)) {
+      return res.status(409).json({ error: `The buyer's fee payment ${live.FeeReceiptNo} is ${live.FeeReceiptStatus === "Approved" ? "already received — refund it to the buyer" : "waiting in Finance → Received Payments — reject it there"} before cancelling.` });
+    }
+    if (live?.FeeInvoiceNo && live.FeeInvoiceStatus !== "Void") {
+      return res.status(409).json({ error: `Transfer-fee invoice ${live.FeeInvoiceNo} is issued to the buyer — void it (and settle its ledger entry with Finance) before cancelling.` });
+    }
     // Its transfer deed goes with it — unless the deed is already signed or
     // registered: that is a legal instrument now, and is undone by a deed of
     // its own, not by cancelling the case.
@@ -298,11 +321,16 @@ router.put("/:id/cancel", requirePageRight("crm-resales", "edit"), async (req, r
     if (deed && ["Executed", "Registered"].includes(deed.Status)) {
       return res.status(409).json({ error: `${deed.DeedNo} is already ${deed.Status === "Registered" ? "registered" : "signed"} — the case can't be cancelled.` });
     }
-    const r = await pool.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req))
-      .query(`UPDATE dbo.CrmUnitResale SET Status = N'${ResaleStatus.CANCELLED}', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-              WHERE Id = @id AND IsActive = 1 AND Status <> N'${ResaleStatus.COMPLETED}'`);
+    const r = await pool.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req)).input("why", sql.NVarChar(500), `Cancelled: ${reason}`.slice(0, 500))
+      .query(`UPDATE dbo.CrmUnitResale SET Status = N'${ResaleStatus.CANCELLED}', RejectionNote = @why, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+              WHERE Id = @id AND IsActive = 1 AND Status NOT IN (N'${ResaleStatus.COMPLETED}', N'${ResaleStatus.CANCELLED}')`);
     if (!r.rowsAffected[0])
-      return res.status(400).json({ error: "Not found, or already completed — a completed resale has already moved the plot and cannot be cancelled here." });
+      return res.status(400).json({ error: "Not found, already cancelled, or completed — a completed resale has already moved the property and cannot be cancelled here." });
+    // The buyer's application opened from the case never took the property.
+    await pool.request().input("id", sql.Int, id).query(`
+      UPDATE a SET a.Status = N'Cancelled', a.UpdatedAt = SYSDATETIME()
+      FROM dbo.CrmApplication a JOIN dbo.CrmUnitResale r ON r.BuyerApplicationId = a.Id
+      WHERE r.Id = @id AND a.Status = N'Draft'`);
     if (deed) {
       await pool.request().input("d", sql.Int, deed.Id).input("by", sql.Int, actorId(req))
         .query("UPDATE dbo.CrmTransferDeed SET Status = N'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @d");

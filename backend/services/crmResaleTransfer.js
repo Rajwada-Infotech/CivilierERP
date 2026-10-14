@@ -268,7 +268,8 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
   try {
     resale = (await tx.request().input("id", sql.Int, resaleId)
       .query("SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
-    if (!resale || resale.Kind !== "BuyBack" || resale.Status === "Completed" || resale.PayoutNewPaymentId !== newPaymentId) {
+    // Only an approved buy-back completes (a cancelled or rejected one never does).
+    if (!resale || resale.Kind !== "BuyBack" || resale.Status !== "Approved" || resale.PayoutNewPaymentId !== newPaymentId) {
       await tx.rollback();
       return { done: false };
     }

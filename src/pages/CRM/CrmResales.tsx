@@ -70,6 +70,9 @@ const CrmResales: React.FC = () => {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Cancelling a case is confirmed, with a reason (kept on the case).
+  const [cancelFor, setCancelFor] = useState<Deal | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [form, setForm] = useState({ ...EMPTY });
   const [paying, setPaying] = useState<Deal | null>(null);
   const [pay, setPay] = useState({ BankLHeadId: "", PaymentMode: "" });
@@ -202,7 +205,7 @@ const CrmResales: React.FC = () => {
                 {open ? "Open case" : "View case"}
               </button>
             )}
-            {open && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
+            {open && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => { setCancelFor(d); setCancelReason(""); }}
               className="px-2 h-7 text-[0.6875rem] rounded-lg border border-border text-muted-foreground hover:bg-muted">
               Cancel
             </button>}
@@ -452,6 +455,21 @@ const CrmResales: React.FC = () => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!cancelFor} onOpenChange={(o) => !o && setCancelFor(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Cancel {cancelFor?.Kind === "BuyBack" ? "buy-back" : "resale"} case #{cancelFor?.Id}?</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">The property stays with its current owner and the case stops. Its unsigned transfer deed is cancelled with it, and the buyer's draft application is closed. A signed or registered deed, a fee invoice or payment, or a payout with Finance has to be settled first — you'll be told which.</p>
+            <textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} rows={3} placeholder="Why is it being cancelled?"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setCancelFor(null)} className="h-9 px-4 rounded-lg border border-border hover:bg-muted">Keep it</button>
+              <button disabled={!cancelReason.trim()} onClick={async () => { const d = cancelFor!; setCancelFor(null); await act(d, "cancel", { reason: cancelReason.trim() }, "Cancelled"); }}
+                className="h-9 px-4 rounded-lg bg-red-600 text-white disabled:opacity-40">Cancel the case</button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </CrmShell>
