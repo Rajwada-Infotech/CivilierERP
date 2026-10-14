@@ -1544,21 +1544,15 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       });
     }
 
-    // ── Guard: raised from CRM ─────────────────────────────────────────────
-    // A refund / buy-back / brokerage payout voucher is tied to its CRM
-    // record (which keeps the voucher's id). Deleting it would leave that
-    // record pointing at nothing — "already with Finance" forever, no new
-    // voucher possible. Rejecting it sends the record back to CRM properly.
+    // Raised from CRM: a refund / buy-back keeps its payout voucher's id.
+    // Deleting is allowed (business choice); an UNPAID voucher's refund /
+    // buy-back is sent back to CRM first, exactly as if Finance had rejected
+    // it, so a fresh voucher can be raised — otherwise the record pointed at
+    // a voucher that no longer existed ("already with Finance" forever).
+    // Brokerage needs nothing: its totals are read live from Payments.
     const crmSrc = (await pool.request().input("PPaymentID", sql.Int, id)
-      .query("SELECT Status, SourceCrmRefundId, SourceCrmResaleId, SourceCrmBrokerageId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")).recordset[0];
-    if (crmSrc && (crmSrc.SourceCrmRefundId || crmSrc.SourceCrmResaleId || crmSrc.SourceCrmBrokerageId)) {
-      const what = crmSrc.SourceCrmRefundId ? "a CRM refund" : crmSrc.SourceCrmResaleId ? "a CRM buy-back" : "a CRM brokerage payout";
-      return res.status(409).json({
-        error: crmSrc.Status === "Approved"
-          ? `This voucher was raised for ${what} and is already paid, so it can't be deleted.`
-          : `This voucher was raised for ${what}, so it can't be deleted — reject it instead, and it goes back to CRM with your note.`,
-      });
-    }
+      .query("SELECT Status, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")).recordset[0];
+    const sendBackToCrm = crmSrc && crmSrc.Status !== "Approved" && (crmSrc.SourceCrmRefundId || crmSrc.SourceCrmResaleId);
 
     const refRow = await pool.request().input("PPaymentID", sql.Int, id)
       .query("SELECT PExpenseRef, PLinkedOAId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
@@ -1618,6 +1612,15 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       await tx.rollback();
       return res.status(404).json({ error: "Payment not found" });
     }
+    if (sendBackToCrm && crmSrc.SourceCrmRefundId) {
+      await tx.request().input("rid", sql.Int, crmSrc.SourceCrmRefundId).input("np", sql.Int, id)
+        .query(`UPDATE dbo.CrmRefund SET Status = 'Pending', FinanceNewPaymentId = NULL,
+                  RejectionNote = N'[Finance] Payout voucher deleted — raise it again', UpdatedAt = SYSDATETIME()
+                WHERE Id = @rid AND FinanceNewPaymentId = @np AND Status IN ('FinanceApproved', 'FinancePending')`);
+    }
+    if (sendBackToCrm && crmSrc.SourceCrmResaleId) {
+      await require("../services/crmResaleTransfer").buyBackVoucherRejected(tx, crmSrc.SourceCrmResaleId, Number(id), "Payout voucher deleted — raise it again");
+    }
     await tx.commit();
     } catch (txErr) {
       try { await tx.rollback(); } catch { /* already rolled back */ }
@@ -1625,8 +1628,9 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     }
     if (expenseRef) await _syncBillStatus(pool,expenseRef);
     if (linkedOAId) await bumpCacheVersion("on-account");
+    if (sendBackToCrm) await bumpCacheVersion(crmSrc.SourceCrmRefundId ? "crm-refunds" : "crm-resales");
     await bumpCacheVersion("new-payment");
-    res.json({ message: "Payment deleted successfully" });
+    res.json({ message: sendBackToCrm ? "Payment deleted — its CRM record is back with CRM to raise a new voucher" : "Payment deleted successfully" });
   } catch (err) {
     console.error("PAYMENT DELETE ERROR:", err.message);
     res.status(500).json({ error: err.message });
