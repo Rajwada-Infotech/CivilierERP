@@ -92,6 +92,9 @@ export default function SmsSetup() {
                     <div className="space-y-1.5 sm:col-span-2">
                       <Label htmlFor="sms-url">API URL</Label>
                       <Input id="sms-url" placeholder="https://api.provider.com/v1/send" value={form.apiUrl ?? ""} onChange={(e) => set("apiUrl", e.target.value)} />
+                      <p className="text-[0.6875rem] text-muted-foreground">
+                        For a gateway called by link, put {"{to}"}, {"{message}"}, {"{sender}"} and {"{apiKey}"} where they go in the URL. Without them the URL gets a JSON POST of to, message and sender, with the key as a Bearer token.
+                      </p>
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">
                       <Label htmlFor="sms-key">API Key / Token</Label>

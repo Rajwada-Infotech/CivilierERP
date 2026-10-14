@@ -4,6 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
+const { send: sendMessage, missingFields } = require("../services/messageProviders");
 
 
 router.use(authMiddleware);
@@ -357,6 +358,57 @@ router.put("/integrations/:channel", adminOnly, async (req, res) => {
     if (req.log) req.log.error(err, `Failed to update integration ${channel}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ====================== Messaging channels: status + test ======================
+const MESSAGING = ["email", "sms", "whatsapp"];
+const MESSAGING_FROM = { email: "fromEmail", sms: "senderId", whatsapp: "phoneNumberId" };
+
+// GET /messaging/status — whether each channel is set up and switched on (no secrets).
+router.get("/messaging/status", adminOnly, async (req, res) => {
+  try {
+    const result = await getPool().request().query(`
+      SELECT Channel, ConfigJson, IsActive, UpdatedAt
+      FROM dbo.CommunicatorConfig
+      WHERE Channel IN ('email', 'sms', 'whatsapp')
+    `);
+    const rows = new Map(result.recordset.map((r) => [r.Channel, r]));
+    res.json({
+      channels: MESSAGING.map((channel) => {
+        const row = rows.get(channel);
+        const config = row?.IsActive ? parseConfigJson(row.ConfigJson) : {};
+        return {
+          channel,
+          saved: !!row?.IsActive,
+          active: !!config.isActive,
+          missing: missingFields(channel, config),
+          provider: config.provider || "",
+          from: config[MESSAGING_FROM[channel]] || "",
+          updatedAt: row?.UpdatedAt || null,
+        };
+      }),
+    });
+  } catch (err) {
+    console.error("ERROR in GET /messaging/status:", err);
+    res.status(500).json({ error: "Failed to load messaging status" });
+  }
+});
+
+// POST /messaging/:channel/test { to } — sends one test message, even while the channel is switched off.
+router.post("/messaging/:channel/test", adminOnly, async (req, res) => {
+  const { channel } = req.params;
+  const to = String(req.body?.to || "").trim();
+  if (!MESSAGING.includes(channel)) return res.status(400).json({ error: "invalid channel" });
+  if (!to || to.length > 200) return res.status(400).json({ error: "Enter where to send the test" });
+  if (channel === "email" ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to) : !/^\+?[\d\s-]{8,16}$/.test(to)) {
+    return res.status(400).json({ error: channel === "email" ? "Enter a valid email address" : "Enter a valid mobile number" });
+  }
+  const result = await sendMessage(
+    channel,
+    { to, subject: "CivilierERP test message", text: "This is a test message from CivilierERP. If you received it, this channel is working." },
+    { force: true },
+  );
+  res.status(result.ok ? 200 : 422).json(result.ok ? { ok: true } : { ok: false, error: result.error });
 });
 
 // ─── Generic channel config routes (unchanged) ───────────────────────────────
