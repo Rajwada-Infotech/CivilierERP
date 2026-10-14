@@ -20,6 +20,7 @@ export interface User {
   created_datetime: string;
   discontinue: boolean;
   can_accept_tickets?: boolean;
+  avatar_url?: string | null;
   last_login?: string | null;
   tenant_id?: string | null;
   tenantId?: string | null;

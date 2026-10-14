@@ -19,6 +19,8 @@ import { getRolesList } from "@/api/roleApi";
 import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { makeAvatarThumb } from "@/lib/avatarThumb";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -33,6 +35,10 @@ interface User {
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
+  /** the list's small thumbnail when there is one, else the full picture (migration 575) */
+  avatar_url?: string | null;
+  /** a picture uploaded before thumbnails existed — made once on this page */
+  avatar_needs_thumb?: boolean;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
@@ -128,6 +134,34 @@ const getInitials = (name: string) =>
     .join("")
     .toUpperCase();
 
+// The user's profile picture, or their initials when they have none (or it
+// fails to load). Same square frame either way.
+function UserAvatar({ name, url, size, muted, userId, needsThumb }: { name: string; url?: string | null; size: string; muted?: boolean; userId?: number; needsThumb?: boolean }) {
+  const [broken, setBroken] = useState(false);
+  // A picture uploaded before thumbnails existed: make its thumbnail once and
+  // save it, so next time the list loads only a few KB. Best-effort.
+  useEffect(() => {
+    if (!needsThumb || !url || !userId) return;
+    let done = false;
+    makeAvatarThumb(url).then((thumb) => {
+      if (!thumb || done) return;
+      fetchWithAuth(`/api/user-profile/${userId}/avatar-thumb`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thumb }),
+      }).catch(() => {});
+    });
+    return () => { done = true; };
+  }, [needsThumb, url, userId]);
+  const frame = `${size} flex items-center justify-center font-heading font-bold flex-shrink-0 border overflow-hidden ${muted ? "border-foreground/40 text-muted-foreground" : "border-foreground text-foreground"}`;
+  if (url && !broken) {
+    return (
+      <div className={frame}>
+        <img src={url} alt={name} className={`w-full h-full object-cover ${muted ? "opacity-60 grayscale" : ""}`} onError={() => setBroken(true)} />
+      </div>
+    );
+  }
+  return <div className={frame}>{getInitials(name)}</div>;
+}
+
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 const RULE = "1px solid hsl(var(--foreground))";
@@ -160,9 +194,7 @@ function buildUserColumns(
       size: 240,
       cell: ({ row }) => (
         <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 flex items-center justify-center text-[0.625rem] font-heading font-bold flex-shrink-0 border ${row.original.discontinue ? "border-foreground/40 text-muted-foreground" : "border-foreground text-foreground"}`}>
-            {getInitials(row.original.name)}
-          </div>
+          <UserAvatar name={row.original.name} url={row.original.avatar_url} size="w-8 h-8 text-[0.625rem]" muted={!!row.original.discontinue} userId={row.original.id} needsThumb={row.original.avatar_needs_thumb} />
           <div className="min-w-0">
             <p className={`font-semibold truncate ${row.original.discontinue ? "text-muted-foreground" : "text-foreground"}`}>{row.original.name}</p>
             <p className="text-xs text-muted-foreground truncate">{row.original.email}</p>
@@ -766,9 +798,7 @@ const Users = () => {
           >
             {/* Avatar header */}
             <div className="flex items-center gap-4 pb-4 mb-4" style={{ borderBottom: RULE }}>
-              <div className="w-14 h-14 flex items-center justify-center text-lg font-heading font-bold border border-foreground text-foreground shrink-0">
-                {getInitials(viewedUser.name)}
-              </div>
+              <UserAvatar name={viewedUser.name} url={viewedUser.avatar_url} size="w-14 h-14 text-lg" />
               <div className="min-w-0">
                 <h2 className="font-heading text-lg font-bold tracking-tight text-foreground truncate">
                   {viewedUser.name}
