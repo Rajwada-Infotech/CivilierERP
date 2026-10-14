@@ -1574,6 +1574,13 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
     // rather than composes; this ordering mirrors the identical, already-
     // established pattern in crmCancellations.js's /approve).
     const transitionResult = await approvalTransition("crm-sales-deed-senior", id, 'Approved', userEmail, req.user?.role, req.body?.Remarks, actorId(req));
+    // A rule with more than one level answers 'Pending' until its LAST level
+    // signs. Marking the deed Approved and sending it to the customer here
+    // used to skip every level after the first (as the director approval,
+    // the agreement approvals and the cancellation approval already avoid).
+    if (transitionResult.newStatus !== "Approved") {
+      return res.json({ success: true, status: transitionResult.newStatus, message: "Approved at this level — waiting for the next approver" });
+    }
 
     // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
     // The status flip and both approval-log entries land together — a
