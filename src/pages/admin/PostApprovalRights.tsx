@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { toast } from "sonner";
 import {
   getUsersForRights,
@@ -44,6 +44,11 @@ interface PageDef {
  * getEffectivePagePermissions() merge Menu Rights uses.
  */
 const POST_APPROVAL_ACTION: PageAction = "post-approval";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const TAG = "inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function PostApprovalRights() {
@@ -224,201 +229,166 @@ export default function PostApprovalRights() {
 
   const grantedCount = eligiblePages.filter((p) => isGranted(p.key)).length;
 
+  // One searchable picker, used for both users and roles.
+  const picker = (opts: {
+    ref: React.RefObject<HTMLDivElement>;
+    open: boolean;
+    setOpen: (o: boolean) => void;
+    label: string;
+    placeholder: string;
+    search: string;
+    setSearch: (s: string) => void;
+    tag?: string;
+    items: { id: number; name: string; sub?: string }[];
+    selectedId: number | null;
+    onPick: (id: number) => void;
+    empty: string;
+  }) => (
+    <div className="relative w-full max-w-sm" ref={opts.ref}>
+      <button
+        onClick={() => opts.setOpen(!opts.open)}
+        className="w-full h-10 flex items-center justify-between gap-2 px-3 border border-foreground/40 hover:border-foreground bg-card text-sm transition-colors"
+        aria-expanded={opts.open}
+      >
+        <span className={opts.label ? "text-foreground font-medium truncate" : "text-muted-foreground"}>{opts.label || opts.placeholder}</span>
+        <span className="flex items-center gap-2 shrink-0">
+          {opts.tag && <span className={`${TAG} text-foreground border-foreground/40 capitalize`}>{opts.tag}</span>}
+          <ChevronDown size={14} className={`text-muted-foreground transition-transform duration-200 ${opts.open ? "rotate-180" : ""}`} />
+        </span>
+      </button>
+      {opts.open && (
+        <div className="absolute z-50 mt-1 w-full border border-foreground bg-card overflow-hidden" style={{ boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" }}>
+          <div className="p-2" style={{ borderBottom: RULE }}>
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                autoFocus
+                placeholder="Search…"
+                value={opts.search}
+                onChange={(e) => opts.setSearch(e.target.value)}
+                className="w-full h-8 pl-8 pr-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+              />
+            </div>
+          </div>
+          <ul className="max-h-60 overflow-auto">
+            {opts.items.length === 0 ? (
+              <li className="px-4 py-3 text-sm text-muted-foreground text-center">{opts.empty}</li>
+            ) : (
+              opts.items.map((it) => (
+                <li key={it.id}>
+                  <button
+                    onClick={() => opts.onPick(it.id)}
+                    className={`w-full px-3 py-2 text-left flex justify-between items-center border-b border-foreground/10 last:border-0 transition-colors ${
+                      opts.selectedId === it.id ? "bg-primary/10" : "hover:bg-primary/5"
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-foreground truncate">{it.name}</span>
+                      {it.sub && <span className="block text-xs text-muted-foreground capitalize">{it.sub}</span>}
+                    </span>
+                    {opts.selectedId === it.id && <Check size={14} className="text-foreground shrink-0" />}
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
       <Breadcrumbs items={[{ label: "Admin" }, { label: "Post Approval Rights" }]} />
 
-      <AdminShell
-        title="Post Approval Rights"
-        subtitle="Who can edit a record after it has already been Approved"
-        icon={ShieldCheck}
+      <SheetShell
+        eyebrow="CivilierERP · Approvals"
+        title="Post-approval rights"
+        subtitle="Who may still edit a record after it has been approved, page by page. Set it for a role, or add to it for one person."
       >
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 relative mb-4" style={{ zIndex: 40 }}>
-          <div className="flex items-center justify-between mb-3">
-            <label className="flex items-center gap-2 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
-              <Users className="w-3.5 h-3.5" />
-              {subject === "user" ? "Select User" : "Select Role"}
-            </label>
-            <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
-              <button
-                onClick={() => switchSubject("role")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  subject === "role"
-                    ? "bg-card shadow text-foreground border border-border"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Role-wise
-              </button>
-              <button
-                onClick={() => switchSubject("user")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  subject === "user"
-                    ? "bg-card shadow text-foreground border border-border"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Custom User-wise
-              </button>
+        <div className="bg-card relative" style={{ border: RULE, zIndex: 40 }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <span className={HEAD}>{subject === "user" ? "Choose a person" : "Choose a role"}</span>
+            <div className="inline-flex items-stretch border border-foreground">
+              {([["role", "Role-wise"], ["user", "Custom user-wise"]] as const).map(([key, label], i) => (
+                <button
+                  key={key}
+                  onClick={() => switchSubject(key)}
+                  aria-pressed={subject === key}
+                  className={`h-8 px-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${i ? "border-l border-foreground" : ""} ${
+                    subject === key ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
-          {subject === "role" && (
-            <p className="text-xs text-muted-foreground/70 mb-3">
-              Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) can only add on top of this.
-            </p>
-          )}
-
-          {subject === "user" ? (
-            <div className="relative w-full max-w-sm" ref={dropdownRef}>
-              <button
-                onClick={() => setDropdownOpen(!dropdownOpen)}
-                className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
-              >
-                <span className={selectedUser ? "text-foreground font-medium" : "text-muted-foreground"}>
-                  {loadingUsers ? "Loading users…" : selectedUser ? selectedUser.name : "Choose a user…"}
-                </span>
-                <div className="flex items-center gap-2">
-                  {selectedUser && (
-                    <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                      {selectedUser.role}
-                    </span>
-                  )}
-                  <ChevronDown size={15} className={`text-muted-foreground transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`} />
-                </div>
-              </button>
-              {dropdownOpen && (
-                <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-                  <div className="p-2.5 border-b border-border bg-muted/40">
-                    <div className="relative">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                      <input
-                        autoFocus
-                        placeholder="Search user…"
-                        value={userSearch}
-                        onChange={(e) => setUserSearch(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-                  <ul className="max-h-60 overflow-auto py-1">
-                    {filteredUsers.length === 0 ? (
-                      <li className="px-4 py-3 text-sm text-muted-foreground text-center">No users found</li>
-                    ) : (
-                      filteredUsers.map((u) => (
-                        <li key={u.id}>
-                          <button
-                            onClick={() => {
-                              setSelectedUserId(u.id);
-                              setDropdownOpen(false);
-                              setUserSearch("");
-                            }}
-                            className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
-                          >
-                            <div>
-                              <div className="text-sm font-medium text-foreground">{u.name}</div>
-                              <div className="text-xs text-muted-foreground capitalize">{u.role.replace(/_/g, " ")}</div>
-                            </div>
-                            {selectedUserId === u.id && <Check size={14} className="text-primary" />}
-                          </button>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="relative w-full max-w-sm" ref={roleDropdownRef}>
-              <button
-                onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-                className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
-              >
-                <span className={selectedRole ? "text-foreground font-medium" : "text-muted-foreground"}>
-                  {loadingRoles ? "Loading roles…" : selectedRole ? selectedRole.RName : "Choose a role…"}
-                </span>
-                <ChevronDown size={15} className={`text-muted-foreground transition-transform duration-200 ${roleDropdownOpen ? "rotate-180" : ""}`} />
-              </button>
-              {roleDropdownOpen && (
-                <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-                  <div className="p-2.5 border-b border-border bg-muted/40">
-                    <div className="relative">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                      <input
-                        autoFocus
-                        placeholder="Search role…"
-                        value={roleSearch}
-                        onChange={(e) => setRoleSearch(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                    </div>
-                  </div>
-                  <ul className="max-h-60 overflow-auto py-1">
-                    {filteredRoles.length === 0 ? (
-                      <li className="px-4 py-3 text-sm text-muted-foreground text-center">No roles found</li>
-                    ) : (
-                      filteredRoles.map((r) => (
-                        <li key={r.RId}>
-                          <button
-                            onClick={() => {
-                              setSelectedRoleId(r.RId);
-                              setRoleDropdownOpen(false);
-                              setRoleSearch("");
-                            }}
-                            className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
-                          >
-                            <div className="text-sm font-medium text-foreground">{r.RName}</div>
-                            {selectedRoleId === r.RId && <Check size={14} className="text-primary" />}
-                          </button>
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
+          <div className="px-4 py-4 space-y-3">
+            {subject === "role" && (
+              <p className="text-xs text-muted-foreground max-w-prose">
+                Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom user-wise) can only add on top of this.
+              </p>
+            )}
+            {subject === "user"
+              ? picker({
+                  ref: dropdownRef,
+                  open: dropdownOpen,
+                  setOpen: (o) => { setDropdownOpen(o); if (!o) setUserSearch(""); },
+                  label: loadingUsers ? "" : selectedUser?.name ?? "",
+                  placeholder: loadingUsers ? "Loading users…" : "Choose a user…",
+                  search: userSearch,
+                  setSearch: setUserSearch,
+                  tag: selectedUser?.role.replace(/_/g, " "),
+                  items: filteredUsers.map((u) => ({ id: u.id, name: u.name, sub: u.role.replace(/_/g, " ") })),
+                  selectedId: selectedUserId,
+                  onPick: (id) => { setSelectedUserId(id); setDropdownOpen(false); setUserSearch(""); },
+                  empty: "No users found",
+                })
+              : picker({
+                  ref: roleDropdownRef,
+                  open: roleDropdownOpen,
+                  setOpen: (o) => { setRoleDropdownOpen(o); if (!o) setRoleSearch(""); },
+                  label: loadingRoles ? "" : selectedRole?.RName ?? "",
+                  placeholder: loadingRoles ? "Loading roles…" : "Choose a role…",
+                  search: roleSearch,
+                  setSearch: setRoleSearch,
+                  items: filteredRoles.map((r) => ({ id: r.RId, name: r.RName })),
+                  selectedId: selectedRoleId,
+                  onPick: (id) => { setSelectedRoleId(id); setRoleDropdownOpen(false); setRoleSearch(""); },
+                  empty: "No roles found",
+                })}
+          </div>
         </div>
 
         {loadingDefs && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
-            <Loader2 size={12} className="animate-spin" /> Loading eligible pages…
+          <div className={`flex items-center gap-2 ${LBL}`}>
+            <Loader2 size={12} className="animate-spin" /> Loading eligible pages
           </div>
         )}
 
         {!hasSubjectSelected ? (
-          <div className="flex flex-col items-center justify-center h-56 rounded-xl border border-dashed border-border bg-card/40 text-muted-foreground">
-            <ShieldCheck className="w-12 h-12 opacity-20 mb-3" />
-            <p className="text-sm font-heading">
-              {subject === "user" ? "Select a user to manage post-approval rights" : "Select a role to manage its post-approval baseline"}
-            </p>
+          <div className="flex items-center justify-center h-40 border border-dashed border-foreground/40 text-sm text-muted-foreground">
+            {subject === "user" ? "Choose a person to manage their post-approval rights." : "Choose a role to manage its post-approval baseline."}
           </div>
         ) : loadingPerms ? (
-          <div className="flex justify-center items-center h-64 rounded-xl border border-border bg-card/40">
-            <Loader2 className="w-7 h-7 animate-spin text-muted-foreground" />
+          <div className="flex justify-center items-center h-40 bg-card" style={{ border: RULE }}>
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-card/60">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck size={14} className="text-primary" />
-                  <span className="text-sm font-heading font-semibold text-foreground">
-                    {subject === "user" ? selectedUser?.name : selectedRole?.RName}
-                  </span>
-                </div>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                  {grantedCount}/{eligiblePages.length} pages granted
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+              <div className="flex items-baseline gap-3 flex-wrap">
+                <span className={HEAD}>{subject === "user" ? selectedUser?.name : selectedRole?.RName}</span>
+                <span className="text-xs text-muted-foreground">
+                  <span className="font-heading font-semibold tabular-nums text-foreground">{grantedCount}</span> of {eligiblePages.length} pages granted
                 </span>
-                {dirty && (
-                  <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 text-xs">
-                    Unsaved
-                  </span>
-                )}
+                {dirty && <span className={`${TAG} text-foreground border-dashed border-foreground`}>Unsaved</span>}
               </div>
               <button
                 onClick={handleSave}
                 disabled={saving || !dirty}
-                className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
+                className="h-9 px-5 inline-flex items-center gap-1.5 bg-foreground text-card border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] disabled:opacity-40 transition-opacity"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {saving ? "Saving…" : "Save"}
@@ -426,50 +396,47 @@ export default function PostApprovalRights() {
             </div>
 
             {eligiblePages.length === 0 ? (
-              <p className="px-5 py-8 text-sm text-muted-foreground text-center">
-                No pages currently support post-approval editing.
-              </p>
+              <p className="px-4 py-8 text-sm text-muted-foreground text-center">No pages currently support post-approval editing.</p>
             ) : (
-              <div className="overflow-x-auto thin-scroll"><table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
-                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground">Page</th>
-                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground">Module</th>
-                    <th className="px-5 py-3 font-heading font-semibold text-muted-foreground text-center">
-                      Allow editing after Approved
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {eligiblePages.map((page) => {
-                    const checked = isGranted(page.key);
-                    return (
-                      <tr key={page.key} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
-                        <td className="px-5 py-3 text-foreground">{page.label}</td>
-                        <td className="px-5 py-3 text-muted-foreground text-xs">{page.module}</td>
-                        <td className="px-5 py-3 text-center">
-                          <button
-                            onClick={() => toggle(page.key)}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                              checked ? "bg-primary" : "bg-muted border border-border"
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                                checked ? "translate-x-4" : "translate-x-0.5"
-                              }`}
-                            />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table></div>
+              <div className="overflow-x-auto thin-scroll">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className={LBL} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
+                      <th className="text-left px-4 py-2.5 font-semibold">Page</th>
+                      <th className="text-left px-4 py-2.5 font-semibold">Module</th>
+                      <th className="px-4 py-2.5 font-semibold text-center">Allow editing after approved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eligiblePages.map((page) => {
+                      const checked = isGranted(page.key);
+                      return (
+                        <tr key={page.key} className="hover:bg-primary/5 transition-colors" style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.1)" }}>
+                          <td className={`px-4 py-2.5 ${checked ? "text-foreground font-medium" : "text-foreground"}`}>{page.label}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`${TAG} text-muted-foreground border-foreground/30`}>{page.module}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              onClick={() => toggle(page.key)}
+                              role="switch"
+                              aria-checked={checked}
+                              aria-label={`Allow editing ${page.label} after approval`}
+                              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? "bg-foreground" : "bg-muted-foreground/30"}`}
+                            >
+                              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-card transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }
