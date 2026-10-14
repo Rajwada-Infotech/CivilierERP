@@ -693,7 +693,15 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
           .query("SELECT Id FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft AND Status = 'PendingTransfer'");
         if (linked.recordset.length) {
           const { applyRebookingTransferToBooking } = require("./crmRefunds");
-          await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
+          const outcome = await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
+          // The money has moved between the companies; if the credit couldn't
+          // land on the booking, say why on the transfer instead of dropping it.
+          if (outcome && outcome.ok === false) {
+            console.warn("[fund-transfer] CRM re-booking not applied:", outcome.reason);
+            await pool.request().input("rt", sql.Int, linked.recordset[0].Id)
+              .input("n", sql.NVarChar(500), `Fund transfer approved, but the credit could not be put on the booking: ${String(outcome.reason || "").slice(0, 400)}`)
+              .query("UPDATE dbo.CrmRebookingTransfer SET Notes = CONCAT(ISNULL(Notes + CHAR(10), ''), @n), UpdatedAt = SYSDATETIME() WHERE Id = @rt");
+          }
           await bumpCacheVersion("crm-refunds");
         }
       } catch (rebookErr) {
@@ -719,6 +727,15 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
     const result = await transition("fund-transfer", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
+    // A CRM re-booking transfer waiting on this fund transfer is off too —
+    // release it, so the held credit it reserved can be refunded or moved again.
+    if (result?.newStatus === "Rejected") {
+      await getPool().request().input("ft", sql.Int, id)
+        .input("n", sql.NVarChar(500), `Fund transfer rejected${req.body?.note ? `: ${String(req.body.note).slice(0, 300)}` : ""} — the held credit is free again`)
+        .query(`UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = CONCAT(ISNULL(Notes + CHAR(10), ''), @n), UpdatedAt = SYSDATETIME()
+                WHERE FundTransferId = @ft AND Status = 'PendingTransfer'`);
+      await bumpCacheVersion("crm-refunds");
+    }
     await bumpCacheVersion("fund-transfer");
     res.json({ message: "Fund Transfer rejected", ...result });
   } catch (err) {

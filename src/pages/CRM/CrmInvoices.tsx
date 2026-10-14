@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
 // (crmBookings.js PUT /:id/invoices/:invoiceId/void) — this only controls
@@ -956,6 +957,8 @@ const CrmInvoices: React.FC = () => {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => { setSearch(v); setPage(1); });
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 

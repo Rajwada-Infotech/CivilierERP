@@ -1544,6 +1544,22 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       });
     }
 
+    // ── Guard: raised from CRM ─────────────────────────────────────────────
+    // A refund / buy-back / brokerage payout voucher is tied to its CRM
+    // record (which keeps the voucher's id). Deleting it would leave that
+    // record pointing at nothing — "already with Finance" forever, no new
+    // voucher possible. Rejecting it sends the record back to CRM properly.
+    const crmSrc = (await pool.request().input("PPaymentID", sql.Int, id)
+      .query("SELECT Status, SourceCrmRefundId, SourceCrmResaleId, SourceCrmBrokerageId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")).recordset[0];
+    if (crmSrc && (crmSrc.SourceCrmRefundId || crmSrc.SourceCrmResaleId || crmSrc.SourceCrmBrokerageId)) {
+      const what = crmSrc.SourceCrmRefundId ? "a CRM refund" : crmSrc.SourceCrmResaleId ? "a CRM buy-back" : "a CRM brokerage payout";
+      return res.status(409).json({
+        error: crmSrc.Status === "Approved"
+          ? `This voucher was raised for ${what} and is already paid, so it can't be deleted.`
+          : `This voucher was raised for ${what}, so it can't be deleted — reject it instead, and it goes back to CRM with your note.`,
+      });
+    }
+
     const refRow = await pool.request().input("PPaymentID", sql.Int, id)
       .query("SELECT PExpenseRef, PLinkedOAId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
     const expenseRef = refRow.recordset[0]?.PExpenseRef || null;

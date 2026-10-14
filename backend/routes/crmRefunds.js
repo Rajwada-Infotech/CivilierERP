@@ -1187,8 +1187,24 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     if (!srcBank.recordset[0] || !dstBank.recordset[0]) {
       return res.status(400).json({ error: "Both projects must have a tagged company bank account before a cross-company transfer" });
     }
+    // Reserve the held credit first (a live claim counts in getUnclaimedRemaining),
+    // so nothing else can take it while the fund transfer is raised; if raising
+    // it fails, the claim is released again.
+    const rtIns = await pool.request()
+      .input("hid", sql.Int, heldId).input("fc", sql.Int, held.FromCompanyId)
+      .input("tb", sql.Int, toBookingId).input("tc", sql.Int, to.ToCompanyId)
+      .input("amt", sql.Decimal(18, 2), amount).input("cb", sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmRebookingTransfer
+          (HeldOnAccountId, FromCompanyId, ToBookingId, ToCompanyId, Amount, IsCrossCompany, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@hid, @fc, @tb, @tc, @amt, 1, 'PendingTransfer', @cb, SYSDATETIME())
+      `);
+    const rtId = rtIns.recordset[0].Id;
+    let ftId, ftDocNo;
+    try {
     const dtId = await resolveDocTypeId(pool, sql, "FT");
-    const ftDocNo = await lockNextDocNumber(pool, sql, { docTypeId: dtId, tableName: "FundTransfer", docNoColumn: "DocNo", issuedBy: userEmail });
+    ftDocNo = await lockNextDocNumber(pool, sql, { docTypeId: dtId, tableName: "FundTransfer", docNoColumn: "DocNo", issuedBy: userEmail });
     const ftIns = await pool.request()
       .input("no", sql.NVarChar(100), ftDocNo || null)
       .input("dt", sql.Date, new Date().toISOString().slice(0, 10))
@@ -1206,27 +1222,24 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
         VALUES
           (@no, @dt, 'Inter', @sc, @dc, @sb, @db, @amt, @nar, 'Draft', @dtid, @cb, 'Transfer')
       `);
-    const ftId = ftIns.recordset[0].FTId;
+    ftId = ftIns.recordset[0].FTId;
     if (ftDocNo) await backPatchRecordId(pool, sql, ftDocNo, "FundTransfer", ftId);
+    await pool.request().input("id", sql.Int, rtId).input("ft", sql.Int, ftId)
+      .query("UPDATE dbo.CrmRebookingTransfer SET FundTransferId = @ft, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    } catch (ftErr) {
+      await pool.request().input("id", sql.Int, rtId).input("n", sql.NVarChar(500), `Fund transfer could not be raised: ${String(ftErr.message).slice(0, 400)}`)
+        .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      throw ftErr;
+    }
     try {
       await approvalTransition("fund-transfer", ftId, "Pending", req.user?.email, req.user?.role);
     } catch (subErr) {
       console.warn("[crm-refunds] fund-transfer auto-submit failed (non-fatal):", subErr.message);
     }
 
-    const rtIns = await pool.request()
-      .input("hid", sql.Int, heldId).input("fc", sql.Int, held.FromCompanyId)
-      .input("tb", sql.Int, toBookingId).input("tc", sql.Int, to.ToCompanyId)
-      .input("amt", sql.Decimal(18, 2), amount).input("ft", sql.Int, ftId).input("cb", sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmRebookingTransfer
-          (HeldOnAccountId, FromCompanyId, ToBookingId, ToCompanyId, Amount, IsCrossCompany, FundTransferId, Status, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@hid, @fc, @tb, @tc, @amt, 1, @ft, 'PendingTransfer', @cb, SYSDATETIME())
-      `);
     await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("fund-transfer")]);
     res.status(201).json({
-      success: true, id: rtIns.recordset[0].Id, crossCompany: true, fundTransferId: ftId, fundTransferDocNo: ftDocNo,
+      success: true, id: rtId, crossCompany: true, fundTransferId: ftId, fundTransferDocNo: ftDocNo,
       message: "Inter-company fund transfer raised — the credit lands on the new booking once Finance approves the transfer.",
     });
   } catch (e) {
