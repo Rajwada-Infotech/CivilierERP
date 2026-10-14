@@ -28,6 +28,7 @@ const API = "/api/crm/resales";
 // and the property returns to stock to be sold again at a new price.
 // Both go through the Approval Inbox (CRM head, then Finance).
 const statusColor: Record<string, string> = {
+  Draft: "text-muted-foreground bg-muted/60 border-border",
   Pending: "text-orange-600 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-900",
   Approved: "text-blue-600 bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-900",
   Completed: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900",
@@ -89,11 +90,11 @@ const CrmResales: React.FC = () => {
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
   const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => getJson("/api/crm/customers"), enabled: open, staleTime: 60_000 });
 
-  const activeCases = useMemo(() => deals.filter((d) => !["Completed", "Cancelled", "Rejected"].includes(d.Status)), [deals]);
+  const activeCases = useMemo(() => deals.filter((d) => !["Completed", "Cancelled"].includes(d.Status)), [deals]);
   const completedCases = useMemo(() => deals.filter((d) => d.Status === "Completed"), [deals]);
   const buybackCases = useMemo(() => deals.filter((d) => d.Kind === "BuyBack"), [deals]);
   const resaleCases = useMemo(() => deals.filter((d) => d.Kind === "Resale"), [deals]);
-  const cancelledCases = useMemo(() => deals.filter((d) => ["Cancelled", "Rejected"].includes(d.Status)), [deals]);
+  const cancelledCases = useMemo(() => deals.filter((d) => d.Status === "Cancelled"), [deals]);
 
   const filteredDeals = useMemo(() => {
     if (tab === "progress") return activeCases;
@@ -186,7 +187,9 @@ const CrmResales: React.FC = () => {
       header: "Status", accessorKey: "Status",
       cell: ({ row }) => (
         <span title={row.original.RejectionNote || undefined} className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[row.original.Status] || ""}`}>
-          {row.original.Status === "Pending" ? "Awaiting approval"
+          {row.original.Status === "Draft" ? "Being prepared"
+            : row.original.Status === "Rejected" ? "Sent back"
+            : row.original.Status === "Pending" ? "Awaiting approval"
             : row.original.Status === "Approved" && row.original.Kind === "BuyBack" && row.original.PayoutNewPaymentId ? "With Finance"
             : row.original.Status}
         </span>
@@ -196,7 +199,7 @@ const CrmResales: React.FC = () => {
       header: "", id: "actions",
       cell: ({ row }) => {
         const d = row.original;
-        const open = !!d.BookingIds && !["Completed", "Cancelled", "Rejected"].includes(d.Status);
+        const open = !!d.BookingIds && !["Completed", "Cancelled"].includes(d.Status);
         return (
           <div className="flex gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
             {d.BookingIds && (

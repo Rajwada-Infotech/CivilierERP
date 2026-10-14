@@ -89,7 +89,7 @@ router.get("/", requirePageRight("crm-resales", "view"), async (req, res) => {
     // Where each open case stands (the same stage engine as the case page).
     const rows = result.recordset;
     for (const row of rows) {
-      if (!row.BookingIds || !["Pending", "Approved"].includes(row.Status)) continue;
+      if (!row.BookingIds || !["Draft", "Pending", "Approved", "Rejected"].includes(row.Status)) continue;
       try {
         const st = await require("../services/crmResaleCase").caseState(pool, row.Id);
         const cur = st.stages.find((s) => s.key === st.currentStage);
@@ -462,9 +462,11 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
                  TdsAmount, BuyBackGstAmount, StampDutyAmount, Status, Notes, CreatedBy)
               OUTPUT INSERTED.Id
               VALUES (@kind, @plot, @unit, @fb, @ids, @fc, @tc, @date, @agreed, @orig,
-                      @fee, @feeGst, @feeHsn, @feeRate, @tds, @bbGst, @stamp, N'${ResaleStatus.PENDING}', @notes, @by)`);
+                      @fee, @feeGst, @feeHsn, @feeRate, @tds, @bbGst, @stamp, N'Draft', @notes, @by)`);
     await bumpResales();
-    res.status(201).json({ success: true, id: r.recordset[0].Id, message: "Recorded — waiting for approval in the Approval Inbox" });
+    res.status(201).json({ success: true, id: r.recordset[0].Id, message: kind === "BuyBack"
+      ? "Case opened — confirm the seller is clear, then send it for approval"
+      : "Case opened — seller clearance, NOC and the buyer's KYC first, then send it for approval" });
   } catch (e) {
     console.error("[crm-resales] POST /deal:", e.message);
     res.status(500).json({ error: "Failed to record it" });
@@ -623,6 +625,8 @@ const withCase = (fn) => async (req, res) => {
   try { res.json(await fn(getPool(), id, req)); } catch (e) { caseErr(res, e, `${req.method} ${req.path}`); }
 };
 router.get("/:id/case", requirePageRight("crm-resales", "view"), withCase((db, id) => caseSvc.caseState(db, id)));
+router.put("/:id/case/submit", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.submitForApproval(db, id,
+  { email: req.user?.email || req.user?.name || String(actorId(req)), role: req.user?.role, userId: req.user?.userId ?? actorId(req) })));
 router.put("/:id/case/clearance", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.confirmClearance(db, id, actorId(req))));
 router.put("/:id/case/seller-loan", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.setSellerLoan(db, id, req.body?.hasLoan === true, actorId(req))));
 router.put("/:id/case/noc", requirePageRight("crm-resales", "edit"), withCase((db, id, req) => caseSvc.issueNoc(db, id, actorId(req))));

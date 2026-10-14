@@ -38,6 +38,7 @@ const DEED_ACTION: Record<string, string> = {
 };
 const ACTION_LABEL: Record<string, string> = {
   clearance: "Confirm seller is clear", noc: "Issue NOC", "buyer-application": "Open buyer's application", "fee-invoice": "Issue fee invoice",
+  submit: "Send for approval",
 };
 
 const Tick = ({ ok }: { ok: boolean }) => ok
@@ -71,7 +72,8 @@ const CrmResaleCase: React.FC = () => {
   useEffect(() => { if (st) setOpen(st.currentStage || st.stages[st.stages.length - 1]?.key || null); }, [st?.currentStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isResale = c?.Kind !== "BuyBack";
-  const finished = !!c && ["Completed", "Cancelled", "Rejected"].includes(c.Status);
+  // A rejected case is sent back to be fixed and sent again — not finished.
+  const finished = !!c && ["Completed", "Cancelled"].includes(c.Status);
   const canEdit = rights.canEdit && !finished;
 
   const apply = (out: any) => {

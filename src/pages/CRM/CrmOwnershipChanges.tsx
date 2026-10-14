@@ -123,7 +123,9 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
   const checks: [string, boolean, string?][] = [
     ["New owner chosen", !!o.ToCustomerId],
     ["New owner's PAN on file", !!o.ToPan, kyc],
-    ["New owner's Aadhaar on file", !!o.ToAadhaar, kyc],
+    // An individual's PAN has P as its 4th letter; a company / firm has no Aadhaar.
+    ...(!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(String(o.ToPan || "").toUpperCase()) || String(o.ToPan).toUpperCase()[3] === "P"
+      ? [["New owner's Aadhaar on file", !!o.ToAadhaar, kyc] as [string, boolean, string?]] : []),
     ["New owner's address on file", !!o.ToAddress, kyc],
     ["New owner's application opened (co-owners go on it)", !!o.ToApplicationId],
     ["Sale deed's registration number", !!o.DeedNo],

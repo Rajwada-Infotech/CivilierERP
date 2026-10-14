@@ -35,6 +35,14 @@ const DOC_TYPES = {
 };
 const DEED_STEPS = ["Draft", "LegalApproved", "Consented", "Executed", "DutyPaid", "Registered"];
 
+/**
+ * An individual's PAN has 'P' as its 4th character (Income-tax PAN structure);
+ * a company, firm, trust, HUF ... has another letter. Individuals give PAN +
+ * Aadhaar + address; others PAN + address (they have no Aadhaar) — business
+ * decision 2026-10-14. Shared with Ownership Changes.
+ */
+const isIndividualPan = (pan) => { const p = String(pan || "").trim().toUpperCase(); return !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(p) || p[3] === "P"; };
+
 const idsOf = (r) => String(r.BookingIds || r.FromBookingId || "").split(",").map(Number).filter(Number.isInteger);
 
 async function loadCase(db, id) {
@@ -106,7 +114,8 @@ async function caseState(db, id) {
   const hasLoan = r.SellerHasLoan != null ? !!r.SellerHasLoan : f.loans.length > 0;
   const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
   const done = r.Status === "Completed";
-  const dead = ["Rejected", "Cancelled"].includes(r.Status);
+  // A rejected case can be fixed and sent again — only a cancelled one is over.
+  const dead = r.Status === "Cancelled";
 
   // 2 clearance
   const clearanceBlockers = [];
@@ -124,7 +133,7 @@ async function caseState(db, id) {
     if (!r.ToCustomerId) buyerBlockers.push("Choose the new buyer");
     else {
       if (!r.ToPan) buyerBlockers.push("Buyer's PAN is missing (Customers)");
-      if (!r.ToAadhaar) buyerBlockers.push("Buyer's Aadhaar is missing (Customers)");
+      if (!r.ToAadhaar && isIndividualPan(r.ToPan)) buyerBlockers.push("Buyer's Aadhaar is missing (Customers)");
       if (!r.ToAddress) buyerBlockers.push("Buyer's address is missing (Customers)");
       if (!r.BuyerApplicationId) buyerBlockers.push("Open the buyer's application from this case");
     }
@@ -166,7 +175,10 @@ async function caseState(db, id) {
       r.SellerClearedAt ? "Confirmed" : clearanceBlockers.length ? null : "All checks pass — confirm to continue"),
     ...(isResale ? [stage("noc", "Developer NOC", !!r.NocIssuedAt, r.SellerClearedAt ? [] : ["Seller clearance first"], r.NocNo || null)] : []),
     ...(isResale ? [stage("buyer", "New buyer", !buyerBlockers.length, buyerBlockers, r.ToName || null)] : []),
-    stage("approval", "Approval", ["Approved", "Completed"].includes(r.Status), r.Status === "Pending" ? ["Waiting in the Approval Inbox (Marketing Head → Director)"] : [], r.Status),
+    stage("approval", "Approval", ["Approved", "Completed"].includes(r.Status),
+      r.Status === "Pending" ? ["Waiting in the Approval Inbox (Marketing Head → Director)"]
+        : r.Status === "Rejected" ? [`Sent back${r.RejectionNote ? `: ${r.RejectionNote}` : ""} — fix it and send it again`]
+          : r.Status === "Draft" ? ["Send it for approval"] : [], r.Status),
     ...(isResale ? [stage("fee", "Transfer fee", feeOk, feeBlockers,
       fee > 0 ? [fmt(fee), r.FeeInvoiceNo, r.FeeReceiptNo && `${r.FeeReceiptNo} ${r.FeeReceiptStatus}`].filter(Boolean).join(" · ") : "No fee", !(fee > 0))] : []),
     stage("deed", deedType === "Assignment" ? "Deed of assignment" : deedType === "CancellationDeed" ? "Cancellation deed" : "Cancellation letter",
@@ -199,11 +211,15 @@ async function caseState(db, id) {
     buyer: [
       { label: "New buyer chosen", ok: !!r.ToCustomerId, hint: r.ToName || null },
       { label: "Buyer's PAN on file", ok: !!r.ToPan, link: "kyc" },
-      { label: "Buyer's Aadhaar on file", ok: !!r.ToAadhaar, link: "kyc" },
+      ...(isIndividualPan(r.ToPan) ? [{ label: "Buyer's Aadhaar on file", ok: !!r.ToAadhaar, link: "kyc" }] : []),
       { label: "Buyer's address on file", ok: !!r.ToAddress, link: "kyc" },
       { label: "Buyer's application opened (add co-applicants there)", ok: !!r.BuyerApplicationId, action: "buyer-application", link: r.BuyerApplicationId ? "application" : null },
     ],
-    approval: [{ label: "Approved by Marketing Head, then Director", ok: ["Approved", "Completed"].includes(r.Status), link: "inbox", hint: r.Status === "Pending" ? "Waiting in the Approval Inbox" : null }],
+    approval: [
+      { label: r.Status === "Rejected" ? "Fixed and sent again" : "Sent for approval", ok: !["Draft", "Rejected"].includes(r.Status), action: "submit",
+        hint: r.Status === "Rejected" ? `Sent back${r.RejectionNote ? `: ${r.RejectionNote}` : ""}` : r.Status === "Draft" ? "Once the steps before it are done" : null },
+      { label: "Approved by Marketing Head, then Director", ok: ["Approved", "Completed"].includes(r.Status), link: "inbox", hint: r.Status === "Pending" ? "Waiting in the Approval Inbox" : null },
+    ],
     fee: [
       { label: `Fee invoice issued to the buyer (${fmt(fee)} incl. GST)`, ok: !!r.FeeInvoiceId && r.FeeInvoiceStatus !== "Void", action: "fee-invoice", hint: r.FeeInvoiceNo || null },
       { label: "Buyer's payment recorded", ok: !!r.FeeReceivedPaymentId && r.FeeReceiptStatus !== "Rejected", action: "fee-payment", hint: r.FeeReceiptNo || null },
@@ -383,6 +399,27 @@ async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
   return caseState(db, id);
 }
 
+/**
+ * Send the case for approval (or again after it was sent back): every stage
+ * before approval must be done — seller clearance, and for a resale the NOC
+ * and the buyer's KYC / application (business decision 2026-10-14).
+ */
+async function submitForApproval(db, id, user) {
+  const st = await caseState(db, id);
+  if (!["Draft", "Rejected"].includes(st.case.Status)) throw new CaseError(st.case.Status === "Pending" ? "It is already waiting for approval" : `This case is ${st.case.Status}`, 409);
+  const idx = st.stages.findIndex((s) => s.key === "approval");
+  const open = st.stages.slice(0, idx).filter((s) => !s.ok && !s.na);
+  if (open.length) throw new CaseError(`Finish first: ${open.map((s) => `${s.label}${s.blockers[0] ? ` (${s.blockers[0]})` : ""}`).join("; ")}`, 409);
+  const { openResaleOn } = require("./crmResaleTransfer");
+  const other = await openResaleOn(db, st.case.BookingIds, id);
+  if (other) throw new CaseError(`This property has another open case (#${other.Id}) — cancel one of them`, 409);
+  const { transition } = require("./approvalService");
+  await transition("crm-resales", id, "Pending", user.email, user.role, null, user.userId);
+  await db.request().input("id", sql.Int, id).input("by", sql.Int, user.userId ?? null)
+    .query("UPDATE dbo.CrmUnitResale SET RejectionNote = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  return caseState(db, id);
+}
+
 /** Throws unless every stage before the last (transfer / payout) is done. */
 async function assertReadyToFinish(db, id) {
   const st = await caseState(db, id);
@@ -424,4 +461,4 @@ async function documentFile(db, id, docId) {
     .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmResaleDocument WHERE Id = @d AND ResaleId = @id AND IsActive = 1")).recordset[0] || null;
 }
 
-module.exports = { caseState, confirmClearance, setSellerLoan, issueNoc, openBuyerApplication, issueFeeInvoice, recordFeePayment, assertReadyToFinish, addDocument, reviewDocument, documentFile, CaseError, DOC_TYPES, DEED_STEPS };
+module.exports = { isIndividualPan, submitForApproval, caseState, confirmClearance, setSellerLoan, issueNoc, openBuyerApplication, issueFeeInvoice, recordFeePayment, assertReadyToFinish, addDocument, reviewDocument, documentFile, CaseError, DOC_TYPES, DEED_STEPS };
