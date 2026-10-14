@@ -3,10 +3,7 @@ import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
-import {
-  FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2,
-  ChevronDown, ChevronRight, Eye, Printer, Pencil, Trash2, Building2, Building, FolderTree, Layers, LayoutGrid, AlertTriangle,
-} from "lucide-react";
+import { FileText, Upload, Sparkles, Loader2, CheckCircle2, ChevronDown, ChevronRight, Eye, Printer, Pencil, Trash2, Building2, Building, FolderTree, Layers, LayoutGrid, AlertTriangle } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getProjectOverrides } from "@/api/unitLayoutOverrideApi";
 import { getLayoutTypes, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
@@ -18,7 +15,7 @@ import { InlineLayoutEditor, type NodeType } from "./InlineLayoutEditor";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { safeHtml } from "@/utils/escapeHtml";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -33,6 +30,13 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/room-master";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const ACT_DEL = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors";
 
 const BLUEPRINT_ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
@@ -108,7 +112,7 @@ function BlueprintUploadField({
   return (
     <div className="space-y-2">
       {pendingFile ? (
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+        <div className="flex items-center gap-2 border border-dashed border-foreground/50 px-3 py-2 text-sm">
           <Upload size={13} className="text-muted-foreground shrink-0" />
           <span className="flex-1 truncate">{pendingFile.name}</span>
           <span className="text-[0.625rem] text-muted-foreground shrink-0">Will upload on save</span>
@@ -117,7 +121,7 @@ function BlueprintUploadField({
         <button
           type="button"
           onClick={() => existingId && openBlueprint(existingId)}
-          className="flex items-center gap-2 w-full rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted/40 transition-colors text-left"
+          className="flex items-center gap-2 w-full border border-foreground/40 px-3 py-2 text-sm hover:border-foreground transition-colors text-left"
         >
           <FileText size={13} className="text-muted-foreground shrink-0" />
           <span className="flex-1 truncate font-medium text-foreground">{existingName}</span>
@@ -146,7 +150,7 @@ function BlueprintUploadField({
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-background text-foreground hover:bg-muted/40 transition-colors"
+        className={`${KEY} h-8 px-3 border border-foreground text-foreground hover:bg-primary/10`}
       >
         <Upload size={12} />
         {pendingFile || existingName ? "Replace file" : "Choose file"}
@@ -257,16 +261,16 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
   if (!data) return null;
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+    <div className="border border-foreground/40 p-3 space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Room Configuration{data.unit.UnitType ? ` — ${data.unit.UnitType}` : ""}
+        <p className={LBL}>
+          Room configuration{data.unit.UnitType ? ` — ${data.unit.UnitType}` : ""}
         </p>
         <button
           type="button"
           onClick={handleGenerate}
           disabled={generating || templateTotal === 0 || allCreated}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className={`${KEY} h-8 px-3 bg-foreground text-card border border-foreground`}
         >
           {generating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
           {allCreated ? "All rooms created" : "Create Rooms"}
@@ -282,7 +286,7 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {data.template.map((t) => (
-            <span key={t.alias} className="text-xs font-medium bg-background border border-border px-2 py-1 rounded-lg">
+            <span key={t.alias} className="text-xs font-medium border border-foreground/40 px-2 py-1">
               {t.alias} <span className="text-muted-foreground">×{t.quantity}</span>
             </span>
           ))}
@@ -298,15 +302,15 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
             {activeExisting.map((r) => (
               <span
                 key={r.Id}
-                className="inline-flex items-center gap-1 text-[0.6875rem] bg-background border border-border px-2 py-0.5 rounded-full"
+                className="inline-flex items-center gap-1 text-[0.6875rem] border border-foreground/40 px-2 py-0.5"
               >
-                <CheckCircle2 size={10} className="text-emerald-500 shrink-0" />
+                <CheckCircle2 size={10} className="text-foreground shrink-0" />
                 {r.RoomName}
                 {r.BlueprintFileName && (
                   <button
                     type="button"
                     onClick={() => openBlueprint(r.Id)}
-                    className="text-primary hover:underline"
+                    className="text-foreground opacity-70 hover:opacity-100"
                     title="View blueprint"
                   >
                     <FileText size={10} />
@@ -375,12 +379,12 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
     }
   };
 
-  const selectCls = "h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary min-w-[10rem]";
+  const selectCls = "h-9 border border-foreground/40 focus:border-foreground bg-card px-2 text-xs text-foreground outline-none min-w-[10rem]";
   return (
-    <div className="rounded-xl border border-border bg-card p-4 flex flex-wrap items-end gap-3">
+    <div className="bg-card p-4 flex flex-wrap items-end gap-3" style={{ border: RULE }}>
       <div className="flex-1 min-w-[14rem]">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Generate Rooms in Bulk</p>
-        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+        <p className={HEAD}>Generate rooms in bulk</p>
+        <p className="text-xs text-muted-foreground mt-1">
           Syncs every unit's rooms to its Unit Composition layout — adds missing rooms and removes unused empty ones.
         </p>
       </div>
@@ -396,7 +400,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
         type="button"
         onClick={handleRun}
         disabled={!projectId || running || unitCount === 0}
-        className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
       >
         {running ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
         {running ? "Generating…" : projectId ? `Generate for ${unitCount} unit(s)` : "Generate"}
@@ -428,7 +432,7 @@ function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong 
   custom?: boolean; chips?: React.ReactNode; onEditLayout?: () => void; editing?: boolean; onDeleteLevel?: () => void;
 }) {
   return (
-    <div className={`flex items-center hover:bg-muted/20 transition-colors ${strong ? "bg-muted/10" : ""}`}>
+    <div className="flex items-center hover:bg-primary/5 transition-colors">
       <button
         type="button"
         onClick={onToggle}
@@ -437,19 +441,19 @@ function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong 
       >
         {expanded ? <ChevronDown size={13} className="text-muted-foreground shrink-0" /> : <ChevronRight size={13} className="text-muted-foreground shrink-0" />}
         {icon}
-        <span className={`text-sm truncate ${strong ? "font-semibold" : "font-medium"} text-foreground`}>{label}</span>
+        <span className={`truncate text-foreground ${strong ? "font-heading text-xs font-bold uppercase tracking-[0.1em]" : "text-sm font-medium"}`}>{label}</span>
         {custom && <CustomBadge />}
         {chips}
-        <span className="ml-auto flex items-center gap-1.5 shrink-0">
-          <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{units} unit{units === 1 ? "" : "s"}</span>
-          <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rooms} room{rooms === 1 ? "" : "s"}</span>
+        <span className="ml-auto flex items-baseline gap-3 shrink-0 text-[0.6875rem] text-muted-foreground">
+          <span><span className="font-heading font-semibold tabular-nums text-foreground">{units}</span> unit{units === 1 ? "" : "s"}</span>
+          <span><span className="font-heading font-semibold tabular-nums text-foreground">{rooms}</span> room{rooms === 1 ? "" : "s"}</span>
         </span>
       </button>
       <div className="mr-3 flex items-center gap-1 shrink-0 w-[124px] justify-end">
         {onEditLayout && <EditLayoutButton onClick={onEditLayout} active={editing} />}
         {onDeleteLevel && rooms > 0 && (
           <button type="button" onClick={onDeleteLevel}
-            className="p-1.5 rounded-md border border-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            className={ACT_DEL} aria-label="Delete rooms in this level"
             title={`Delete all ${rooms} room(s) in this level`}>
             <Trash2 size={13} />
           </button>
@@ -461,7 +465,7 @@ function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong 
 
 function CustomBadge() {
   return (
-    <span className="text-[0.5625rem] font-semibold uppercase tracking-wide bg-violet-500/15 text-violet-600 dark:text-violet-400 px-1.5 py-0.5 rounded shrink-0"
+    <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-dashed border-foreground px-1.5 py-0.5 shrink-0"
       title="This level has its own layout (overrides the one above)">
       Custom
     </span>
@@ -471,8 +475,8 @@ function CustomBadge() {
 function EditLayoutButton({ onClick, active = false }: { onClick: () => void; active?: boolean }) {
   return (
     <button type="button" onClick={onClick} aria-expanded={active}
-      className={`shrink-0 inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md border transition-colors ${
-        active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+      className={`${KEY} shrink-0 h-7 px-2 border ${
+        active ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`}
       title="View / set this level's room layout">
       <LayoutGrid size={11} /> Layout
     </button>
@@ -486,7 +490,7 @@ function LayoutChips({ items }: { items: { label: string; total: number; text: s
     <span className="hidden md:flex items-center gap-1 min-w-0 overflow-hidden">
       {items.map((i) => (
         <span key={i.label} title={`${i.label}: ${i.text || "no rooms"}`}
-          className="text-[0.625rem] text-muted-foreground border border-border px-1.5 py-0.5 rounded shrink-0">
+          className="text-[0.625rem] text-muted-foreground border border-foreground/25 px-1.5 py-0.5 shrink-0">
           {i.label} · {i.total}
         </span>
       ))}
@@ -650,7 +654,7 @@ const roomViewFields: {
         <button
           type="button"
           onClick={() => openBlueprint(row._id)}
-          className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+          className="inline-flex items-center gap-1.5 text-sm text-foreground underline underline-offset-2 hover:no-underline"
         >
           <FileText size={13} className="shrink-0" />
           <span className="truncate">{String(val)}</span>
@@ -1002,17 +1006,34 @@ const RoomMaster: React.FC = () => {
   };
 
   if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading rooms...</div>;
+    return <div className="p-6 text-sm text-muted-foreground">Loading rooms…</div>;
   if (error)
-    return <div className="p-6 text-red-500">Failed to load rooms.</div>;
+    return <div className="p-6 text-sm text-destructive">Failed to load rooms.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Setup", "Flat Master"]} />
-      <CivilWorkDprShell
-        title="Flat Master"
-        icon={DoorOpen}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Flat master"
+        subtitle="Every room of every unit, by project, block and floor. Rooms are built from each unit's layout; a level can carry its own layout over the one above."
       >
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+          {[
+            { label: "Projects", value: roomTree.length, note: "with rooms" },
+            { label: "Units", value: roomGroups.length, note: "with rooms" },
+            { label: "Rooms", value: mappedData.length, note: "in all" },
+            { label: "Active", value: mappedData.filter((r) => r.isActive).length, note: "open for DPR work" },
+          ].map((x) => (
+            <div key={x.label}>
+              <p className="label">{x.label}</p>
+              <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+              <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+            </div>
+          ))}
+        </div>
+      </div>
       {rights.canCreate && <BulkGenerateRoomsPanel units={allUnits} />}
       <MasterPage
         title="Room"
@@ -1055,21 +1076,21 @@ const RoomMaster: React.FC = () => {
           GRNs" pattern GRN.tsx uses. Row-level actions (View/Print/Edit/
           Delete) are unchanged from the old flat table, just reached from
           here instead. ── */}
-      <div className="mt-4 rounded-xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-muted/20">
-          <div>
-            <p className="text-sm font-heading font-semibold text-foreground">Room Records</p>
-            <p className="text-[0.6875rem] text-muted-foreground">{mappedData.length} record{mappedData.length === 1 ? "" : "s"}</p>
-          </div>
+      <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+          <p className="flex items-baseline gap-2.5">
+            <span className={HEAD}>Room records</span>
+            <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{mappedData.length}</span>
+          </p>
           <div className="flex items-center gap-2">
           {roomTree.length > 0 && (
             <>
               <button type="button" onClick={() => setExpandedUnits(new Set(allTreeKeys))}
-                className="text-[0.6875rem] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                className={`${KEY} h-8 px-3 border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground`}>
                 Expand all
               </button>
               <button type="button" onClick={() => setExpandedUnits(new Set())}
-                className="text-[0.6875rem] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                className={`${KEY} h-8 px-3 border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground`}>
                 Collapse all
               </button>
             </>
@@ -1087,7 +1108,7 @@ const RoomMaster: React.FC = () => {
         {roomGroups.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted-foreground">No rooms recorded yet.</p>
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-foreground/15">
             {roomTree.map((p) => (
               <div key={p.key}>
                 {(() => {
@@ -1095,7 +1116,7 @@ const RoomMaster: React.FC = () => {
                   const types = typesOf(p.blocks.flatMap((b) => b.floors.flatMap((f) => f.units)));
                   return (
                     <TreeRow depth={0} expanded={expandedUnits.has(p.key)} onToggle={() => toggleUnit(p.key)}
-                      icon={<FolderTree size={13} className="text-violet-500 shrink-0" />} label={p.name} units={p.unitCount} rooms={p.roomCount} strong
+                      icon={<FolderTree size={13} className="text-foreground shrink-0" />} label={p.name} units={p.unitCount} rooms={p.roomCount} strong
                       custom={isCustom.project(pos.projectId)} chips={<LayoutChips items={chipsFor(types, pos, "PROJECT")} />}
                       editing={editing?.key === p.key}
                       onEditLayout={() => toggleEditor({ key: p.key, level: "PROJECT", position: pos, types })}
@@ -1110,7 +1131,7 @@ const RoomMaster: React.FC = () => {
                       const types = typesOf(b.floors.flatMap((f) => f.units));
                       return (
                         <TreeRow depth={1} expanded={expandedUnits.has(b.key)} onToggle={() => toggleUnit(b.key)}
-                          icon={<Building size={13} className="text-sky-500 shrink-0" />} label={`Block ${b.name}`} units={b.unitCount} rooms={b.roomCount}
+                          icon={<Building size={13} className="text-muted-foreground shrink-0" />} label={`Block ${b.name}`} units={b.unitCount} rooms={b.roomCount}
                           custom={isCustom.block(b.blockIdNum)} chips={<LayoutChips items={chipsFor(types, pos, "BLOCK")} />}
                           editing={editing?.key === b.key}
                           onEditLayout={() => toggleEditor({ key: b.key, level: "BLOCK", position: pos, types })}
@@ -1126,7 +1147,7 @@ const RoomMaster: React.FC = () => {
                           const floorLabelText = f.key.endsWith("-villas") ? "Villas" : f.floorNo == null ? "No floor" : f.floorNo === 0 ? "Ground Floor" : `Floor ${f.floorNo}`;
                           return (
                             <TreeRow depth={2} expanded={expandedUnits.has(f.key)} onToggle={() => toggleUnit(f.key)}
-                              icon={<Layers size={13} className="text-amber-500 shrink-0" />}
+                              icon={<Layers size={13} className="text-muted-foreground shrink-0" />}
                               label={floorLabelText}
                               units={f.unitCount} rooms={f.roomCount}
                               custom={isCustom.floor(b.blockIdNum, f.floorNo)}
@@ -1141,7 +1162,7 @@ const RoomMaster: React.FC = () => {
                           const expanded = expandedUnits.has(g.key);
                           return (
                             <div key={g.key}>
-                              <div className="flex items-center hover:bg-muted/20 transition-colors">
+                              <div className="flex items-center hover:bg-primary/5 transition-colors">
                               <button
                                 type="button"
                                 onClick={() => toggleUnit(g.key)}
@@ -1153,10 +1174,10 @@ const RoomMaster: React.FC = () => {
                                 ) : (
                                   <ChevronRight size={13} className="text-muted-foreground shrink-0" />
                                 )}
-                                <Building2 size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+                                <Building2 size={13} className="text-muted-foreground shrink-0" />
                                 <span className="text-sm font-medium text-foreground">{g.unitName || "—"}</span>
                                 {g.bhkType && (
-                                  <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full shrink-0">
+                                  <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground/40 px-1.5 py-0.5 shrink-0">
                                     {g.bhkType}
                                   </span>
                                 )}
@@ -1167,13 +1188,13 @@ const RoomMaster: React.FC = () => {
                                   const active = g.rooms.filter((r) => r.isActive && r.roomCategoryId != null).length;
                                   const exp = expectedRooms(g);
                                   return exp != null && active !== exp ? (
-                                    <span className="ml-auto inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-2 py-0.5 rounded-full shrink-0"
+                                    <span className="ml-auto inline-flex items-center gap-1 text-[0.6875rem] font-semibold tabular-nums text-destructive border border-destructive px-1.5 py-0.5 shrink-0"
                                       title={`Has ${active} active room(s); its layout calls for ${exp}. Run "Generate" in Generate Rooms in Bulk, or check the layout.`}>
                                       <AlertTriangle size={10} /> {active}/{exp} rooms
                                     </span>
                                   ) : (
-                                    <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                                      {g.rooms.length} room{g.rooms.length === 1 ? "" : "s"}
+                                    <span className="ml-auto text-[0.6875rem] text-muted-foreground shrink-0">
+                                      <span className="font-heading font-semibold tabular-nums text-foreground">{g.rooms.length}</span> room{g.rooms.length === 1 ? "" : "s"}
                                     </span>
                                   );
                                 })()}
@@ -1188,7 +1209,7 @@ const RoomMaster: React.FC = () => {
                                 )}
                                 {canBulkDelete && g.rooms.length > 0 && (
                                   <button type="button" onClick={() => setDeletingLevel({ level: "UNIT", position: { projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId) }, name: g.unitName, roomCount: g.rooms.length })}
-                                    className="p-1.5 rounded-md border border-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                    className={ACT_DEL} aria-label="Delete rooms in this unit"
                                     title={`Delete all ${g.rooms.length} room(s) in this unit`}>
                                     <Trash2 size={13} />
                                   </button>
@@ -1201,7 +1222,7 @@ const RoomMaster: React.FC = () => {
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-sm">
                                     <thead>
-                                      <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide bg-muted/10">
+                                      <tr className={`text-left ${LBL}`} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.25)" }}>
                                         <th className="pr-3 py-2" style={{ paddingLeft: 16 + 4 * 20 + 8 }}>Room Name</th>
                                         <th className="px-3 py-2">Floor</th>
                                         <th className="px-3 py-2">Status</th>
@@ -1210,33 +1231,25 @@ const RoomMaster: React.FC = () => {
                                     </thead>
                                     <tbody>
                                       {[...g.rooms].sort(byStorey).map((room) => (
-                                        <tr key={room._id} className="border-b border-border last:border-0 hover:bg-muted/10">
+                                        <tr key={room._id} className="hover:bg-primary/5">
                                           <td className="pr-3 py-2.5 font-medium text-foreground" style={{ paddingLeft: 16 + 4 * 20 + 8 }}>{room.roomName as string}</td>
                                           {/* A villa room's floor is the villa's own (Ground / 1 / 2); a flat's is the unit's. */}
                                           <td className="px-3 py-2.5 text-muted-foreground">{room.storey ? storeyName(String(room.storey)) : (room.floor as string) || "—"}</td>
                                           <td className="px-3 py-2.5">
-                                            {room.isActive ? (
-                                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
-                                              </span>
-                                            ) : (
-                                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
-                                              </span>
-                                            )}
+                                            {room.isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
                                           </td>
                                           <td className="px-5 py-2.5">
                                             <div className="flex items-center justify-end gap-1">
                                               <button data-row-view
                                                 onClick={() => setViewRoom(room)}
-                                                className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                                className={ACT}
                                                 title="View"
                                               >
                                                 <Eye size={13} />
                                               </button>
                                               <button
                                                 onClick={() => printRoom(room)}
-                                                className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
+                                                className={ACT}
                                                 title="Print"
                                               >
                                                 <Printer size={13} />
@@ -1244,7 +1257,7 @@ const RoomMaster: React.FC = () => {
                                               {rights.canEdit && (
                                                 <button
                                                   onClick={() => requestEdit(room._id)}
-                                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                                  className={ACT}
                                                   title="Edit"
                                                 >
                                                   <Pencil size={13} />
@@ -1253,7 +1266,7 @@ const RoomMaster: React.FC = () => {
                                               {rights.canDelete && (
                                                 <button
                                                   onClick={() => setDeletingRoom(room)}
-                                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                                  className={ACT_DEL}
                                                   title="Delete"
                                                 >
                                                   <Trash2 size={13} />
@@ -1282,15 +1295,18 @@ const RoomMaster: React.FC = () => {
 
       {/* ── View dialog — same fields MasterPage's own viewConfig would have shown ── */}
       <Dialog open={!!viewRoom} onOpenChange={(open) => !open && setViewRoom(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sheet-frame max-w-md" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle>Room Details</DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Room</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{(viewRoom?.roomName as string) || "Room details"}</DialogTitle>
+            </div>
           </DialogHeader>
           {viewRoom && (
             <div className="space-y-3 pt-1">
               {roomViewFields.map((f) => (
                 <div key={f.key} className="space-y-0.5">
-                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">{f.label}</p>
+                  <p className={LBL}>{f.label}</p>
                   <div className="text-sm text-foreground">
                     {f.render ? f.render(viewRoom[f.key], viewRoom) : String(viewRoom[f.key] ?? "—")}
                   </div>
@@ -1303,15 +1319,18 @@ const RoomMaster: React.FC = () => {
 
       {/* ── Delete confirm dialog ── */}
       <Dialog open={!!deletingRoom} onOpenChange={(open) => !open && setDeletingRoom(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sheet-frame max-w-sm" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle>Delete Room</DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Room</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Delete room</DialogTitle>
+            </div>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
             Delete <strong>{deletingRoom?.roomName as string}</strong>? This can't be undone.
           </p>
-          <DialogFooter className="pt-2">
-            <button onClick={() => setDeletingRoom(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+          <DialogFooter className="pt-3 gap-2" style={{ borderTop: RULE }}>
+            <button onClick={() => setDeletingRoom(null)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>
               Cancel
             </button>
             <button
@@ -1323,7 +1342,7 @@ const RoomMaster: React.FC = () => {
                   setDeletingRoom(null);
                 }
               }}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+              className={`${KEY} h-9 px-5 bg-destructive text-destructive-foreground border border-destructive`}
             >
               Delete
             </button>
@@ -1333,19 +1352,22 @@ const RoomMaster: React.FC = () => {
 
       {/* ── Bulk Delete confirm dialog ── */}
       <Dialog open={!!deletingLevel} onOpenChange={(open) => { if (!open && !deletingLevelInFlight) setDeletingLevel(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sheet-frame max-w-sm" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle>Delete {deletingLevel?.level ? deletingLevel.level.charAt(0) + deletingLevel.level.slice(1).toLowerCase() : 'Level'} Rooms</DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>{deletingLevel?.level ? deletingLevel.level.charAt(0) + deletingLevel.level.slice(1).toLowerCase() : "Level"}</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Delete rooms</DialogTitle>
+            </div>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
             Delete all <strong>{deletingLevel?.roomCount}</strong> room(s) in <strong>{deletingLevel?.name}</strong>?
             Rooms with work entries or blueprints will be automatically retained.
           </p>
-          <DialogFooter className="pt-2">
+          <DialogFooter className="pt-3 gap-2" style={{ borderTop: RULE }}>
             <button
               onClick={() => setDeletingLevel(null)}
               disabled={deletingLevelInFlight}
-              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors disabled:opacity-50"
+              className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}
             >
               Cancel
             </button>
@@ -1372,16 +1394,16 @@ const RoomMaster: React.FC = () => {
                   setDeletingLevelInFlight(false);
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
+              className={`${KEY} h-9 px-5 bg-destructive text-destructive-foreground border border-destructive`}
             >
               {deletingLevelInFlight ? (
                 <><Loader2 size={13} className="animate-spin" /> Deleting…</>
-              ) : "Delete All"}
+              ) : "Delete all"}
             </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </CivilWorkDprShell>
+      </SheetShell>
     </>
   );
 };
