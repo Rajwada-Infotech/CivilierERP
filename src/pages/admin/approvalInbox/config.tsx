@@ -123,7 +123,7 @@ export const MODULE_CONFIG: Record<
     color: "text-rose-500 bg-rose-500/10",
     navPath: "/material/expense-booking",
     apiEndpoint: "/api/expense-booking",
-    label: "Expense Bookings",
+    label: "Invoices",
   },
   "received-payment": {
     icon: ArrowDownCircle,
@@ -476,7 +476,6 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "purchase-orders": "material",
   "work-orders": "material",
   "goods-receipt": "material",
-  "expense-booking": "material",
   "material-issues": "material",
   "material-issue-return": "material",
   "vehicle-in-out": "material",
@@ -484,6 +483,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "inter-company-transfer": "material",
   "debit-note": "material",
 
+  "expense-booking": "finance",
   payments: "finance",
   "crm-refund-payment": "finance",
   "received-payment": "finance",
