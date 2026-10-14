@@ -12,6 +12,8 @@ export interface ShortcutRow {
   joiner?: "+" | "then";
   label: string;
   hint?: string;
+  /** Module id, for a module switch — drawn with that module's icon and colour. */
+  module?: string;
 }
 
 export interface ShortcutGroup {
@@ -34,7 +36,7 @@ export const GENERAL_SHORTCUTS: ShortcutGroup = {
 export const MODULE_SWITCH_SHORTCUTS: ShortcutGroup = {
   title: "Switch module",
   note: "Hold Shift and press the key. Only modules you have access to respond.",
-  rows: MODULE_SHORTCUTS.map((s) => ({ keys: ["Shift", s.keyLabel], label: s.label })),
+  rows: MODULE_SHORTCUTS.map((s) => ({ keys: ["Shift", s.keyLabel], label: s.label, module: s.module })),
 };
 
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [GENERAL_SHORTCUTS, MODULE_SWITCH_SHORTCUTS];
