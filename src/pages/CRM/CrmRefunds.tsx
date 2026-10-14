@@ -18,6 +18,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/refunds";
 const BKG_API = "/api/crm/bookings";
@@ -464,6 +465,8 @@ const CrmRefunds: React.FC = () => {
   const [sp] = useSearchParams();
   // ?search= (e.g. from a credit note) opens the list filtered to that refund.
   const [searchInput, setSearchInput] = useState(() => sp.get("search") || "");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => { setSearch(v); setPage(1); });
   const [search, setSearch] = useState(() => sp.get("search") || "");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [status, setStatus] = useState<string>("All");
@@ -576,7 +579,7 @@ const CrmRefunds: React.FC = () => {
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setPage(1); } }}
-                placeholder="Search customer, refund no, booking, cancellation… (Enter)"
+                placeholder="Search customer, refund no, booking, cancellation…"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
             </div>
             <div className="flex flex-wrap gap-1.5">
