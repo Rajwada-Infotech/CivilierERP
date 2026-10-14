@@ -2548,14 +2548,31 @@ router.put("/:id/cancel", requirePageRight("crm-sales-deed", "edit"), async (req
       return res.status(400).json({ error: `Cannot cancel a deed in status '${currentStatus}'` });
     }
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("ub", sql.Int, actorId(req))
-      .query(`UPDATE dbo.CrmSalesDeed SET Status = 'Cancelled', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+    // The deed's open registry appointment goes with it (decided 2026-10-14):
+    // left open, completing it later marked the CANCELLED deed Registered.
+    const tx = pool.transaction();
+    await tx.begin();
+    let closedRegistries = [];
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmSalesDeed SET Status = 'Cancelled', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+      closedRegistries = (await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmRegistry SET Status = 'Cancelled', CancelledReason = N'Sale deed cancelled', CancelledAt = SYSDATETIME(),
+                  CancelledBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+                OUTPUT INSERTED.Id
+                WHERE SalesDeedId = @id AND Status NOT IN ('Completed', 'Cancelled')`)).recordset.map((r) => r.Id);
+      for (const rid of closedRegistries) await logRegistryHistory(rid, 'Cancelled', 'Sale deed cancelled', actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
 
     logDeedApprovalHistory(id, 'Cancelled', 'Sale deed cancelled by staff', actorId(req), 'Staff').catch(e => console.error("Error logging cancellation:", e));
 
-    res.json({ success: true, status: 'Cancelled' });
+    res.json({ success: true, status: 'Cancelled', registriesCancelled: closedRegistries.length });
   } catch (e) {
     console.error("[crm-sales-deed] cancel error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
