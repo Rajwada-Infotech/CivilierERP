@@ -41,7 +41,7 @@ import {
   labelizeKey,
   extractLineItems,
   formatPreviewValue,
-} from "./ApprovalInbox";
+} from "./approvalInbox/config";
 import { partnerLineKind } from "@/pages/finance/journalVoucher/ledgerGroups";
 import {
   getRungAssignment,
