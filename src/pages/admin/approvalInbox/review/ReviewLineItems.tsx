@@ -11,21 +11,21 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
       {/* Line items */}
       {lineItems.length > 0 && (
         <div>
-          <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-            <Package size={10} className="text-emerald-500" />
+          <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+            <Package size={10} className="text-muted-foreground" />
             {isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`}
           </p>
           {isJournalVoucher ? (
-            <div className="rounded-xl border border-border overflow-x-auto">
+            <div className="border border-foreground/25 overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="bg-muted/40 border-b border-border">
+                <thead className="border-b border-foreground">
                   <tr>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Ledger</th>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Debit (₹)</th>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Credit (₹)</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-left">Ledger</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">Debit (₹)</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">Credit (₹)</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/50">
+                <tbody className="divide-y divide-foreground/10">
                   {lineItems.map((li, i) => {
                     const debit = Number(li.DebitAmount) || 0;
                     const credit = Number(li.CreditAmount) || 0;
@@ -34,39 +34,39 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
                       LHeadCode: li.LHeadCode as string | null | undefined,
                     });
                     return (
-                      <tr key={i} className="hover:bg-muted/20 transition-colors">
+                      <tr key={i} className="hover:bg-primary/5 transition-colors">
                         <td className="px-3 py-2 font-medium">
                           <span className="flex items-center gap-2">
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${debit > 0 ? "bg-emerald-500" : "bg-red-500"}`} />
+                            <span className={`font-heading text-[0.5625rem] font-semibold w-5 shrink-0 ${debit > 0 ? "text-foreground" : "text-muted-foreground"}`}>{debit > 0 ? "Dr" : "Cr"}</span>
                             {(li.LHeadName as string) || "—"}
                             {kind && (
-                              <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                              <span className={`shrink-0 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 ${
                                 kind === "Investment"
-                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                  : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                                  ? "text-foreground border border-foreground/50"
+                                  : "text-foreground border border-dashed border-foreground/50"
                               }`}>
                                 {kind}
                               </span>
                             )}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
+                        <td className="px-3 py-2 text-right text-foreground tabular-nums">
                           {debit > 0 ? formatINR(debit) : ""}
                         </td>
-                        <td className="px-3 py-2 text-right text-red-600 dark:text-red-400">
+                        <td className="px-3 py-2 text-right text-foreground tabular-nums">
                           {credit > 0 ? formatINR(credit) : ""}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
-                <tfoot className="bg-muted/20 border-t border-border font-semibold">
+                <tfoot className="border-t border-foreground font-semibold">
                   <tr>
-                    <td className="px-3 py-2 text-[0.625rem] uppercase tracking-widest text-muted-foreground">Total</td>
-                    <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
+                    <td className="px-3 py-2 text-[0.625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground">Total</td>
+                    <td className="px-3 py-2 text-right text-foreground tabular-nums">
                       {formatINR(lineItems.reduce((s, li) => s + (Number(li.DebitAmount) || 0), 0))}
                     </td>
-                    <td className="px-3 py-2 text-right text-red-600 dark:text-red-400">
+                    <td className="px-3 py-2 text-right text-foreground tabular-nums">
                       {formatINR(lineItems.reduce((s, li) => s + (Number(li.CreditAmount) || 0), 0))}
                     </td>
                   </tr>
@@ -74,13 +74,13 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
               </table>
             </div>
           ) : isMaterialRequest ? (
-            <div className="rounded-xl border border-border divide-y divide-border/50">
+            <div className="border border-foreground/25 divide-y divide-foreground/10">
               {lineItems.map((li, i) => {
                 const name = (li.ItemName ?? li.itemName ?? "—") as string;
                 const qty = Number(li.Quantity ?? li.quantity ?? 0);
                 const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
                 return (
-                  <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-muted/20 transition-colors">
+                  <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-primary/5 transition-colors">
                     <span className="font-medium text-foreground">{name}</span>
                     <span className="text-muted-foreground shrink-0">
                       {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""}
@@ -90,21 +90,21 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
               })}
             </div>
           ) : (
-            <div className="rounded-xl border border-border overflow-x-auto">
+            <div className="border border-foreground/25 overflow-x-auto">
 
           <table className="w-full text-xs">
-                <thead className="bg-muted/40 border-b border-border">
+                <thead className="border-b border-foreground">
                   <tr>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">UOM</th>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
-                    <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-left">Item</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">Qty</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-left">UOM</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">Rate</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">
                       {isInterCompanyTransfer ? "Amount (Incl. GST)" : "Amount"}
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border/50">
+                <tbody className="divide-y divide-foreground/10">
                   {lineItems.map((li, i) => {
                     const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
                     const qty = Number(li.Quantity ?? li.quantity ?? 0);
@@ -122,7 +122,7 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
                     // two totals on the same screen disagree.
                     const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
                     return (
-                      <tr key={i} className="hover:bg-muted/20 transition-colors">
+                      <tr key={i} className="hover:bg-primary/5 transition-colors">
                         <td className="px-3 py-2 font-medium">{name}</td>
                         <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
                         <td className="px-3 py-2 text-muted-foreground">{uom || "—"}</td>
@@ -133,9 +133,9 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
                   })}
                 </tbody>
                 {isInterCompanyTransfer && lineItems.length > 0 && (
-                  <tfoot className="bg-muted/20 border-t border-border font-semibold">
+                  <tfoot className="border-t border-foreground font-semibold">
                     <tr>
-                      <td colSpan={4} className="px-3 py-2 text-[0.625rem] uppercase tracking-widest text-muted-foreground text-right">Total (Incl. GST)</td>
+                      <td colSpan={4} className="px-3 py-2 text-[0.625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground text-right">Total (Incl. GST)</td>
                       <td className="px-3 py-2 text-right">{formatINR(effectiveAmount ?? 0)}</td>
                     </tr>
                   </tfoot>

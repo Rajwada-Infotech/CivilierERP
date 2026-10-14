@@ -14,15 +14,15 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
         loadingRungDetail ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-[46px] rounded-lg bg-muted animate-pulse" />
+              <div key={i} className="h-[46px] bg-muted animate-pulse" />
             ))}
           </div>
         ) : rungDetail?.assignment ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <UserRound size={10} className="text-cyan-500" /> Engineers
+                <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <UserRound size={10} className="text-muted-foreground" /> Engineers
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {rungDetail.assignment.engineerIds.length === 0 ? (
@@ -31,7 +31,7 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
                     rungDetail.assignment.engineerIds.map((id) => (
                       <span
                         key={id}
-                        className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                        className="text-xs font-medium border border-foreground/40 px-2.5 py-1 text-foreground"
                       >
                         {engineers.find((e) => e.id === id)?.name || `#${id}`}
                       </span>
@@ -41,8 +41,8 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
               </div>
 
               <div>
-                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <ShieldCheck size={10} className="text-violet-500" /> Quality Check
+                <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <ShieldCheck size={10} className="text-muted-foreground" /> Quality Check
                   <QcStatusPill qc={rungDetail.assignment.qcStatus} />
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -52,7 +52,7 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
                     rungDetail.assignment.qcUserIds.map((id) => (
                       <span
                         key={id}
-                        className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                        className="text-xs font-medium border border-foreground/40 px-2.5 py-1 text-foreground"
                       >
                         {engineers.find((e) => e.id === id)?.name || `#${id}`}
                       </span>
@@ -89,8 +89,8 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
 
             {rungDetail.assignment.description && (
               <div>
-                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Description</p>
-                <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2">Description</p>
+                <p className="text-xs text-foreground border border-foreground/25 px-3 py-2.5">
                   {rungDetail.assignment.description}
                 </p>
               </div>
@@ -99,13 +99,13 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
             {(rungDetail.assignment.materials.length > 0 || rungDetail.assignment.remarks) && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                    <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
+                  <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <Package size={10} className="text-muted-foreground" /> Materials ({rungDetail.assignment.materials.length})
                   </p>
                   {rungDetail.assignment.materials.length === 0 ? (
                     <p className="text-xs text-muted-foreground italic">No materials entered</p>
                   ) : (
-                    <div className="rounded-xl border border-border divide-y divide-border/50">
+                    <div className="border border-foreground/25 divide-y divide-foreground/10">
                       {rungDetail.assignment.materials.map((m, i) => {
                         const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
                         return (
@@ -121,9 +121,9 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
                   )}
                 </div>
                 <div>
-                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Remarks</p>
+                  <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2">Remarks</p>
                   {rungDetail.assignment.remarks ? (
-                    <p className="text-xs text-foreground whitespace-pre-wrap break-words bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                    <p className="text-xs text-foreground whitespace-pre-wrap break-words border border-foreground/25 px-3 py-2.5">
                       {rungDetail.assignment.remarks}
                     </p>
                   ) : (
@@ -135,10 +135,10 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
 
             {rungDetail.assignment.checkpoints.length > 0 && (
               <div>
-                <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <ListChecks size={10} className="text-cyan-500" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
+                <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <ListChecks size={10} className="text-muted-foreground" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
                 </p>
-                <div className="rounded-xl border border-border divide-y divide-border/50">
+                <div className="border border-foreground/25 divide-y divide-foreground/10">
                   {rungDetail.assignment.checkpoints.map((cp) => {
                     const qcCheck = rungDetail.assignment?.qcStatus?.checks?.find((c) => c.fieldName === cp.fieldName);
                     const rating = qcCheck?.rating ? RATING_META[qcCheck.rating] : null;
@@ -165,7 +165,7 @@ export function ReviewWorkAllocation({ r }: { r: ApprovalReviewState }) {
                             </span>
                           )}
                           {rating && (
-                            <span className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${rating.cls}`}>
+                            <span className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 ${rating.cls}`}>
                               {rating.label}
                             </span>
                           )}

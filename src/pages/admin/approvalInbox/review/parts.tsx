@@ -63,13 +63,14 @@ export const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step
   const isSubmitted = step.status === "Submitted";
   const isPending = step.status === "Pending";
 
+  // Approved stays green and rejected red, as on the inbox; submitted is inked, waiting is a dashed outline.
   const dot = isRejected
-    ? "bg-red-500 ring-red-500/20"
+    ? "bg-red-600 border-red-600 text-white"
     : isApproved
-      ? "bg-emerald-500 ring-emerald-500/20"
+      ? "bg-emerald-600 border-emerald-600 text-white"
       : isSubmitted
-        ? "bg-sky-500 ring-sky-500/20"
-        : "bg-amber-400 ring-amber-400/25";
+        ? "bg-foreground border-foreground text-card"
+        : "border-dashed border-foreground text-foreground";
 
   const Icon = isRejected ? XCircle : isApproved ? CheckCircle2 : isSubmitted ? SendHorizonal : Clock;
 
@@ -77,10 +78,10 @@ export const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step
     <div className="flex gap-3">
       {/* Rail */}
       <div className="flex flex-col items-center shrink-0">
-        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white ring-4 ${dot} ${isPending ? "animate-pulse" : ""}`}>
+        <div className={`w-7 h-7 flex items-center justify-center border ${dot}`}>
           <Icon size={13} />
         </div>
-        {!isLast && <div className="w-px flex-1 bg-border min-h-[24px] mt-1" />}
+        {!isLast && <div className="w-px flex-1 bg-foreground/40 min-h-[24px] mt-1" />}
       </div>
 
       {/* Content */}
@@ -88,14 +89,14 @@ export const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-xs font-semibold text-foreground">{step.label}</p>
           <span
-            className={`text-[0.5625rem] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+            className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border ${
               isRejected
-                ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                ? "text-red-600 border-red-500"
                 : isApproved
-                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  ? "text-emerald-600 border-emerald-500"
                   : isSubmitted
-                    ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
+                    ? "text-foreground border-foreground"
+                    : "text-muted-foreground border-dashed border-foreground/50"
             }`}
           >
             {step.status}
@@ -125,7 +126,7 @@ export const ChainNode: React.FC<{ step: ChainStep; isLast: boolean }> = ({ step
         )}
 
         {step.note && (
-          <blockquote className="mt-1.5 text-[0.6875rem] text-foreground/80 italic border-l-2 border-border pl-2.5 py-0.5">
+          <blockquote className="mt-1.5 text-[0.6875rem] text-foreground/80 italic border-l-2 border-foreground/40 pl-2.5 py-0.5">
             "{step.note}"
           </blockquote>
         )}
@@ -139,7 +140,7 @@ export const SourceBadgeWithName: React.FC<{ source: SourceType; name?: string |
   <span className="flex flex-wrap items-center gap-2">
     {name && <span className="text-foreground">{name}</span>}
     <span
-      className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[source].className}`}
+      className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 ${SOURCE_META[source].className}`}
     >
       {SOURCE_META[source].label}
     </span>
@@ -149,12 +150,12 @@ export const SourceBadgeWithName: React.FC<{ source: SourceType; name?: string |
 // Where Quality Check stands on this activity.
 export const QcStatusPill: React.FC<{ qc?: { decision: "APPROVED" | "REWORK" } | null }> = ({ qc }) => {
   const meta = !qc
-    ? { label: "Not reviewed", cls: "bg-slate-500/10 text-slate-600 dark:text-slate-400" }
+    ? { label: "Not reviewed", cls: "text-muted-foreground border border-dashed border-foreground/40" }
     : qc.decision === "APPROVED"
-      ? { label: "Passed", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" }
-      : { label: "Sent back for rework", cls: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" };
+      ? { label: "Passed", cls: "text-emerald-600 border border-emerald-500" }
+      : { label: "Sent back for rework", cls: "text-red-600 border border-red-500" };
   return (
-    <span className={`ml-auto text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full normal-case ${meta.cls}`}>
+    <span className={`ml-auto font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 ${meta.cls}`}>
       {meta.label}
     </span>
   );
@@ -162,16 +163,16 @@ export const QcStatusPill: React.FC<{ qc?: { decision: "APPROVED" | "REWORK" } |
 
 // A checkpoint's Quality Check rating.
 export const RATING_META: Record<string, { label: string; cls: string }> = {
-  POOR: { label: "Poor", cls: "bg-red-500/10 text-red-600 dark:text-red-400" },
-  GOOD: { label: "Good", cls: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
-  EXCELLENT: { label: "Excellent", cls: "bg-teal-500/15 text-teal-700 dark:text-teal-300" },
+  POOR: { label: "Poor", cls: "text-red-600 border border-red-500" },
+  GOOD: { label: "Good", cls: "text-emerald-600 border border-emerald-500" },
+  EXCELLENT: { label: "Excellent", cls: "bg-emerald-600 text-white border border-emerald-600" },
 };
 
 export const FormField: React.FC<{ label: string; value: React.ReactNode; accent?: boolean }> = ({ label, value, accent }) => (
   <div className="min-w-0">
-    <p className="text-[0.5625rem] font-bold uppercase tracking-widest text-muted-foreground/60 mb-1.5">{label}</p>
-    <div className={`text-[0.8125rem] font-medium text-foreground rounded-xl px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
-      accent ? "bg-primary/5 border-primary/20 text-primary" : "bg-muted/30 border-border/50"
+    <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">{label}</p>
+    <div className={`text-[0.8125rem] font-medium text-foreground px-3 py-2.5 break-words min-h-[38px] flex items-center border ${
+      accent ? "border-foreground font-semibold" : "border-foreground/25"
     }`}>
       {value ?? <span className="text-muted-foreground/40">—</span>}
     </div>
@@ -199,18 +200,18 @@ export const WoActivities: React.FC<{ activities: WoActivity[] }> = ({ activitie
   let n = 0;
   return (
     <div>
-      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-        <Package size={10} className="text-emerald-500" />
+      <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+        <Package size={10} className="text-muted-foreground" />
         {`Activities (${activities.length})`}
       </p>
       <div className="space-y-3">
         {[...groups.entries()].map(([group, rows]) => (
-          <div key={group} className="rounded-xl border border-border overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-3 py-2 bg-muted/40 border-b border-border">
+          <div key={group} className="border border-foreground/25 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-foreground">
               <span className="text-xs font-heading font-semibold text-foreground">{group}</span>
               <span className="text-xs font-semibold text-foreground">{formatINR(rows.reduce((s, r) => s + num(r.GrandTotal), 0))}</span>
             </div>
-            <div className="divide-y divide-border/50">
+            <div className="divide-y divide-foreground/10">
               {rows.map((a) => {
                 n += 1;
                 const mats = a.materials ?? [];
@@ -222,7 +223,7 @@ export const WoActivities: React.FC<{ activities: WoActivity[] }> = ({ activitie
                         <p className="text-xs font-medium text-foreground">
                           <span className="text-muted-foreground mr-1.5">{n}.</span>
                           {(a.ActivityName as string) || "—"}
-                          {a.HsnCode ? <span className="ml-1.5 text-[0.625rem] font-mono text-muted-foreground">SAC {String(a.HsnCode)}</span> : null}
+                          {a.HsnCode ? <span className="ml-1.5 text-[0.625rem] font-heading tabular-nums text-muted-foreground">SAC {String(a.HsnCode)}</span> : null}
                         </p>
                         {a.Remarks ? <p className="text-[0.6875rem] text-muted-foreground/80 mt-0.5 whitespace-pre-wrap">{String(a.Remarks)}</p> : null}
                       </div>
@@ -242,7 +243,7 @@ export const WoActivities: React.FC<{ activities: WoActivity[] }> = ({ activitie
                       ))}
                     </div>
                     {mats.length > 0 && (
-                      <div className="mt-2 rounded-lg bg-muted/30 border border-border/50 divide-y divide-border/40">
+                      <div className="mt-2 border border-foreground/20 divide-y divide-foreground/10">
                         {mats.map((m, mi) => {
                           const q = num(m.Quantity);
                           const r = num(m.Rate);
@@ -278,19 +279,19 @@ export const WoActivities: React.FC<{ activities: WoActivity[] }> = ({ activitie
 export interface BoqLine { name: string; code: string; sub: string; description: string; facts: [string, string][]; amount: string }
 export const BoqLines: React.FC<{ title: string; rows: BoqLine[] }> = ({ title, rows }) => (
   <div>
-    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-      <Package size={10} className="text-emerald-500" />
+    <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2 flex items-center gap-1.5">
+      <Package size={10} className="text-muted-foreground" />
       {title}
     </p>
-    <div className="rounded-xl border border-border divide-y divide-border/50 overflow-hidden">
+    <div className="border border-foreground/25 divide-y divide-foreground/10 overflow-hidden">
       {rows.map((r, i) => (
-        <div key={i} className="px-3 py-2.5 hover:bg-muted/20 transition-colors">
+        <div key={i} className="px-3 py-2.5 hover:bg-primary/5 transition-colors">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-medium text-foreground">
                 <span className="text-muted-foreground mr-1.5">{i + 1}.</span>
                 {r.name}
-                {r.code && <span className="ml-1.5 text-[0.625rem] font-mono text-muted-foreground">{r.code}</span>}
+                {r.code && <span className="ml-1.5 text-[0.625rem] font-heading tabular-nums text-muted-foreground">{r.code}</span>}
               </p>
               {r.sub && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{r.sub}</p>}
               {r.description && <p className="text-[0.6875rem] text-muted-foreground/80 mt-0.5 whitespace-pre-wrap">{r.description}</p>}
