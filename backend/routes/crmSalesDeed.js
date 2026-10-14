@@ -314,7 +314,7 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
       .query("SELECT TOP 1 Id AS QPId, QPNo, Status AS QPStatus, ConfirmedAmount FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
 
     const registry = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id AS RegistryId, RegNo, Status AS RegistryStatus, ScheduledDate FROM dbo.CrmRegistry WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id AS RegistryId, RegNo, Status AS RegistryStatus, ScheduledDate FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
 
     const gate = await getProjectSaleGate(pool, bookingId);
 
@@ -474,7 +474,7 @@ router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view
       JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -595,7 +595,7 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
     res.status(201).json({ success: true, id: registryId, RegNo: regNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "Registry tracking already started for this booking" });
+      return res.status(409).json({ error: "This booking already has a registry in progress or completed — a new one can be started only after cancelling it" });
     console.error("[crm-sales-deed/registry] POST error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
@@ -1903,7 +1903,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
 
     if (b.RegistrationNo && !row.RegistrationNo) {
       const registry = await pool.request().input("bid", sql.Int, row.BookingId)
-        .query("SELECT Status FROM dbo.CrmRegistry WHERE BookingId = @bid");
+        .query("SELECT TOP 1 Status FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
       if (!registry.recordset.length || registry.recordset[0].Status !== "Completed") {
         return res.status(400).json({ error: "Registration number can't be recorded until Registry is marked Completed (Query Payment must be Confirmed first)" });
       }

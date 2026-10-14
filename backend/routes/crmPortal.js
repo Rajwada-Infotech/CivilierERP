@@ -347,7 +347,7 @@ router.get("/timeline", async (req, res) => {
         LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
         WHERE qp.BookingId = @bid
       `),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Id, RegNo, Status, ScheduledDate, CompletedDate FROM dbo.CrmRegistry WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 Id, RegNo, Status, ScheduledDate, CompletedDate FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC"),
       // Every payment now lands in On Account first and stays there until an
       // explicit staff-side On Account Adjustment (crmPayments.js
       // applyOnAccountToMilestone) — so a customer who has genuinely paid can
@@ -1433,6 +1433,7 @@ router.get("/activity", async (req, res) => {
         FROM dbo.CrmRegistry reg
         JOIN dbo.CrmBooking b ON b.Id = reg.BookingId
         WHERE b.ApplicationId = @aid
+        ORDER BY CASE WHEN reg.Status = 'Cancelled' THEN 1 ELSE 0 END, reg.Id DESC
       `),
       pool.request().input("aid", sql.Int, appId).query(`
         SELECT n.NocType, n.NocNo, n.IssuedDate
