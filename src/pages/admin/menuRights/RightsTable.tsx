@@ -1,6 +1,6 @@
 import React from "react";
 import { Check } from "lucide-react";
-import { ALL_ACTIONS, MODULE_COLORS } from "./config";
+import { ALL_ACTIONS } from "./config";
 import type { MenuRightsState } from "./useMenuRights";
 
 // The page × action grid.
@@ -12,7 +12,7 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
-            <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
+            <tr className="border-b border-foreground font-heading text-[0.5625rem] uppercase tracking-[0.12em]">
               <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-0 sm:min-w-[240px]">
                 Menu / Page
               </th>
@@ -36,9 +36,6 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
               // misleading there, so each row gets its own instead.
               const isCrossModuleTier = TIER_ORDER.includes(group);
               const groupModule = pages[0]?.module ?? "General";
-              const colorClass =
-                MODULE_COLORS[groupModule] ??
-                "bg-muted/30 text-muted-foreground";
               const allGroupChecked = pages.every((p) =>
                 p.actions.every((a) => isChecked(p.key, a)),
               );
@@ -53,7 +50,7 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                   {isFirstModuleWiseGroup && (
                     <tr>
                       <td colSpan={ALL_ACTIONS.length + 2} className="px-5 pt-5 pb-1">
-                        <span className="text-[0.625rem] font-heading font-bold uppercase tracking-[0.2em] text-muted-foreground/50">
+                        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
                           Module Pages
                         </span>
                       </td>
@@ -64,13 +61,13 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                   <tr>
                     <td
                       colSpan={ALL_ACTIONS.length + 2}
-                      className="px-5 py-2 border-y border-border/50"
+                      className="px-5 py-2 border-y border-foreground/40"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           {!isCrossModuleTier && (
                             <span
-                              className={`text-[0.625rem] font-heading font-bold px-2 py-0.5 rounded-full border ${colorClass}`}
+                              className="inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap text-foreground border-foreground/50"
                             >
                               {groupModule}
                             </span>
@@ -86,10 +83,10 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                         </div>
                         <button
                           onClick={() => toggleGroup(pages)}
-                          className={`text-[0.625rem] px-2.5 py-0.5 rounded-full border transition-colors ${
+                          className={`h-7 px-2.5 border font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                             allGroupChecked
-                              ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
-                              : "bg-muted text-muted-foreground border-border hover:bg-muted/80"
+                              ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive"
+                              : "border-foreground text-foreground hover:bg-primary/10"
                           }`}
                         >
                           {allGroupChecked ? "Revoke all" : "Grant all"}
@@ -106,20 +103,18 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                     const allChecked =
                       checkedCount === page.actions.length;
                     const someChecked = checkedCount > 0 && !allChecked;
-                    const rowColorClass =
-                      MODULE_COLORS[page.module] ?? "bg-muted/30 text-muted-foreground";
 
                     return (
                       <tr
                         key={page.key}
-                        className="border-b border-border/40 hover:bg-muted/20 transition-colors"
+                        className="border-b border-foreground/10 hover:bg-primary/5 transition-colors"
                       >
                         <td className="px-5 py-2.5 text-sm font-body text-foreground pl-10">
                           <span className="flex items-center gap-2">
                             {page.label}
                             {isCrossModuleTier && (
                               <span
-                                className={`text-[0.5625rem] font-heading font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${rowColorClass}`}
+                                className="inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap text-muted-foreground border-foreground/30 shrink-0"
                               >
                                 {page.module}
                               </span>
@@ -141,10 +136,11 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                                   onClick={() =>
                                     togglePermission(page.key, action.key)
                                   }
-                                  className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-all ${
-                                    checked
-                                      ? "btn-module border-primary text-white shadow-sm"
-                                      : "border-border bg-muted hover:border-primary/50"
+                                  role="checkbox"
+                                  aria-checked={checked}
+                                  aria-label={`${action.label} — ${page.label}`}
+                                  className={`inline-flex items-center justify-center w-5 h-5 border transition-colors ${
+                                    checked ? "bg-foreground border-foreground text-card" : "border-foreground/40 bg-card hover:border-foreground"
                                   }`}
                                 >
                                   {checked && (
@@ -152,8 +148,8 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                                   )}
                                 </button>
                               ) : (
-                                <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-border/30 bg-muted/20">
-                                  <span className="w-1.5 h-px bg-border/40 block rounded" />
+                                <span className="inline-flex items-center justify-center w-5 h-5" title="Not offered on this page">
+                                  <span className="w-2 h-px bg-foreground/25 block" />
                                 </span>
                               )}
                             </td>
@@ -165,17 +161,16 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                             onClick={() =>
                               toggleAllForPage(page.key, page.actions)
                             }
-                            className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-all ${
-                              allChecked
-                                ? "btn-module border-primary text-white shadow-sm"
-                                : someChecked
-                                  ? "bg-primary/20 border-primary/40"
-                                  : "border-border bg-muted hover:border-primary/50"
+                            role="checkbox"
+                            aria-checked={allChecked ? true : someChecked ? "mixed" : false}
+                            aria-label={`Every action — ${page.label}`}
+                            className={`inline-flex items-center justify-center w-5 h-5 border transition-colors ${
+                              allChecked ? "bg-foreground border-foreground text-card" : someChecked ? "border-foreground bg-card" : "border-foreground/40 bg-card hover:border-foreground"
                             }`}
                           >
                             {allChecked && <Check className="w-3 h-3" />}
                             {someChecked && (
-                              <span className="w-2 h-0.5 bg-primary block rounded" />
+                              <span className="w-2 h-0.5 bg-foreground block" />
                             )}
                           </button>
                         </td>

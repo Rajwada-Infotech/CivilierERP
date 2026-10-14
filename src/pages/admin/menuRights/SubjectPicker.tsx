@@ -8,49 +8,44 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
     <>
       {/* ── Subject Selector Card ────────────────────────────────────────── */}
       <div
-        className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm p-5 relative"
+        className="bg-card border border-foreground relative"
         style={{ zIndex: 40 }}
       >
-        <div className="flex items-center justify-between mb-3">
-          <label className="flex items-center gap-2 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
-            <Users className="w-3.5 h-3.5" />
-            {subject === "user" ? "Select User" : "Select Role"}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-foreground">
+          <label className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+            {subject === "user" ? "Choose a person" : "Choose a role"}
           </label>
-          <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+          <div className="inline-flex items-stretch border border-foreground w-fit">
             <button
               onClick={() => switchSubject("role")}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                subject === "role"
-                  ? "bg-card shadow text-foreground border border-border"
-                  : "text-muted-foreground hover:text-foreground"
+              className={`h-8 px-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                subject === "role" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               Role-wise
             </button>
             <button
               onClick={() => switchSubject("user")}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                subject === "user"
-                  ? "bg-card shadow text-foreground border border-border"
-                  : "text-muted-foreground hover:text-foreground"
+              className={`h-8 px-3 border-l border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                subject === "user" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Custom User-wise
+              Custom user-wise
             </button>
           </div>
         </div>
         {subject === "role" && (
-          <p className="text-xs text-muted-foreground/70 mb-3">
+          <p className="text-xs text-muted-foreground px-4 pt-3 max-w-prose">
             Sets the baseline every user with this role inherits, effective immediately — a user's own overrides (Custom User-wise) take full precedence over this for any page they touch, whether that's granting more or restricting less.
           </p>
         )}
 
         {subject === "user" ? (
-          <div className="relative w-full max-w-sm" ref={dropdownRef}>
+          <div className="relative w-full max-w-sm m-4" ref={dropdownRef}>
             {/* Trigger button */}
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
+              className="w-full h-10 flex items-center justify-between px-3 border border-foreground/40 hover:border-foreground bg-card transition-colors text-sm"
             >
               <span
                 className={
@@ -67,8 +62,8 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
               </span>
               <div className="flex items-center gap-2">
                 {selectedUser && (
-                  <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {selectedUser.role}
+                  <span className="inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap text-foreground border-foreground/40 capitalize">
+                    {selectedUser.role.replace(/_/g, " ")}
                   </span>
                 )}
                 <ChevronDown
@@ -80,8 +75,8 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
 
             {/* Dropdown panel */}
             {dropdownOpen && (
-              <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-                <div className="p-2.5 border-b border-border bg-muted/40">
+              <div className="absolute z-50 mt-1 w-full border border-foreground bg-card overflow-hidden" style={{ boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" }}>
+                <div className="p-2 border-b border-foreground">
                   <div className="relative">
                     <Search
                       size={13}
@@ -92,7 +87,7 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
                       placeholder="Search user…"
                       value={userSearch}
                       onChange={(e) => setUserSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full h-8 pl-8 pr-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -110,7 +105,7 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
                             setDropdownOpen(false);
                             setUserSearch("");
                           }}
-                          className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
+                          className="w-full px-3 py-2 text-left hover:bg-primary/5 flex justify-between items-center border-b border-foreground/10 transition-colors"
                         >
                           <div>
                             <div className="text-sm font-medium text-foreground">
@@ -121,7 +116,7 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
                             </div>
                           </div>
                           {selectedUserId === u.id && (
-                            <Check size={14} className="text-primary" />
+                            <Check size={14} className="text-foreground" />
                           )}
                         </button>
                       </li>
@@ -132,11 +127,11 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
             )}
           </div>
         ) : (
-          <div className="relative w-full max-w-sm" ref={roleDropdownRef}>
+          <div className="relative w-full max-w-sm m-4" ref={roleDropdownRef}>
             {/* Trigger button */}
             <button
               onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
-              className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border bg-muted hover:border-primary/60 transition-all text-sm font-body"
+              className="w-full h-10 flex items-center justify-between px-3 border border-foreground/40 hover:border-foreground bg-card transition-colors text-sm"
             >
               <span
                 className={
@@ -159,8 +154,8 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
 
             {/* Dropdown panel */}
             {roleDropdownOpen && (
-              <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-                <div className="p-2.5 border-b border-border bg-muted/40">
+              <div className="absolute z-50 mt-1 w-full border border-foreground bg-card overflow-hidden" style={{ boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" }}>
+                <div className="p-2 border-b border-foreground">
                   <div className="relative">
                     <Search
                       size={13}
@@ -171,7 +166,7 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
                       placeholder="Search role…"
                       value={roleSearch}
                       onChange={(e) => setRoleSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full h-8 pl-8 pr-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -189,13 +184,13 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
                             setRoleDropdownOpen(false);
                             setRoleSearch("");
                           }}
-                          className="w-full px-4 py-2.5 text-left hover:bg-muted/60 flex justify-between items-center transition-colors"
+                          className="w-full px-3 py-2 text-left hover:bg-primary/5 flex justify-between items-center border-b border-foreground/10 transition-colors"
                         >
                           <div className="text-sm font-medium text-foreground">
                             {r.RName}
                           </div>
                           {selectedRoleId === r.RId && (
-                            <Check size={14} className="text-primary" />
+                            <Check size={14} className="text-foreground" />
                           )}
                         </button>
                       </li>
