@@ -423,6 +423,8 @@ async function createApp() {
 
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  // Any successful write anywhere (staff or customer portal) drops the cached CRM lists — see middleware/crmListCache.js.
+  app.use("/api", require("./middleware/crmListCache").crmListCacheInvalidator);
 
   app.use(helmet());
   app.use(
@@ -589,6 +591,12 @@ async function createApp() {
 
   // Per-user project scoping (req.projectScope: null = unrestricted).
   app.use("/api", attachProjectScope);
+
+  // CRM paged lists: served from Redis on repeat (per user + scope), dropped on any successful write.
+  {
+    const { crmListCache } = require("./middleware/crmListCache");
+    app.use("/api/crm", crmListCache);
+  }
 
   if (!isTest) logger.info("[ROUTES] Loading routes...");
 

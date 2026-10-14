@@ -140,12 +140,13 @@ async function computeDynamicTtl(fallback = 300) {
  *   router.get("/", cache("grns", 300), async (req, res) => { ... })
  *
  * Options:
- *   shared: true  — one cache entry for all users (master data routes).
+ *   shared: true    — one cache entry for all users (master data routes).
+ *   fixedTtl: true  — keep exactly `ttl` (skip the load-based dynamic TTL, which can only lengthen it to 60–300 s).
  *
  * Adds req.timing stages when req.timing is present:
  *   cache.version_check  cache.lookup  cache.lock  cache.write
  */
-function cache(namespace, ttl = 300, { shared = false } = {}) {
+function cache(namespace, ttl = 300, { shared = false, fixedTtl = false } = {}) {
   return async (req, res, next) => {
     try {
       // Fast-exit: Redis is down, skip all cache logic
@@ -259,7 +260,7 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
           if (res.statusCode >= 200 && res.statusCode < 300) {
             const writeStart = req.timing?.startStage();
             const jsonStr = JSON.stringify(data);
-            const finalTtl = (await getCachedDynamicTtl(ttl)) || ttl;
+            const finalTtl = fixedTtl ? ttl : (await getCachedDynamicTtl(ttl)) || ttl;
 
             let valueToStore = jsonStr;
             if (jsonStr.length > 1024) {

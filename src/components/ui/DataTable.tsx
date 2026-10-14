@@ -78,6 +78,18 @@ interface DataTableProps<TData extends RowData> {
    *   ],
    * }}
    */
+  /**
+   * Server-side pagination: `data` is already the current page from the API. The footer's Rows
+   * selector and page buttons then drive the server (page is 1-based) and "of N" shows the
+   * server's total. Leave unset for the normal client-side paging of a full list.
+   */
+  serverPagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    onPageChange: (page: number) => void;
+    onPageSizeChange: (pageSize: number) => void;
+  };
   exportConfig?: {
     title: string;
     filename?: string;
@@ -103,6 +115,7 @@ export function DataTable<TData extends RowData>({
   loading = false,
   skeletonRows = 5,
   exportConfig,
+  serverPagination,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -153,6 +166,11 @@ export function DataTable<TData extends RowData>({
     return next;
   }, [columns]);
 
+  const sp = serverPagination;
+  const effectivePagination: PaginationState = sp
+    ? { pageIndex: Math.max(0, sp.page - 1), pageSize: sp.pageSize }
+    : pagination;
+
   const table = useReactTable({
     data,
     columns: orderedColumns,
@@ -160,12 +178,18 @@ export function DataTable<TData extends RowData>({
       sorting,
       globalFilter,
       columnFilters,
-      pagination,
+      pagination: effectivePagination,
     },
+    ...(sp ? { manualPagination: true, rowCount: sp.total } : {}),
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
-    onPaginationChange: setPagination,
+    onPaginationChange: (updater) => {
+      if (!sp) return setPagination(updater);
+      const next = typeof updater === "function" ? updater(effectivePagination) : updater;
+      if (next.pageSize !== sp.pageSize) sp.onPageSizeChange(next.pageSize);
+      else if (next.pageIndex !== effectivePagination.pageIndex) sp.onPageChange(next.pageIndex + 1);
+    },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -186,12 +210,13 @@ export function DataTable<TData extends RowData>({
   // Reset to page 0 only when the search/filter actually changes — not on
   // every `data` reference change (see autoResetPageIndex comment above).
   useEffect(() => {
+    if (sp) return;
     setPagination((p) => (p.pageIndex === 0 ? p : { ...p, pageIndex: 0 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter, columnFilters]);
 
   const { rows } = table.getRowModel();
-  const totalFiltered = table.getFilteredRowModel().rows.length;
+  const totalFiltered = sp ? sp.total : table.getFilteredRowModel().rows.length;
 
   // Clamp — but never reset to 0 — if the current page fell out of range
   // (e.g. a row was deleted and page 3 no longer exists). A same-length
@@ -199,6 +224,7 @@ export function DataTable<TData extends RowData>({
   // reproduce the scroll-reset bug the two changes above just fixed.
   const pageCount = table.getPageCount();
   useEffect(() => {
+    if (sp) return;
     if (pageCount > 0 && pagination.pageIndex > pageCount - 1) {
       setPagination((p) => ({ ...p, pageIndex: pageCount - 1 }));
     }
@@ -453,17 +479,19 @@ export function DataTable<TData extends RowData>({
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-muted-foreground">Rows</span>
             <select
-              value={pagination.pageSize}
+              value={effectivePagination.pageSize}
               onChange={(e) =>
-                setPagination((p) => ({
-                  ...p,
-                  pageSize: Number(e.target.value),
-                  pageIndex: 0,
-                }))
+                sp
+                  ? sp.onPageSizeChange(Number(e.target.value))
+                  : setPagination((p) => ({
+                      ...p,
+                      pageSize: Number(e.target.value),
+                      pageIndex: 0,
+                    }))
               }
               className="text-xs font-body rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
             >
-              {pageSizeOptions.map((s) => (
+              {(sp && !pageSizeOptions.includes(sp.pageSize) ? [...pageSizeOptions, sp.pageSize].sort((a, b) => a - b) : pageSizeOptions).map((s) => (
                 <option key={s} value={s}>
                   {s}
                 </option>

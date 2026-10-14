@@ -26,7 +26,6 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
@@ -132,8 +131,8 @@ interface AmendmentListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchAmendmentsList(filters: AmendmentListFilters, page: number): Promise<{ rows: AmendmentRow[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchAmendmentsList(filters: AmendmentListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: AmendmentRow[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.status) params.set("status", filters.status);
   if (filters.search) params.set("search", filters.search);
   if (filters.companyId) params.set("companyId", filters.companyId);
@@ -183,6 +182,7 @@ export default function CrmBookingAmendments() {
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
@@ -197,8 +197,8 @@ export default function CrmBookingAmendments() {
     search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId,
   }), [statusFilter, search, cpb]);
   const { data: listResult, isLoading } = useQuery({
-    queryKey: ["crm-booking-amendments", listFilters, page],
-    queryFn: () => fetchAmendmentsList(listFilters, page),
+    queryKey: ["crm-booking-amendments", listFilters, page, pageSize],
+    queryFn: () => fetchAmendmentsList(listFilters, page, pageSize),
     staleTime: 30_000,
   });
   const rows = listResult?.rows ?? [];
@@ -437,14 +437,13 @@ export default function CrmBookingAmendments() {
       </div>
 
       {/* ── Main data table ───────────────────────────────────────────────── */}
-      <DataTable
+      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
         columns={columns}
         data={rows}
         loading={isLoading}
         searchable={false}
         emptyMessage="No amendment requests found."
       />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* ── Review dialog ─────────────────────────────────────────────────── */}
       {reviewDialog && (

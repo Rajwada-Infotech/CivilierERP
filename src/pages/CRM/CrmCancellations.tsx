@@ -14,7 +14,6 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
@@ -42,8 +41,8 @@ interface CancellationListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchCancellationsList(filters: CancellationListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchCancellationsList(filters: CancellationListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.search) params.set("search", filters.search);
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
@@ -73,6 +72,7 @@ const CrmCancellations: React.FC = () => {
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
@@ -114,8 +114,8 @@ const CrmCancellations: React.FC = () => {
     [search, cpb]
   );
   const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-cancellations", listFilters, page],
-    queryFn: () => fetchCancellationsList(listFilters, page),
+    queryKey: ["crm-cancellations", listFilters, page, pageSize],
+    queryFn: () => fetchCancellationsList(listFilters, page, pageSize),
     staleTime: 30_000,
   });
   const cancellations = listResult?.rows ?? [];
@@ -251,14 +251,13 @@ const CrmCancellations: React.FC = () => {
           <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
-      <DataTable
+      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
         data={cancellations}
         columns={columns}
         loading={isLoading}
         emptyMessage="No cancellation requests"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setPolicy(null); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); } }}>
         <DialogContent accent="crm" className="max-w-sm">

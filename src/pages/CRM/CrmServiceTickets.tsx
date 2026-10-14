@@ -14,7 +14,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
@@ -51,8 +50,8 @@ interface TicketListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchTicketsList(filters: TicketListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchTicketsList(filters: TicketListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.search) params.set("search", filters.search);
   if (filters.status !== "All") params.set("status", filters.status);
   if (filters.companyId) params.set("companyId", filters.companyId);
@@ -84,6 +83,7 @@ const CrmServiceTickets: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState("All");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [dialogOpen, setDialogOpen]   = useState(false);
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [saving, setSaving]           = useState(false);
@@ -106,8 +106,8 @@ const CrmServiceTickets: React.FC = () => {
     [search, statusFilter, cpb]
   );
   const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-service-tickets", listFilters, page],
-    queryFn: () => fetchTicketsList(listFilters, page),
+    queryKey: ["crm-service-tickets", listFilters, page, pageSize],
+    queryFn: () => fetchTicketsList(listFilters, page, pageSize),
     staleTime: 30_000,
   });
   const tickets = listResult?.rows ?? [];
@@ -362,7 +362,7 @@ const CrmServiceTickets: React.FC = () => {
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
-      <DataTable
+      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
         data={filtered}
         columns={columns}
         searchable={false}
@@ -371,7 +371,6 @@ const CrmServiceTickets: React.FC = () => {
         rowClassName={(row) => isOverdue(row.original) ? "bg-red-50/30" : ""}
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>

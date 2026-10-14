@@ -23,7 +23,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/noc";
@@ -78,8 +77,8 @@ interface NocListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchNocList(filters: NocListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchNocList(filters: NocListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.type !== "All") params.set("type", filters.type);
   if (filters.status !== "All") params.set("status", filters.status);
   if (filters.search) params.set("search", filters.search);
@@ -207,6 +206,7 @@ const CrmNoc: React.FC = () => {
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
@@ -228,8 +228,8 @@ const CrmNoc: React.FC = () => {
     [typeFilter, statusFilter, search, cpb]
   );
   const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-noc", listFilters, page],
-    queryFn: () => fetchNocList(listFilters, page),
+    queryKey: ["crm-noc", listFilters, page, pageSize],
+    queryFn: () => fetchNocList(listFilters, page, pageSize),
     staleTime: 30_000,
   });
   const nocs = listResult?.rows ?? [];
@@ -461,7 +461,7 @@ const CrmNoc: React.FC = () => {
           <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
-        <DataTable
+        <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
           data={nocs as any[]}
           columns={nocColumns}
           loading={isLoading}
@@ -469,7 +469,6 @@ const CrmNoc: React.FC = () => {
           className="rounded-xl border border-border overflow-hidden bg-card"
           onRowClick={(row) => setDetailId(row.original.Id)}
         />
-        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
         {/* ── Request dialog ────────────────────────────────────────────── */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>

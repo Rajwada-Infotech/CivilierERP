@@ -11,7 +11,6 @@ import { buildWorkbook, downloadBlob, type XlsxCell } from "@/lib/xlsxBook";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   AlertTriangle,
@@ -1101,6 +1100,7 @@ const CrmCreditNotes: React.FC = () => {
   const [selectedId, setSelectedId] = useState<number | null>(sp.get("id") ? Number(sp.get("id")) : null);
   const [tab, setTab] = useState<Tab>("all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [period, setPeriod] = useState("fy");
   const P = periods();
   const [custom, setCustom] = useState<[string, string]>(P.month);
@@ -1117,13 +1117,13 @@ const CrmCreditNotes: React.FC = () => {
 
   // Query paginated list
   const { data: listResponse, isLoading, isFetching, dataUpdatedAt } = useQuery<{ rows: any[]; total: number }>({
-    queryKey: ["crm-gst-notes", from, to, tab, page, search, cpb.companyId, cpb.projectId],
+    queryKey: ["crm-gst-notes", from, to, tab, page, pageSize, search, cpb.companyId, cpb.projectId],
     queryFn: async () => {
       const q = new URLSearchParams({
         from,
         to,
         page: String(page),
-        pageSize: String(PAGE_SIZE),
+        pageSize: String(pageSize),
       });
       if (tab !== "all" && tab !== "pending") q.set("status", tab);
       if (search.trim()) q.set("search", search.trim());
@@ -1670,7 +1670,7 @@ const CrmCreditNotes: React.FC = () => {
         />
       ) : (
         <div className="space-y-2">
-          <DataTable
+          <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
             data={rows}
             columns={columns}
             searchable={false}
@@ -1680,7 +1680,6 @@ const CrmCreditNotes: React.FC = () => {
             emptyMessage="No credit notes found for the selected period and filters."
             className="rounded-xl border border-border overflow-hidden bg-card"
           />
-          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </div>
       )}
 
