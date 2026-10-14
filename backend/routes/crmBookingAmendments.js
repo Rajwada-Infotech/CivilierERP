@@ -149,6 +149,15 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Re-read under a lock: two approvals at once (a double click, two
+      // approvers) both passed the Pending check above and both applied the
+      // change — the extra charge / parking added twice.
+      const live = (await tx.request().input("id", sql.Int, id)
+        .query("SELECT Status FROM dbo.CrmBookingAmendmentRequest WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id")).recordset[0];
+      if (live?.Status !== CrmStatus.PENDING) {
+        await tx.rollback();
+        return res.status(409).json({ error: `This request is already ${live?.Status || "gone"}` });
+      }
       if (reqRow.ChangeType === "ExtraCharge") {
         if (reqRow.Action === "Add") applyResult = await extraChargesRouter.applyAddExtraCharge(tx, reqRow.BookingId, proposedChange, actor);
         else if (reqRow.Action === "Edit") applyResult = await extraChargesRouter.applyEditExtraCharge(tx, reqRow.TargetId, proposedChange, actor);
