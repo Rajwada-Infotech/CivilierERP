@@ -1,19 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { Link } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -28,11 +18,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plug, Plus, Pencil, PowerOff, Search, Radio } from "lucide-react";
+import { Plus, Pencil, Search, X } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +35,8 @@ interface IntegrationChannel {
   IsActive: boolean;
   UpdatedAt: string | null;
   UpdatedBy: string | null;
+  /** Names of the Social Media platforms linked to this channel. */
+  UsedBy?: string[];
 }
 
 const EMPTY_FORM = {
@@ -53,6 +45,15 @@ const EMPTY_FORM = {
   description: "",
   sortOrder: 0,
 };
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const FIELD = "w-full h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -107,6 +108,7 @@ export default function IntegrationChannelsAdmin() {
     total: channels.length,
     active: channels.filter((c) => c.IsActive).length,
     inactive: channels.filter((c) => !c.IsActive).length,
+    linked: channels.reduce((n, c) => n + (c.UsedBy?.length ?? 0), 0),
   };
 
   // ─── Open add / edit dialog ────────────────────────────────────────────────
@@ -150,7 +152,8 @@ export default function IntegrationChannelsAdmin() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             label: form.label.trim(),
-            description: form.description.trim() || null,
+            // "" (not null) so clearing the description sticks — the server keeps the old value for null.
+            description: form.description.trim(),
             sortOrder: form.sortOrder,
           }),
         });
@@ -219,146 +222,154 @@ export default function IntegrationChannelsAdmin() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Integration Channels"]} />
-      <AdminShell
-        title="Integration Channels"
-        subtitle="Manage the channels available in the Communicator"
-        icon={Plug}
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Masters"
+        title="Integration channels"
+        subtitle="The API integrations a Social Media platform can be linked to. Email, SMS and WhatsApp delivery is set up under Communicator, not here."
         action={
           rights.canCreate && (
-            <Button onClick={openAdd} className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
-              <Plus className="h-4 w-4" />
-              Add Channel
-            </Button>
+            <button type="button" onClick={openAdd} className={`${KEY_INK} h-9 px-4`}>
+              <Plus size={13} /> Add channel
+            </button>
           )
         }
       >
-      {/* Stats strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[
-          { label: "Total Channels", value: stats.total },
-          { label: "Active",         value: stats.active,   className: "text-green-600" },
-          { label: "Inactive",       value: stats.inactive, className: "text-muted-foreground" },
-        ].map(({ label, value, className }) => (
-          <Card key={label}>
-            <CardContent className="pt-5 pb-4">
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className={`text-2xl font-bold mt-1 ${className ?? ""}`}>{value}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+        {/* Counts */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Channels", value: stats.total, note: "in the list" },
+              { label: "Active", value: stats.active, note: "offered on Social Media" },
+              { label: "Inactive", value: stats.inactive, note: "hidden from new links" },
+              { label: "Linked platforms", value: stats.linked, note: "Social Media platforms using one" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{loading ? "…" : x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
 
-      {/* Search + table */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
+        {/* Search + table */}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <span className={HEAD}>Channels</span>
+            <div className="relative w-full sm:w-72">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
                 placeholder="Search channels…"
+                aria-label="Search channels"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className={`${FIELD} pl-8 pr-8`}
               />
+              {search && (
+                <button onClick={() => setSearch("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X size={12} />
+                </button>
+              )}
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
+
           {loading ? (
-            <div className="py-12 text-center text-muted-foreground text-sm">
-              Loading channels…
-            </div>
+            <p className="py-12 text-center text-muted-foreground text-sm">Loading channels…</p>
           ) : filtered.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground text-sm">
-              {search ? "No channels match your search." : "No channels found."}
+            <div className="py-12 flex flex-col items-center gap-3 text-muted-foreground text-sm">
+              <p>{search ? "No channels match this search." : "No channels yet."}</p>
+              {!search && rights.canCreate && (
+                <button type="button" onClick={openAdd} className={`${KEY_LINE} h-8 px-3`}>
+                  <Plus size={12} /> Add the first channel
+                </button>
+              )}
             </div>
           ) : (
-            <div className="overflow-x-auto thin-scroll"><table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Key</th>
-                  <th className="text-left py-3 px-4 font-medium text-muted-foreground">Label</th>
-                  <th className="text-left py-3 px-4 font-medium text-muted-foreground hidden md:table-cell">Description</th>
-                  <th className="text-center py-3 px-4 font-medium text-muted-foreground">Order</th>
-                  <th className="text-center py-3 px-4 font-medium text-muted-foreground">Status</th>
-                  <th className="text-right py-3 px-4 font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((ch) => (
-                  <tr key={ch.Id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="py-3 px-4">
-                      <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
-                        {ch.ChannelKey}
-                      </code>
-                    </td>
-                    <td className="py-3 px-4 font-medium">{ch.Label}</td>
-                    <td className="py-3 px-4 text-muted-foreground hidden md:table-cell">
-                      {ch.Description ?? <span className="italic opacity-50">—</span>}
-                    </td>
-                    <td className="py-3 px-4 text-center text-muted-foreground">{ch.SortOrder}</td>
-                    <td className="py-3 px-4 text-center">
-                      <Badge variant={ch.IsActive ? "default" : "secondary"}>
-                        {ch.IsActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {rights.canEdit && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openEdit(ch)}
-                            className="gap-1.5"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Edit
-                          </Button>
-                        )}
-                        <Switch
-                          checked={ch.IsActive}
-                          onCheckedChange={() => handleToggle(ch)}
-                          title={ch.IsActive ? "Deactivate" : "Activate"}
-                        />
-                      </div>
-                    </td>
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[760px]">
+                <thead>
+                  <tr className={LBL} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
+                    <th className="text-left py-2.5 px-4 font-semibold">Key</th>
+                    <th className="text-left py-2.5 px-4 font-semibold">Label</th>
+                    <th className="text-left py-2.5 px-4 font-semibold">Used by</th>
+                    <th className="text-right py-2.5 px-4 font-semibold">Order</th>
+                    <th className="text-left py-2.5 px-4 font-semibold">Status</th>
+                    <th className="text-right py-2.5 px-4 font-semibold">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table></div>
+                </thead>
+                <tbody className="divide-y divide-foreground/10">
+                  {filtered.map((ch) => (
+                    <tr key={ch.Id} className={`hover:bg-primary/5 transition-colors ${ch.IsActive ? "" : "text-muted-foreground"}`}>
+                      <td className="py-3 px-4 align-top">
+                        <span className="font-heading text-xs tabular-nums border border-foreground/30 px-1.5 py-0.5">{ch.ChannelKey}</span>
+                      </td>
+                      <td className="py-3 px-4 align-top">
+                        <p className={`font-medium ${ch.IsActive ? "text-foreground" : ""}`}>{ch.Label}</p>
+                        {ch.Description && <p className="text-xs text-muted-foreground mt-0.5 max-w-[34ch]">{ch.Description}</p>}
+                      </td>
+                      <td className="py-3 px-4 align-top text-xs">
+                        {ch.UsedBy && ch.UsedBy.length > 0 ? (
+                          <span className="text-foreground">{ch.UsedBy.join(", ")}</span>
+                        ) : (
+                          <span className="text-muted-foreground">No platform</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 align-top text-right font-heading tabular-nums">{ch.SortOrder}</td>
+                      <td className="py-3 px-4 align-top">
+                        <SheetMark text={ch.IsActive ? "Active" : "Inactive"} tone={ch.IsActive ? "done" : "waiting"} />
+                      </td>
+                      <td className="py-2 px-4 align-top">
+                        {rights.canEdit && (
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button type="button" onClick={() => openEdit(ch)} className={ACT} title="Edit" aria-label={`Edit ${ch.Label}`}>
+                              <Pencil size={13} />
+                            </button>
+                            <button type="button" onClick={() => handleToggle(ch)} className={`${KEY_LINE} h-7 px-2.5`}>
+                              {ch.IsActive ? "Deactivate" : "Activate"}
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+
+        <p className="text-xs text-muted-foreground max-w-prose border-l-2 border-foreground/40 pl-3 py-0.5">
+          A channel only labels which integration a platform uses; ad sync runs on the platform's own access token, set on the{" "}
+          <Link to="/sales-automation/social-media" className="text-foreground underline underline-offset-2">Social Media master</Link>.
+        </p>
+      </SheetShell>
 
       {/* Add / Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sheet-frame sm:max-w-md" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Radio className="h-4 w-4 text-primary" />
-              {editing ? "Edit Channel" : "Add Integration Channel"}
-            </DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Integration channel</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">
+                {editing ? "Edit channel" : "Add channel"}
+              </DialogTitle>
+              <DialogDescription className="sr-only">Key, label, description and order of the channel</DialogDescription>
+            </div>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
-            {/* Channel Key — read-only when editing */}
+          <div className="space-y-4 py-1">
             <div className="space-y-1.5">
-              <Label htmlFor="channelKey">
-                Channel Key
-                {!editing && (
-                  <span className="text-muted-foreground font-normal ml-1">
-                    (lowercase, hyphens only — cannot be changed later)
-                  </span>
-                )}
-              </Label>
+              <label htmlFor="channelKey" className={`${LBL} block`}>
+                Channel key
+                {!editing && <span className="normal-case tracking-normal font-normal"> — lowercase and hyphens; cannot be changed later</span>}
+              </label>
               {editing ? (
-                <code className="block w-full text-sm bg-muted px-3 py-2 rounded-md font-mono">
-                  {editing.ChannelKey}
-                </code>
+                <p className="font-heading text-sm tabular-nums border border-dashed border-foreground/40 px-2.5 py-2">{editing.ChannelKey}</p>
               ) : (
-                <Input
+                <input
                   id="channelKey"
-                  placeholder="e.g. my-service-api"
+                  className={FIELD}
+                  placeholder="e.g. meta-marketing-api"
                   value={form.channelKey}
                   onChange={(e) =>
                     setForm((f) => ({
@@ -370,35 +381,35 @@ export default function IntegrationChannelsAdmin() {
               )}
             </div>
 
-            {/* Label */}
             <div className="space-y-1.5">
-              <Label htmlFor="label">Label *</Label>
-              <Input
+              <label htmlFor="label" className={`${LBL} block`}>Label <span className="text-destructive">*</span></label>
+              <input
                 id="label"
-                placeholder="e.g. My Service API"
+                className={FIELD}
+                placeholder="e.g. Meta Marketing API"
                 value={form.label}
                 onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
               />
             </div>
 
-            {/* Description */}
             <div className="space-y-1.5">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
+              <label htmlFor="description" className={`${LBL} block`}>Description</label>
+              <textarea
                 id="description"
-                placeholder="Short description shown in the admin UI"
+                className="w-full px-2.5 py-2 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none resize-none"
+                placeholder="Shown under the label in this list"
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 rows={2}
               />
             </div>
 
-            {/* Sort Order */}
             <div className="space-y-1.5">
-              <Label htmlFor="sortOrder">Sort Order</Label>
-              <Input
+              <label htmlFor="sortOrder" className={`${LBL} block`}>Sort order</label>
+              <input
                 id="sortOrder"
                 type="number"
+                className={`${FIELD} w-32 tabular-nums`}
                 value={form.sortOrder}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, sortOrder: parseInt(e.target.value) || 0 }))
@@ -407,37 +418,37 @@ export default function IntegrationChannelsAdmin() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+            <button type="button" onClick={() => setDialogOpen(false)} disabled={saving} className={`${KEY_LINE} h-9 px-4`}>
               Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving} className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
-              {saving ? "Saving…" : editing ? "Save Changes" : "Create Channel"}
-            </Button>
-          </DialogFooter>
+            </button>
+            <button type="button" onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5`}>
+              {saving ? "Saving…" : editing ? "Save changes" : "Create channel"}
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* Deactivate confirm */}
       <AlertDialog open={!!confirmTarget} onOpenChange={() => setConfirmTarget(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sheet-frame" style={{ margin: 0 }}>
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <PowerOff className="h-4 w-4 text-destructive" />
-              Deactivate channel?
-            </AlertDialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>{confirmTarget?.ChannelKey}</p>
+              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Deactivate {confirmTarget?.Label}</AlertDialogTitle>
+            </div>
             <AlertDialogDescription>
-              <strong>{confirmTarget?.Label}</strong> (
-              <code className="text-xs">{confirmTarget?.ChannelKey}</code>) will be hidden from
-              the Communicator integration list. Existing config in{" "}
-              <code className="text-xs">CommunicatorConfig</code> is preserved and can be
-              restored by reactivating the channel.
+              It will no longer be offered when linking a Social Media platform.
+              {confirmTarget?.UsedBy && confirmTarget.UsedBy.length > 0
+                ? ` ${confirmTarget.UsedBy.join(", ")} stay${confirmTarget.UsedBy.length === 1 ? "s" : ""} linked to it.`
+                : " No platform is linked to it."}{" "}
+              You can reactivate it at any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
+            <AlertDialogCancel className={`${KEY} h-9 px-4 rounded-none border border-foreground text-foreground bg-card hover:bg-primary/10`}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90"
+              className={`${KEY} h-9 px-5 rounded-none !bg-destructive !text-destructive-foreground border border-destructive hover:!bg-destructive/90`}
               onClick={() => {
                 if (confirmTarget) applyToggle(confirmTarget, false);
                 setConfirmTarget(null);
@@ -448,7 +459,6 @@ export default function IntegrationChannelsAdmin() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      </AdminShell>
     </>
   );
 }

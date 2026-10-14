@@ -23,52 +23,6 @@ const parseConfigJson = (value) => {
   }
 };
 
-const toLegacyApiRecord = (channel, row) => {
-  const config = row?.configJson || {};
-  return {
-    id: channel,
-    name:
-      config.name ||
-      channel
-        .split("-")
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(" "),
-    baseUrl: config.baseUrl || "",
-    apiKey: config.apiKey || "",
-    status: row?.isActive ? "active" : "inactive",
-  };
-};
-
-/**
- * Fetch the list of active channel keys from dbo.IntegrationChannels.
- * Falls back to the legacy hardcoded list if the table doesn't exist yet
- * (safe during the migration window).
- */
-const LEGACY_CHANNELS = [
-  "payment-gateway",
-  "sms-api",
-  "whatsapp-api",
-  "email-api",
-  "push-notifications",
-];
-
-async function getActiveChannelKeys() {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT ChannelKey
-      FROM dbo.IntegrationChannels
-      WHERE IsActive = 1
-      ORDER BY SortOrder ASC
-    `);
-    const keys = result.recordset.map((r) => r.ChannelKey);
-    return keys.length > 0 ? keys : LEGACY_CHANNELS;
-  } catch {
-    // Table doesn't exist yet — migration hasn't run; fall back gracefully
-    return LEGACY_CHANNELS;
-  }
-}
-
 // ─── Channel management CRUD (super_admin only) ──────────────────────────────
 
 /**
@@ -83,7 +37,19 @@ router.get("/channels", superAdminOnly, async (req, res) => {
       FROM dbo.IntegrationChannels
       ORDER BY SortOrder ASC
     `);
-    res.json({ channels: result.recordset });
+    // The channels are offered on the Social Media platform master; show which platforms point at each.
+    const usage = await pool
+      .request()
+      .query(`
+        IF OBJECT_ID('dbo.SaSocialMediaPlatform', 'U') IS NULL
+          SELECT CAST(NULL AS INT) AS ApiConfigId, CAST(NULL AS NVARCHAR(200)) AS Name WHERE 1 = 0
+        ELSE
+          SELECT ApiConfigId, Name FROM dbo.SaSocialMediaPlatform WHERE ApiConfigId IS NOT NULL ORDER BY Name
+      `)
+      .catch(() => ({ recordset: [] }));
+    const usedBy = new Map();
+    for (const r of usage.recordset) usedBy.set(r.ApiConfigId, [...(usedBy.get(r.ApiConfigId) || []), r.Name]);
+    res.json({ channels: result.recordset.map((c) => ({ ...c, UsedBy: usedBy.get(c.Id) || [] })) });
   } catch (err) {
     console.error("ERROR in GET /communicator/channels:", err);
     res.status(500).json({ error: err.message });
@@ -151,7 +117,7 @@ router.post("/channels", superAdminOnly, async (req, res) => {
 /**
  * PUT /api/communicator/channels/:id
  * Update label, description, sortOrder, or isActive.
- * ChannelKey is immutable after creation (it's the FK used in CommunicatorConfig).
+ * ChannelKey is immutable after creation.
  */
 router.put("/channels/:id", superAdminOnly, async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -198,8 +164,8 @@ router.put("/channels/:id", superAdminOnly, async (req, res) => {
 
 /**
  * DELETE /api/communicator/channels/:id  (soft delete — sets IsActive = 0)
- * Hard deletes are intentionally not exposed; the channel may still have
- * config rows in CommunicatorConfig.
+ * Hard deletes are intentionally not exposed; Social Media platforms may still
+ * point at the channel (SaSocialMediaPlatform.ApiConfigId).
  */
 router.delete("/channels/:id", superAdminOnly, async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -221,141 +187,6 @@ router.delete("/channels/:id", superAdminOnly, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("ERROR in DELETE /communicator/channels/:id:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ====================== GET /integrations ======================
-router.get("/integrations", adminOnly, async (req, res) => {
-  try {
-    const activeChannels = await getActiveChannelKeys();
-    const pool = getPool();
-    const request = pool.request();
-
-    activeChannels.forEach((channel, index) => {
-      request.input(`Channel${index}`, sql.NVarChar(50), channel);
-    });
-    request.input("LegacyChannel", sql.NVarChar(50), "integrations");
-
-    const result = await request.query(`
-      SELECT
-        Channel,
-        ConfigJson,
-        IsActive,
-        UpdatedAt
-      FROM dbo.CommunicatorConfig
-      WHERE Channel IN (${activeChannels.map((_, i) => `@Channel${i}`).join(", ")}, @LegacyChannel)
-    `);
-
-    const byChannel = new Map(
-      result.recordset.map((row) => [
-        row.Channel,
-        {
-          channel: row.Channel,
-          configJson: parseConfigJson(row.ConfigJson),
-          isActive: !!row.IsActive,
-          updatedBy: null,
-          updatedAt: row.UpdatedAt || null,
-        },
-      ]),
-    );
-
-    const integrations = activeChannels.map((channel) => {
-      const existing = byChannel.get(channel);
-      return (
-        existing || {
-          channel,
-          configJson: {},
-          isActive: false,
-          updatedBy: null,
-          updatedAt: null,
-        }
-      );
-    });
-
-    const legacyConfig = byChannel.get("integrations")?.configJson || {};
-    const configuredApis = integrations
-      .filter(
-        (row) => row.isActive || Object.keys(row.configJson || {}).length > 0,
-      )
-      .map((row) => toLegacyApiRecord(row.channel, row));
-
-    const legacyApis = Array.isArray(legacyConfig.apis) ? legacyConfig.apis : [];
-
-    res.json({
-      integrations,
-      config: {
-        apis: legacyApis.length > 0 ? legacyApis : configuredApis,
-      },
-    });
-  } catch (err) {
-    console.error("🔥 ERROR in GET /integrations:", err);
-    if (req.log) req.log.error(err, "Failed to fetch integrations");
-    res.status(500).json({
-      error: "Failed to load integrations",
-      message: process.env.NODE_ENV === "development" ? err.message : undefined,
-    });
-  }
-});
-
-// ====================== PUT /integrations/:channel ======================
-router.put("/integrations/:channel", adminOnly, async (req, res) => {
-  const { channel } = req.params;
-
-  // Validate against DB list (with legacy fallback)
-  const activeChannels = await getActiveChannelKeys();
-  if (!activeChannels.includes(channel)) {
-    return res.status(400).json({ error: "invalid integration channel" });
-  }
-
-  const rawConfig = req.body?.configJson ?? req.body?.config ?? req.body;
-  if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
-    return res.status(400).json({ error: "config object required" });
-  }
-
-  const isActive =
-    typeof req.body?.isActive === "boolean" ? req.body.isActive : true;
-  const updatedBy =
-    req.user?.name || req.user?.email || req.user?.userId || "system";
-
-  try {
-    const pool = getPool();
-    const json = JSON.stringify(rawConfig);
-
-    await pool
-      .request()
-      .input("Channel",    sql.NVarChar(50),       channel)
-      .input("ConfigJson", sql.NVarChar(sql.MAX),   json)
-      .input("IsActive",   sql.Bit,                 isActive ? 1 : 0)
-      .input("UpdatedBy",  sql.NVarChar(100),       String(updatedBy))
-      .query(`
-        MERGE dbo.CommunicatorConfig AS target
-        USING (
-          VALUES (@Channel, @ConfigJson, @IsActive, @UpdatedBy)
-        ) AS source (Channel, ConfigJson, IsActive, UpdatedBy)
-        ON target.Channel = source.Channel
-        WHEN MATCHED THEN
-          UPDATE SET
-            ConfigJson = source.ConfigJson,
-            IsActive   = source.IsActive,
-            UpdatedBy  = source.UpdatedBy,
-            UpdatedAt  = GETDATE()
-        WHEN NOT MATCHED THEN
-          INSERT (Channel, ConfigJson, IsActive, CreatedAt, UpdatedAt, UpdatedBy)
-          VALUES (
-            source.Channel,
-            source.ConfigJson,
-            source.IsActive,
-            GETDATE(),
-            GETDATE(),
-            source.UpdatedBy
-          );
-      `);
-
-    res.json({ success: true, channel, isActive });
-  } catch (err) {
-    console.error("🔥 ERROR in PUT /integrations/:channel:", err);
-    if (req.log) req.log.error(err, `Failed to update integration ${channel}`);
     res.status(500).json({ error: err.message });
   }
 });
