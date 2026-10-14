@@ -450,8 +450,15 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     const pool = getPool();
     const b = req.body || {};
     const sourceType = b.SourceType;
-    if (!["CancellationHeldCredit", "OverpaymentOnAccount", "Manual"].includes(sourceType)) {
-      return res.status(400).json({ error: "SourceType must be CancellationHeldCredit, OverpaymentOnAccount or Manual" });
+    // Every refund pays back money we hold: a cancelled booking's held credit
+    // or an overpayment. A 'Manual' refund (any customer, any amount, nothing
+    // behind it) is not allowed — business decision 2026-10-14; no screen
+    // raised one. Older Manual rows, if any, still display and run as before.
+    if (sourceType === "Manual") {
+      return res.status(400).json({ error: "A refund must come from a held credit (a cancelled booking) or an overpayment — choose it under Source of funds" });
+    }
+    if (!["CancellationHeldCredit", "OverpaymentOnAccount"].includes(sourceType)) {
+      return res.status(400).json({ error: "SourceType must be CancellationHeldCredit or OverpaymentOnAccount" });
     }
     const gross = Number(b.GrossAmount);
     if (!Number.isFinite(gross) || gross <= 0) return res.status(400).json({ error: "GrossAmount must be a positive number" });
@@ -465,17 +472,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     let deductionPct = 0;
     let dueDate = null;
 
-    if (sourceType === "Manual") {
-      customerId = b.CustomerId !== undefined && b.CustomerId !== null && b.CustomerId !== "" ? parseInt(b.CustomerId, 10) : null;
-      if (customerId == null) return res.status(400).json({ error: "CustomerId is required for a manual refund" });
-      bookingId = b.BookingId !== undefined && b.BookingId !== null && b.BookingId !== "" ? parseInt(b.BookingId, 10) : null;
-      if (bookingId != null) {
-        const bk = await pool.request().input("bid", sql.Int, bookingId)
-          .query("SELECT CompanyId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
-        companyId = bk.recordset[0]?.CompanyId ?? null;
-        projectId = bk.recordset[0]?.ProjectId ?? null;
-      }
-    } else {
+    {
       sourceOnAccountId = b.SourceOnAccountId !== undefined && b.SourceOnAccountId !== null && b.SourceOnAccountId !== "" ? parseInt(b.SourceOnAccountId, 10) : null;
       if (sourceOnAccountId == null) return res.status(400).json({ error: "SourceOnAccountId is required for this source" });
       const oaRow = await pool.request().input("id", sql.Int, sourceOnAccountId).query(`
