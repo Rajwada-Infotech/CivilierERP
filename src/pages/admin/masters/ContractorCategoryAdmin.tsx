@@ -48,7 +48,7 @@ import { Switch } from "@/components/ui/switch";
 import { Plus, Pencil, Trash2, Search, RefreshCw, Tag } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface FormState {
@@ -58,6 +58,14 @@ interface FormState {
 }
 
 const EMPTY_FORM: FormState = { code: "", name: "", isActive: true };
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ContractorCategoryAdmin() {
@@ -190,152 +198,129 @@ export default function ContractorCategoryAdmin() {
         { label: "Contractor Categories" },
       ]} />
 
-      <AdminShell
-        title="Contractor Categories"
-        subtitle="Manage contractor category master data"
-        icon={Tag}
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Contractor categories"
+        subtitle="The categories a contractor can be filed under, such as civil or electrical. Inactive ones stay on existing records."
         action={
           rights.canCreate && (
-            <button onClick={openAdd} className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
+            <button onClick={openAdd} className={`${KEY_INK} h-9 px-4 shrink-0`}>
               <Plus className="h-3.5 w-3.5" />
-              Add Category
+              New category
             </button>
           )
         }
       >
-      {/* Stats strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {[
-          { label: "Total", value: categories.length },
-          { label: "Active", value: activeCount },
-          { label: "Inactive", value: categories.length - activeCount },
-        ].map((s) => (
-          <Card key={s.label} className="py-3">
-            <CardContent className="p-0 px-4 flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{s.label}</span>
-              <span className="text-2xl font-bold">{s.value}</span>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Table card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-base">All Categories</CardTitle>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search code or name…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-9 w-56"
-                />
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Categories", value: categories.length, note: "in all" },
+              { label: "Active", value: activeCount, note: "offered for contractors" },
+              { label: "Inactive", value: categories.length - activeCount, note: "kept on existing records" },
+            ].map((s) => (
+              <div key={s.label}>
+                <p className="label">{s.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : s.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{s.note}</p>
               </div>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-9 w-9"
-                onClick={() => refetch()}
-                title="Refresh"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            </div>
+            ))}
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-16 text-muted-foreground text-sm">
-              Loading categories…
+        </div>
+
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="flex items-baseline gap-2.5 mr-auto">
+              <span className={HEAD}>Categories</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+            </p>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                placeholder="Search code or name…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-9 pl-8 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+              />
             </div>
+            <button onClick={() => refetch()} title="Refresh" aria-label="Refresh" className={`${ACT} !w-9 !h-9 !border-foreground/40`}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {isLoading ? (
+            <div className="py-16 text-center text-muted-foreground text-sm">Loading categories…</div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-              <Tag className="h-8 w-8 opacity-30" />
-              <span className="text-sm">
-                {search ? "No categories match your search" : "No categories yet"}
-              </span>
+            <div className="py-16 text-center text-sm text-muted-foreground">
+              {search ? "No categories match your search." : "No categories yet."}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-28">Code</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="w-24 text-center">Status</TableHead>
-                  <TableHead className="w-20 text-center">Active</TableHead>
-                  <TableHead className="w-20 text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((cat) => (
-                  <TableRow key={cat.id}>
-                    <TableCell className="font-mono text-xs font-medium">
-                      {cat.code}
-                    </TableCell>
-                    <TableCell className="font-medium">{cat.name}</TableCell>
-                    <TableCell className="text-center">
-                      <Badge
-                        variant={cat.isActive ? "default" : "secondary"}
-                        className="text-xs"
-                      >
-                        {cat.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Switch
-                        checked={cat.isActive}
-                        onCheckedChange={(val) =>
-                          toggleMutation.mutate({ cat, active: val })
-                        }
-                        disabled={toggleMutation.isPending}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {rights.canEdit && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => openEdit(cat)}
-                            title="Edit"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                        {rights.canDelete && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            onClick={() => setDeleteTarget(cat)}
-                            title="Deactivate"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={LBL} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground))" }}>
+                    <th className="px-4 py-2.5 text-left font-semibold w-32">Code</th>
+                    <th className="px-4 py-2.5 text-left font-semibold">Name</th>
+                    <th className="px-4 py-2.5 text-left font-semibold w-28">Status</th>
+                    <th className="px-4 py-2.5 text-center font-semibold w-24">Live</th>
+                    <th className="px-4 py-2.5 text-right font-semibold w-24">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((cat) => (
+                    <tr key={cat.id} className="hover:bg-primary/5 transition-colors" style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.12)" }}>
+                      <td className={`px-4 py-2.5 font-heading text-xs font-semibold tabular-nums ${cat.isActive ? "text-foreground" : "text-muted-foreground"}`}>
+                        {cat.code}
+                      </td>
+                      <td className={`px-4 py-2.5 font-medium ${cat.isActive ? "text-foreground" : "text-muted-foreground"}`}>{cat.name}</td>
+                      <td className="px-4 py-2.5">
+                        {cat.isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <Switch
+                          checked={cat.isActive}
+                          onCheckedChange={(val) => toggleMutation.mutate({ cat, active: val })}
+                          disabled={toggleMutation.isPending}
+                          className="data-[state=checked]:bg-foreground"
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center justify-end gap-1">
+                          {rights.canEdit && (
+                            <button onClick={() => openEdit(cat)} title="Edit" aria-label="Edit" className={ACT}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {rights.canDelete && (
+                            <button
+                              onClick={() => setDeleteTarget(cat)}
+                              title="Deactivate"
+                              aria-label="Deactivate"
+                              className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </CardContent>
-      </Card>
-
-      </AdminShell>
+        </div>
+      </SheetShell>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(o) => !o && closeDialog()}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sheet-frame sm:max-w-md" style={{ margin: 0 }}>
           <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit Category" : "Add Contractor Category"}
-            </DialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Contractor category</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">
+                {editing ? "Edit category" : "New category"}
+              </DialogTitle>
+            </div>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
@@ -351,7 +336,7 @@ export default function ContractorCategoryAdmin() {
                   setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))
                 }
                 maxLength={50}
-                className="font-mono uppercase"
+                className="font-heading tabular-nums uppercase"
               />
             </div>
 
@@ -377,6 +362,7 @@ export default function ContractorCategoryAdmin() {
                 onCheckedChange={(val) =>
                   setForm((f) => ({ ...f, isActive: val }))
                 }
+                className="data-[state=checked]:bg-foreground"
               />
               <Label htmlFor="cc-active" className="cursor-pointer">
                 Active
@@ -388,13 +374,13 @@ export default function ContractorCategoryAdmin() {
             )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={closeDialog} disabled={isSaving}>
+          <DialogFooter className="pt-3 gap-2" style={{ borderTop: RULE }}>
+            <button onClick={closeDialog} disabled={isSaving} className={`${KEY_LINE} h-9 px-4`}>
               Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={isSaving} className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto hover:opacity-90">
+            </button>
+            <button onClick={handleSubmit} disabled={isSaving} className={`${KEY_INK} h-9 px-5`}>
               {isSaving ? "Saving…" : editing ? "Update" : "Create"}
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -404,19 +390,22 @@ export default function ContractorCategoryAdmin() {
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="sheet-frame" style={{ margin: 0 }}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate category?</AlertDialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Contractor category</p>
+              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Deactivate category</AlertDialogTitle>
+            </div>
             <AlertDialogDescription>
               <strong>{deleteTarget?.name}</strong> will be marked inactive.
               Existing records referencing this category are preserved. You can
               reactivate it at any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
+            <AlertDialogCancel className={`${KEY_LINE} h-9 px-4 rounded-none`}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className={`${KEY} h-9 px-5 rounded-none bg-destructive text-destructive-foreground border border-destructive hover:bg-destructive/90`}
               onClick={() =>
                 deleteTarget && deleteMutation.mutate(deleteTarget.id)
               }

@@ -64,6 +64,7 @@ const SHEET_BASE = `
 .crm-sheet .grid2 { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
 .crm-sheet .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .crm-sheet .num { text-align: right; padding-right: 0; white-space: nowrap; }
+.crm-sheet .num + th, .crm-sheet .num + td { padding-left: 24px; }
 .crm-sheet .grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .crm-sheet .noscroll { scrollbar-width: none; -ms-overflow-style: none; }
 .crm-sheet .noscroll::-webkit-scrollbar { display: none; }

@@ -29,9 +29,10 @@ const GL_POSTERS = {
   "debit-note": postDebitNoteApproval,
 };
 
-// Modules where money leaves the company on approval, and the column holding
-// the user who raised the request (an int user id). Used for maker-checker in
-// transition(): the raiser can never be the approver.
+// Modules that record who raised a request, and the column holding that user
+// (an int user id). Whether the raiser may also approve it is a setting per
+// module — dbo.ApprovalRaiserRule, set in Approval Setup (migration 571);
+// with no row the raiser may not.
 const MAKER_COLUMNS = {
   "crm-cancellations": "RequestedBy",
   "crm-refunds": "RequestedBy",
@@ -42,10 +43,20 @@ const MAKER_COLUMNS = {
   "crm-transfer-deeds": "CreatedBy",
   // Whoever recorded a new owner can't approve the record too.
   "crm-ownership-changes": "CreatedBy",
-  // Credit notes (crm-credit-notes / crm-credit-note-cancel) deliberately have
-  // no maker-checker: by the business's choice whoever raises one may approve
-  // it, within the levels set in Approval Setup.
+  "crm-credit-notes": "CreatedBy",
+  "crm-credit-note-cancel": "CancelRequestedById",
 };
+
+// Checks outside the approval levels that follow the same setting: who
+// verifies a paper they uploaded themselves.
+const RAISER_RULE_EXTRA = { "crm-transfer-deed-papers": "Transfer deed papers (verify what you uploaded)" };
+
+/** Whether the raiser of a request in this module may approve it (Approval Setup). */
+async function raiserMayApprove(module) {
+  const row = (await getPool().request().input("m", sql.NVarChar(100), module)
+    .query("SELECT RaiserMayApprove FROM dbo.ApprovalRaiserRule WHERE Module = @m")).recordset[0];
+  return row?.RaiserMayApprove === true || row?.RaiserMayApprove === 1;
+}
 
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {
@@ -776,10 +787,11 @@ async function transition(
       authErr.status = 403;
       throw authErr;
     }
-    // Maker-checker: whoever raised a request that pays money out can't also
-    // approve it, whatever roles they hold. Rejecting one's own is allowed.
+    // Maker-checker: unless Approval Setup lets the raiser approve their own
+    // request in this module, whoever raised it can't also approve it,
+    // whatever roles they hold. Rejecting one's own is always allowed.
     const makerColumn = MAKER_COLUMNS[module];
-    if (targetStatus === "Approved" && makerColumn && userId != null) {
+    if (targetStatus === "Approved" && makerColumn && userId != null && !(await raiserMayApprove(module))) {
       const maker = (await getPool().request().input("id", sql.Int, Number(id))
         .query(`SELECT ${makerColumn} AS Maker FROM ${map.table} WHERE ${map.pk} = @id`)).recordset[0]?.Maker;
       if (maker != null && Number(maker) === Number(userId)) {
@@ -1090,6 +1102,9 @@ async function canApproveBookingAmendment(userId, userRole) {
 
 module.exports = {
   transition,
+  MAKER_COLUMNS,
+  RAISER_RULE_EXTRA,
+  raiserMayApprove,
   guardEdit,
   guardEditAnyStage,
   restartApprovalCycle,

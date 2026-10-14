@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { invalidateRoomData } from "@/lib/roomQueries";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
@@ -15,9 +15,13 @@ import {
   LAYOUT_TYPES_QUERY_KEY,
   type BhkType,
 } from "@/api/unitBhkConfigApi";
-import { Grid3x3, Home, Minus, Plus, Save, X } from "lucide-react";
+import { Minus, Plus, Save, X } from "lucide-react";
 
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const STEP = "w-7 h-7 flex items-center justify-center border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-30 disabled:hover:border-foreground/40";
 
 // A real layout can reasonably have a handful of any one room category —
 // even a big custom Duplex/Triplex template — but not a typo like "40
@@ -166,71 +170,92 @@ export default function RoomCompositionBuilder() {
           { label: "Unit Composition" },
         ]}
       />
-      <CivilWorkDprShell
-        title="Unit Composition"
-        subtitle="One room layout template per type — every unit of that type inherits it automatically"
-        icon={Grid3x3}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Unit composition"
+        subtitle="One room layout per unit type. Every unit of that type takes its rooms from it."
       >
         {!rights.canView ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="p-8 text-center text-sm text-muted-foreground border border-dashed border-foreground/40">
             You don't have access to this page.
           </div>
         ) : (
           <>
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                {[
+                  { label: "Layout types", value: layoutTypes.length, note: villaLayoutCount ? `${villaLayoutCount} villa type${villaLayoutCount === 1 ? "" : "s"} planned elsewhere` : "offered for units" },
+                  { label: "With a layout", value: layoutTypes.filter((x) => x.roomCount > 0).length, note: "can be picked for units" },
+                  { label: "Room categories", value: (categories as RoomCategory[]).length, note: "active, to count from" },
+                  { label: selectedLabel ? `Rooms in ${selectedLabel}` : "Rooms", value: totalRooms, note: "in the layout below" },
+                ].map((x) => (
+                  <div key={x.label}>
+                    <p className="label">{x.label}</p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value.toLocaleString("en-IN")}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* ── Layout type selector — the 4 BHK defaults plus any custom
                 types (Duplex, Triplex, ...) added below. ── */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-                <Home size={14} className="text-cyan-600 dark:text-cyan-400" />
-                <span className="text-sm font-heading font-semibold text-foreground">Layout Type</span>
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="flex items-baseline gap-2.5 px-4 py-3" style={{ borderBottom: RULE }}>
+                <span className={HEAD}>Layout type</span>
+                {!loadingTypes && <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{layoutTypes.length}</span>}
               </div>
-              <div className="p-5">
+              <div className="p-4">
                 {loadingTypes ? (
                   <div className="flex flex-wrap gap-2">
                     {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className="h-8 w-20 rounded-lg border border-border bg-muted/30 animate-pulse" />
+                      <div key={i} className="h-8 w-20 border border-foreground/20 bg-muted/30 animate-pulse" />
                     ))}
                   </div>
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {layoutTypes.map((t) => (
-                      <div
-                        key={t.typeKey}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setBhkType(t.typeKey)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBhkType(t.typeKey); } }}
-                        className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all cursor-pointer ${
-                          bhkType === t.typeKey
-                            ? "border-cyan-500 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
-                            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                        }`}
-                      >
-                        {t.label}
-                        {t.roomCount === 0 && (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full bg-amber-500"
-                            title="No rooms defined yet — this type can't be picked for units until it has a layout"
-                          />
-                        )}
-                        {/* Only custom types (not the 4 seeded BHK defaults) can be
-                            removed — same rule the backend enforces. */}
-                        {!t.isSystem && rights.canDelete && (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleRemoveType(t); }}
-                            disabled={removingTypeKey === t.typeKey}
-                            title={`Remove "${t.label}"`}
-                            className="ml-0.5 -mr-1 w-4 h-4 shrink-0 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-red-500 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
-                          >
-                            <X size={11} />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    {layoutTypes.map((t) => {
+                      const on = bhkType === t.typeKey;
+                      return (
+                        <div
+                          key={t.typeKey}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={on}
+                          onClick={() => setBhkType(t.typeKey)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBhkType(t.typeKey); } }}
+                          className={`${KEY} h-8 px-3.5 shrink-0 cursor-pointer border ${
+                            on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"
+                          }`}
+                        >
+                          {t.label}
+                          {t.roomCount === 0 && (
+                            <span
+                              className="w-1.5 h-1.5 border border-current"
+                              style={{ borderStyle: "dashed" }}
+                              title="No rooms defined yet — this type can't be picked for units until it has a layout"
+                            />
+                          )}
+                          {/* Only custom types (not the 4 seeded BHK defaults) can be
+                              removed — same rule the backend enforces. */}
+                          {!t.isSystem && rights.canDelete && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRemoveType(t); }}
+                              disabled={removingTypeKey === t.typeKey}
+                              title={`Remove "${t.label}"`}
+                              aria-label={`Remove ${t.label}`}
+                              className="-mr-1.5 w-5 h-5 shrink-0 flex items-center justify-center opacity-60 hover:opacity-100 hover:text-destructive disabled:opacity-30 transition-colors"
+                            >
+                              <X size={11} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
 
                     {addingType ? (
-                      <div className="flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-1.5 py-1">
+                      <div className="flex items-center gap-1 border border-foreground px-1 h-8">
                         <input
                           ref={newTypeInputRef}
                           value={newTypeLabel}
@@ -242,14 +267,15 @@ export default function RoomCompositionBuilder() {
                           placeholder="e.g. Duplex"
                           maxLength={50}
                           disabled={addingSaving}
-                          className="w-28 h-6 px-2 rounded-md text-xs bg-background border border-border focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50"
+                          className="w-28 h-6 px-2 text-xs bg-card text-foreground border-0 focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
                         />
                         <button
                           type="button"
                           onClick={handleAddType}
                           disabled={addingSaving || !newTypeLabel.trim()}
-                          className="w-6 h-6 shrink-0 rounded-md bg-cyan-500 text-white flex items-center justify-center hover:bg-cyan-600 disabled:opacity-40 transition-colors"
+                          className="w-6 h-6 shrink-0 bg-foreground text-card flex items-center justify-center disabled:opacity-40 transition-opacity"
                           title="Add"
+                          aria-label="Add type"
                         >
                           <Plus size={12} />
                         </button>
@@ -257,8 +283,9 @@ export default function RoomCompositionBuilder() {
                           type="button"
                           onClick={() => { setAddingType(false); setNewTypeLabel(""); }}
                           disabled={addingSaving}
-                          className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors"
+                          className="w-6 h-6 shrink-0 text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors"
                           title="Cancel"
+                          aria-label="Cancel"
                         >
                           <X size={12} />
                         </button>
@@ -268,18 +295,18 @@ export default function RoomCompositionBuilder() {
                         <button
                           type="button"
                           onClick={() => setAddingType(true)}
-                          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-dashed border-border text-muted-foreground hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all"
+                          className={`${KEY} h-8 px-3.5 shrink-0 border border-dashed border-foreground/50 text-muted-foreground hover:text-foreground hover:border-foreground`}
                         >
-                          <Plus size={13} /> Add Type
+                          <Plus size={12} /> Add type
                         </button>
                       )
                     )}
                   </div>
                 )}
                 {villaLayoutCount > 0 && (
-                  <p className="mt-2 text-[0.6875rem] text-muted-foreground">
+                  <p className="mt-3 text-[0.6875rem] text-muted-foreground">
                     Villa type layouts ({villaLayoutCount}) aren't listed here — their rooms are planned floor by floor in{" "}
-                    <a href="/crm/setup/plot-master" className="text-primary hover:underline">Plot Master › Villa types › Rooms</a>.
+                    <a href="/crm/setup/plot-master" className="text-foreground underline underline-offset-2 hover:no-underline">Plot Master › Villa types › Rooms</a>.
                   </p>
                 )}
               </div>
@@ -287,87 +314,77 @@ export default function RoomCompositionBuilder() {
 
             {/* ── Composition ── */}
             {bhkType && (
-              <div className="rounded-xl border border-border bg-card overflow-hidden">
-                <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-                  <Grid3x3 size={14} className="text-cyan-600 dark:text-cyan-400" />
-                  <span className="text-sm font-heading font-semibold text-foreground">
-                    {selectedLabel} Unit Composition
-                  </span>
+              <div className="bg-card" style={{ border: RULE }}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: RULE }}>
+                  <span className={HEAD}>{selectedLabel} composition</span>
+                  <span className={LBL}>Up to {MAX_ROOM_QTY} of any one category</span>
                 </div>
-                <div className="p-5 space-y-5">
-                  {loadingTemplate || loadingCategories ? (
-                    <div className="h-24 rounded-lg border border-border bg-muted/30 animate-pulse" />
-                  ) : (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        This layout applies to every unit tagged {selectedLabel} — set it once here instead
-                        of per unit. Saving never touches a room that's already been built; it only takes
-                        effect for units whose rooms haven't been generated yet. To rebuild an already-built
-                        unit's rooms from this layout, use Room Master's "Generate Rooms" for its project.
-                      </p>
+                {loadingTemplate || loadingCategories ? (
+                  <div className="m-4 h-24 border border-foreground/20 bg-muted/30 animate-pulse" />
+                ) : (
+                  <>
+                    <p className="px-4 pt-4 text-xs leading-relaxed text-muted-foreground">
+                      This layout applies to every unit tagged {selectedLabel} — set it once here instead
+                      of per unit. Saving never touches a room that's already been built; it only takes
+                      effect for units whose rooms haven't been generated yet. To rebuild an already-built
+                      unit's rooms from this layout, use Room Master's "Generate Rooms" for its project.
+                    </p>
 
-                      <div className="space-y-2">
-                        <p className={labelCls}>Room Categories</p>
-                        {(categories as RoomCategory[]).length === 0 ? (
-                          <p className="text-sm text-muted-foreground">
-                            No active room categories yet — add some in Room Master first.
-                          </p>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                            {(categories as RoomCategory[]).map((c) => {
-                              const qty = quantities[c.id] ?? 0;
-                              return (
-                                <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-1.5">
-                                  <span className="text-xs font-heading font-semibold text-foreground">{c.alias}</span>
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => setQty(c.id, qty - 1)}
-                                      disabled={qty <= 0}
-                                      className="w-6 h-6 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
-                                    >
-                                      <Minus size={11} />
-                                    </button>
-                                    <span className="w-5 text-center text-xs font-semibold tabular-nums">{qty}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => setQty(c.id, qty + 1)}
-                                      disabled={qty >= MAX_ROOM_QTY}
-                                      title={qty >= MAX_ROOM_QTY ? `Max ${MAX_ROOM_QTY} per category` : undefined}
-                                      className="w-6 h-6 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30"
-                                    >
-                                      <Plus size={11} />
-                                    </button>
-                                  </div>
+                    <div className="p-4 space-y-2">
+                      <p className={LBL}>Room categories</p>
+                      {(categories as RoomCategory[]).length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No active room categories yet — add some in Room Master first.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6">
+                          {(categories as RoomCategory[]).map((c) => {
+                            const qty = quantities[c.id] ?? 0;
+                            return (
+                              <div key={c.id} className="flex items-center justify-between gap-3 py-2 border-b border-foreground/15">
+                                <span className={`text-sm ${qty ? "font-medium text-foreground" : "text-muted-foreground"}`}>{c.alias}</span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button type="button" onClick={() => setQty(c.id, qty - 1)} disabled={qty <= 0} className={STEP} aria-label={`One fewer ${c.alias}`}>
+                                    <Minus size={11} />
+                                  </button>
+                                  <span className={`w-7 text-center font-heading text-sm font-semibold tabular-nums ${qty ? "text-foreground" : "text-muted-foreground/50"}`}>{qty}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setQty(c.id, qty + 1)}
+                                    disabled={qty >= MAX_ROOM_QTY}
+                                    title={qty >= MAX_ROOM_QTY ? `Max ${MAX_ROOM_QTY} per category` : undefined}
+                                    className={STEP}
+                                    aria-label={`One more ${c.alias}`}
+                                  >
+                                    <Plus size={11} />
+                                  </button>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-border">
-                        <span className="text-xs text-muted-foreground">
-                          {totalRooms} room{totalRooms === 1 ? "" : "s"} total
-                        </span>
-                        {rights.canCreate && (
-                          <button
-                            onClick={handleSave}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:opacity-90 disabled:opacity-50 transition-all"
-                          >
-                            <Save size={13} /> {saving ? "Saving…" : `Save ${selectedLabel} Template`}
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderTop: RULE }}>
+                      <span className="flex items-baseline gap-2">
+                        <span className={LBL}>Total</span>
+                        <span className="font-heading text-sm font-bold tabular-nums text-foreground">{totalRooms}</span>
+                        <span className="text-xs text-muted-foreground">room{totalRooms === 1 ? "" : "s"}</span>
+                      </span>
+                      {rights.canCreate && (
+                        <button onClick={handleSave} disabled={saving} className={`${KEY} h-9 px-5 bg-foreground text-card border border-foreground`}>
+                          <Save size={13} /> {saving ? "Saving…" : `Save ${selectedLabel} layout`}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
     </>
   );
 }

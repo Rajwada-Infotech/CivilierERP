@@ -56,7 +56,9 @@ function getStoredUserForLogging(): { id?: string; name?: string; email?: string
 
 // Fire-and-forget — a logging failure must never affect the actual request.
 // Uses a raw fetch() rather than calling fetchWithAuth recursively.
-function logMutationActivity(method: string, url: string) {
+// Exported for the few writes that deliberately skip fetchWithAuth (ApprovalActions keeps the backend's own
+// 403 wording), so they still reach the Activity Browser.
+export function logMutationActivity(method: string, url: string) {
   if (typeof window === "undefined") return;
   const actionType = MUTATION_ACTION_TYPE[method.toUpperCase()];
   if (!actionType) return;
@@ -194,8 +196,22 @@ export async function fetchWithAuth(
 
   if (response.status === 403) {
     console.error("Forbidden");
+    // Most 403s name the reason ("You uploaded this document, so someone
+    // else has to verify it", "You don't have access to this project") —
+    // show it. A bare "Forbidden" / "Access denied" or no body keeps the
+    // generic message.
+    let reason = "";
+    try {
+      const body = await response.clone().json();
+      if (typeof body?.error === "string") reason = body.error.trim();
+      else if (typeof body?.message === "string") reason = body.message.trim();
+    } catch {
+      // Non-JSON or empty body — fall back to the generic message.
+    }
     throw new ApiError(
-      "You do not have permission to perform this action.",
+      reason && !/^(forbidden|access denied)\.?$/i.test(reason)
+        ? reason
+        : "You do not have permission to perform this action.",
       response.status,
     );
   }

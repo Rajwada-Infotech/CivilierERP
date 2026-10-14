@@ -1,5 +1,6 @@
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SHEET_FRAME_CSS } from "@/components/sheet/Sheet";
 
 export type ProfileTab = {
   key: string;
@@ -26,16 +27,48 @@ interface ProfileShellProps {
   children: React.ReactNode;
 }
 
+// The profile pages drawn on the sheet: the frame's paper, rules and capitals around a title block (square avatar,
+// name, role, email, and the figures on a ruled row), squared ink tabs, and sections as ruled boxes. Everything inside
+// the frame is squared off by SHEET_FRAME_CSS; this adds the profile's own parts, and squares the avatar pop-up,
+// which opens outside the frame.
+const PROFILE_CSS = `
+.sheet-frame .pf-avatar {
+  width: 72px; height: 72px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; overflow: hidden;
+  border: 1.5px solid var(--ink); background: hsl(var(--card)); color: var(--ink);
+  font-family: "Sora", sans-serif; font-weight: 700; font-size: 22px; letter-spacing: -0.02em; position: relative;
+}
+.sheet-frame .pf-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.sheet-frame .pf-avatar .pf-cam { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: hsl(var(--foreground) / 0.55); color: hsl(var(--card)); opacity: 0; transition: opacity .15s; }
+.sheet-frame .pf-avatar:hover .pf-cam { opacity: 1; }
+.sheet-frame .pf-figure { font-family: "Sora", sans-serif; font-weight: 600; font-size: 20px; letter-spacing: -0.02em; line-height: 1; color: var(--ink); }
+.sheet-frame .pf-tabs { display: inline-flex; flex-wrap: wrap; max-width: 100%; }
+/* Badges and status dots on a profile read as square marks, like the rest of the sheet. */
+.pf-sheet .rounded-full { border-radius: 0 !important; }
+.sheet-frame .pf-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.sheet-frame .pf-sec { border: 1px solid var(--rule); background: hsl(var(--card)); }
+.sheet-frame .pf-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--ink); }
+.sheet-frame .pf-mark { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  border: 1px solid var(--rule); color: var(--ink); background: hsl(var(--card)); }
+.sheet-frame .pf-key { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--ink);
+  color: var(--ink); background: hsl(var(--card)); font-family: "Sora", sans-serif; font-weight: 600; font-size: 9.5px;
+  letter-spacing: 0.12em; text-transform: uppercase; transition: background-color .15s, color .15s; }
+.sheet-frame .pf-key:hover { background: var(--ink); color: hsl(var(--card)); }
+.sheet-frame .pf-value { font-size: 14px; font-weight: 600; color: var(--ink); margin-top: 5px; }
+
+.pf-modal { border-radius: 0 !important; border: 1.5px solid hsl(var(--foreground)) !important; box-shadow: 6px 6px 0 hsl(var(--foreground) / 0.14) !important; }
+.pf-modal [class*="rounded-"]:not(.rounded-full), .pf-modal button, .pf-modal input { border-radius: 0 !important; }
+.pf-modal .shadow-lg { box-shadow: none !important; }
+`;
+
 export function ProfileShell({
   breadcrumbs,
   initials,
   name,
   email,
   roleBadge,
-  avatarGradient,
   avatarUrl,
   onAvatarClick,
-  accentColor,
   stats,
   tabs,
   activeTab,
@@ -43,104 +76,75 @@ export function ProfileShell({
   children,
 }: ProfileShellProps) {
   return (
-    <div className="max-w-5xl mx-auto space-y-0">
+    <div className="max-w-5xl mx-auto">
+      <style>{SHEET_FRAME_CSS + PROFILE_CSS}</style>
       <div className="mb-4">
         <Breadcrumbs items={breadcrumbs} />
       </div>
 
-      {/* ── Header card ──────────────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-border bg-card shadow-sm">
-        <div className="px-6 pt-6 pb-5 flex flex-col sm:flex-row sm:items-center gap-5">
-          {/* Avatar */}
-          <div className="relative shrink-0 group">
-            <div
-              className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-lg font-heading font-bold select-none overflow-hidden ring-1 ring-border ${onAvatarClick ? "cursor-pointer" : ""}`}
-              style={{ background: avatarUrl ? "transparent" : avatarGradient }}
+      <div className="sheet-frame sheet-in pf-sheet">
+        {/* ── Title block ──────────────────────────────────────────────────── */}
+        <div style={{ padding: "20px 22px 18px" }}>
+          <p className="label">CivilierERP · Profile</p>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-5 mt-3">
+            <span
+              className="pf-avatar"
               onClick={onAvatarClick}
               title={onAvatarClick ? "Click to change avatar" : undefined}
+              style={{ cursor: onAvatarClick ? "pointer" : undefined }}
             >
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={name}
-                  className="w-full h-full object-cover rounded-full"
-                />
-              ) : (
-                initials
-              )}
+              {avatarUrl ? <img src={avatarUrl} alt={name} /> : initials}
               {onAvatarClick && (
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full flex items-center justify-center">
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="white"
-                    strokeWidth="2"
-                  >
+                <span className="pf-cam" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                     <circle cx="12" cy="13" r="4" />
                   </svg>
-                </div>
+                </span>
               )}
-            </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-card" />
-          </div>
+            </span>
 
-          {/* Name / role / meta */}
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-lg font-heading font-bold text-foreground leading-none">
-                {name}
-              </h1>
-              {roleBadge}
+            <div className="flex-1 min-w-0">
+              <h1 className="title" style={{ fontSize: "clamp(24px, 2.8vw, 34px)", margin: 0, lineHeight: 1.08 }}>{name}</h1>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                {roleBadge}
+                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{email}</span>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-1.5">{email}</p>
-          </div>
 
-          {/* Stats — quiet inline values, no boxed glass pills */}
-          {stats.length > 0 && (
-            <div className="flex items-center gap-5 sm:gap-6 shrink-0 pl-0 sm:pl-2">
-              {stats.map((s) => (
-                <div key={s.label} className="flex flex-col">
-                  <span className="text-sm font-heading font-bold text-foreground leading-none">
-                    {s.value}
-                  </span>
-                  <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground mt-1">
-                    {s.label}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+            {stats.length > 0 && (
+              <div className={`statrow ${stats.length >= 4 ? "four" : ""} shrink-0`} style={{ minWidth: 0 }}>
+                {stats.map((s) => (
+                  <div key={s.label}>
+                    <p className="label">{s.label}</p>
+                    <p className="pf-figure" style={{ marginTop: 6, textTransform: "capitalize" }}>{typeof s.value === "string" ? s.value.replace(/_/g, " ") : s.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Tab bar */}
-        <div className="flex gap-1 px-6 border-t border-border">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => onTabChange(tab.key)}
-              className={`flex items-center gap-1.5 px-3 py-3 text-xs font-heading font-semibold border-b-2 transition-colors -mb-px ${
-                activeTab === tab.key
-                  ? "border-foreground text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80"
-              }`}
-            >
-              <tab.icon size={13} />
-              {tab.label}
-            </button>
-          ))}
+        {/* ── Tabs ─────────────────────────────────────────────────────────── */}
+        <div className="cell" style={{ paddingTop: 14, paddingBottom: 14 }}>
+          <div className="seg pf-tabs">
+            {tabs.map((tab) => (
+              <button key={tab.key} type="button" onClick={() => onTabChange(tab.key)} className={activeTab === tab.key ? "on" : ""}>
+                <tab.icon size={12} />
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {/* ── Tab content ──────────────────────────────────────────────────── */}
+        <div className="cell">{children}</div>
       </div>
-
-      {/* ── Tab content ───────────────────────────────────────────────────── */}
-      <div className="pt-5">{children}</div>
     </div>
   );
 }
 
-// ── Section card ──────────────────────────────────────────────────────────────
+// ── Section ───────────────────────────────────────────────────────────────────
 
 interface ProfileSectionProps {
   title: string;
@@ -162,40 +166,24 @@ export function ProfileSection({
   noPadding,
 }: ProfileSectionProps) {
   return (
-    <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-        <div className="flex items-center gap-2.5">
+    <section className="pf-sec">
+      <header className="pf-sec-head">
+        <div className="flex items-center gap-2.5 min-w-0">
           {Icon && (
-            <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center shrink-0">
-              <Icon size={13} className="text-muted-foreground" />
-            </div>
+            <span className="pf-mark">
+              <Icon size={13} />
+            </span>
           )}
-          <div>
-            <h2 className="text-sm font-heading font-semibold text-foreground leading-none">
-              {title}
-            </h2>
-            {subtitle && (
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                {subtitle}
-              </p>
-            )}
+          <div className="min-w-0">
+            <h2 className="label" style={{ color: "var(--ink)", margin: 0 }}>{title}</h2>
+            {subtitle && <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 3 }}>{subtitle}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2">
           {headerRight}
           {onEdit && (
-            <button
-              onClick={onEdit}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-all hover:opacity-90 active:scale-95 text-foreground bg-muted hover:bg-muted/80 border border-border"
-            >
-              <svg
-                width="11"
-                height="11"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-              >
+            <button type="button" onClick={onEdit} className="pf-key">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
               </svg>
@@ -203,9 +191,9 @@ export function ProfileSection({
             </button>
           )}
         </div>
-      </div>
-      <div className={noPadding ? "" : "px-5 py-5"}>{children}</div>
-    </div>
+      </header>
+      <div className={noPadding ? "" : "px-4 py-4 sm:px-5 sm:py-5"}>{children}</div>
+    </section>
   );
 }
 
@@ -219,15 +207,9 @@ interface ProfileFieldProps {
 
 export function ProfileField({ label, value, mono }: ProfileFieldProps) {
   return (
-    <div className="space-y-1">
-      <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
-        {label}
-      </p>
-      <p
-        className={`text-sm font-medium text-foreground ${mono ? "font-mono" : ""}`}
-      >
-        {value || "—"}
-      </p>
+    <div>
+      <p className="label">{label}</p>
+      <div className={`pf-value ${mono ? "font-mono" : ""}`}>{value || "—"}</div>
     </div>
   );
 }
@@ -281,7 +263,7 @@ export function PasswordForm({
     <div className="space-y-3 max-w-md">
       {(["current", "next", "confirm"] as const).map((field) => (
         <div key={field}>
-          <label className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
+          <label className="label mb-1.5 block">
             {field === "current"
               ? "Current Password"
               : field === "next"
@@ -303,27 +285,13 @@ export function PasswordForm({
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               {showPw[field] ? (
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
                   <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
                   <line x1="1" y1="1" x2="23" y2="23" />
                 </svg>
               ) : (
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
@@ -337,14 +305,7 @@ export function PasswordForm({
       )}
       {pwMatch && (
         <p className="text-[0.6875rem] text-emerald-600 flex items-center gap-1">
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <polyline points="20 6 9 17 4 12" />
           </svg>
           Passwords match
@@ -357,26 +318,11 @@ export function PasswordForm({
           className="flex items-center gap-2 px-4 py-2 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50 transition-all"
         >
           {isPending ? (
-            <svg
-              width="13"
-              height="13"
-              className="animate-spin"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
+            <svg width="13" height="13" className="animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 12a9 9 0 1 1-6.219-8.56" />
             </svg>
           ) : (
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invalidateProjectCompanyQueries } from "@/lib/invalidateProjectQueries";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   FolderKanban,
   Plus,
@@ -111,6 +111,18 @@ interface Project {
   projectImage?: string | File | null;
 }
 
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const ACT_DEL = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors";
+const TAG = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground/40 px-1.5 py-0.5 whitespace-nowrap";
+const INPUT = "w-full px-3 py-2 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 disabled:cursor-not-allowed";
+const DIALOG_STYLE = { margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" };
+
 function ProjectAvatar({
   imageUrl,
   name,
@@ -126,32 +138,17 @@ function ProjectAvatar({
       <img
         src={imageUrl}
         alt={name}
-        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 shrink-0`}
+        className={`${dim} object-contain border border-foreground/30 bg-card shrink-0`}
       />
     );
   }
   return (
     <div
-      className={`${dim} rounded-lg bg-primary/10 text-primary font-heading font-bold flex items-center justify-center shrink-0`}
+      className={`${dim} border border-foreground text-foreground font-heading font-bold flex items-center justify-center shrink-0`}
     >
       {name.charAt(0).toUpperCase()}
     </div>
   );
-}
-
-// A fixed palette cycled by id, so companies sitting side by side in the
-// stack read as distinct at a glance instead of a wall of same-colored dots.
-const TAG_AVATAR_COLORS = [
-  "bg-violet-500/15 text-violet-600",
-  "bg-blue-500/15 text-blue-600",
-  "bg-emerald-500/15 text-emerald-600",
-  "bg-amber-500/15 text-amber-600",
-  "bg-rose-500/15 text-rose-600",
-  "bg-cyan-500/15 text-cyan-600",
-];
-function tagAvatarColor(id: string) {
-  const n = parseInt(id, 10) || 0;
-  return TAG_AVATAR_COLORS[n % TAG_AVATAR_COLORS.length];
 }
 
 // Assignee-stack style picker: collapses to overlapping avatar circles (or
@@ -186,7 +183,7 @@ function CompanyTagPicker({
       <PopoverTrigger asChild>
         <button type="button" className="group flex items-center gap-2.5 py-1">
           {selected.length === 0 ? (
-            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed border-border text-xs text-muted-foreground group-hover:border-primary/40 group-hover:text-primary transition-colors">
+            <span className={`${KEY} h-8 px-3 border border-dashed border-foreground/50 text-muted-foreground group-hover:text-foreground group-hover:border-foreground`}>
               <Plus size={12} /> Add companies
             </span>
           ) : (
@@ -196,29 +193,29 @@ function CompanyTagPicker({
                   const id = String(c.Id ?? c.id);
                   const name = c.Name ?? c.name ?? "";
                   return (
-                    <Avatar key={id} className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
-                      <AvatarFallback className={`text-[0.6875rem] font-heading font-bold ${tagAvatarColor(id)}`}>
+                    <Avatar key={id} className="h-8 w-8 rounded-none border-2 border-card ring-1 ring-foreground">
+                      <AvatarFallback className="rounded-none text-[0.6875rem] font-heading font-bold bg-card text-foreground">
                         {name.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                   );
                 })}
                 {extra > 0 && (
-                  <Avatar className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
-                    <AvatarFallback className="text-[0.625rem] font-heading font-bold bg-muted text-muted-foreground">
+                  <Avatar className="h-8 w-8 rounded-none border-2 border-card ring-1 ring-foreground">
+                    <AvatarFallback className="rounded-none text-[0.625rem] font-heading font-bold bg-foreground text-card">
                       +{extra}
                     </AvatarFallback>
                   </Avatar>
                 )}
               </div>
-              <span className="text-xs text-muted-foreground group-hover:text-primary transition-colors">
+              <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
                 {selected.length} tagged
               </span>
             </>
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-0" align="start">
+      <PopoverContent className="w-72 p-0 rounded-none border-foreground" align="start">
         <Command>
           <CommandInput placeholder="Search companies…" />
           <CommandList>
@@ -230,13 +227,13 @@ function CompanyTagPicker({
                 const checked = selectedIds.includes(id);
                 return (
                   <CommandItem key={id} value={name} onSelect={() => toggle(id)} className="gap-2">
-                    <Avatar className="h-6 w-6">
-                      <AvatarFallback className={`text-[0.625rem] font-heading font-bold ${tagAvatarColor(id)}`}>
+                    <Avatar className="h-6 w-6 rounded-none">
+                      <AvatarFallback className="rounded-none text-[0.625rem] font-heading font-bold border border-foreground bg-card text-foreground">
                         {name.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <span className="flex-1 truncate">{name}</span>
-                    <Check size={14} className={checked ? "opacity-100 text-primary" : "opacity-0"} />
+                    <Check size={14} className={checked ? "opacity-100 text-foreground" : "opacity-0"} />
                   </CommandItem>
                 );
               })}
@@ -340,17 +337,9 @@ function ProjectViewModal({
   project: Project;
   onClose: () => void;
 }) {
-  const STATUS_COLORS: Record<string, string> = {
-    Active: "bg-emerald-500/10 text-emerald-600",
-    Planning: "bg-blue-500/10 text-blue-600",
-    "On Hold": "bg-[#ffe2021a] text-amber-600",
-    Completed: "bg-purple-500/10 text-purple-600",
-    Cancelled: "bg-muted text-muted-foreground",
-  };
-
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className={LBL}>
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -367,10 +356,13 @@ function ProjectViewModal({
     icon?: React.ReactNode;
   }) => (
     <div className="col-span-full pt-2">
-      <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2 flex items-center gap-1.5">
-        {icon}
-        {title}
-      </p>
+      <div className="flex items-center gap-3 mb-1">
+        <p className={`${HEAD} shrink-0 flex items-center gap-1.5`}>
+          {icon}
+          {title}
+        </p>
+        <span className="flex-1 h-px bg-foreground" />
+      </div>
     </div>
   );
 
@@ -453,8 +445,8 @@ function ProjectViewModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
+      <div className="sheet-frame bg-card w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" style={DIALOG_STYLE}>
+        <div className="p-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: RULE }}>
           <div className="flex items-center gap-3">
             <ProjectAvatar
               imageUrl={projectLogo}
@@ -462,46 +454,38 @@ function ProjectViewModal({
               size="md"
             />
             <div>
-              <h2 className="font-heading font-semibold text-foreground text-base">
+              <p className={LBL}>Project</p>
+              <h2 className="font-heading font-bold tracking-tight text-foreground text-lg">
                 {project.name}
               </h2>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 {project.code && (
-                  <span className="font-mono text-xs text-primary">
+                  <span className="font-heading text-xs font-semibold tabular-nums text-foreground">
                     {project.code}
                   </span>
                 )}
                 {project.status && (
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[project.status] || "bg-muted text-muted-foreground"}`}
-                  >
-                    {project.status}
-                  </span>
+                  <SheetMark text={project.status} tone={project.status === "Completed" || project.status === "Active" ? "done" : project.status === "Cancelled" ? "none" : "waiting"} />
                 )}
                 {project.jvEnabled && (
-                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-violet-500/10 text-violet-600">
-                    JV
-                  </span>
+                  <span className={TAG}>JV</span>
                 )}
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${project.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                >
-                  {project.isActive ? "Active" : "Inactive"}
-                </span>
+                {!project.isActive && <span className={LBL}>Inactive</span>}
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={printPreview}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-8 px-3`}
               title="Print"
             >
               <Printer size={13} /> Print
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className={ACT}
+              aria-label="Close"
             >
               <X size={16} />
             </button>
@@ -557,10 +541,10 @@ function ProjectViewModal({
           </div>
         </div>
 
-        <div className="p-4 border-t border-border flex justify-end flex-shrink-0">
+        <div className="p-4 flex justify-end flex-shrink-0" style={{ borderTop: RULE }}>
           <button
             onClick={onClose}
-            className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+            className={`${KEY_LINE} h-9 px-5`}
           >
             Close
           </button>
@@ -585,7 +569,7 @@ function buildProjectColumns(
       accessorKey: "Code",
       header: "Code",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-medium text-primary">
+        <span className="font-heading text-xs font-semibold tabular-nums text-foreground">
           {getValue() as string}
         </span>
       ),
@@ -599,7 +583,7 @@ function buildProjectColumns(
             imageUrl={row.original.ProjectImage}
             name={row.original.Name || "?"}
           />
-          <span className="font-medium text-foreground max-w-[160px] truncate">
+          <span className="font-semibold text-foreground max-w-[160px] truncate">
             {row.original.Name}
           </span>
         </div>
@@ -644,11 +628,7 @@ function buildProjectColumns(
       cell: ({ getValue }) => {
         const v = getValue() as string;
         return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${v === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {v || "—"}
-          </span>
+          v ? <SheetMark text={v} tone={v === "Completed" || v === "Active" ? "done" : v === "Cancelled" ? "none" : "waiting"} /> : <span className="text-muted-foreground">—</span>
         );
       },
     },
@@ -657,9 +637,7 @@ function buildProjectColumns(
       header: "JV",
       cell: ({ getValue }) =>
         getValue() ? (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-violet-500/10 text-violet-600">
-            JV
-          </span>
+          <span className={TAG}>JV</span>
         ) : (
           <span className="text-muted-foreground/40 text-xs">—</span>
         ),
@@ -671,7 +649,8 @@ function buildProjectColumns(
         const active = getValue() as boolean;
         return (
           <span
-            className={`w-2 h-2 rounded-full inline-block ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
+            className={`w-2.5 h-2.5 inline-block border border-foreground ${active ? "bg-foreground" : ""}`}
+            title={active ? "Active" : "Inactive"}
           />
         );
       },
@@ -684,7 +663,7 @@ function buildProjectColumns(
         <div className="flex items-center justify-end gap-1">
           <button data-row-view
             onClick={() => openView(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
+            className={ACT} aria-label="View details"
             title="View details"
           >
             <Eye size={13} />
@@ -692,7 +671,7 @@ function buildProjectColumns(
           {rights.canEdit && (
             <button
               onClick={() => openEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              className={ACT} aria-label="Edit"
               title="Edit"
             >
               <Pencil size={13} />
@@ -701,7 +680,7 @@ function buildProjectColumns(
           {rights.canDelete && (
             <button
               onClick={() => setDeleteConfirm(row.original.Id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className={ACT_DEL} aria-label="Delete"
               title="Delete"
             >
               <Trash2 size={13} />
@@ -712,7 +691,7 @@ function buildProjectColumns(
               onClick={() =>
                 setCascadeTarget({ Id: row.original.Id, Name: row.original.Name })
               }
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 hover:bg-red-500/10"
+              className={ACT_DEL} aria-label="Delete project and all its transactions"
               title="Super Admin: delete project and ALL its transactions"
             >
               <ShieldAlert size={13} />
@@ -1074,9 +1053,9 @@ export default function ProjectMaster() {
     required = false,
   ) => (
     <div key={key}>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
+      <label className={`${LBL} block mb-1.5`}>
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {required && <span className="text-destructive ml-0.5">*</span>}
       </label>
       {type === "date" ? (
         <div className="relative">
@@ -1090,7 +1069,7 @@ export default function ProjectMaster() {
               !readOnly && setForm((p) => ({ ...p, [key]: e.target.value }))
             }
             readOnly={readOnly}
-            className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${readOnly ? "opacity-60 cursor-not-allowed bg-muted/40" : ""}`}
+            className={`${INPUT} pl-8 ${readOnly ? "opacity-60 cursor-not-allowed border-dashed" : ""}`}
           />
         </div>
       ) : (
@@ -1102,7 +1081,7 @@ export default function ProjectMaster() {
           }
           placeholder={ph || label}
           readOnly={readOnly}
-          className={`w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all ${readOnly ? "opacity-60 cursor-not-allowed bg-muted/40" : ""}`}
+          className={`${INPUT} ${readOnly ? "opacity-60 cursor-not-allowed border-dashed" : ""}`}
         />
       )}
     </div>
@@ -1110,14 +1089,14 @@ export default function ProjectMaster() {
 
   const se = (label: string, key: keyof Project, options: string[]) => (
     <div key={key}>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
+      <label className={`${LBL} block mb-1.5`}>
         {label}
       </label>
       <div className="relative">
         <select
           value={(form[key] as string) || ""}
           onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-          className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+          className={`${INPUT} pr-8 appearance-none`}
         >
           <option value="">— Select —</option>
           {options.map((o) => (
@@ -1140,41 +1119,57 @@ export default function ProjectMaster() {
     <>
       <Breadcrumbs items={["Admin", "Masters", "Project Master"]} />
 
-      <AdminShell
-        title="Project Master"
-        subtitle="Manage projects, timelines and location"
-        icon={FolderKanban}
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Projects"
+        subtitle="Every project, the company and enterprise it belongs to, where it is, and its timeline."
         action={
           !showForm &&
           rights.canCreate && (
-            <button
-              onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
-            >
-              <Plus size={13} /> Add Project
+            <button onClick={openNew} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+              <Plus size={13} /> New project
             </button>
           )
         }
       >
         {/* Table */}
         {!showForm && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center gap-3">
-              <div className="relative flex-1 max-w-sm">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {[
+                { label: "Projects", value: projects.length, note: "on record" },
+                { label: "Active", value: (projects as any[]).filter((r) => r.IsActive).length, note: "open for work" },
+                { label: "Joint ventures", value: (projects as any[]).filter((r) => r.JvEnabled).length, note: "run with a partner" },
+                { label: "Completed", value: (projects as any[]).filter((r) => r.Status === "Completed").length, note: "by status" },
+              ].map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {!showForm && (
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <p className="flex items-baseline gap-2.5 mr-auto">
+                <span className={HEAD}>Projects</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+              </p>
+              <div className="relative w-full sm:w-72">
                 <Search
-                  size={15}
+                  size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by name or code…"
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className={`${INPUT} h-9 pl-9`}
                 />
               </div>
-              <span className="text-xs text-muted-foreground">
-                {filtered.length} project{filtered.length !== 1 ? "s" : ""}
-              </span>
               <ExportMenu
                 data={filtered as unknown as Record<string, unknown>[]}
                 columns={exportColumns}
@@ -1207,37 +1202,40 @@ export default function ProjectMaster() {
 
         {/* Form */}
         {showForm && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
             {/* Form header */}
-            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+            <div className="p-4 flex items-center justify-between" style={{ borderBottom: RULE }}>
               <div className="flex items-center gap-3">
                 <ProjectAvatar
                   imageUrl={imagePreview || null}
                   name={form.name || "?"}
                   size="md"
                 />
-                <h2 className="font-heading font-semibold text-foreground">
-                  {editId != null ? `Edit — ${form.name || "Project"}` : "New Project"}
-                </h2>
+                <div>
+                  <p className={LBL}>Project</p>
+                  <h2 className="font-heading text-base font-bold tracking-tight text-foreground">
+                    {editId != null ? `Edit ${form.name || "project"}` : "New project"}
+                  </h2>
+                </div>
               </div>
               <button
                 onClick={resetForm}
-                className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted"
+                className={`${KEY_LINE} h-8 px-3`}
               >
                 Cancel
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 p-3 border-b border-border bg-muted/20 overflow-x-auto">
+            <div className="flex gap-0 px-4 overflow-x-auto" style={{ borderBottom: RULE }}>
               {TABS.map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize whitespace-nowrap transition-colors ${
+                  className={`px-4 py-3 -mb-px border-b-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap transition-colors ${
                     activeTab === tab
-                      ? "btn-module text-white shadow-sm"
-                      : "text-muted-foreground hover:bg-muted"
+                      ? "border-foreground text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {tab === "compliance" ? (
@@ -1261,7 +1259,7 @@ export default function ProjectMaster() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {/* Image */}
                   <div className="col-span-full">
-                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                    <label className={`${LBL} block mb-2`}>
                       Project Image
                     </label>
                     <div className="flex items-center gap-4">
@@ -1270,17 +1268,17 @@ export default function ProjectMaster() {
                           <img
                             src={imagePreview}
                             alt="Preview"
-                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                            className="w-16 h-16 object-contain border border-foreground/40 bg-card"
                           />
                           <button
                             onClick={removeImage}
-                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100"
+                            aria-label="Remove image" className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100"
                           >
                             <X size={11} />
                           </button>
                         </div>
                       ) : (
-                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                        <div className="w-16 h-16 border border-dashed border-foreground/50 flex items-center justify-center">
                           <FolderKanban
                             size={20}
                             className="text-muted-foreground/40"
@@ -1298,7 +1296,7 @@ export default function ProjectMaster() {
                         />
                         <label
                           htmlFor="project-image-input"
-                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer"
+                          className={`${KEY_LINE} h-8 px-3 cursor-pointer`}
                         >
                           <Upload size={13} />
                           {imagePreview ? "Change Image" : "Upload Image"}
@@ -1322,7 +1320,7 @@ export default function ProjectMaster() {
                       (taxable), and whether several units can go on one booking.
                       Leaving it unset keeps the existing high-rise behaviour. */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    <label className={`${LBL} block mb-1.5`}>
                       Project Type
                     </label>
                     <div className="relative">
@@ -1339,7 +1337,7 @@ export default function ProjectMaster() {
                             projectTypeCode: sel?.Code ?? "",
                           }));
                         }}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         <option value="">
                           {projectTypeOptions[0] ? `— Default: ${projectTypeOptions[0].Name} —` : "— Default type —"}
@@ -1373,7 +1371,7 @@ export default function ProjectMaster() {
                       </p>
                     )}
                     {typeImpact && typeImpact.total > 0 && (
-                      <p className="mt-1 text-[0.6875rem] text-amber-600 dark:text-amber-400">
+                      <p className="mt-1 text-[0.6875rem] text-foreground font-medium">
                         ⚠ With this type, {typeImpact.total} unsold unit(s) could not be booked:{" "}
                         {typeImpact.blocked.map((b) => `${b.units} ${b.reason}`).join(", ")}.
                         Pick a type that sells them, or fix the units' kind.
@@ -1384,7 +1382,7 @@ export default function ProjectMaster() {
 
                   {/* Enterprise Dropdown */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    <label className={`${LBL} block mb-1.5`}>
                       Enterprise
                     </label>
                     <div className="relative">
@@ -1411,7 +1409,7 @@ export default function ProjectMaster() {
                             tradeLicenseNo: "",
                           }));
                         }}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         <option value="">— Select Enterprise —</option>
                         {enterprises.map((e: any) => {
@@ -1433,7 +1431,7 @@ export default function ProjectMaster() {
 
                   {/* Company Dropdown — filtered by selected enterprise */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    <label className={`${LBL} block mb-1.5`}>
                       Company
                     </label>
                     <div className="relative">
@@ -1451,7 +1449,7 @@ export default function ProjectMaster() {
                           );
                         }}
                         disabled={!form.enterpriseId}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         <option value="">
                           {form.enterpriseId
@@ -1474,13 +1472,13 @@ export default function ProjectMaster() {
                       />
                     </div>
                     {complianceLoading && (
-                      <p className="text-[0.625rem] text-primary mt-1 flex items-center gap-1">
+                      <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
                         <Loader2 size={10} className="animate-spin" />
                         Fetching compliance data…
                       </p>
                     )}
                     {form.companyId && !complianceLoading && form.gst && (
-                      <p className="text-[0.625rem] text-emerald-600 mt-1">
+                      <p className="text-[0.625rem] text-foreground mt-1">
                         ✓ Compliance data loaded from Company Master
                       </p>
                     )}
@@ -1495,7 +1493,7 @@ export default function ProjectMaster() {
                       className="flex items-center gap-2 text-sm"
                     >
                       {form.isActive ? (
-                        <ToggleRight size={24} className="text-emerald-500" />
+                        <ToggleRight size={24} className="text-foreground" />
                       ) : (
                         <ToggleLeft
                           size={24}
@@ -1505,7 +1503,7 @@ export default function ProjectMaster() {
                       <span
                         className={
                           form.isActive
-                            ? "text-emerald-600"
+                            ? "text-foreground font-medium"
                             : "text-muted-foreground"
                         }
                       >
@@ -1515,7 +1513,7 @@ export default function ProjectMaster() {
                   </div>
 
                   {/* Joint Venture toggle */}
-                  <div className="col-span-full border border-border rounded-lg p-4 bg-muted/10 space-y-3">
+                  <div className="col-span-full border border-foreground/30 p-4 space-y-3">
                     <div className="flex items-center gap-3">
                       <button
                         onClick={() =>
@@ -1528,7 +1526,7 @@ export default function ProjectMaster() {
                         className="flex items-center gap-2 text-sm"
                       >
                         {form.jvEnabled ? (
-                          <ToggleRight size={24} className="text-violet-500" />
+                          <ToggleRight size={24} className="text-foreground" />
                         ) : (
                           <ToggleLeft
                             size={24}
@@ -1538,7 +1536,7 @@ export default function ProjectMaster() {
                         <span
                           className={
                             form.jvEnabled
-                              ? "text-violet-600 font-medium"
+                              ? "text-foreground font-medium"
                               : "text-muted-foreground"
                           }
                         >
@@ -1546,15 +1544,13 @@ export default function ProjectMaster() {
                         </span>
                       </button>
                       {form.jvEnabled && (
-                        <span className="px-2 py-0.5 rounded-full text-xs bg-violet-500/10 text-violet-600 font-medium">
-                          Enabled
-                        </span>
+                        <span className={TAG}>Enabled</span>
                       )}
                     </div>
 
                     {form.jvEnabled && (
                       <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-1">
+                        <label className={`${LBL} block mb-1.5`}>
                           JV Partner / Company Name
                         </label>
                         <input
@@ -1567,14 +1563,14 @@ export default function ProjectMaster() {
                             }))
                           }
                           placeholder="Enter JV partner or company name"
-                          className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
+                          className={INPUT}
                         />
                       </div>
                     )}
                   </div>
 
                   {/* Multi-Company tagging toggle */}
-                  <div className="col-span-full border border-border rounded-lg p-4 bg-muted/10 space-y-3">
+                  <div className="col-span-full border border-foreground/30 p-4 space-y-3">
                     <button
                       onClick={() =>
                         setForm((p) => ({
@@ -1588,14 +1584,14 @@ export default function ProjectMaster() {
                       className="flex items-center gap-2 text-sm"
                     >
                       {form.multiCompanyEnabled ? (
-                        <ToggleRight size={24} className="text-blue-500" />
+                        <ToggleRight size={24} className="text-foreground" />
                       ) : (
                         <ToggleLeft size={24} className="text-muted-foreground" />
                       )}
                       <span
                         className={
                           form.multiCompanyEnabled
-                            ? "text-blue-600 font-medium"
+                            ? "text-foreground font-medium"
                             : "text-muted-foreground"
                         }
                       >
@@ -1605,7 +1601,7 @@ export default function ProjectMaster() {
 
                     {form.multiCompanyEnabled && (
                       <div>
-                        <label className="block text-xs font-medium text-muted-foreground mb-2">
+                        <label className={`${LBL} block mb-2`}>
                           Companies (besides the primary Company above)
                         </label>
                         <CompanyTagPicker
@@ -1671,10 +1667,10 @@ export default function ProjectMaster() {
               {/* ── Compliance ── */}
               {activeTab === "compliance" && (
                 <div className="space-y-4">
-                  <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                  <div className="flex items-start gap-3 p-3 border border-dashed border-foreground/50">
                     <Shield
                       size={15}
-                      className="text-blue-500 mt-0.5 shrink-0"
+                      className="text-foreground mt-0.5 shrink-0"
                     />
                     <p className="text-xs text-muted-foreground">
                       These fields are automatically fetched from the linked{" "}
@@ -1727,17 +1723,17 @@ export default function ProjectMaster() {
             </div>
 
             {/* Save / Cancel */}
-            <div className="p-4 border-t border-border flex justify-end gap-3">
+            <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: RULE }}>
               <button
                 onClick={resetForm}
-                className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                className={`${KEY_LINE} h-9 px-4`}
               >
                 Cancel
               </button>
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                className={`${KEY_INK} h-9 px-5`}
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
@@ -1759,30 +1755,28 @@ export default function ProjectMaster() {
         {/* Delete Confirmation */}
         {deleteConfirm !== null && createPortal(
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <Trash2 size={18} className="text-red-500" />
-                </div>
+            <div className="sheet-frame bg-card p-6 w-80" style={DIALOG_STYLE}>
+              <div className="pb-3 mb-4" style={{ borderBottom: RULE }}>
                 <div>
-                  <p className="font-heading font-semibold text-foreground">
-                    Delete this project?
+                  <p className={LBL}>Project</p>
+                  <p className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">
+                    Delete project
                   </p>
                   <p className="text-xs text-muted-foreground">
                     This action cannot be undone.
                   </p>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                  className={`${KEY_LINE} flex-1 h-9`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => deleteMutation.mutate(deleteConfirm)}
-                  className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600"
+                  className={`${KEY} flex-1 h-9 bg-destructive text-destructive-foreground border border-destructive`}
                 >
                   Delete
                 </button>
@@ -1795,13 +1789,11 @@ export default function ProjectMaster() {
         {/* Super Admin: Delete Project + ALL Transactions */}
         {cascadeTarget !== null && createPortal(
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
-            <div className="bg-card border border-red-500/40 rounded-xl p-6 w-[26rem] shadow-xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <ShieldAlert size={18} className="text-red-600" />
-                </div>
+            <div className="sheet-frame bg-card p-6 w-[26rem]" style={{ ...DIALOG_STYLE, border: "1px solid hsl(var(--destructive))" }}>
+              <div className="pb-3 mb-4" style={{ borderBottom: "1px solid hsl(var(--destructive))" }}>
                 <div>
-                  <p className="font-heading font-semibold text-foreground">
+                  <p className={`${LBL} !text-destructive flex items-center gap-1.5`}><ShieldAlert size={11} /> Super admin</p>
+                  <p className="font-heading text-base font-bold tracking-tight text-foreground mt-1">
                     Delete "{cascadeTarget.Name}" and ALL its transactions?
                   </p>
                   <p className="text-xs text-muted-foreground">
@@ -1812,15 +1804,15 @@ export default function ProjectMaster() {
                   </p>
                 </div>
               </div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">
-                Type the project name to confirm: <span className="font-mono text-foreground">{cascadeTarget.Name}</span>
+              <label className={`${LBL} block mb-1.5`}>
+                Type the project name to confirm: <span className="font-heading normal-case tracking-normal text-foreground">{cascadeTarget.Name}</span>
               </label>
               <input
                 autoFocus
                 value={cascadeConfirmText}
                 onChange={(e) => setCascadeConfirmText(e.target.value)}
                 placeholder="Type project name exactly"
-                className="w-full mb-4 px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                className={`${INPUT} mb-4 focus:!border-destructive`}
               />
               <div className="flex gap-3">
                 <button
@@ -1828,7 +1820,7 @@ export default function ProjectMaster() {
                     setCascadeTarget(null);
                     setCascadeConfirmText("");
                   }}
-                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                  className={`${KEY_LINE} flex-1 h-9`}
                 >
                   Cancel
                 </button>
@@ -1838,9 +1830,9 @@ export default function ProjectMaster() {
                     cascadeDeleteMutation.isPending
                   }
                   onClick={() => cascadeDeleteMutation.mutate()}
-                  className="flex-1 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`${KEY} flex-1 h-9 bg-destructive text-destructive-foreground border border-destructive`}
                 >
-                  {cascadeDeleteMutation.isPending ? "Deleting…" : "Delete Everything"}
+                  {cascadeDeleteMutation.isPending ? "Deleting…" : "Delete everything"}
                 </button>
               </div>
             </div>
@@ -1848,7 +1840,7 @@ export default function ProjectMaster() {
           document.body
         )}
 
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }

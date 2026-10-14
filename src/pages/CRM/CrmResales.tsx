@@ -26,8 +26,10 @@ const API = "/api/crm/resales";
 // by the new buyer) is.
 // BUY-BACK is us buying the property back at an agreed price; Finance pays it
 // and the property returns to stock to be sold again at a new price.
-// Both go through the Approval Inbox (CRM head, then Finance).
+// Both start as a draft and go to the Approval Inbox through "Send for approval"
+// on the case, once the steps before it are done.
 const statusColor: Record<string, string> = {
+  Draft: "text-muted-foreground bg-muted/60 border-border",
   Pending: "text-orange-600 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-900",
   Approved: "text-blue-600 bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-900",
   Completed: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900",
@@ -52,7 +54,7 @@ interface Deal {
 interface Holding {
   BookingId: number; BookingIds: number[]; BookingNos: string; UnitNo: string; Kind: string;
   ProjectName: string | null; BlockName: string | null; CustomerId: number; CustomerName: string | null; Mobile: string | null;
-  TotalValue: number; Paid: number; OpenDeal: { Id: number; Kind: string; Status: string } | null;
+  TotalValue: number; Paid: number; OpenDeal: { Id: number; Kind: string; Status: string } | null; Conveyed?: boolean;
 }
 
 const getJson = async (url: string) => {
@@ -70,6 +72,9 @@ const CrmResales: React.FC = () => {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Cancelling a case is confirmed, with a reason (kept on the case).
+  const [cancelFor, setCancelFor] = useState<Deal | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [form, setForm] = useState({ ...EMPTY });
   const [paying, setPaying] = useState<Deal | null>(null);
   const [pay, setPay] = useState({ BankLHeadId: "", PaymentMode: "" });
@@ -86,11 +91,11 @@ const CrmResales: React.FC = () => {
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
   const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => getJson("/api/crm/customers"), enabled: open, staleTime: 60_000 });
 
-  const activeCases = useMemo(() => deals.filter((d) => !["Completed", "Cancelled", "Rejected"].includes(d.Status)), [deals]);
+  const activeCases = useMemo(() => deals.filter((d) => !["Completed", "Cancelled"].includes(d.Status)), [deals]);
   const completedCases = useMemo(() => deals.filter((d) => d.Status === "Completed"), [deals]);
   const buybackCases = useMemo(() => deals.filter((d) => d.Kind === "BuyBack"), [deals]);
   const resaleCases = useMemo(() => deals.filter((d) => d.Kind === "Resale"), [deals]);
-  const cancelledCases = useMemo(() => deals.filter((d) => ["Cancelled", "Rejected"].includes(d.Status)), [deals]);
+  const cancelledCases = useMemo(() => deals.filter((d) => d.Status === "Cancelled"), [deals]);
 
   const filteredDeals = useMemo(() => {
     if (tab === "progress") return activeCases;
@@ -183,7 +188,9 @@ const CrmResales: React.FC = () => {
       header: "Status", accessorKey: "Status",
       cell: ({ row }) => (
         <span title={row.original.RejectionNote || undefined} className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[row.original.Status] || ""}`}>
-          {row.original.Status === "Pending" ? "Awaiting approval"
+          {row.original.Status === "Draft" ? "Being prepared"
+            : row.original.Status === "Rejected" ? "Sent back"
+            : row.original.Status === "Pending" ? "Awaiting approval"
             : row.original.Status === "Approved" && row.original.Kind === "BuyBack" && row.original.PayoutNewPaymentId ? "With Finance"
             : row.original.Status}
         </span>
@@ -193,7 +200,7 @@ const CrmResales: React.FC = () => {
       header: "", id: "actions",
       cell: ({ row }) => {
         const d = row.original;
-        const open = !!d.BookingIds && !["Completed", "Cancelled", "Rejected"].includes(d.Status);
+        const open = !!d.BookingIds && !["Completed", "Cancelled"].includes(d.Status);
         return (
           <div className="flex gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
             {d.BookingIds && (
@@ -202,7 +209,7 @@ const CrmResales: React.FC = () => {
                 {open ? "Open case" : "View case"}
               </button>
             )}
-            {open && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => act(d, "cancel", undefined, "Cancelled")}
+            {open && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => { setCancelFor(d); setCancelReason(""); }}
               className="px-2 h-7 text-[0.6875rem] rounded-lg border border-border text-muted-foreground hover:bg-muted">
               Cancel
             </button>}
@@ -322,7 +329,7 @@ const CrmResales: React.FC = () => {
                 onChange={(v) => setForm((f) => ({ ...f, FromBookingId: v }))}
                 placeholder="Choose a sold property"
                 searchPlaceholder="Search unit, booking or owner…"
-                options={holdings.filter((h) => !h.OpenDeal).map((h) => ({
+                options={holdings.filter((h) => !h.OpenDeal && !h.Conveyed).map((h) => ({
                   value: String(h.BookingId),
                   label: [h.UnitNo, h.Kind, h.CustomerName, h.BookingNos, h.ProjectName].filter(Boolean).join(" · "),
                 }))}
@@ -336,6 +343,7 @@ const CrmResales: React.FC = () => {
                   <span className="text-muted-foreground">Still due</span><span className="tabular-nums">{fmt(Math.max(0, holding.TotalValue - holding.Paid))}</span>
                 </div>
               )}
+              {!holding && <p className="mt-1 text-[0.6875rem] text-muted-foreground">Not listed? It has an open case, or its sale deed is registered — use Ownership Changes.</p>}
             </div>
 
             {form.Kind === "Resale" ? (
@@ -406,7 +414,7 @@ const CrmResales: React.FC = () => {
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setOpen(false)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
               <button onClick={save} disabled={saving} className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
-                {saving ? "Saving…" : "Send for approval"}
+                {saving ? "Saving…" : "Open case"}
               </button>
             </div>
           </div>
@@ -452,6 +460,21 @@ const CrmResales: React.FC = () => {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!cancelFor} onOpenChange={(o) => !o && setCancelFor(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Cancel {cancelFor?.Kind === "BuyBack" ? "buy-back" : "resale"} case #{cancelFor?.Id}?</DialogTitle></DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">The property stays with its current owner and the case stops. Its unsigned transfer deed is cancelled with it, and the buyer's draft application is closed. A signed or registered deed, a fee invoice or payment, or a payout with Finance has to be settled first — you'll be told which.</p>
+            <textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} rows={3} placeholder="Why is it being cancelled?"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background" />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setCancelFor(null)} className="h-9 px-4 rounded-lg border border-border hover:bg-muted">Keep it</button>
+              <button disabled={!cancelReason.trim()} onClick={async () => { const d = cancelFor!; setCancelFor(null); await act(d, "cancel", { reason: cancelReason.trim() }, "Cancelled"); }}
+                className="h-9 px-4 rounded-lg bg-red-600 text-white disabled:opacity-40">Cancel the case</button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </CrmShell>

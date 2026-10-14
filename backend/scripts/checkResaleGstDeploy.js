@@ -1,5 +1,6 @@
 // Read-only check after deploying Resale (cases, transfer deeds, ownership
-// changes) and the refund credit notes (migrations 557-565). Changes nothing.
+// changes), the refund credit notes and the approval self-approval setting
+// (migrations 557-571). Changes nothing.
 //   node scripts/checkResaleGstDeploy.js
 const fs = require("fs");
 const path = require("path");
@@ -18,16 +19,30 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
   const applied = new Set((await q("SELECT name FROM dbo.__Migrations")).map((r) => r.name));
   const pending = files.filter((f) => !applied.has(f)).sort();
   line(!pending.length, pending.length ? `${pending.length} not applied: ${pending.join(", ")}` : `all ${files.length} applied`);
-  for (const t of ["CrmTransferDeed", "CrmOwnershipChange", "CrmOwnershipChangeLog", "CrmGstNote"]) {
+  for (const t of ["CrmTransferDeed", "CrmOwnershipChange", "CrmOwnershipChangeLog", "CrmGstNote", "ApprovalRaiserRule"]) {
     const n = (await q(`SELECT OBJECT_ID('dbo.${t}', 'U') AS id`))[0].id;
     line(!!n, `table ${t}${n ? "" : " missing"}`);
   }
 
+  const ck = (await q("SELECT definition FROM sys.check_constraints WHERE name = 'CK_CrmUnitResale_Status'"))[0];
+  const draftOk = !!ck && /Draft/.test(ck.definition);
+  line(draftOk, `resale case can start as a draft (being prepared)${draftOk ? "" : " — migration 569 not applied"}`);
+
   console.log("\n== Approval workflows (Approval Setup) ==");
   for (const m of ["crm-transfer-deeds", "crm-transfer-deed-date", "crm-ownership-changes", "crm-resales", "crm-credit-notes", "crm-credit-note-cancel"]) {
     const w = await q(`SELECT TOP 1 Name, active, LevelsData FROM dbo.ApprovalWorkflows WHERE modules LIKE N'%"${m}"%'`);
-    line(!!w.length && w[0].active, w.length ? `${m}: "${w[0].Name}"${w[0].active ? "" : " (inactive)"}${w[0].LevelsData ? "" : " — no levels set"}` : `${m}: no workflow — set it up in Approval Setup`);
+    // No workflow is not a fault: the approval still works with one level —
+    // any admin / super admin / dba, or anyone with Approval Inbox edit rights.
+    if (!w.length) console.log(`INFO ${m}: no rule of its own — one approval by an admin (or anyone allowed in the Approval Inbox); add levels in Approval Setup if you want them`);
+    else line(w[0].active, `${m}: "${w[0].Name}"${w[0].active ? "" : " (inactive — the default single approval applies)"}${w[0].LevelsData ? "" : " — no levels set"}`);
   }
+
+  console.log("\n== Who may approve their own request (Approval Setup) ==");
+  if ((await q("SELECT OBJECT_ID('dbo.ApprovalRaiserRule', 'U') AS id"))[0].id) {
+    for (const r of await q("SELECT Module, RaiserMayApprove, UpdatedBy FROM dbo.ApprovalRaiserRule ORDER BY Module")) {
+      console.log(`   ${r.Module}: ${r.RaiserMayApprove ? "the raiser may approve" : "someone else has to"} (set by ${r.UpdatedBy || "?"})`);
+    }
+  } else console.log("   not set up yet — migration 571 not applied");
 
   console.log("\n== Page access (Role Rights) ==");
   for (const k of ["crm-transfer-deeds", "crm-ownership-changes"]) {
@@ -44,11 +59,14 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
     const miss = [!c.address && "address", !c.state && "state"].filter(Boolean);
     line(!miss.length, `${c.name} (${c.bookings} bookings)${miss.length ? ` — missing ${miss.join(", ")} (Company master)` : ""}${c.gst_no ? "" : " · no GSTIN (right only if it isn't GST-registered — then it shouldn't charge GST)"}`);
   }
-  // Place of supply comes from the project's GSTIN state code (the Project
-  // master has no separate state field), else a typed state.
-  const projNoPlace = await q(`SELECT DISTINCT p.name FROM dbo.enterprise p JOIN dbo.CrmBooking b ON b.ProjectId = p.id AND b.IsActive = 1
-    WHERE p.business_type = 'P' AND ISNULL(p.gst_no, '') = '' AND ISNULL(p.state, '') = ''`);
-  line(!projNoPlace.length, projNoPlace.length ? `projects with no GSTIN (place of supply falls back to the company's state — Project master → Compliance → GSTIN): ${projNoPlace.map((p) => p.name).join(", ")}` : "every project's place of supply is known (from its GSTIN)");
+  // Place of supply is the company's GSTIN state: projects carry no GSTIN of
+  // their own (routes/projectMaster.js — GST lives on the parent company), so
+  // there is nothing to fill per project. A registered company's GSTIN must be valid.
+  const { checkGstin, STATE_CODES } = require("../services/gstin");
+  for (const c of comps.filter((x) => x.gst_no)) {
+    const g = checkGstin(c.gst_no);
+    line(!g.error, g.error ? `${c.name}: ${g.error} (Company master)` : `${c.name}: GSTIN ${g.value} — place of supply ${STATE_CODES[g.stateCode] || g.stateCode}`);
+  }
 
   console.log("\n== Refunds paid before credit notes existed (issue on request: Refunds → Credit note) ==");
   const old = await q(`SELECT r.RefundNo, r.NetAmount, r.PaidAt, b.BookingNo FROM dbo.CrmRefund r JOIN dbo.CrmBooking b ON b.Id = r.BookingId
@@ -58,7 +76,7 @@ const line = (ok, msg) => console.log(`${ok ? "OK  " : "FIX "} ${msg}`);
 
   console.log("\n== Live work in the new pages ==");
   const live = (await q(`SELECT
-    (SELECT COUNT(*) FROM dbo.CrmUnitResale WHERE IsActive = 1 AND Status IN ('Pending', 'Approved')) AS openCases,
+    (SELECT COUNT(*) FROM dbo.CrmUnitResale WHERE IsActive = 1 AND Status IN ('Draft', 'Pending', 'Approved', 'Rejected')) AS openCases,
     (SELECT COUNT(*) FROM dbo.CrmTransferDeed WHERE IsActive = 1 AND Status NOT IN ('Registered', 'Cancelled')) AS openDeeds,
     (SELECT COUNT(*) FROM dbo.CrmOwnershipChange WHERE IsActive = 1 AND Status IN ('Draft', 'Pending', 'Rejected')) AS openChanges`))[0];
   console.log(`   open resale cases ${live.openCases} · deeds in progress ${live.openDeeds} · ownership changes open ${live.openChanges}`);

@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 // v5 (booking-wise cards): one card per Booking, not per receipt — a
 // booking with 3 receipts used to render as 3 separate cards; now it's one
@@ -391,6 +392,8 @@ const CrmMoneyReceipts: React.FC = () => {
   const bookingIdParam = searchParams.get("bookingId") || undefined;
 
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => patchFilters({ search: v }));
   const [filters, setFilters] = useState<ReceiptListFilters>(EMPTY_FILTERS);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -604,7 +607,7 @@ const CrmMoneyReceipts: React.FC = () => {
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") patchFilters({ search: searchInput }); }}
-                placeholder="Search receipt no, booking, applicant... (Enter to search)"
+                placeholder="Search receipt no, booking, applicant..."
                 className="w-full pl-7 pr-3 py-1.5 text-xs border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
 

@@ -27,6 +27,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
@@ -179,6 +180,8 @@ export default function CrmBookingAmendments() {
   } | null>(null);
   const [notes, setNotes] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -430,7 +433,7 @@ export default function CrmBookingAmendments() {
         <div className="relative flex-1 min-w-48">
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search by booking, customer... (Enter to search)"
+            placeholder="Search by booking, customer..."
             className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />

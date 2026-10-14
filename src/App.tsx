@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useState, useEffect } from "react";
 import { RouteErrorBoundary } from "./components/ErrorBoundary";
 import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
-import { Toaster } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { SystemUpdateBanner } from "./components/SystemUpdateBanner";
 import { NewBuildWatcher } from "./components/NewBuildWatcher";
 import { MaintenanceWatcher } from "./components/MaintenanceWatcher";
@@ -2686,7 +2686,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Toaster richColors position="top-right" closeButton />
+      <Toaster position="top-right" closeButton />
       <SystemUpdateBanner />
       <NewBuildWatcher />
       {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.

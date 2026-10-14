@@ -89,7 +89,7 @@ function missing(o) {
   if (!o.ToCustomerId) out.push("the new owner");
   else {
     if (!o.ToPan) out.push("the new owner's PAN (Customers)");
-    if (!o.ToAadhaar) out.push("the new owner's Aadhaar (Customers)");
+    if (!o.ToAadhaar && require("./crmResaleCase").isIndividualPan(o.ToPan)) out.push("the new owner's Aadhaar (Customers)");
     if (!o.ToAddress) out.push("the new owner's address (Customers)");
     if (!o.ToApplicationId) out.push("the new owner's application (open it here, then add any co-owners on it)");
   }

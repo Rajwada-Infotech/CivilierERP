@@ -29,6 +29,7 @@ import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -729,6 +730,8 @@ const CrmApplication: React.FC = () => {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");

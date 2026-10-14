@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { useTheme, THEME_DOTS, type Theme } from "@/contexts/ThemeContext";
+import { NAV_PANEL_CSS } from "./navPanelStyles";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
 
@@ -21,40 +22,41 @@ function useClickOutside(
 
 // ─── ThemeOptions ─────────────────────────────────────────────────────────────
 
+// The themes as numbered rows on the sheet, each with a square swatch of its colour; the one in use is tagged.
 const ThemeOptions: React.FC<{
   currentTheme: Theme;
   setTheme: (t: Theme) => void;
   onClose: () => void;
 }> = ({ currentTheme, setTheme, onClose }) => (
   <>
-    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
-      Appearance
-    </p>
-    {(
-      Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]
-    ).map(([t, { bg, label }]) => (
-      <button
-        key={t}
-        onClick={() => {
-          setTheme(t);
-          onClose();
-        }}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
-          currentTheme === t
-            ? "bg-primary/10 text-primary"
-            : "text-foreground hover:bg-muted"
-        }`}
-      >
-        <span
-          className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50"
-          style={{ backgroundColor: bg }}
-        />
-        {label}
-        {currentTheme === t && (
-          <span className="ml-auto text-primary text-xs">✓</span>
-        )}
-      </button>
-    ))}
+    <div className="np-head">
+      <div className="min-w-0">
+        <p className="np-label">CivilierERP · Appearance</p>
+        <p className="np-title">Theme</p>
+      </div>
+    </div>
+    <div className="np-list">
+      {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }], i) => {
+        const current = currentTheme === t;
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => {
+              setTheme(t);
+              onClose();
+            }}
+            aria-pressed={current}
+            className="np-row center"
+          >
+            <span className="np-num">{String(i + 1).padStart(2, "0")}</span>
+            <span className="np-swatch" style={{ backgroundColor: bg }} />
+            <span className="np-name">{label}</span>
+            {current ? <span className="np-tag">In use</span> : <span />}
+          </button>
+        );
+      })}
+    </div>
   </>
 );
 
@@ -86,6 +88,7 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
 
   return (
     <div ref={ref} className="relative shrink-0">
+      <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
       {/* Trigger */}
       <button
         onClick={onToggle}
@@ -97,8 +100,8 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
 
       {/* Panel */}
       <div
-        className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right right-0 w-48 p-1.5
-          ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
+        className={`np-sheet absolute top-full mt-3 z-50 transition-opacity duration-200 right-0 w-56
+          ${open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
       >
         <ThemeOptions
           currentTheme={theme}

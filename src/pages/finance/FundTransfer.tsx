@@ -1503,13 +1503,13 @@ export default function FundTransfer() {
             {/* Amount, date, narration */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5">
-                <label className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">
+                <label className="flex items-center gap-1.5 h-4 leading-none text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">
                   <Calendar size={11} /> Date *
                 </label>
                 <DateInput className="h-9" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
+                <label className="flex items-center gap-1.5 h-4 leading-none text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading">Amount *</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-heading tabular-nums pointer-events-none">₹</span>
                   <Input type="number" min={0} step="0.01" className="h-9 font-heading tabular-nums pl-7" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />

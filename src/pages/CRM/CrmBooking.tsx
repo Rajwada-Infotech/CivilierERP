@@ -35,6 +35,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { DateInput } from "@/components/ui/date-input";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -243,6 +244,8 @@ const CrmBooking: React.FC = () => {
   const viewFilter = sp.get("view") || "";
 
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
@@ -880,7 +883,7 @@ const CrmBooking: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search name, booking no, unit... (Enter to search)"
+              placeholder="Search name, booking no, unit..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
           <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
