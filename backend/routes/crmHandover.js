@@ -116,7 +116,7 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id AND h.Status <> '${CrmStatus.CANCELLED}')
       ORDER BY b.BookingNo
     `);
 
@@ -273,7 +273,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "A handover already exists for this booking" });
+      return res.status(409).json({ error: "This booking already has a handover in progress or completed — a new one can be scheduled only after cancelling it" });
     console.error("[crm-handover] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }

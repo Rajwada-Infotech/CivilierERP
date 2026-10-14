@@ -179,7 +179,9 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
         LEFT JOIN dbo.CrmAgreement ag ON ag.BookingId = b.Id
-        LEFT JOIN dbo.CrmHandover h ON h.BookingId = b.Id
+        -- the current handover: a live / completed one before a cancelled one (migration 572)
+        OUTER APPLY (SELECT TOP 1 x.* FROM dbo.CrmHandover x WHERE x.BookingId = b.Id
+                     ORDER BY CASE WHEN x.Status = 'Cancelled' THEN 1 ELSE 0 END, x.Id DESC) h
         LEFT JOIN dbo.CrmLegalMilestone lm ON lm.BookingId = b.Id
         LEFT JOIN dbo.CrmPrePossession pp ON pp.BookingId = b.Id
         WHERE a.CustomerId = @cid

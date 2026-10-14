@@ -324,7 +324,7 @@ router.get("/timeline", async (req, res) => {
                CustomerApprovalStatus, CustomerApprovedAt, CustomerRecheckRemarks
         FROM dbo.CrmSalesDeed WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Cancelled'
       `),
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 Status, ScheduledDate, ActualHandoverDate FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1 Id, NoticeNo, Status, OfferedDate, ResponseDeadline, SentAt, AcknowledgedAt, DisputedAt, DisputeReason
         FROM dbo.CrmPossessionNotice WHERE BookingId = @bid AND Status <> 'Draft' ORDER BY CreatedAt DESC
