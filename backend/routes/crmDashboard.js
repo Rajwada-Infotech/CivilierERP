@@ -129,7 +129,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       FROM dbo.CrmBooking b
       WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}' ${projBookingCond}
         AND (
-          NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement a WHERE a.BookingId = b.Id)
+          NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement a WHERE a.BookingId = b.Id AND a.Status <> 'Cancelled')
           OR EXISTS (
             SELECT 1 FROM dbo.CrmAgreement a
             WHERE a.BookingId = b.Id AND a.Status = '${CrmStatus.DRAFT}'

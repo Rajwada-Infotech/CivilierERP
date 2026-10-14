@@ -254,7 +254,7 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
       WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status <> 'Cancelled')
       ORDER BY b.BookingNo
     `);
 
@@ -330,7 +330,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-agreements", "view"), as
     const bid = parseInt(req.params.bookingId, 10);
     if (!Number.isFinite(bid)) return res.status(400).json({ error: "Invalid bookingId" });
     const idRow = await pool.request().input("bid", sql.Int, bid)
-      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (!idRow.recordset[0]) return res.json(null);
     const detail = await buildAgreementDetail(pool, idRow.recordset[0].Id);
     res.json(detail);
@@ -532,7 +532,7 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "An agreement already exists for this booking" });
+      return res.status(409).json({ error: "This booking already has an agreement in progress or done — a new one can be made only after cancelling it" });
     console.error("[crm-agreements] POST error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }

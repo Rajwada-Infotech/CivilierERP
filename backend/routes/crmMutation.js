@@ -210,7 +210,7 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const reg = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id, Status, RegistrationNo, SubRegistrarOffice FROM dbo.CrmRegistry WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id, Status, RegistrationNo, SubRegistrarOffice FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (!reg.recordset.length || reg.recordset[0].Status !== "Completed") {
       return res.status(400).json({ error: "Mutation requires the Sale Deed Registry to be Completed — the deed must be officially registered at the Sub-Registrar Office before mutation can be applied" });
     }
