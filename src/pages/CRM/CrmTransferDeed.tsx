@@ -138,11 +138,6 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
   const regCopy = docs.find((x) => x.DocumentType === "RegisteredDeed");
   const papers = docs.filter((x) => x.DocumentType !== "RegisteredDeed");
   const papersEditable = canEdit && ["Draft", "UnderReview"].includes(d.Status);
-  // Whoever uploads a paper for the company can't also verify it (the server
-  // refuses) — say so instead of offering the buttons. Portal uploads are the
-  // customer's, so any staff member may check them.
-  const myId = (() => { try { return Number(JSON.parse(sessionStorage.getItem("user") || "{}").id) || 0; } catch { return 0; } })();
-  const uploadedByMe = (x: any) => x.UploadedByType !== "Portal" && !!x.UploadedBy && Number(x.UploadedBy) === myId;
 
   // ── Stepper (same pattern as the Sale Deed page) ──
   const stepper = [
@@ -259,8 +254,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
                     </div>
                     <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border ${docChip(x.Status)}`}>{docWord[x.Status] || x.Status}</span>
                     {x.FileName && <button className={ghost} onClick={() => view(`documents/${x.Id}/file`)}><Eye size={12} /> View</button>}
-                    {papersEditable && x.Status === "Uploaded" && uploadedByMe(x) && <span className="text-[0.6875rem] text-muted-foreground">You uploaded it — someone else verifies</span>}
-                    {papersEditable && x.Status === "Uploaded" && !uploadedByMe(x) && <>
+                    {papersEditable && x.Status === "Uploaded" && <>
                       <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={!!busy} onClick={() => call(pk, `documents/${x.Id}/review`, { decision: "Verified" }, "Verified")}>Verify</button>
                       <button className={ghost} disabled={!!busy} onClick={() => reject(pk, `documents/${x.Id}/review`, "Reject this document")}>Reject</button>
                     </>}

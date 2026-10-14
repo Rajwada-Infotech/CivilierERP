@@ -172,9 +172,7 @@ async function reviewDocument(db, id, docId, decision, remarks, actorUserId) {
   if (slot.Status !== "Uploaded") throw new DeedError("Only an uploaded document can be verified or rejected", 409);
   if (!["Verified", "Rejected"].includes(decision)) throw new DeedError("decision must be Verified or Rejected");
   if (decision === "Rejected" && !String(remarks || "").trim()) throw new DeedError("Say why it's rejected");
-  if (slot.UploadedByType !== "Portal" && slot.UploadedBy && Number(slot.UploadedBy) === Number(actorUserId)) {
-    throw new DeedError("You uploaded this document, so someone else has to verify it.", 403);
-  }
+  // Whoever uploaded it may verify it too (business decision 2026-10-14).
   await db.request().input("s", sql.Int, docId).input("st", sql.NVarChar(20), decision).input("r", sql.NVarChar(1000), remarks || null).input("u", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmTransferDeedDocument SET Status = @st, Remarks = ISNULL(@r, Remarks), VerifiedBy = @u, VerifiedAt = SYSDATETIME() WHERE Id = @s");
   await log(db, id, decision === "Verified" ? "Document verified" : "Document rejected", { party: slot.Party, userId: actorUserId, remarks: [slot.Label, remarks].filter(Boolean).join(" — ") });
@@ -489,7 +487,7 @@ async function verifyRegisteredCopy(db, id, approve, remarks, actorUserId) {
   const doc = (await db.request().input("d", sql.Int, id)
     .query("SELECT Id, Status, UploadedBy FROM dbo.CrmTransferDeedDocument WHERE DeedId = @d AND DocumentType = N'RegisteredDeed' AND IsActive = 1")).recordset[0];
   if (!doc || doc.Status !== "Uploaded") throw new DeedError("Upload the registered copy first", 409);
-  if (doc.UploadedBy && Number(doc.UploadedBy) === Number(actorUserId)) throw new DeedError("You uploaded this document, so someone else has to verify it.", 403);
+  // Whoever uploaded it may verify it too (business decision 2026-10-14).
   if (!approve && !String(remarks || "").trim()) throw new DeedError("Say why it's rejected");
   await db.request().input("s", sql.Int, doc.Id).input("st", sql.NVarChar(20), approve ? "Verified" : "Rejected").input("r", sql.NVarChar(1000), remarks || null).input("u", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmTransferDeedDocument SET Status = @st, Remarks = ISNULL(@r, Remarks), VerifiedBy = @u, VerifiedAt = SYSDATETIME() WHERE Id = @s");
@@ -530,7 +528,7 @@ async function cancelDeed(db, id, remarks, actorUserId) {
 async function deedState(db, id) {
   const d = await loadDeed(db, id);
   const docs = (await db.request().input("d", sql.Int, id).query(`
-    SELECT x.Id, x.DocumentType, x.Label, x.Party, x.IsMandatory, x.Status, x.FileName, x.Remarks, x.UploadedByType, x.UploadedBy, x.UploadedAt, x.VerifiedAt,
+    SELECT x.Id, x.DocumentType, x.Label, x.Party, x.IsMandatory, x.Status, x.FileName, x.Remarks, x.UploadedByType, x.UploadedAt, x.VerifiedAt,
            u.name AS UploadedByName, v.name AS VerifiedByName
     FROM dbo.CrmTransferDeedDocument x LEFT JOIN dbo.Users u ON u.id = x.UploadedBy LEFT JOIN dbo.Users v ON v.id = x.VerifiedBy
     WHERE x.DeedId = @d AND x.IsActive = 1 ORDER BY CASE x.Party WHEN N'Company' THEN 0 WHEN N'Seller' THEN 1 ELSE 2 END, x.Id`)).recordset;
