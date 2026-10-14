@@ -15,7 +15,6 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
@@ -42,8 +41,8 @@ interface BrokerageListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchBrokerageList(filters: BrokerageListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchBrokerageList(filters: BrokerageListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.search) params.set("search", filters.search);
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
@@ -92,6 +91,7 @@ const CrmBrokerage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
@@ -101,8 +101,8 @@ const CrmBrokerage: React.FC = () => {
     [search, cpb]
   );
   const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-brokerage", listFilters, page],
-    queryFn: () => fetchBrokerageList(listFilters, page),
+    queryKey: ["crm-brokerage", listFilters, page, pageSize],
+    queryFn: () => fetchBrokerageList(listFilters, page, pageSize),
     staleTime: 30_000,
   });
   const records = listResult?.rows ?? [];
@@ -343,14 +343,13 @@ const CrmBrokerage: React.FC = () => {
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
-      <DataTable
+      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
         data={records}
         columns={columns}
         loading={isLoading}
         emptyMessage="No brokerage records"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
         <DialogContent accent="crm" className="max-w-md">

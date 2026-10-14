@@ -16,7 +16,6 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
@@ -54,8 +53,8 @@ const PAY_MODES = ["NEFT", "RTGS", "IMPS", "UPI", "Cheque"];
 const fmt = (n: number | null | undefined) => (n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—");
 
 interface Filters { search: string; companyId: string; projectId: string; blockId: string; status: string }
-async function fetchList(f: Filters, page: number): Promise<{ rows: any[]; total: number }> {
-  const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchList(f: Filters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const p = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (f.search) p.set("search", f.search);
   if (f.companyId) p.set("companyId", f.companyId);
   if (f.projectId) p.set("projectId", f.projectId);
@@ -471,6 +470,7 @@ const CrmRefunds: React.FC = () => {
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [status, setStatus] = useState<string>("All");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [showNew, setShowNew] = useState(false);
   const [financeDialog, setFinanceDialog] = useState<any | null>(null);
   const [financeBank, setFinanceBank] = useState("");
@@ -478,8 +478,8 @@ const CrmRefunds: React.FC = () => {
 
   const filters = useMemo<Filters>(() => ({ search, status, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }), [search, status, cpb]);
   const { data: result, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
-    queryKey: ["crm-refunds", filters, page],
-    queryFn: () => fetchList(filters, page),
+    queryKey: ["crm-refunds", filters, page, pageSize],
+    queryFn: () => fetchList(filters, page, pageSize),
     staleTime: 20_000,
   });
   const rows = result?.rows ?? [];
@@ -595,10 +595,9 @@ const CrmRefunds: React.FC = () => {
           <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
         </div>
 
-        <DataTable data={rows} columns={columns} searchable={false} loading={isLoading}
+        <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }} data={rows} columns={columns} searchable={false} loading={isLoading}
           emptyMessage="No refunds yet. Cancelling a booking auto-creates a draft refund; you can also raise one for an overpayment or manually."
           className="rounded-xl border border-border overflow-hidden bg-card" />
-        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
         {showNew && <NewRefundDialog onClose={() => setShowNew(false)} onDone={invalidate} />}
 

@@ -32,7 +32,6 @@ import { VillaOffersPanel } from "@/components/crm/VillaOffersPanel";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { DateInput } from "@/components/ui/date-input";
@@ -140,8 +139,8 @@ interface BookingListFilters {
 // Main-list fetch: server-side search/status/Company/Project/Block +
 // pagination. Kept entirely separate from fetchBookings() above, which stays
 // exactly as-is for the applicationId-scoped deep-link/legacy callers.
-async function fetchBookingsList(filters: BookingListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ includeCancelled: "1", page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchBookingsList(filters: BookingListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ includeCancelled: "1", page: String(page), pageSize: String(pageSize) });
   if (filters.search) params.set("search", filters.search);
   if (filters.status !== "All") params.set("status", filters.status);
   if (filters.companyId) params.set("companyId", filters.companyId);
@@ -251,6 +250,7 @@ const CrmBooking: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState("All");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
   const [saving, setSaving] = useState(false);
@@ -278,10 +278,10 @@ const CrmBooking: React.FC = () => {
   // main list. Only the main list (no appFilter) goes through the new
   // server-side search/status/Company/Project/Block + pagination path.
   const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-bookings", appFilter, listFilters, page],
+    queryKey: ["crm-bookings", appFilter, listFilters, page, pageSize],
     queryFn: async () => {
       if (appFilter) return { rows: await fetchBookings(appFilter), total: 0 };
-      return fetchBookingsList(listFilters, page);
+      return fetchBookingsList(listFilters, page, pageSize);
     },
     staleTime: 30_000,
   });
@@ -898,7 +898,7 @@ const CrmBooking: React.FC = () => {
           <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
-        <DataTable
+        <DataTable serverPagination={!appFilter ? { page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } } : undefined}
           data={bookings}
           columns={bookingColumns}
           searchable={false}
@@ -906,7 +906,6 @@ const CrmBooking: React.FC = () => {
           emptyMessage="No bookings found"
           className="border-0"
         />
-        {!appFilter && <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}
       </div>
 
       {/* New Booking Dialog — manual fallback, still requires a real Application.

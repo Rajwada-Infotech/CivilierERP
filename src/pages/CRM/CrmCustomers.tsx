@@ -17,7 +17,6 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
@@ -395,6 +394,7 @@ const CrmCustomers: React.FC = () => {
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -513,8 +513,8 @@ const CrmCustomers: React.FC = () => {
     return (v: T) => { setter(v); setPage(1); };
   }
   const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-customers", listFilters, page],
-    queryFn: () => fetchCustomersList(listFilters, page),
+    queryKey: ["crm-customers", listFilters, page, pageSize],
+    queryFn: () => fetchCustomersList(listFilters, page, pageSize),
     staleTime: 30_000,
   });
   const customers = listResult?.rows ?? [];
@@ -747,7 +747,7 @@ const CrmCustomers: React.FC = () => {
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
-      <DataTable
+      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
         data={filtered}
         columns={customerColumns}
         searchable={false}
@@ -755,7 +755,6 @@ const CrmCustomers: React.FC = () => {
         emptyMessage="No customers found"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}

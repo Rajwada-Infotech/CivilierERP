@@ -25,7 +25,6 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
@@ -127,10 +126,10 @@ interface ApplicationListFilters {
 // dropdown (New Booking, Unit/Parking Matrix, Communication Log), which
 // still calls GET / with no ?page= at all and keeps getting the original
 // bare-array/Converted-excluded-by-default behavior untouched.
-async function fetchApplicationsList(filters: ApplicationListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+async function fetchApplicationsList(filters: ApplicationListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
   const q = new URLSearchParams();
   q.set("page", String(page));
-  q.set("pageSize", String(PAGE_SIZE));
+  q.set("pageSize", String(pageSize));
   if (filters.search) q.set("search", filters.search);
   if (filters.status && filters.status !== "All") q.set("status", filters.status);
   if (filters.displayStage) q.set("displayStage", filters.displayStage);
@@ -738,6 +737,7 @@ const CrmApplication: React.FC = () => {
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState(1);
   // Furthest step this application has actually reached — persisted
@@ -801,8 +801,8 @@ const CrmApplication: React.FC = () => {
 
   const listFilters: ApplicationListFilters = { search, status: statusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
   const { data: listData, isLoading } = useQuery({
-    queryKey: ["crm-apps", listFilters, page],
-    queryFn: () => fetchApplicationsList(listFilters, page),
+    queryKey: ["crm-apps", listFilters, page, pageSize],
+    queryFn: () => fetchApplicationsList(listFilters, page, pageSize),
     placeholderData: (prev) => prev,
   });
   const apps = listData?.rows || [];
@@ -2114,7 +2114,7 @@ const CrmApplication: React.FC = () => {
             so DataTable's own global search is disabled to avoid a second,
             redundant search box. `apps` is now the current page's already
             server-filtered rows, not a client-side-filtered full list. */}
-        <DataTable
+        <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
           data={apps}
           columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
           searchable={false}
@@ -2123,7 +2123,6 @@ const CrmApplication: React.FC = () => {
           className="border-0"
         />
         <div className="px-3.5">
-          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </div>
       </div>
 
