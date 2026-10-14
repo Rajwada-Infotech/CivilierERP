@@ -287,7 +287,7 @@ export function ApprovalActions({
           ) : (
             <Button
               size="sm"
-              className={sheet ? `${SK} bg-foreground text-card border border-foreground hover:bg-foreground/85` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"}
+              className={sheet ? `${SK} bg-emerald-600 text-white border border-emerald-600 hover:bg-emerald-700` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"}
               disabled={loading !== null}
               onClick={() => handleAction("approve")}
             >
@@ -302,7 +302,7 @@ export function ApprovalActions({
 
           <Button
             size="sm"
-            className={sheet ? `${SK} bg-card text-destructive border border-destructive hover:bg-destructive/10` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"}
+            className={sheet ? `${SK} bg-red-600 text-white border border-red-600 hover:bg-red-700` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"}
             disabled={loading !== null}
             onClick={() => setRejectOpen(true)}
           >

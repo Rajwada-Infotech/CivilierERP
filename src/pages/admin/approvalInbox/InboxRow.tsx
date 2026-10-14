@@ -281,12 +281,12 @@ export const InboxRow: React.FC<{
           </p>
           <div className="flex items-center gap-1.5">
             {approvedBy && (
-              <span className={`${TAG} text-foreground border-foreground truncate max-w-[120px]`}>
+              <span className={`${TAG} text-emerald-500 border-emerald-500 truncate max-w-[120px]`}>
                 <CheckCircle2 size={9} /> {approvedBy}
               </span>
             )}
             {rejectedBy && (
-              <span className={`${TAG} text-destructive border-destructive truncate max-w-[120px]`}>
+              <span className={`${TAG} text-red-500 border-red-500 truncate max-w-[120px]`}>
                 <XCircle size={9} /> {rejectedBy}
               </span>
             )}
@@ -422,12 +422,12 @@ export const InboxRow: React.FC<{
         <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Approved / Rejected by</span>
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
-            <span className={`${TAG} text-foreground border-foreground truncate max-w-[130px]`}>
+            <span className={`${TAG} text-emerald-500 border-emerald-500 truncate max-w-[130px]`}>
               <CheckCircle2 size={9} /> {approvedBy}
             </span>
           )}
           {rejectedBy && (
-            <span className={`${TAG} text-destructive border-destructive truncate max-w-[130px]`}>
+            <span className={`${TAG} text-red-500 border-red-500 truncate max-w-[130px]`}>
               <XCircle size={9} /> {rejectedBy}
             </span>
           )}
