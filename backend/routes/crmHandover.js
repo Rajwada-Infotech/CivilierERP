@@ -127,7 +127,7 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
       // Sub-Registrar) — mandatory for every booking, regardless of
       // project type.
       const agr = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+        .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
       if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
 
       // 2. Possession Notice must be Acknowledged by the customer
@@ -209,7 +209,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     // Mandatory for every booking, regardless of project type.
     const agr = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
-      .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);
+      .query(`SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC`);
     if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "Handover requires the Agreement for Sale to be Registered (AFS registered at Sub-Registrar) first" });
     }

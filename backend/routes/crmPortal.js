@@ -313,7 +313,7 @@ router.get("/timeline", async (req, res) => {
                ProposedDate, ProposedDateStatus, AgreementDate, DateApprovalStatus, LastRecheckRemarks, SentToCustomerAt,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id) AS DocumentCount,
                (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = CrmAgreement.Id AND d.Status IN ('Requested','${CrmStatus.REJECTED}')) AS DocumentsNeedingAction
-        FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL
+        FROM dbo.CrmAgreement WHERE BookingId = @bid AND SentToCustomerAt IS NOT NULL AND Status <> 'Cancelled'
       `),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT MilestoneNo, MilestoneName, DueDate, AmountDue, AmountPaid, Status
@@ -520,7 +520,7 @@ router.get("/agreement", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     // Not having an agreement shared yet is a normal, expected state — 200 + null.
     res.json(result.recordset[0] || null);
@@ -698,7 +698,7 @@ router.post("/agreement/respond", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement pending your response" });
     if (ag.recordset[0].SeniorApprovalStatus !== CrmStatus.APPROVED) {
@@ -821,7 +821,7 @@ router.post("/agreement/propose-date", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
     const agreementRow = ag.recordset[0];
@@ -878,7 +878,7 @@ router.post("/agreement/date/accept", async (req, res) => {
       FROM dbo.CrmAgreement ag
       JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL
+      WHERE b.ApplicationId = @aid AND ag.SentToCustomerAt IS NOT NULL AND ag.Status <> 'Cancelled'
     `);
     if (!ag.recordset.length) return res.status(404).json({ error: "No agreement found" });
     const agreementRow = ag.recordset[0];

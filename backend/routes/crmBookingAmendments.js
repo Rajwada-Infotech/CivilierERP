@@ -204,7 +204,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     // Legal visibility — this booking's financial details just changed
     // after its Agreement documents were already under verification.
     const agreement = await pool.request().input("bid", sql.Int, reqRow.BookingId)
-      .query("SELECT Id, AgreementNo, LegalExecutiveId FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id, AgreementNo, LegalExecutiveId FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (agreement.recordset.length && agreement.recordset[0].LegalExecutiveId) {
       const ag = agreement.recordset[0];
       await emitNotification(pool, ag.LegalExecutiveId, "crm_booking_amendment_approved",
