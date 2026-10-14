@@ -21,6 +21,7 @@ import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -2179,6 +2180,8 @@ const CrmWelcomeCall: React.FC = () => {
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => { setSearch(v); setHistoryPage(1); });
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [historyPage, setHistoryPage] = useState(1);
@@ -2353,7 +2356,7 @@ const CrmWelcomeCall: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setHistoryPage(1); } }}
-              placeholder="Search by customer or booking no... (Enter to search)"
+              placeholder="Search by customer or booking no..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
           <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setHistoryPage(1); }} />

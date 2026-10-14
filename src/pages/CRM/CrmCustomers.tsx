@@ -22,6 +22,7 @@ import { SearchableSelect } from "@/components/SearchableSelect";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { CrmCustomerImportDialog } from "./CrmCustomerImportDialog";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -389,6 +390,8 @@ const CrmCustomers: React.FC = () => {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -738,7 +741,7 @@ const CrmCustomers: React.FC = () => {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search name, mobile, PAN, customer no... (Enter to search)"
+            placeholder="Search name, mobile, PAN, customer no..."
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
         </div>
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
