@@ -70,7 +70,7 @@ export function ModuleGroupSelector({
                 <span className="text-base">{group.icon}</span>
                 <span>{group.label}</span>
                 {selectedCount > 0 && (
-                  <span className="text-[0.625rem] font-bold text-foreground px-1.5 py-0.5">
+                  <span className="font-heading text-[0.5625rem] font-bold tabular-nums bg-foreground text-card px-1.5 py-0.5">
                     {selectedCount}
                   </span>
                 )}
@@ -95,7 +95,7 @@ export function ModuleGroupSelector({
             </div>
 
             {isOpen && (
-              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-foreground/25 py-1 min-w-0 sm:min-w-[200px]">
+              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-foreground py-1 min-w-0 sm:min-w-[200px]" style={{ boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" }}>
                 {groupMods.map((m) => {
                   const active = selectedModules.includes(m.id);
                   return (

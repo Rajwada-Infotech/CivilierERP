@@ -29,11 +29,11 @@ export function FormStep({
         <div className="w-7 h-7 border border-foreground text-foreground text-xs font-bold flex items-center justify-center">
           {number}
         </div>
-        <div className="w-0.5 flex-1 bg-border/50 mt-1" />
+        <div className="w-px flex-1 bg-foreground/30 mt-1" />
       </div>
       <div className="flex-1 pb-6">
         <div className="mb-3">
-          <div className="text-sm font-semibold text-foreground">{title}</div>
+          <div className="font-heading text-sm font-semibold text-foreground">{title}</div>
           {subtitle && (
             <div className="text-xs text-muted-foreground mt-0.5">
               {subtitle}
@@ -127,12 +127,13 @@ export function ConfigForm({
   }
 
   return (
-    <div className="border border-foreground/25 bg-card">
+    <div className="border border-foreground bg-card">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-foreground">
         <div>
-          <h2 className="text-base font-semibold text-foreground">
-            {initial ? "Edit Approval Rule" : "Create a New Approval Rule"}
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Approval rule</p>
+          <h2 className="font-heading text-lg font-bold tracking-tight text-foreground mt-0.5">
+            {initial ? "Edit approval rule" : "New approval rule"}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             Follow the steps below — it only takes a minute
@@ -141,7 +142,7 @@ export function ConfigForm({
         <Button
           variant="outline"
           size="sm"
-          className="gap-1.5 text-xs"
+          className="rounded-none h-9 px-4 gap-1.5 bg-card border border-foreground text-foreground hover:bg-primary/10 hover:text-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
           onClick={onCancel}
         >
           <X className="w-3.5 h-3.5" /> Cancel
@@ -159,7 +160,7 @@ export function ConfigForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Site Manager Approval, Finance Sign-off…"
-            className="h-10 text-sm max-w-md"
+            className="h-10 text-sm max-w-md rounded-none bg-card border-foreground/40 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-foreground"
           />
         </FormStep>
 
@@ -265,12 +266,12 @@ export function ConfigForm({
                   type="button"
                   onClick={() => setAddingLevel(true)}
                   className={cn(
-                    "inline-flex items-center gap-2 px-4 py-2.5 border-2 border-dashed text-sm transition-all",
+                    "inline-flex items-center gap-2 h-9 px-4 border border-dashed font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors",
                     "border-foreground/25 text-muted-foreground hover:border-foreground hover:text-foreground",
                     levels.length > 0 && "ml-11",
                   )}
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5" />
                   {levels.length === 0
                     ? "Add first approval step"
                     : "Add another step"}
@@ -289,12 +290,12 @@ export function ConfigForm({
             : "Fill in all steps above to save"}
         </p>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel}>
+          <Button variant="outline" size="sm" onClick={onCancel} className="rounded-none h-9 px-4 gap-1.5 bg-card border border-foreground text-foreground hover:bg-primary/10 hover:text-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]">
             Discard
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 font-heading uppercase tracking-[0.1em] text-[0.625rem] font-semibold px-5"
+            className="h-9 gap-1.5 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 font-heading uppercase tracking-[0.1em] text-[0.625rem] font-semibold px-5"
             onClick={submit}
             disabled={saving}
           >

@@ -64,7 +64,7 @@ export function AddLevelRow({
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g. Site Manager, Finance Head, Director…"
-            className="h-9 text-sm"
+            className="h-9 text-sm rounded-none bg-card border-foreground/40 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-foreground"
             onKeyDown={(e) => {
               if (e.key === "Enter") confirm();
               if (e.key === "Escape") onCancel();
@@ -137,7 +137,7 @@ export function AddLevelRow({
       <div className="flex gap-2 pt-1">
         <Button
           size="sm"
-          className="gap-1.5 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 font-heading uppercase tracking-[0.1em] text-[0.625rem]"
+          className="h-8 px-4 gap-1.5 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 font-heading uppercase tracking-[0.1em] text-[0.625rem] font-semibold"
           onClick={confirm}
         >
           <Check className="w-3.5 h-3.5" /> {isEdit ? "Save changes" : "Add this step"}
@@ -146,7 +146,7 @@ export function AddLevelRow({
           size="sm"
           variant="outline"
           onClick={onCancel}
-          className="gap-1.5"
+          className="rounded-none h-8 px-4 gap-1.5 bg-card border border-foreground text-foreground hover:bg-primary/10 hover:text-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
         >
           <X className="w-3.5 h-3.5" /> Cancel
         </Button>
@@ -268,7 +268,7 @@ export function LevelCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground hover: ml-1"
+            className="h-7 w-7 p-0 rounded-none border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground hover:bg-transparent ml-1"
             onClick={onEdit}
             title="Edit who's assigned to this step"
           >
@@ -277,7 +277,7 @@ export function LevelCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            className="h-7 w-7 p-0 rounded-none border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive hover:bg-transparent"
             onClick={onRemove}
             title="Remove this step"
           >
