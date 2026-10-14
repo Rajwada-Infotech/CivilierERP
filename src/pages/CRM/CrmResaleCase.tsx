@@ -278,7 +278,7 @@ const CrmResaleCase: React.FC = () => {
         <div className="mt-3 h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={doneCount} aria-valuemax={steps.length}>
           <div className={`h-full ${c.Status === "Rejected" || c.Status === "Cancelled" ? "bg-muted-foreground/40" : "bg-emerald-500"}`} style={{ width: `${Math.round((doneCount / steps.length) * 100)}%` }} />
         </div>
-        {["Rejected", "Cancelled"].includes(c.Status) && c.RejectionNote && <p className="mt-3 text-sm text-red-600">{c.Status === "Rejected" ? "Rejected: " : ""}{c.RejectionNote}</p>}
+        {["Rejected", "Cancelled"].includes(c.Status) && c.RejectionNote && <p className="mt-3 text-sm text-red-600">{c.Status === "Rejected" ? "Sent back: " : ""}{c.RejectionNote}</p>}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -339,7 +339,7 @@ const CrmResaleCase: React.FC = () => {
               <div><span className={label}>Paid so far</span><span className="tabular-nums">{fmt(c.OriginalValue)}</span></div>
               <div><span className={label}>{isResale ? "Price between buyers" : "Buy-back price"}</span><span className="tabular-nums">{fmt(c.AgreedValue)}</span></div>
             </div>
-            {isResale && <div><span className={label}>Our transfer fee</span><span className="tabular-nums">{Number(c.DeveloperFeeAmount) > 0 ? `${fmt(c.DeveloperFeeAmount)} + GST = ${fmt(c.FeeTotal)}` : "None"}</span></div>}
+            {isResale && <div><span className={label}>Our transfer fee</span><span className="tabular-nums">{Number(c.DeveloperFeeAmount) > 0 ? (Number(c.DeveloperFeeGstAmount) > 0 ? `${fmt(c.DeveloperFeeAmount)} + GST = ${fmt(c.FeeTotal)}` : `${fmt(c.DeveloperFeeAmount)} (no GST)`) : "None"}</span></div>}
             {c.NocNo && <div><span className={label}>NOC</span>{c.NocNo}</div>}
             {c.DeedRegNo && <div><span className={label}>Registered deed</span>{c.DeedRegNo}<span className="block text-[0.6875rem] text-muted-foreground">{date(c.DeedRegDate)} · {c.DeedRegOffice}</span></div>}
           </section>

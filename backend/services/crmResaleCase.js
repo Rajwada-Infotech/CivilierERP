@@ -217,11 +217,11 @@ async function caseState(db, id) {
     ],
     approval: [
       { label: r.Status === "Rejected" ? "Fixed and sent again" : "Sent for approval", ok: !["Draft", "Rejected"].includes(r.Status), action: "submit",
-        hint: r.Status === "Rejected" ? `Sent back${r.RejectionNote ? `: ${r.RejectionNote}` : ""}` : r.Status === "Draft" ? "Once the steps before it are done" : null },
+        hint: r.Status === "Rejected" ? `Sent back${r.RejectionNote ? `: ${r.RejectionNote}` : ""}` : r.Status === "Draft" ? "Steps above are done — send it to the approvers" : null },
       { label: "Approved by Marketing Head, then Director", ok: ["Approved", "Completed"].includes(r.Status), link: "inbox", hint: r.Status === "Pending" ? "Waiting in the Approval Inbox" : null },
     ],
     fee: [
-      { label: `Fee invoice issued to the buyer (${fmt(fee)} incl. GST)`, ok: !!r.FeeInvoiceId && r.FeeInvoiceStatus !== "Void", action: "fee-invoice", hint: r.FeeInvoiceNo || null },
+      { label: `Fee invoice issued to the buyer (${fmt(fee)}${Number(r.DeveloperFeeGstAmount) > 0 ? " incl. GST" : ", no GST"})`, ok: !!r.FeeInvoiceId && r.FeeInvoiceStatus !== "Void", action: "fee-invoice", hint: r.FeeInvoiceNo || null },
       { label: "Buyer's payment recorded", ok: !!r.FeeReceivedPaymentId && r.FeeReceiptStatus !== "Rejected", action: "fee-payment", hint: r.FeeReceiptNo || null },
       { label: "Payment approved by Finance", ok: feeApproved, hint: r.FeeReceivedPaymentId && !feeApproved ? "Finance → Received Payments" : null },
     ],
