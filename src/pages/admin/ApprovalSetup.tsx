@@ -247,7 +247,7 @@ export default function ApprovalSetup() {
                                   key={mid}
                                   className="text-[0.6875rem] px-1.5 py-0.5 border border-foreground/25 text-muted-foreground"
                                 >
-                                  {m?.icon} {m?.label ?? mid}
+                                  {m?.label ?? mid}
                                 </span>
                               );
                             })}

@@ -1,8 +1,11 @@
 // Choosing which module a workflow is for, grouped by area.
 import React from "react";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, Package, HardHat, Wallet, ShoppingBag, Home, Layers, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MODULE_OPTIONS, MODULE_GROUPS } from "./config";
+
+// Each area drawn with an ink line icon rather than its emoji.
+const GROUP_ICON: Record<string, LucideIcon> = { material: Package, engineering: HardHat, finance: Wallet, sales: ShoppingBag, crm: Home };
 
 // ─── Module group selector ─────────────────────────────────────────────────────
 
@@ -67,7 +70,7 @@ export function ModuleGroupSelector({
                       : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                <span className="text-base">{group.icon}</span>
+                {(() => { const GI = GROUP_ICON[group.id] ?? Layers; return <GI className="w-3.5 h-3.5 shrink-0" />; })()}
                 <span>{group.label}</span>
                 {selectedCount > 0 && (
                   <span className="font-heading text-[0.5625rem] font-bold tabular-nums bg-foreground text-card px-1.5 py-0.5">
@@ -111,7 +114,6 @@ export function ModuleGroupSelector({
                           : "text-foreground",
                       )}
                     >
-                      <span className="text-base">{m.icon}</span>
                       <span className="flex-1">{m.label}</span>
                       {active && (
                         <Check className="w-3.5 h-3.5 shrink-0 text-foreground" />
