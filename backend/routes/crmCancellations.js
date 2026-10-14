@@ -232,19 +232,6 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
   }
 });
 
-// A booking that is changing hands can't be cancelled under it: an open
-// resale / buy-back case (being prepared, waiting, approved or sent back)
-// would otherwise lose its booking mid-transfer — the deed in progress, the
-// buyer's fee — while the paid money is parked for a refund and the property
-// is put back on sale. Checked when the request is raised and again when it
-// is approved (a case may have been opened in between). Returns the reason or null.
-async function resaleBlocksCancellation(pool, bookingId) {
-  const { openResaleOn } = require("../services/crmResaleTransfer");
-  const open = await openResaleOn(pool, [bookingId]);
-  if (!open) return null;
-  return `This property has an open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} case (#${open.Id}, ${open.Status === "Draft" ? "being prepared" : open.Status === "Rejected" ? "sent back" : open.Status.toLowerCase()}) — finish or cancel that case first (Resale → Resale Cases)`;
-}
-
 // POST / — request a cancellation; auto-computes refund from paid milestones
 //
 // Workflow guard: once the sales deed is Registered, the unit is legally
@@ -277,8 +264,6 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
     if (deed.recordset.length && deed.recordset[0].Status === CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "This booking's sales deed is already Registered — a legal deed-cancellation process is required, not a standard cancellation request" });
     }
-    const resaleOpen = await resaleBlocksCancellation(pool, bookingId);
-    if (resaleOpen) return res.status(409).json({ error: resaleOpen });
 
     const paidRes = await pool.request().input("bid", sql.Int, bookingId)
       .query(`
@@ -443,14 +428,6 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // Re-checked at approval: the villa may have been booked after the request was raised.
     const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, bookingId);
     if (villaOnLand) return res.status(409).json({ error: `The villa built on this land is booked (${villaOnLand}). Cancel the villa booking first — the land can't be cancelled from under it.` });
-    // ...and so may a resale case or a registered sale deed.
-    const resaleOpen = await resaleBlocksCancellation(pool, bookingId);
-    if (resaleOpen) return res.status(409).json({ error: resaleOpen });
-    const deedNow = (await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC")).recordset[0];
-    if (deedNow?.Status === CrmStatus.REGISTERED) {
-      return res.status(409).json({ error: "This booking's sales deed was registered after the request was raised — a legal deed-cancellation process is required now, not a standard cancellation. Reject this request." });
-    }
 
     const freshPaidRes = await pool.request().input("bid", sql.Int, bookingId)
       .query(`

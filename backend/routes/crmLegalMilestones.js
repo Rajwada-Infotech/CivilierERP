@@ -236,7 +236,7 @@ router.get("/eligible-bookings", requirePageRight("crm-legal-milestones", "view"
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      JOIN dbo.CrmAgreement agr ON agr.BookingId = b.Id
+      JOIN dbo.CrmAgreement agr ON agr.BookingId = b.Id AND agr.Status <> 'Cancelled'
       WHERE b.Status = 'Approved'
         AND b.IsActive = 1
         AND (b.IsFrozen = 0 OR (b.FreezeExpiresAt IS NOT NULL AND b.FreezeExpiresAt < SYSDATETIME()))
@@ -280,7 +280,7 @@ router.post("/", requirePageRight("crm-legal-milestones", "create"), async (req,
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const agr = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
     if (!agr.recordset.length) {
       return res.status(400).json({ error: "Legal milestone tracking requires an agreement to exist for this booking first" });
     }
