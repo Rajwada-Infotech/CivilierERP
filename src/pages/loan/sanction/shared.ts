@@ -183,3 +183,9 @@ export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`
 export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
 export const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
 export const ACT_DEL = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors";
+
+/** Bank name with the account number's last four digits, so same-name accounts are told apart. */
+export const bankLabel = (b: { BName: string | null; BAccountNumber: string | null }) => {
+  const tail = (b.BAccountNumber || "").replace(/\s/g, "").slice(-4);
+  return tail ? `${b.BName ?? ""} ··${tail}` : b.BName ?? "";
+};

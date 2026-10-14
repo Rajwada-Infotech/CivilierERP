@@ -2,7 +2,7 @@ import { AlertTriangle, Pencil, Save, X as XIcon } from "lucide-react";
 import { type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { PAYMENT_MODES } from "@/pages/finance/payment/types";
 import { DateInput } from "@/components/ui/date-input";
-import { LOAN_BANK_PAYMENT_MODES, inputCls, labelCls } from "./shared";
+import { LOAN_BANK_PAYMENT_MODES, inputCls, labelCls, bankLabel } from "./shared";
 import { LoanChequePicker } from "./LoanChequePicker";
 import { SectionLabel } from "./parts";
 import type { LoanSanctionState } from "./useLoanSanction";
@@ -115,7 +115,7 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
                   >
                     <option value="">— No bank A/C tag —</option>
                     {banksForCompany(viewingLoan?.LenderCompanyName || "").map((b: BankRecord) => (
-                      <option key={b.BId} value={b.BId}>{b.BName}</option>
+                      <option key={b.BId} value={b.BId}>{bankLabel(b)}</option>
                     ))}
                   </select>
                 </div>
@@ -133,7 +133,7 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
                     >
                       <option value="">— No bank A/C tag —</option>
                       {banksForCompany(viewingLoan?.BorrowerCompanyName || "").map((b: BankRecord) => (
-                        <option key={b.BId} value={b.BId}>{b.BName}</option>
+                        <option key={b.BId} value={b.BId}>{bankLabel(b)}</option>
                       ))}
                     </select>
                   </div>

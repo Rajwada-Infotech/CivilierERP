@@ -1300,7 +1300,8 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       // it there meant any booking approved before a salesperson got
       // assigned silently never sent the customer their booking-confirmed
       // SMS/WhatsApp/Email at all.
-      await triggerBookingConfirmed(pool, id);
+      // Not awaited: real providers can take seconds, and approval shouldn't wait on them.
+      triggerBookingConfirmed(pool, id).catch(() => {});
     }
 
     res.json({ success: true, status: result.confirmed ? "Approved" : "Pending", ...result });

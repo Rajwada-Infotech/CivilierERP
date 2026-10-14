@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Construction, Loader2, Power } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +18,14 @@ import { getMaintenanceStatus, setMaintenanceMode } from "@/api/maintenanceModeA
 import { formatIst, fromIstInputValue, toIstInputValue } from "@/lib/maintenanceTime";
 
 const inp =
-  "w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
+  "w-full px-3 py-2 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const chip = (on: boolean) =>
+  `${KEY} h-8 px-3 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
 
 const WARNINGS: { label: string; minutes: number }[] = [
   { label: "Right now", minutes: 0 },
@@ -87,25 +94,31 @@ const SystemMaintenance = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "System Maintenance"]} />
-      <AdminShell
-        title="System Maintenance"
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="System maintenance"
         subtitle="Hold everyone except super admins on a Maintenance page while you work, and tell them when it will be over."
-        icon={Construction}
       >
         {isLoading || !state ? (
           <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
         ) : (
-          <div className="grid max-w-3xl gap-4">
+          <div className="grid max-w-3xl gap-5">
             <div
-              className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-5 ${
-                state.active ? "border-amber-500/50 bg-amber-500/10" : "border-border bg-card/70"
+              className={`flex flex-wrap items-center justify-between gap-3 bg-card p-4 border ${
+                state.active && state.enforced ? "border-destructive" : state.active ? "border-dashed border-foreground" : "border-foreground"
               }`}
             >
               <div>
-                <p className="flex items-center gap-2 font-heading font-semibold">
-                  <span className={`h-2.5 w-2.5 rounded-full ${state.active ? "bg-amber-500" : "bg-emerald-500"}`} />
-                  {!state.active ? "System is live" : state.enforced ? "Maintenance is ON" : "Maintenance announced - not started yet"}
-                </p>
+                <p className={LBL}>Status</p>
+                <div className="mt-1.5">
+                  {!state.active ? (
+                    <SheetMark text="System is live" tone="done" />
+                  ) : state.enforced ? (
+                    <SheetMark text="Maintenance is on" tone="stopped" />
+                  ) : (
+                    <SheetMark text="Maintenance announced — not started yet" tone="waiting" />
+                  )}
+                </div>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {state.active
                     ? !state.enforced && state.startsAt
@@ -121,7 +134,7 @@ const SystemMaintenance = () => {
                   type="button"
                   onClick={() => apply.mutate(false)}
                   disabled={apply.isPending}
-                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
                 >
                   {apply.isPending ? <Loader2 size={15} className="animate-spin" /> : <Power size={15} />}
                   End maintenance now
@@ -129,11 +142,11 @@ const SystemMaintenance = () => {
               )}
             </div>
 
-            <div className="grid gap-4 rounded-2xl border border-border bg-card/70 p-5">
-              <p className="font-heading font-semibold">{state.active ? "Change what people see" : "What people will see"}</p>
+            <div className="grid gap-4 bg-card p-4" style={{ border: RULE }}>
+              <p className={`${HEAD} pb-3 -mx-4 px-4`} style={{ borderBottom: RULE }}>{state.active ? "Change what people see" : "What people will see"}</p>
 
               <label className="grid gap-1.5 text-sm">
-                <span className="font-medium">Heading</span>
+                <span className={LBL}>Heading</span>
                 <input
                   className={inp}
                   value={title}
@@ -144,7 +157,7 @@ const SystemMaintenance = () => {
               </label>
 
               <label className="grid gap-1.5 text-sm">
-                <span className="font-medium">Message</span>
+                <span className={LBL}>Message</span>
                 <textarea
                   rows={3}
                   className={inp}
@@ -156,8 +169,8 @@ const SystemMaintenance = () => {
               </label>
 
               <div className="grid gap-1.5 text-sm">
-                <label htmlFor="maintenance-ends" className="font-medium">
-                  Expected back <span className="font-normal text-muted-foreground">(India time, optional)</span>
+                <label htmlFor="maintenance-ends" className={LBL}>
+                  Expected back <span className="normal-case tracking-normal font-normal">(India time, optional)</span>
                 </label>
                 <div className="flex flex-wrap items-center gap-2">
                   <input
@@ -172,7 +185,7 @@ const SystemMaintenance = () => {
                       key={p.label}
                       type="button"
                       onClick={() => setEndIn(p.minutes)}
-                      className="rounded-lg border border-border px-3 py-2 text-xs font-medium transition-colors hover:bg-muted"
+                      className={chip(false)}
                     >
                       In {p.label}
                     </button>
@@ -189,7 +202,7 @@ const SystemMaintenance = () => {
 
               {!state.active && (
                 <div className="grid gap-1.5 text-sm">
-                  <span className="font-medium">Hold everyone</span>
+                  <span className={LBL}>Hold everyone</span>
                   <div className="flex flex-wrap items-center gap-2">
                     {WARNINGS.map((w) => (
                       <button
@@ -197,9 +210,7 @@ const SystemMaintenance = () => {
                         type="button"
                         aria-pressed={startIn === w.minutes}
                         onClick={() => setStartIn(w.minutes)}
-                        className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
-                          startIn === w.minutes ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"
-                        }`}
+                        className={chip(startIn === w.minutes)}
                       >
                         {w.label}
                       </button>
@@ -207,18 +218,18 @@ const SystemMaintenance = () => {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {startIn === 0
-                      ? "Everyone is held at once - anything unsaved is lost."
+                      ? <span className="text-destructive">Everyone is held at once - anything unsaved is lost.</span>
                       : `Everyone sees a countdown strip now (also on the login page) and is held when it ends, so they can finish and save what they are doing.`}
                   </p>
                 </div>
               )}
 
-              <div className="flex justify-end">
+              <div className="flex justify-end pt-3 -mx-4 px-4" style={{ borderTop: RULE }}>
                 <button
                   type="button"
                   onClick={() => (state.active ? apply.mutate(true) : setConfirmOpen(true))}
                   disabled={apply.isPending || !!endError}
-                  className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  className={`${KEY} h-9 px-5 border ${state.active ? "bg-foreground text-card border-foreground" : "bg-destructive text-destructive-foreground border-destructive"}`}
                 >
                   {apply.isPending ? <Loader2 size={15} className="animate-spin" /> : <Construction size={15} />}
                   {state.active ? "Update message and end time" : "Start maintenance"}
@@ -227,12 +238,15 @@ const SystemMaintenance = () => {
             </div>
           </div>
         )}
-      </AdminShell>
+      </SheetShell>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sheet-frame" style={{ margin: 0 }}>
           <AlertDialogHeader>
-            <AlertDialogTitle>Start maintenance?</AlertDialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>System maintenance</p>
+              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Start maintenance</AlertDialogTitle>
+            </div>
             <AlertDialogDescription>
               {startIn === 0
                 ? "Every user and role except super admin will be held on the Maintenance page straight away, on the web and in the mobile apps. Anything they have not saved is lost."
@@ -240,9 +254,11 @@ const SystemMaintenance = () => {
               {endsAt ? ` They will be told to expect the system back ${formatIst(endsAt.toISOString())}.` : " No end time is set."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => apply.mutate(true)}>Start maintenance</AlertDialogAction>
+          <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
+            <AlertDialogCancel className={`${KEY} h-9 px-4 rounded-none border border-foreground text-foreground bg-card hover:bg-primary/10`}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => apply.mutate(true)} className={`${KEY} h-9 px-5 rounded-none !bg-destructive !text-destructive-foreground border border-destructive hover:!bg-destructive/90`}>
+              Start maintenance
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

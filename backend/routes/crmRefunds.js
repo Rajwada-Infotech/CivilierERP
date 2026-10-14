@@ -179,9 +179,31 @@ const REFUND_SELECT = `
 `;
 
 // ── GET / — list ──────────────────────────────────────────────────────────
+// Self-repair: a refund still "with Finance" whose payout voucher Finance has
+// already approved (paid). Marking it Paid runs when the voucher is approved,
+// but that step is non-fatal there — if it failed (a database error at that
+// moment) nothing re-ran it, leaving the refund stuck. markCrmRefundPaid is
+// idempotent, so this simply finishes the job. Never blocks the list.
+async function settlePaidRefunds(pool, userEmail) {
+  try {
+    const stuck = (await pool.request().query(`
+      SELECT r.Id, r.FinanceNewPaymentId FROM dbo.CrmRefund r
+      JOIN dbo.NewPayment np ON np.PPaymentID = r.FinanceNewPaymentId
+      WHERE r.Status IN ('FinanceApproved', 'FinancePending') AND np.Status = 'Approved'`)).recordset;
+    for (const s of stuck) {
+      try {
+        const out = await markCrmRefundPaid(pool, s.Id, s.FinanceNewPaymentId, userEmail);
+        console.warn(`[crm-refunds] settled refund ${s.Id} whose voucher was already paid:`, out?.reason || "ok");
+      } catch (e) { console.error(`[crm-refunds] could not settle refund ${s.Id}:`, e.message); }
+    }
+    if (stuck.length) await bumpCacheVersion("crm-refunds");
+  } catch (e) { console.error("[crm-refunds] settlePaidRefunds:", e.message); }
+}
+
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    await settlePaidRefunds(pool, req.user?.email || req.user?.name || null);
     const { status, search } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;

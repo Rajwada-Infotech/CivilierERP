@@ -4,7 +4,7 @@ import { PAYMENT_MODES } from "@/pages/finance/payment/types";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { type CustomerOption } from "@/api/loanSanctionApi";
 import { DateInput } from "@/components/ui/date-input";
-import { LOAN_BANK_PAYMENT_MODES, STANDARD_INTEREST_RATES, STANDARD_TENURES, fmt, inputCls, labelCls } from "./shared";
+import { LOAN_BANK_PAYMENT_MODES, STANDARD_INTEREST_RATES, STANDARD_TENURES, fmt, inputCls, labelCls, bankLabel } from "./shared";
 import { LoanChequePicker } from "./LoanChequePicker";
 import { CustomerComboField, ComboField } from "./parts";
 import type { LoanSanctionState } from "./useLoanSanction";
@@ -132,7 +132,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
                 <option value="">— Select —</option>
                 {banksForCompany(companyName(form.lenderCompanyId)).map((b: BankRecord) => (
                   <option key={b.BId} value={b.BId}>
-                    {b.BName}
+                    {bankLabel(b)}
                   </option>
                 ))}
               </select>
@@ -157,7 +157,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
                 <option value="">— Select —</option>
                 {banksForCompany(companyName(form.borrowerCompanyId)).map((b: BankRecord) => (
                   <option key={b.BId} value={b.BId}>
-                    {b.BName}
+                    {bankLabel(b)}
                   </option>
                 ))}
               </select>

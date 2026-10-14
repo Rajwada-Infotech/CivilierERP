@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -19,7 +19,6 @@ import {
   Search,
   Eye,
   XCircle,
-  Shield,
 } from "lucide-react";
 import {
   getRoles,
@@ -48,7 +47,15 @@ const EMPTY: FormState = {
 };
 
 const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+  "w-full px-3 py-2 text-sm font-body bg-card border border-foreground/40 focus:border-foreground outline-none text-foreground placeholder:text-muted-foreground/60";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors";
 
 // ─── Column builder ───────────────────────────────────────────────────────────
 function buildRoleColumns(
@@ -66,7 +73,7 @@ function buildRoleColumns(
       accessorKey: "RCode",
       header: "Code",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">
+        <span className="font-heading text-xs font-semibold tracking-wider text-foreground border border-foreground/30 px-1.5 py-0.5">
           {(getValue() as string) || "—"}
         </span>
       ),
@@ -98,18 +105,22 @@ function buildRoleColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[0.6875rem] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-destructive mr-1">
                 Delete?
               </span>
               <button
                 onClick={() => handleDelete(id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10"
+                className={`${ACT} text-destructive border-destructive hover:bg-destructive/10`}
+                title="Confirm delete"
+                aria-label="Confirm delete"
               >
                 <Check size={12} />
               </button>
               <button
                 onClick={() => setDeleteId(null)}
-                className="p-1 rounded text-muted-foreground hover:bg-muted"
+                className={`${ACT} hover:text-foreground hover:border-foreground`}
+                title="Keep"
+                aria-label="Keep"
               >
                 <X size={12} />
               </button>
@@ -120,15 +131,18 @@ function buildRoleColumns(
           <div className="flex items-center justify-end gap-1">
             <button data-row-view
               onClick={() => onView(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+              className={`${ACT} hover:text-foreground hover:border-foreground`}
               title="View details"
+              aria-label="View details"
             >
               <Eye size={13} />
             </button>
             {canEdit && (
               <button
                 onClick={() => handleEdit(row.original)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+                className={`${ACT} hover:text-foreground hover:border-foreground`}
+                title="Edit"
+                aria-label="Edit"
               >
                 <Edit2 size={13} />
               </button>
@@ -136,7 +150,9 @@ function buildRoleColumns(
             {canDelete && (
               <button
                 onClick={() => setDeleteId(id)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                className={`${ACT} hover:text-destructive hover:border-destructive`}
+                title="Delete"
+                aria-label="Delete"
               >
                 <Trash2 size={13} />
               </button>
@@ -303,41 +319,45 @@ const RoleMaster: React.FC = () => {
   });
 
   if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading roles...</div>;
+    return <div className="p-6 text-sm text-muted-foreground">Loading roles…</div>;
   if (error)
-    return <div className="p-6 text-red-500">Failed to load roles.</div>;
+    return <div className="p-6 text-sm text-destructive">Could not load the roles.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Masters", "Role Master"]} />
-      <AdminShell title="Role Master" icon={Shield}>
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Setup"
+        title="Roles"
+        subtitle="The user roles that page rights, menu rights and approvals are granted to."
+      >
       <div className="space-y-5">
-        {/* ── Form ── */}
-        {rights.canCreate && (
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+        {/* ── Form ── (also shown to editors without create rights once they pick a role to edit) */}
+        {(rights.canCreate || editingId != null) && (
+        <div className={`bg-card overflow-hidden border border-foreground`}>
+          <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: RULE }}>
             <div>
-              <h2 className="font-heading font-semibold text-foreground text-sm">
-                {editingId ? "Edit Role" : "Add Role"}
+              <h2 className={HEAD}>
+                {editingId ? "Edit role" : "Add role"}
               </h2>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">
                 {editingId
                   ? "Modify role details below."
                   : "Define a new user role."}
               </p>
             </div>
             {editingId && (
-              <span className="text-[0.625rem] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
+              <span className="inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-dashed border-foreground text-foreground">
                 Editing
               </span>
             )}
           </div>
 
-          <div className="p-5">
+          <div className="p-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Role Name */}
               <div>
-                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className={`${LBL} block mb-1.5`}>
                   Role Name <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
@@ -362,7 +382,7 @@ const RoleMaster: React.FC = () => {
 
               {/* Role Code (Read-only preview) */}
               <div>
-                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className={`${LBL} block mb-1.5`}>
                   Role Code
                 </label>
                 <div className="relative">
@@ -375,18 +395,18 @@ const RoleMaster: React.FC = () => {
                     value={form.RCode}
                     readOnly
                     placeholder="Auto-generated"
-                    className={`${inp} pl-8 bg-muted/50 font-mono font-semibold tracking-wider text-primary`}
+                    className={`${inp} pl-8 border-dashed font-heading font-semibold tracking-wider`}
                     title="Auto-generated from Role Name (server authoritative)"
                   />
                 </div>
-                <p className="text-[0.625rem] text-muted-foreground mt-1 font-mono">
+                <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading tracking-wide">
                   {form.RName ? generateRoleCode(form.RName) : ""} (preview)
                 </p>
               </div>
 
               {/* Description */}
               <div className="lg:col-span-2">
-                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className={`${LBL} block mb-1.5`}>
                   Description
                 </label>
                 <div className="relative">
@@ -405,20 +425,14 @@ const RoleMaster: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold text-white shadow-sm btn-module hover:opacity-90 transition-all"
-              >
-                <Users size={15} />
-                {editingId ? "Update" : "Save Role"}
+            <div className="flex items-center gap-2 mt-5 pt-4 -mx-4 px-4" style={{ borderTop: RULE }}>
+              <button onClick={handleSave} className={`${KEY_INK} h-9 px-5`}>
+                <Users size={13} />
+                {editingId ? "Update" : "Save role"}
               </button>
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
-              >
-                <RotateCcw size={14} />
-                Reset
+              <button onClick={handleReset} className={`${KEY_LINE} h-9 px-4`}>
+                <RotateCcw size={12} />
+                {editingId ? "Cancel edit" : "Reset"}
               </button>
             </div>
           </div>
@@ -426,13 +440,13 @@ const RoleMaster: React.FC = () => {
         )}
 
         {/* ── Table ── */}
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
             <div>
-              <h3 className="font-heading font-semibold text-foreground text-sm">
-                Role Records ({filtered.length})
+              <h3 className={HEAD}>
+                Roles <span className="font-normal text-muted-foreground tabular-nums ml-1">{filtered.length}</span>
               </h3>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">
                 Manage user roles for access control
               </p>
             </div>
@@ -446,7 +460,8 @@ const RoleMaster: React.FC = () => {
                 placeholder="Search roles..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-44"
+                aria-label="Search roles"
+                className="h-9 pl-8 pr-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground placeholder:text-muted-foreground/60 outline-none w-full sm:w-56"
               />
             </div>
           </div>
@@ -465,14 +480,14 @@ const RoleMaster: React.FC = () => {
               }
               rowClassName={(row) =>
                 row.original.RId === editingId
-                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  ? "bg-primary/5 border-l-2 border-l-foreground"
                   : ""
               }
             />
           </div>
         </div>
       </div>
-      </AdminShell>
+      </SheetShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
@@ -481,24 +496,25 @@ const RoleMaster: React.FC = () => {
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
           />
-          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <Users size={15} className="text-primary" />
-                <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Role Details
+          <div className="relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200" style={{ borderLeft: RULE }}>
+            <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: RULE }}>
+              <div>
+                <p className={LBL}>Role</p>
+                <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-0.5">
+                  {viewRecord.RName}
                 </h3>
               </div>
               <button
                 onClick={() => setViewRecord(null)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+                className={`${ACT} hover:text-foreground hover:border-foreground`}
+                aria-label="Close"
               >
                 <XCircle size={15} />
               </button>
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className={`${LBL} mb-1`}>
                   Role Name
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -506,15 +522,15 @@ const RoleMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className={`${LBL} mb-1`}>
                   Role Code
                 </p>
-                <p className="font-mono text-sm font-semibold text-primary">
+                <p className="font-heading text-sm font-semibold tracking-wider text-foreground">
                   {viewRecord.RCode || "—"}
                 </p>
               </div>
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className={`${LBL} mb-1`}>
                   Description
                 </p>
                 <p className="text-sm text-foreground">
@@ -526,17 +542,19 @@ const RoleMaster: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="px-5 py-3 border-t border-border">
+            {rights.canEdit && (
+            <div className="px-5 py-3" style={{ borderTop: RULE }}>
               <button
                 onClick={() => {
                   handleEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white "
+                className={`${KEY_INK} w-full h-9 px-4`}
               >
-                <Edit2 size={13} /> Edit Role
+                <Edit2 size={12} /> Edit role
               </button>
             </div>
+            )}
           </div>
         </div></BodyPortal>
       )}

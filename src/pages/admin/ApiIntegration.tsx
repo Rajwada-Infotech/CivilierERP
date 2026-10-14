@@ -1,496 +1,157 @@
-import { generateUUID } from '../../utils/cryptoPolyfill';  
-import React from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Loader2, Mail, MessageCircle, MessageSquare, RefreshCw, Send, Settings2, type LucideIcon } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
-import {
-  getCommunicatorConfig,
-  saveCommunicatorConfig,
-} from "@/api/communicatorConfigApi";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Edit3, Loader2, Plus, RefreshCw, Trash2, Link2 } from "lucide-react";
-import { toast } from "sonner";
-import {
-  apiIntegrationSchema,
-  type ApiIntegrationForm,
-} from "@/schemas/apiIntegrationSchema";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { getMessagingStatus, sendMessagingTest, type MessagingChannel, type MessagingStatus } from "@/api/communicatorConfigApi";
 
-interface ApiConfig {
-  id: string;
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  status: "active" | "inactive";
-}
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const FIELD = "w-full h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
+const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
 
-interface IntegrationConfigPayload {
-  apis?: ApiConfig[];
-}
-
-const QUERY_KEY = ["communicator-config", "integrations"];
-const EMPTY_FORM: ApiIntegrationForm = { name: "", baseUrl: "", apiKey: "" };
-
-const buildId = () => {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return generateUUID();
-  }
-  return `api-${Date.now()}`;
+const CHANNELS: Record<MessagingChannel, { label: string; Icon: LucideIcon; setup: string; fromLabel: string; testLabel: string; placeholder: string }> = {
+  email: { label: "Email", Icon: Mail, setup: "/admin/communicator/email-setup", fromLabel: "Sends from", testLabel: "Test to email", placeholder: "you@company.com" },
+  sms: { label: "SMS", Icon: MessageSquare, setup: "/admin/communicator/sms-setup", fromLabel: "Sender ID", testLabel: "Test to mobile", placeholder: "98765 43210" },
+  whatsapp: { label: "WhatsApp", Icon: MessageCircle, setup: "/admin/communicator/whatsapp-setup", fromLabel: "Phone number ID", testLabel: "Test to mobile", placeholder: "98765 43210" },
 };
 
-const maskApiKey = (apiKey: string) => {
-  if (!apiKey) return "Not set";
-  if (apiKey.length <= 8) return `${apiKey.slice(0, 2)}••••`;
-  return `${apiKey.slice(0, 4)}••••${apiKey.slice(-4)}`;
+const FIELD_NAMES: Record<string, string> = {
+  smtpHost: "SMTP host", smtpPort: "SMTP port", fromEmail: "from address",
+  apiUrl: "API URL", apiKey: "API key", senderId: "sender ID",
+  accessToken: "access token", phoneNumberId: "phone number ID",
 };
 
-export default function ApiIntegration() {
-  const rights = usePageRights("api-integration");
-  const queryClient = useQueryClient();
-  const [editingId, setEditingId] = React.useState<string | null>(null);
-  const {
-    register: registerNewApi,
-    handleSubmit: handleNewApiSubmit,
-    reset: resetNewApi,
-    watch: watchNewApi,
-    formState: { errors: newApiErrors },
-  } = useForm<ApiIntegrationForm>({
-    resolver: zodResolver(apiIntegrationSchema),
-    defaultValues: EMPTY_FORM,
-  });
-  const {
-    register: registerEditApi,
-    handleSubmit: handleEditApiSubmit,
-    reset: resetEditApi,
-    formState: { errors: editApiErrors },
-  } = useForm<ApiIntegrationForm>({
-    resolver: zodResolver(apiIntegrationSchema),
-    defaultValues: EMPTY_FORM,
-  });
-  const newApi = watchNewApi();
+const ChannelCard: React.FC<{ s: MessagingStatus; canTest: boolean }> = ({ s, canTest }) => {
+  const meta = CHANNELS[s.channel];
+  const [to, setTo] = useState("");
+  const test = useMutation({ mutationFn: () => sendMessagingTest(s.channel, to.trim()) });
+  const ready = s.saved && s.missing.length === 0;
+  const sending = ready && s.active;
 
-  const {
-    data: apis = [],
-    isLoading,
-    isFetching,
-    error,
-  } = useQuery<ApiConfig[]>({
-    queryKey: QUERY_KEY,
-    queryFn: async () => {
-      const config =
-        await getCommunicatorConfig<IntegrationConfigPayload>("integrations");
-      return Array.isArray(config.apis) ? config.apis : [];
-    },
-    staleTime: 5 * 60_000,
-  });
-
-  const persistApis = useMutation({
-    mutationFn: async (nextApis: ApiConfig[]) => {
-      await saveCommunicatorConfig("integrations", { apis: nextApis });
-      return nextApis;
-    },
-    onSuccess: (nextApis) => {
-      queryClient.setQueryData(QUERY_KEY, nextApis);
-    },
-    onError: (mutationError: Error) => {
-      toast.error(mutationError.message);
-    },
-  });
-
-  const saveApis = React.useCallback(
-    async (nextApis: ApiConfig[], successMessage: string) => {
-      try {
-        await persistApis.mutateAsync(nextApis);
-        toast.success(successMessage);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    [persistApis],
-  );
-
-  const addApi = async (values: ApiIntegrationForm) => {
-    const saved = await saveApis(
-      [
-        ...apis,
-        {
-          id: buildId(),
-          name: values.name.trim(),
-          baseUrl: values.baseUrl.trim(),
-          apiKey: values.apiKey.trim(),
-          status: "active" as const,
-        },
-      ],
-      `API "${values.name.trim()}" saved`,
-    );
-    if (saved) {
-      resetNewApi(EMPTY_FORM);
-    }
-  };
-
-  const deleteApi = async (id: string) => {
-    const target = apis.find((api) => api.id === id);
-    await saveApis(
-      apis.filter((api) => api.id !== id),
-      target ? `API "${target.name}" removed` : "API removed",
-    );
-  };
-
-  const toggleStatus = async (id: string) => {
-    const nextApis = apis.map((api) =>
-      api.id === id
-        ? {
-            ...api,
-            status: (api.status === "active" ? "inactive" : "active") as
-              | "active"
-              | "inactive",
-          }
-        : api,
-    );
-    const target = nextApis.find((api) => api.id === id);
-    await saveApis(
-      nextApis,
-      target
-        ? `API "${target.name}" marked ${target.status}`
-        : "API status updated",
-    );
-  };
-
-  const startEdit = (api: ApiConfig) => {
-    setEditingId(api.id);
-    resetEditApi({
-      name: api.name,
-      baseUrl: api.baseUrl,
-      apiKey: api.apiKey,
-    });
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    resetEditApi(EMPTY_FORM);
-  };
-
-  const saveEdit = async (values: ApiIntegrationForm) => {
-    if (!editingId) return;
-    const nextApis = apis.map((api) =>
-      api.id === editingId
-        ? {
-            ...api,
-            name: values.name.trim(),
-            baseUrl: values.baseUrl.trim(),
-            apiKey: values.apiKey.trim(),
-          }
-        : api,
-    );
-    const saved = await saveApis(
-      nextApis,
-      `API "${values.name.trim()}" updated`,
-    );
-    if (saved) {
-      cancelEdit();
-    }
-  };
-
-  const isSaving = persistApis.isPending;
-  const activeCount = apis.filter((a) => a.status === "active").length;
-
-  const headerAction = (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center gap-2 text-xs font-body text-muted-foreground">
-        <span className="px-2.5 py-1 rounded-full bg-muted border border-border">
-          {apis.length} total
-        </span>
-        <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-          {activeCount} active
-        </span>
+  return (
+    <div className={`bg-card flex flex-col border ${sending ? "border-foreground" : "border-dashed border-foreground/50"}`}>
+      <div className="flex items-start justify-between gap-3 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.2)" }}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-8 h-8 flex items-center justify-center border border-foreground shrink-0"><meta.Icon size={15} /></span>
+          <div className="min-w-0">
+            <p className="font-heading text-base font-bold tracking-tight text-foreground">{meta.label}</p>
+            <p className="text-xs text-muted-foreground truncate">{s.provider || "No provider named"}</p>
+          </div>
+        </div>
+        {sending ? <SheetMark text="Sending" tone="done" /> : ready ? <SheetMark text="Switched off" tone="waiting" /> : <span className={`${TAG} text-muted-foreground border-foreground/40`}>Not set up</span>}
       </div>
-      <button
-        onClick={() => queryClient.invalidateQueries({ queryKey: QUERY_KEY })}
-        disabled={isFetching}
-        className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
-        title="Refresh"
-      >
-        <RefreshCw
-          size={13}
-          className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
-        />
-        Refresh
-      </button>
+
+      <div className="px-4 py-3 space-y-2.5 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className={LBL}>{meta.fromLabel}</span>
+          <span className="text-sm text-foreground truncate">{s.from || "—"}</span>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <span className={LBL}>Last saved</span>
+          <span className="text-sm text-foreground tabular-nums">{s.updatedAt ? new Date(s.updatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"}</span>
+        </div>
+        {s.saved && s.missing.length > 0 && (
+          <p className="text-xs text-destructive">Missing {s.missing.map((k) => FIELD_NAMES[k] || k).join(", ")}.</p>
+        )}
+        {ready && !s.active && <p className="text-xs text-muted-foreground">Set up, but its Active switch is off — nothing is sent automatically.</p>}
+      </div>
+
+      <div className="px-4 py-3 space-y-2" style={{ borderTop: "1px solid hsl(var(--foreground) / 0.2)" }}>
+        {canTest && (
+          <>
+            <label className={`${LBL} block`} htmlFor={`test-${s.channel}`}>{meta.testLabel}</label>
+            <div className="flex gap-2">
+              <input
+                id={`test-${s.channel}`}
+                className={FIELD}
+                value={to}
+                placeholder={meta.placeholder}
+                inputMode={s.channel === "email" ? "email" : "tel"}
+                onChange={(e) => { setTo(e.target.value); test.reset(); }}
+                onKeyDown={(e) => e.key === "Enter" && ready && to.trim() && !test.isPending && test.mutate()}
+                disabled={!ready}
+              />
+              <button type="button" className={`${KEY_INK} h-9 px-3 shrink-0`} disabled={!ready || !to.trim() || test.isPending} onClick={() => test.mutate()}>
+                {test.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Send test
+              </button>
+            </div>
+            {test.isSuccess && <SheetMark text={`Handed to the provider — check ${to.trim()}`} tone="done" />}
+            {test.isError && <p className="text-xs text-destructive break-words">{(test.error as Error).message}</p>}
+          </>
+        )}
+        <Link to={meta.setup} className={`${KEY_LINE} h-9 px-3 w-full`}>
+          <Settings2 size={12} /> {s.saved ? "Settings" : "Set up"}
+        </Link>
+      </div>
     </div>
   );
+};
+
+export default function ApiIntegrationPage() {
+  const rights = usePageRights("api-integration");
+  const { data: channels = [], isLoading, isError, isFetching, refetch } = useQuery({
+    queryKey: ["communicator-messaging-status"],
+    queryFn: getMessagingStatus,
+  });
+
+  const ready = channels.filter((c) => c.saved && c.missing.length === 0);
+  const sending = ready.filter((c) => c.active);
 
   return (
     <>
-      <Breadcrumbs items={["Admin", "API Integration"]} />
-      <AdminShell
-        title="API Integration"
-        subtitle="Manage external API connections persisted via communicator config"
-        icon={Link2}
-        action={headerAction}
+      <Breadcrumbs items={["Admin", "Integrations"]} />
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Integrations"
+        subtitle="The providers that carry messages to customers. When a booking is approved, the applicant is sent an SMS, a WhatsApp and an email through every channel that is set up and switched on."
+        action={
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 px-3`}>
+            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Re-read
+          </button>
+        }
       >
-        {/* ── Add New API card ─────────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
-            <Plus size={14} className="text-primary" />
-            <span className="text-sm font-heading font-semibold text-foreground">
-              Add New API
-            </span>
-          </div>
-          <div className="p-6">
-            <form className="space-y-4" onSubmit={handleNewApiSubmit(addApi)}>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="name"
-                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
-                  >
-                    API Name <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="name"
-                    placeholder="Payment Gateway API"
-                    className="font-body"
-                    {...registerNewApi("name")}
-                  />
-                  {newApiErrors.name && (
-                    <p className="text-xs text-destructive">{newApiErrors.name.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="baseUrl"
-                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
-                  >
-                    Base URL <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="baseUrl"
-                    placeholder="https://api.example.com"
-                    className="font-body"
-                    {...registerNewApi("baseUrl")}
-                  />
-                  {newApiErrors.baseUrl && (
-                    <p className="text-xs text-destructive">{newApiErrors.baseUrl.message}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label
-                    htmlFor="apiKey"
-                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
-                  >
-                    API Key <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="apiKey"
-                    type="password"
-                    placeholder="sk-..."
-                    className="font-body"
-                    {...registerNewApi("apiKey")}
-                  />
-                  {newApiErrors.apiKey && (
-                    <p className="text-xs text-destructive">{newApiErrors.apiKey.message}</p>
-                  )}
-                </div>
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Sending", value: sending.length, note: "set up and switched on" },
+              { label: "Switched off", value: ready.length - sending.length, note: "set up, sending nothing" },
+              { label: "Not set up", value: channels.length - ready.length, note: "settings missing" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
               </div>
-              <div className="flex items-center gap-3 pt-2">
-                <Button
-                  type="submit"
-                  disabled={isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey}
-                  className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
-                >
-                  {isSaving ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Plus size={14} />
-                  )}
-                  Add API
-                </Button>
-              </div>
-            </form>
+            ))}
           </div>
         </div>
 
-        {/* ── Configured APIs card ─────────────────────────────────────── */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-heading font-semibold text-foreground">
-              Configured APIs
-            </h2>
-            <span className="text-xs font-body text-muted-foreground">
-              ({apis.length})
-            </span>
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+            <span className={HEAD}>Messaging channels</span>
           </div>
-
-          {error ? (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-              {(error as Error).message || "Failed to load API integrations."}
-            </div>
-          ) : isLoading ? (
-            <div className="flex justify-center py-16">
-              <Loader2 size={24} className="animate-spin text-muted-foreground" />
-            </div>
-          ) : apis.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 rounded-2xl border-2 border-dashed border-border bg-muted/10">
-              <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
-                <Link2 size={24} className="text-muted-foreground/40" />
+          <div className="p-4">
+            {isError ? (
+              <p className="text-sm text-destructive">Could not read the channels. Use Re-read to try again.</p>
+            ) : isLoading ? (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {[0, 1, 2].map((i) => <div key={i} className="h-64 border border-dashed border-foreground/30 animate-pulse" />)}
               </div>
-              <p className="text-sm font-heading font-semibold text-muted-foreground">
-                No API configurations found
-              </p>
-              <p className="text-xs font-body text-muted-foreground/60 mt-1">
-                Use the form above to add your first API
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {apis.map((api) => (
-                <div
-                  key={api.id}
-                  className={`rounded-2xl border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 ${
-                    editingId === api.id
-                      ? "border-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20"
-                      : "border-border hover:border-primary/30"
-                  }`}
-                >
-                  {editingId === api.id ? (
-                    <div>
-                      <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
-                        <Edit3 size={14} className="text-primary" />
-                        <span className="text-sm font-heading font-semibold text-foreground">
-                          Edit API
-                        </span>
-                        <Badge className="ml-auto text-[0.625rem] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
-                          Editing
-                        </Badge>
-                      </div>
-                      <div className="p-6">
-                        <form
-                          className="space-y-4"
-                          onSubmit={handleEditApiSubmit(saveEdit)}
-                        >
-                          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                            <div className="space-y-1.5">
-                              <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
-                                API Name
-                              </Label>
-                              <Input className="font-body" {...registerEditApi("name")} />
-                              {editApiErrors.name && (
-                                <p className="text-xs text-destructive">{editApiErrors.name.message}</p>
-                              )}
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
-                                Base URL
-                              </Label>
-                              <Input className="font-body" {...registerEditApi("baseUrl")} />
-                              {editApiErrors.baseUrl && (
-                                <p className="text-xs text-destructive">{editApiErrors.baseUrl.message}</p>
-                              )}
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
-                                API Key
-                              </Label>
-                              <Input
-                                type="password"
-                                className="font-body"
-                                {...registerEditApi("apiKey")}
-                              />
-                              {editApiErrors.apiKey && (
-                                <p className="text-xs text-destructive">{editApiErrors.apiKey.message}</p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3 pt-2">
-                            <Button
-                              type="submit"
-                              disabled={isSaving}
-                              className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
-                            >
-                              {isSaving && <Loader2 size={14} className="animate-spin" />}
-                              Save Changes
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={cancelEdit}
-                              disabled={isSaving}
-                              className="font-heading text-sm"
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3 p-5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="text-sm font-heading font-semibold text-foreground truncate">
-                            {api.name}
-                          </p>
-                          <p className="text-xs font-body text-muted-foreground mt-0.5 truncate">
-                            {api.baseUrl}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <code className="rounded-lg bg-muted px-2.5 py-1 text-xs font-mono border border-border">
-                            {maskApiKey(api.apiKey)}
-                          </code>
-                          <Badge
-                            variant={api.status === "active" ? "default" : "secondary"}
-                            className="text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5"
-                          >
-                            {api.status}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between border-t border-border/50 pt-3 mt-0.5">
-                        <button
-                          onClick={() => toggleStatus(api.id)}
-                          disabled={isSaving}
-                          className="text-[0.6875rem] font-body text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                        >
-                          Toggle status
-                        </button>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => startEdit(api)}
-                            disabled={isSaving}
-                            className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary"
-                          >
-                            <Edit3 size={13} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteApi(api.id)}
-                            disabled={isSaving}
-                            className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
-                          >
-                            <Trash2 size={13} />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {channels.map((s) => <ChannelCard key={s.channel} s={s} canTest={rights.canEdit} />)}
+              </div>
+            )}
+          </div>
         </div>
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }

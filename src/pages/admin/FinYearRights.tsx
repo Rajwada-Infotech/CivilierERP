@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import {
@@ -70,34 +70,15 @@ function periodProgress(startDate: string, endDate: string): number {
   return Math.min(100, Math.max(0, pct));
 }
 
-// ─── Stat Pill ────────────────────────────────────────────────────────────────
+// ─── Drawing-sheet ink ─────────────────────────────────────────────────────────
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: number;
-  accent: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
-      <div
-        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: `${accent}18`, border: `1px solid ${accent}30` }}
-      >
-        <Icon size={15} style={{ color: accent }} />
-      </div>
-      <div>
-        <p className="text-xl font-bold text-foreground leading-none">{value}</p>
-        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
-      </div>
-    </div>
-  );
-}
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
 
 // ─── Year Card ────────────────────────────────────────────────────────────────
 
@@ -121,49 +102,20 @@ function YearCard({
   const isActive  = fy.status === "Active";
   const progress  = isActive ? periodProgress(fy.startDate, fy.endDate) : 0;
 
-  const statusCls = isActive
-    ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20 dark:text-emerald-400"
-    : "bg-slate-500/10 text-slate-500 border-slate-400/20";
-
-  const lockCls = fy.locked
-    ? "bg-[#ffe2021a] text-amber-600 border-amber-400/20 dark:text-amber-400"
-    : "bg-muted text-muted-foreground border-border";
-
-  const accentColor = isActive ? "#3b82f6" : "#64748b";
-
   return (
-    <div className="relative rounded-2xl border border-border bg-card overflow-hidden hover:border-blue-400/30 hover:shadow-md transition-all duration-200 group">
-      {/* Top accent bar */}
-      <div
-        className="h-0.5 w-full"
-        style={{ background: `linear-gradient(90deg, ${accentColor}, transparent)` }}
-      />
-
-      <div className="p-4 space-y-3.5">
+    <div className={`bg-card flex flex-col border ${isActive ? "border-foreground" : "border-dashed border-foreground/50"}`}>
+      <div className="p-4 space-y-3 flex-1">
         {/* Title row */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: `${accentColor}15`, border: `1px solid ${accentColor}25` }}
-            >
-              <CalendarRange size={16} style={{ color: accentColor }} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-base font-bold text-foreground font-heading leading-tight whitespace-nowrap">
-                {fy.year}
-              </p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5 whitespace-nowrap">Financial Year</p>
-            </div>
+          <div className="min-w-0">
+            <p className={LBL}>Financial year</p>
+            <p className="font-heading text-xl font-bold tracking-tight tabular-nums text-foreground leading-tight whitespace-nowrap mt-0.5">
+              {fy.year}
+            </p>
           </div>
-
-          {/* Badges */}
-          <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 max-w-[50%]">
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${statusCls}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-slate-400"}`} />
-              {fy.status}
-            </span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${lockCls}`}>
+          <div className="flex flex-col items-end gap-1.5 shrink-0">
+            {isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>{fy.status}</span>}
+            <span className={`${TAG} ${fy.locked ? "bg-foreground text-card border-foreground" : "text-muted-foreground border-foreground/40"}`}>
               {fy.locked ? <Lock size={9} /> : <Unlock size={9} />}
               {fy.locked ? "Locked" : "Open"}
             </span>
@@ -171,50 +123,38 @@ function YearCard({
         </div>
 
         {/* Date range */}
-        <div className="rounded-xl bg-muted/40 border border-border/60 px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
-          <CalendarDays size={12} className="shrink-0 text-blue-500/70" />
-          <span className="font-medium text-foreground">{fmtDate(fy.startDate)}</span>
-          <span className="text-muted-foreground/40 mx-0.5">→</span>
-          <span className="font-medium text-foreground">{fmtDate(fy.endDate)}</span>
+        <div className="flex items-center gap-2 text-xs whitespace-nowrap py-2 border-y border-foreground/15">
+          <CalendarDays size={12} className="shrink-0 text-muted-foreground" />
+          <span className="font-medium text-foreground tabular-nums">{fmtDate(fy.startDate)}</span>
+          <span className="text-muted-foreground">→</span>
+          <span className="font-medium text-foreground tabular-nums">{fmtDate(fy.endDate)}</span>
         </div>
 
-        {/* Progress bar (only for active years) */}
+        {/* How far through the year (active years only) */}
         {isActive && (
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[0.625rem] text-muted-foreground">
-              <span>Year progress</span>
-              <span className="font-semibold text-foreground">{Math.round(progress)}%</span>
+            <div className="flex items-center justify-between">
+              <span className={LBL}>Year progress</span>
+              <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{Math.round(progress)}%</span>
             </div>
-            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500"
-                style={{ width: `${progress}%` }}
-              />
+            <div className="h-2 border border-foreground/50 overflow-hidden">
+              <div className="h-full bg-foreground transition-all duration-500" style={{ width: `${progress}%` }} />
             </div>
           </div>
         )}
+      </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 pt-1 border-t border-border/60">
+      {/* Actions */}
+      {(canEdit || canDelete) && (
+        <div className="flex items-center gap-2 px-4 py-3 border-t border-foreground/25">
           {canEdit && (
-            <button
-              onClick={onEdit}
-              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted hover:text-foreground text-muted-foreground transition-colors"
-            >
+            <button onClick={onEdit} className={`${KEY_LINE} flex-1 h-8`}>
               <Edit3 size={11} />
               Edit
             </button>
           )}
           {canEdit && (
-            <button
-              onClick={onToggleLock}
-              disabled={lockPending}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:opacity-50 ${
-                fy.locked
-                  ? "border-emerald-400/30 text-emerald-600 hover:bg-emerald-500/8 dark:text-emerald-400"
-                  : "border-amber-400/30 text-amber-600 hover:bg-amber-500/8 dark:text-amber-400"
-              }`}
-            >
+            <button onClick={onToggleLock} disabled={lockPending} className={`${KEY_LINE} flex-1 h-8`}>
               {lockPending
                 ? <Loader2 size={11} className="animate-spin" />
                 : fy.locked
@@ -226,13 +166,14 @@ function YearCard({
           {canDelete && (
             <button
               onClick={onDelete}
-              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border text-muted-foreground hover:bg-red-500/8 hover:text-red-500 hover:border-red-400/30 transition-colors"
+              aria-label={`Delete ${fy.year}`}
+              className="w-8 h-8 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
             >
-              <Trash2 size={11} />
+              <Trash2 size={12} />
             </button>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -277,14 +218,14 @@ function FinYearDialog({
   }, [open, editing, reset]);
 
   const inputCls =
-    "w-full px-3 py-2.5 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all";
+    "w-full h-10 px-3 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none";
 
   const dateCls =
-    "w-full pl-8 pr-3 py-2.5 text-sm rounded-xl border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+    "w-full pl-8 pr-3 h-10 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground focus:outline-none";
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && !isSaving) onClose(); }}>
-      <DialogContent className="p-0 gap-0 overflow-hidden max-w-sm w-[calc(100vw-2rem)]">
+      <DialogContent className="sheet-frame p-0 gap-0 overflow-hidden max-w-sm w-[calc(100vw-2rem)]" style={{ margin: 0 }}>
         <DialogTitle className="sr-only">
           {editing ? "Edit Financial Year" : "New Financial Year"}
         </DialogTitle>
@@ -293,27 +234,11 @@ function FinYearDialog({
         </DialogDescription>
 
         {/* Header */}
-        <div className="relative px-6 pt-6 pb-5 bg-gradient-to-br from-blue-500/8 via-transparent to-transparent border-b border-border">
-          <button
-            onClick={() => { if (!isSaving) onClose(); }}
-            className="absolute top-4 right-4 p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          >
-            <X size={14} />
-          </button>
-
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center">
-              <CalendarRange size={15} className="text-blue-500" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                {editing ? "Edit Financial Year" : "New Financial Year"}
-              </p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                {editing ? `Editing ${editing.year}` : "Configure dates, status and lock"}
-              </p>
-            </div>
-          </div>
+        <div className="px-6 pt-6 pb-4" style={{ borderBottom: RULE }}>
+          <p className={LBL}>{editing ? `Editing ${editing.year}` : "Dates, status and lock"}</p>
+          <p className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">
+            {editing ? "Edit financial year" : "New financial year"}
+          </p>
         </div>
 
         {/* Body */}
@@ -322,8 +247,8 @@ function FinYearDialog({
 
             {/* Year name */}
             <div className="space-y-1.5">
-              <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                Year Label <span className="text-red-500">*</span>
+              <label className={`${LBL} block`}>
+                Year Label <span className="text-destructive">*</span>
               </label>
               <input
                 {...register("year")}
@@ -331,7 +256,7 @@ function FinYearDialog({
                 className={inputCls}
               />
               {errors.year && (
-                <p className="text-[0.6875rem] text-red-500 flex items-center gap-1">
+                <p className="text-[0.6875rem] text-destructive flex items-center gap-1">
                   <AlertTriangle size={10} /> {errors.year.message}
                 </p>
               )}
@@ -340,46 +265,45 @@ function FinYearDialog({
             {/* Date range */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Start Date <span className="text-red-500">*</span>
+                <label className={`${LBL} block`}>
+                  Start Date <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
                   <Calendar size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   <DateInput {...register("startDate")} className={dateCls} />
                 </div>
                 {errors.startDate && (
-                  <p className="text-[0.6875rem] text-red-500">{errors.startDate.message}</p>
+                  <p className="text-[0.6875rem] text-destructive">{errors.startDate.message}</p>
                 )}
               </div>
               <div className="space-y-1.5">
-                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                  End Date <span className="text-red-500">*</span>
+                <label className={`${LBL} block`}>
+                  End Date <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
                   <Calendar size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   <DateInput {...register("endDate")} className={dateCls} />
                 </div>
                 {errors.endDate && (
-                  <p className="text-[0.6875rem] text-red-500">{errors.endDate.message}</p>
+                  <p className="text-[0.6875rem] text-destructive">{errors.endDate.message}</p>
                 )}
               </div>
             </div>
 
             {/* Status toggle buttons */}
             <div className="space-y-1.5">
-              <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Status</label>
+              <label className={`${LBL} block`}>Status</label>
               <div className="flex gap-2">
                 {(["Active", "Closed"] as const).map((s) => (
                   <button
                     key={s}
                     type="button"
                     onClick={() => setValue("status", s, { shouldValidate: true })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-xl border transition-all ${
+                    aria-pressed={formData.status === s}
+                    className={`${KEY} flex-1 h-9 border ${
                       formData.status === s
-                        ? s === "Active"
-                          ? "bg-emerald-500/10 border-emerald-400/40 text-emerald-600 dark:text-emerald-400"
-                          : "bg-slate-500/10 border-slate-400/40 text-slate-600 dark:text-slate-400"
-                        : "border-border text-muted-foreground hover:bg-muted"
+                        ? "bg-foreground text-card border-foreground"
+                        : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"
                     }`}
                   >
                     {s === "Active" ? <CheckCircle2 size={12} /> : <X size={12} />}
@@ -390,44 +314,43 @@ function FinYearDialog({
             </div>
 
             {/* Lock toggle */}
-            <div className={`flex items-center justify-between px-3.5 py-3 rounded-xl border transition-colors ${
-              formData.locked
-                ? "bg-amber-500/8 border-amber-400/30"
-                : "bg-muted/30 border-border"
+            <div className={`flex items-center justify-between px-3.5 py-3 border transition-colors ${
+              formData.locked ? "border-foreground" : "border-foreground/30"
             }`}>
               <div className="flex items-center gap-2.5">
                 {formData.locked
-                  ? <Lock size={14} className="text-amber-500" />
+                  ? <Lock size={14} className="text-foreground" />
                   : <Unlock size={14} className="text-muted-foreground" />}
                 <div>
-                  <p className="text-xs font-semibold text-foreground">Lock Year</p>
+                  <p className="text-xs font-semibold text-foreground">Lock year</p>
                   <p className="text-[0.625rem] text-muted-foreground">Prevents new entries when locked</p>
                 </div>
               </div>
               <Switch
                 checked={formData.locked}
                 onCheckedChange={(c) => setValue("locked", c)}
+                className="data-[state=checked]:bg-foreground"
               />
             </div>
           </div>
 
           {/* Footer */}
-          <div className="px-6 pb-5 flex gap-2.5 border-t border-border pt-4">
+          <div className="px-6 pb-5 flex gap-2 pt-4" style={{ borderTop: RULE }}>
             <button
               type="button"
               onClick={() => { if (!isSaving) onClose(); }}
               disabled={isSaving}
-              className="flex-1 py-2.5 text-sm rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+              className={`${KEY_LINE} flex-1 h-10`}
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-heading font-semibold rounded-xl btn-module shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className={`${KEY_INK} flex-1 h-10`}
             >
               {isSaving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              {isSaving ? "Saving…" : editing ? "Save Changes" : "Create Year"}
+              {isSaving ? "Saving…" : editing ? "Save changes" : "Create year"}
             </button>
           </div>
         </form>
@@ -525,51 +448,63 @@ export default function FinYearRights() {
     <>
       <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
 
-      <AdminShell
-        title="Financial Year Rights"
-        subtitle="Manage financial years, date ranges, and lock status"
-        icon={Calendar}
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Rights"
+        title="Financial years"
+        subtitle="The financial years entries are booked in, their date ranges, and whether each is locked against new entries."
         action={
           rights.canCreate && (
             <button
               onClick={openAdd}
               disabled={isLoading}
-              className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 rounded-lg btn-module transition-all disabled:opacity-50"
+              className={`${KEY_INK} h-9 px-4`}
             >
               <Plus size={13} />
-              New Year
+              New year
             </button>
           )
         }
       >
 
-        {/* ── Stats ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon={CalendarRange} label="Total Years"    value={finYears.length} accent="#3b82f6" />
-          <StatCard icon={CheckCircle2}  label="Active"         value={activeCount}     accent="#10b981" />
-          <StatCard icon={X}             label="Closed"         value={closedCount}     accent="#64748b" />
-          <StatCard icon={ShieldCheck}   label="Locked"         value={lockedCount}     accent="#f59e0b" />
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Years", value: finYears.length, note: "set up" },
+              { label: "Active", value: activeCount, note: "open for the year's work" },
+              { label: "Closed", value: closedCount, note: "finished" },
+              { label: "Locked", value: lockedCount, note: "no new entries" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* ── Search ── */}
-        <div className="relative max-w-sm">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-          <input
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search financial years…"
-            className="w-full pl-9 pr-8 py-2.5 text-sm rounded-xl border border-border bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-blue-500/25 focus:border-blue-500/50 transition-all"
-          />
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X size={12} />
-            </button>
-          )}
-        </div>
-
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="flex items-baseline gap-2.5 mr-auto">
+              <span className={HEAD}>Years</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+            </p>
+            <div className="relative w-full sm:w-72">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search financial years…"
+                className="w-full h-9 pl-8 pr-8 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+              />
+              {searchTerm && (
+                <button onClick={() => setSearchTerm("")} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="p-4">
         {/* ── Grid ── */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground text-sm">
@@ -577,26 +512,23 @@ export default function FinYearRights() {
             Loading financial years…
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-16 flex flex-col items-center gap-4 text-center rounded-2xl border border-dashed border-border bg-muted/20">
-            <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
-              <CalendarDays size={22} className="text-muted-foreground/50" />
-            </div>
+          <div className="py-14 flex flex-col items-center gap-3 text-center border border-dashed border-foreground/40">
             <div>
-              <p className="text-sm font-semibold text-foreground">
+              <p className="font-heading text-base font-bold tracking-tight text-foreground">
                 {searchTerm ? "No years match your search" : "No financial years configured"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {searchTerm ? "Try clearing your search." : "Click \"New Year\" to add your first financial year."}
+                {searchTerm ? "Try clearing your search." : "Use New year to add your first financial year."}
               </p>
             </div>
             {searchTerm && (
-              <button onClick={() => setSearchTerm("")} className="text-xs text-blue-500 hover:underline">
+              <button onClick={() => setSearchTerm("")} className={`${KEY_LINE} h-9 px-4`}>
                 Clear search
               </button>
             )}
           </div>
         ) : (
-          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
             {filtered.map((fy) => (
               <YearCard
                 key={fy.id}
@@ -611,8 +543,10 @@ export default function FinYearRights() {
             ))}
           </div>
         )}
+          </div>
+        </div>
 
-      </AdminShell>
+      </SheetShell>
 
       {/* ── Form dialog ── */}
       <FinYearDialog
@@ -625,29 +559,29 @@ export default function FinYearRights() {
 
       {/* ── Delete confirm ── */}
       <AlertDialog open={!!deletingId} onOpenChange={(o) => { if (!o) setDeletingId(null); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sheet-frame" style={{ margin: 0 }}>
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-red-500" />
-              Delete Financial Year?
-            </AlertDialogTitle>
+            <div className="pb-3" style={{ borderBottom: RULE }}>
+              <p className={LBL}>Financial year</p>
+              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Delete {deletingYear?.year}</AlertDialogTitle>
+            </div>
             <AlertDialogDescription>
               This will permanently delete{" "}
               <span className="font-semibold text-foreground">{deletingYear?.year}</span>.
               This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
+            <AlertDialogCancel disabled={isDeleting} className={`${KEY_LINE} h-9 px-4 rounded-none bg-card`}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className={`${KEY} h-9 px-5 rounded-none !bg-destructive !text-destructive-foreground border border-destructive hover:!bg-destructive/90`}
               onClick={handleDelete}
               disabled={isDeleting}
             >
               {isDeleting ? (
-                <><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Deleting…</>
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" />Deleting…</>
               ) : (
-                <><Trash2 className="mr-2 h-3.5 w-3.5" />Delete</>
+                <><Trash2 className="h-3.5 w-3.5" />Delete</>
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

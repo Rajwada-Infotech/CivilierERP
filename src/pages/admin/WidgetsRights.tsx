@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { getWidgetCatalog, type WidgetCatalogItem } from "@/api/widgetsApi";
 import { getRolesList } from "@/api/roleApi";
 
@@ -93,6 +93,14 @@ async function saveRoleWidgets(roleId: number, allowedWidgets: string[]): Promis
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border whitespace-nowrap ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
+const FIELD = "w-full border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
+
 export default function WidgetsRights() {
   const rights = usePageRights("widgets-rights");
   // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
@@ -242,22 +250,18 @@ export default function WidgetsRights() {
     <>
       <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
 
-      <AdminShell
-        title="Widgets Rights"
-        subtitle="Control which dashboard widgets each user can access. Changes take effect on next login."
-        icon={Puzzle}
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Rights"
+        title="Widget rights"
+        subtitle="Which dashboard widgets a role or a person can use. Changes take effect on next login."
         action={
           hasSubjectSelected && (
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
-              className={`btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-60 transition-all
- ${saveStatus === "saved"
-                  ? "!bg-none !bg-emerald-500 border border-emerald-500/30"
-                  : saveStatus === "error"
-                  ? "!bg-none !bg-destructive border border-destructive/30"
-                  : ""
-                }`}
+              className={`${KEY} h-9 px-5 shrink-0 border ${
+                saveStatus === "error" ? "bg-destructive text-destructive-foreground border-destructive" : "bg-foreground text-card border-foreground"
+              }`}
             >
               {saveStatus === "saving" ? (
                 <><RefreshCw size={14} className="animate-spin" /> Saving…</>
@@ -266,44 +270,36 @@ export default function WidgetsRights() {
               ) : saveStatus === "error" ? (
                 <><AlertCircle size={14} /> Failed</>
               ) : (
-                <><Save size={14} /> Save Changes</>
+                <><Save size={13} /> Save changes</>
               )}
             </button>
           )
         }
       >
         {/* Subject selector */}
-        <div className="bg-card border border-border rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Users size={16} className="text-primary" />
-              {subject === "user" ? "Select User" : "Select Role"}
-            </div>
-            <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+        <div className="bg-card relative" style={{ border: RULE, zIndex: 40 }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <span className={HEAD}>{subject === "user" ? "Choose a person" : "Choose a role"}</span>
+            <div className="inline-flex items-stretch border border-foreground w-fit">
               <button
                 onClick={() => switchSubject("role")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  subject === "role"
-                    ? "bg-card shadow text-foreground border border-border"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                aria-pressed={subject === "role"}
+                className={`h-8 px-3 ${KEY} ${subject === "role" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}
               >
                 Role-wise
               </button>
               <button
                 onClick={() => switchSubject("user")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  subject === "user"
-                    ? "bg-card shadow text-foreground border border-border"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                aria-pressed={subject === "user"}
+                className={`h-8 px-3 border-l border-foreground ${KEY} ${subject === "user" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}
               >
-                Custom User-wise
+                Custom user-wise
               </button>
             </div>
           </div>
+          <div className="p-4 space-y-3">
           {subject === "role" && (
-            <p className="text-xs text-muted-foreground/70">
+            <p className="text-xs text-muted-foreground max-w-prose">
               Sets the baseline every user with this role sees, effective immediately — a user's own overrides (Custom User-wise) fully replace this for them.
             </p>
           )}
@@ -314,12 +310,12 @@ export default function WidgetsRights() {
                 <AlertCircle size={14} /> {usersError}
               </div>
             ) : usersLoading ? (
-              <div className="h-10 bg-muted/30 animate-pulse rounded-lg" />
+              <div className="h-10 bg-muted/30 animate-pulse" />
             ) : (
               <div className="relative">
                 <button
                   onClick={() => setUserDropdownOpen(o => !o)}
-                  className="w-full flex items-center justify-between gap-2 pl-3 pr-3 py-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors text-sm appearance-none"
+                  className="w-full max-w-md h-10 flex items-center justify-between gap-2 px-3 border border-foreground/40 hover:border-foreground bg-card transition-colors text-sm"
                 >
                   <span className={selectedUser ? "text-foreground font-medium" : "text-muted-foreground"}>
                     {selectedUser ? `${selectedUser.name} — ${selectedUser.email}` : "Choose a user to configure…"}
@@ -328,8 +324,8 @@ export default function WidgetsRights() {
                 </button>
 
                 {userDropdownOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                    <div className="p-2 border-b border-border">
+                  <div className="absolute top-full left-0 w-full max-w-md mt-1 bg-card border border-foreground z-50 overflow-hidden" style={{ boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" }}>
+                    <div className="p-2 border-b border-foreground">
                       <div className="relative">
                         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
@@ -337,7 +333,7 @@ export default function WidgetsRights() {
                           value={userSearch}
                           onChange={e => setUserSearch(e.target.value)}
                           placeholder="Search users…"
-                          className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/30 rounded-lg outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary"
+                          className={`${FIELD} h-8 pl-8 pr-3`}
                         />
                       </div>
                     </div>
@@ -349,14 +345,14 @@ export default function WidgetsRights() {
                           <button
                             key={u.id}
                             onClick={() => { setSelectedUser(u); setUserDropdownOpen(false); setUserSearch(""); }}
-                            className={`w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-accent/10 transition-colors text-left
-                              ${selectedUser?.id === u.id ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                            className={`w-full flex items-center justify-between px-3 py-2 text-sm border-b border-foreground/10 hover:bg-primary/5 transition-colors text-left text-foreground
+                              ${selectedUser?.id === u.id ? "bg-primary/10" : ""}`}
                           >
                             <div>
                               <p className="font-medium">{u.name}</p>
                               <p className="text-xs text-muted-foreground">{u.email}</p>
                             </div>
-                            <span className="text-xs text-muted-foreground capitalize bg-muted/40 px-2 py-0.5 rounded-full">
+                            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground border border-foreground/30 px-1.5 py-0.5">
                               {u.role}
                             </span>
                           </button>
@@ -368,12 +364,12 @@ export default function WidgetsRights() {
               </div>
             )
           ) : rolesLoading ? (
-            <div className="h-10 bg-muted/30 animate-pulse rounded-lg" />
+            <div className="h-10 bg-muted/30 animate-pulse" />
           ) : (
             <div className="relative">
               <button
                 onClick={() => setRoleDropdownOpen(o => !o)}
-                className="w-full flex items-center justify-between gap-2 pl-3 pr-3 py-2.5 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors text-sm appearance-none"
+                className="w-full max-w-md h-10 flex items-center justify-between gap-2 px-3 border border-foreground/40 hover:border-foreground bg-card transition-colors text-sm"
               >
                 <span className={selectedRole ? "text-foreground font-medium" : "text-muted-foreground"}>
                   {selectedRole ? selectedRole.RName : "Choose a role to configure…"}
@@ -382,8 +378,8 @@ export default function WidgetsRights() {
               </button>
 
               {roleDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-xl shadow-xl z-50 overflow-hidden">
-                  <div className="p-2 border-b border-border">
+                <div className="absolute top-full left-0 w-full max-w-md mt-1 bg-card border border-foreground z-50 overflow-hidden" style={{ boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)" }}>
+                  <div className="p-2 border-b border-foreground">
                     <div className="relative">
                       <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                       <input
@@ -391,7 +387,7 @@ export default function WidgetsRights() {
                         value={roleSearch}
                         onChange={e => setRoleSearch(e.target.value)}
                         placeholder="Search roles…"
-                        className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/30 rounded-lg outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary"
+                        className={`${FIELD} h-8 pl-8 pr-3`}
                       />
                     </div>
                   </div>
@@ -403,8 +399,8 @@ export default function WidgetsRights() {
                         <button
                           key={r.RId}
                           onClick={() => { setSelectedRoleId(r.RId); setRoleDropdownOpen(false); setRoleSearch(""); }}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-accent/10 transition-colors text-left
-                            ${selectedRoleId === r.RId ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                          className={`w-full flex items-center justify-between px-3 py-2 text-sm border-b border-foreground/10 hover:bg-primary/5 transition-colors text-left text-foreground
+                            ${selectedRoleId === r.RId ? "bg-primary/10" : ""}`}
                         >
                           <p className="font-medium">{r.RName}</p>
                         </button>
@@ -418,18 +414,18 @@ export default function WidgetsRights() {
 
           {hasSubjectSelected && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
-              <span className="w-2 h-2 rounded-full bg-primary inline-block" />
               Configuring <strong className="text-foreground">{subject === "user" ? selectedUser?.name : selectedRole?.RName}</strong> —
               <strong className="text-foreground">{enabledCount}</strong> of {widgetCatalog.length} widgets enabled
             </div>
           )}
+          </div>
         </div>
 
         {/* Widget configurator */}
         {hasSubjectSelected && (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
             {/* Toolbar */}
-            <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
+            <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
               {/* Search */}
               <div className="relative flex-1 min-w-0 sm:min-w-[180px]">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -437,7 +433,7 @@ export default function WidgetsRights() {
                   value={widgetSearch}
                   onChange={e => setWidgetSearch(e.target.value)}
                   placeholder="Search widgets…"
-                  className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/20 border border-border rounded-lg outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary"
+                  className={`${FIELD} h-8 pl-8 pr-3`}
                 />
               </div>
 
@@ -447,47 +443,8 @@ export default function WidgetsRights() {
                   <button
                     key={cat}
                     onClick={() => setCategoryFilter(cat)}
-                    className={`px-2.5 py-1 rounded-lg border text-[0.6875rem] font-medium transition-all whitespace-nowrap
-                      ${categoryFilter === cat
-                        ? cat === "All"
-                          ? "btn-module text-white border-transparent font-semibold shadow-sm"
-                          : cat === "Charts"
-                            ? "bg-blue-500 text-white border-blue-500 font-semibold"
-                            : cat === "KPIs"
-                              ? "btn-module text-white border-violet-500 font-semibold"
-                              : cat === "Data"
-                                ? "bg-cyan-500 text-white border-cyan-500 font-semibold"
-                                : cat === "Planning"
-                                  ? "bg-emerald-500 text-white border-emerald-500 font-semibold"
-                                  : cat === "Alerts"
-                                    ? "bg-rose-500 text-white border-rose-500 font-semibold"
-                                    : cat === "Activity"
-                                      ? "bg-amber-500 text-white border-amber-500 font-semibold"
-                                      : cat === "Geo"
-                                        ? "bg-teal-500 text-white border-teal-500 font-semibold"
-                                        : cat === "Tools"
-                                          ? "bg-orange-500 text-white border-orange-500 font-semibold"
-                                          : "btn-module text-white border-transparent font-semibold shadow-sm"
-                        : cat === "All"
-                          ? "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
-                          : cat === "Charts"
-                            ? "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20"
-                            : cat === "KPIs"
-                              ? "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20"
-                              : cat === "Data"
-                                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20"
-                                : cat === "Planning"
-                                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"
-                                  : cat === "Alerts"
-                                    ? "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20"
-                                    : cat === "Activity"
-                                      ? "border-amber-500/30 bg-[#ffe2021a] text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
-                                      : cat === "Geo"
-                                        ? "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20"
-                                        : cat === "Tools"
-                                          ? "border-orange-500/30 bg-orange-500/10 text-orange-600 dark:text-orange-400 hover:bg-orange-500/20"
-                                          : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
-                      }`}
+                    aria-pressed={categoryFilter === cat}
+                    className={chip(categoryFilter === cat)}
                   >
                     {cat}
                   </button>
@@ -498,13 +455,13 @@ export default function WidgetsRights() {
               <div className="flex items-center gap-2 ml-auto">
                 <button
                   onClick={selectAll}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors font-medium"
+                  className={`${KEY} h-7 px-2.5 border border-foreground text-foreground hover:bg-primary/10`}
                 >
                   <ToggleRight size={13} /> Enable all
                 </button>
                 <button
                   onClick={clearAll}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted/40 rounded-lg transition-colors"
+                  className={`${KEY} h-7 px-2.5 border border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground`}
                 >
                   <ToggleLeft size={13} /> Disable all
                 </button>
@@ -519,7 +476,7 @@ export default function WidgetsRights() {
             ) : widgetsLoading || catalogLoading ? (
               <div className="p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {Array.from({ length: 12 }).map((_, i) => (
-                  <div key={i} className="h-24 rounded-xl bg-muted/30 animate-pulse" />
+                  <div key={i} className="h-24 bg-muted/30 animate-pulse" />
                 ))}
               </div>
             ) : (
@@ -531,27 +488,28 @@ export default function WidgetsRights() {
                     <button
                       key={widget.key}
                       onClick={() => toggleWidget(widget.key)}
-                      className={`relative group flex flex-col items-center gap-2 p-4 rounded-xl border text-left transition-all
+                      aria-pressed={enabled}
+                      className={`relative group flex flex-col items-center gap-2 p-4 border text-left transition-colors
                         ${enabled
-                          ? "border-primary/50 bg-primary/5 hover:bg-primary/10 shadow-sm"
-                          : "border-border bg-muted/10 hover:bg-muted/20 opacity-60 hover:opacity-80"
+                          ? "border-foreground bg-card hover:bg-primary/5"
+                          : "border-dashed border-foreground/40 bg-card hover:border-foreground"
                         }`}
                     >
                       {/* Enable/disable indicator */}
-                      <div className={`absolute top-2 right-2 w-4 h-4 rounded-full flex items-center justify-center transition-all
-                        ${enabled ? "bg-primary" : "bg-muted/40 border border-border"}`}
+                      <div className={`absolute top-2 right-2 w-4 h-4 flex items-center justify-center border transition-colors
+                        ${enabled ? "bg-foreground border-foreground" : "border-foreground/40"}`}
                       >
-                        {enabled && <Check size={10} className="text-primary-foreground" strokeWidth={3} />}
+                        {enabled && <Check size={10} className="text-card" strokeWidth={3} />}
                       </div>
 
-                      <div className={`p-2 rounded-lg transition-all ${enabled ? "bg-primary/15" : "bg-muted/30"}`}>
-                        <Icon size={18} className={enabled ? "text-primary" : "text-muted-foreground"} />
+                      <div className="p-2">
+                        <Icon size={18} className={enabled ? "text-foreground" : "text-muted-foreground"} />
                       </div>
                       <div className="text-center">
                         <p className={`text-xs font-semibold font-heading leading-tight ${enabled ? "text-foreground" : "text-muted-foreground"}`}>
                           {widget.label}
                         </p>
-                        <p className="text-[0.625rem] text-muted-foreground mt-0.5 leading-tight hidden sm:block">
+                        <p className={`${LBL} mt-1 leading-tight hidden sm:block`}>
                           {widget.category}
                         </p>
                       </div>
@@ -568,7 +526,7 @@ export default function WidgetsRights() {
             )}
 
             {/* Footer summary */}
-            <div className="px-4 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
+            <div className="px-4 py-3 flex flex-wrap items-center justify-between gap-3" style={{ borderTop: RULE }}>
               <p className="text-xs text-muted-foreground">
                 <span className="font-semibold text-foreground">{enabledCount}</span> widgets enabled for{" "}
                 <span className="font-semibold text-foreground">
@@ -580,7 +538,7 @@ export default function WidgetsRights() {
                   <div
                     key={w.key}
                     title={w.key}
-                    className={`w-2 h-2 rounded-full transition-all ${allowedWidgets.has(w.key) ? "bg-primary" : "bg-muted/40"}`}
+                    className={`w-2 h-2 border transition-colors ${allowedWidgets.has(w.key) ? "bg-foreground border-foreground" : "border-foreground/30"}`}
                   />
                 ))}
               </div>
@@ -590,11 +548,8 @@ export default function WidgetsRights() {
 
         {/* Empty state */}
         {!hasSubjectSelected && !usersLoading && (
-          <div className="border border-dashed border-border rounded-xl p-12 flex flex-col items-center justify-center gap-3 text-center">
-            <div className="p-4 bg-muted/20 rounded-2xl">
-              <Puzzle size={32} className="text-muted-foreground" />
-            </div>
-            <p className="font-medium text-foreground">
+          <div className="border border-dashed border-foreground/40 p-10 flex flex-col items-center justify-center gap-2 text-center">
+            <p className="font-heading text-base font-bold tracking-tight text-foreground">
               {subject === "user" ? "Select a user to configure their widgets" : "Select a role to configure its baseline widgets"}
             </p>
             <p className="text-sm text-muted-foreground max-w-xs">
@@ -604,7 +559,7 @@ export default function WidgetsRights() {
             </p>
           </div>
         )}
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }

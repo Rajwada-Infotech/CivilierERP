@@ -18,7 +18,7 @@ import { getMenuMasters } from "@/api/menuMasterApi";
 import { toast } from "sonner";
 import { Tag } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DbEntryType {
@@ -101,8 +101,8 @@ function makePrefixRenderer(
     return (
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[0.6875rem] text-muted-foreground font-heading">
-            Mode:
+          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Mode
           </span>
           {(["auto", "custom"] as const).map((m) => (
             <button
@@ -111,10 +111,11 @@ function makePrefixRenderer(
               onClick={() =>
                 onChange({ mode: m, customPrefix: groupVal.customPrefix })
               }
-              className={`px-2.5 py-0.5 rounded-full text-[0.625rem] font-heading border transition-all ${
+              aria-pressed={groupVal.mode === m}
+              className={`h-7 px-2.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] border transition-colors ${
                 groupVal.mode === m
-                  ? "btn-module text-white border-primary"
-                  : "bg-muted text-muted-foreground border-border hover:border-primary"
+                  ? "bg-foreground text-card border-foreground"
+                  : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"
               }`}
             >
               {m === "auto" ? "Auto (2+3 Letters)" : "Custom"}
@@ -142,20 +143,20 @@ function makePrefixRenderer(
                 ? "Auto-generated"
                 : "Enter custom prefix"
             }
-            className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-              ${groupVal.mode === "auto" ? "opacity-60 cursor-not-allowed" : ""}
-              ${error ? "border-destructive" : "border-border"}`}
+            className={`w-full h-9 pl-8 pr-3 text-sm font-heading tracking-wide bg-card border outline-none text-foreground
+              ${groupVal.mode === "auto" ? "border-dashed cursor-not-allowed" : "focus:border-foreground"}
+              ${error ? "border-destructive" : "border-foreground/40"}`}
           />
         </div>
 
         {groupVal.mode === "auto" && (
-          <p className="text-[0.6875rem] text-primary mt-1">
-            From:{" "}
-            <span className="font-semibold">
+          <p className="text-[0.6875rem] text-muted-foreground mt-1">
+            From{" "}
+            <span className="font-semibold text-foreground">
               {projectNameRef.current || "—"}
             </span>
             {" → "}
-            <span className="font-mono font-bold text-foreground">
+            <span className="font-heading font-bold tracking-wide text-foreground">
               {resolvedPrefix}
             </span>
           </p>
@@ -374,18 +375,17 @@ const NamedEntryTypeMaster: React.FC = () => {
       <Breadcrumbs
         items={["Dashboard", "Finance Module", "Named Entry Type Master"]}
       />
-      <AdminShell
-        title="Named Entry Type Master"
-        subtitle="Configure document entry types and auto-generated prefixes per project"
-        icon={Tag}
+      <SheetShell
+        eyebrow="CivilierERP · Admin · Setup"
+        title="Entry types"
+        subtitle="Document entry types for each project, with the prefix their document numbers start with."
       >
 
       {entryTypeOptions.length === 0 && (
-        <div className="mb-4 px-4 py-3 rounded-lg border border-amber-500/30 bg-[#ffe2021a] text-amber-700 dark:text-amber-400 text-sm font-heading">
-          No entry types found in Menu Master. Add entries via{" "}
-          <strong>Admin → Menu Master</strong> before creating named entry
-          types.
-        </div>
+        <p className="text-sm text-destructive border border-destructive bg-card px-4 py-3">
+          No entry types found in Menu Types. Add them under{" "}
+          <strong>Admin → Setup → Menu Types</strong> before creating named entry types.
+        </p>
       )}
 
       <MasterPage
@@ -446,7 +446,7 @@ const NamedEntryTypeMaster: React.FC = () => {
           ],
         } : undefined}
       />
-      </AdminShell>
+      </SheetShell>
     </>
   );
 };
