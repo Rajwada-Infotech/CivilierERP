@@ -359,18 +359,21 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       .input("sdt",  sql.Date, b.ScheduledDate || null)
       .input("adt",  sql.Date, b.ActualHandoverDate || null)
       .input("khb",  sql.Int,  b.KeyHandoverBy ? parseInt(b.KeyHandoverBy) : null)
-      .input("fdc",  sql.Bit,  b.FinalDuesCleared ? 1 : 0)
-      .input("ack",  sql.Bit,  b.CustomerAcknowledged ? 1 : 0)
+      // A field the caller didn't send keeps its value (a stage move sends
+      // only Status) — it used to reset both ticks to "no" and wipe the notes.
+      .input("fdc",  sql.Bit,  b.FinalDuesCleared === undefined ? null : (b.FinalDuesCleared ? 1 : 0))
+      .input("ack",  sql.Bit,  b.CustomerAcknowledged === undefined ? null : (b.CustomerAcknowledged ? 1 : 0))
       .input("st",   sql.NVarChar(30), b.Status || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes === undefined ? null : (b.Notes || ""))
+      .input("keepNote", sql.Bit, b.Notes === undefined ? 1 : 0)
       .input("ub",   sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmHandover SET
           ScheduledDate = ISNULL(@sdt, ScheduledDate),
           ActualHandoverDate = ISNULL(@adt, ActualHandoverDate),
           KeyHandoverBy = ISNULL(@khb, KeyHandoverBy),
-          FinalDuesCleared = @fdc, CustomerAcknowledged = @ack,
-          Status = ISNULL(@st, Status), Notes = @note,
+          FinalDuesCleared = ISNULL(@fdc, FinalDuesCleared), CustomerAcknowledged = ISNULL(@ack, CustomerAcknowledged),
+          Status = ISNULL(@st, Status), Notes = CASE WHEN @keepNote = 1 THEN Notes ELSE NULLIF(@note, N'') END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
