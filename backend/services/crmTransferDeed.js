@@ -25,15 +25,33 @@ class DeedError extends Error { constructor(m, status = 400) { super(m); this.st
 const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
 const LIVE = ["Draft", "UnderReview", "LegalApproved", "WithParties", "PartiesApproved", "DateApproved", "Executed", "Registered"];
 
+/**
+ * What a party's KYC is: an individual gives PAN + Aadhaar, a company / firm /
+ * HUF / trust PAN + address proof (by the PAN's 4th letter — business
+ * decision 2026-10-14, same as the case's buyer checks).
+ */
+const kycLabel = (who, pan) => `${who}'s KYC (${require("./crmResaleCase").isIndividualPan(pan) ? "PAN & Aadhaar" : "PAN & address proof"})`;
+
+/**
+ * Whether staff may verify a paper they uploaded themselves is a setting in
+ * Approval Setup ("crm-transfer-deed-papers", migration 571). Portal uploads
+ * are the customer's, so any staff member may check them.
+ */
+async function assertMayVerifyOwn(doc, actorUserId) {
+  if (doc.UploadedByType === "Portal" || !doc.UploadedBy || Number(doc.UploadedBy) !== Number(actorUserId)) return;
+  if (await require("./approvalService").raiserMayApprove("crm-transfer-deed-papers")) return;
+  throw new DeedError("You uploaded this document, so someone else has to verify it (Approval Setup).", 403);
+}
+
 /** The papers each deed needs, and whose they are. */
-function requiredDocs(deedType, { agreementRegistered }) {
+function requiredDocs(deedType, { agreementRegistered, sellerPan = null, buyerPan = null }) {
   const docs = [
     { DocumentType: "DeedDraft", Label: deedType === "Assignment" ? "Deed of assignment — draft" : "Cancellation deed — draft", Party: "Company" },
-    { DocumentType: "SellerKyc", Label: "Seller's KYC (PAN & Aadhaar)", Party: "Seller" },
+    { DocumentType: "SellerKyc", Label: kycLabel("Seller", sellerPan), Party: "Seller" },
   ];
   if (agreementRegistered) docs.push({ DocumentType: "SellerAfs", Label: "Seller's registered agreement for sale (copy)", Party: "Seller" });
   if (deedType === "Assignment") {
-    docs.push({ DocumentType: "BuyerKyc", Label: "Buyer's KYC (PAN & Aadhaar)", Party: "Buyer" });
+    docs.push({ DocumentType: "BuyerKyc", Label: kycLabel("Buyer", buyerPan), Party: "Buyer" });
     docs.push({ DocumentType: "DeveloperNoc", Label: "Our NOC for the transfer (signed)", Party: "Company" });
   }
   return docs;
@@ -100,7 +118,7 @@ async function openForCase(db, resaleId, actorUserId) {
     .query(`INSERT INTO dbo.CrmTransferDeed (DeedNo, ResaleId, BookingId, DeedType, Status, SeniorApprovalStatus, CreatedBy)
             OUTPUT INSERTED.Id VALUES (@no, @r, @b, @t, N'Draft', N'Draft', @by)`);
   const id = ins.recordset[0].Id;
-  for (const doc of requiredDocs(deedType, { agreementRegistered: st.seller.agreement?.Status === "Registered" })) {
+  for (const doc of requiredDocs(deedType, { agreementRegistered: st.seller.agreement?.Status === "Registered", sellerPan: st.case.FromPan, buyerPan: st.case.ToPan })) {
     await db.request().input("d", sql.Int, id).input("t", sql.NVarChar(40), doc.DocumentType).input("l", sql.NVarChar(200), doc.Label)
       .input("p", sql.NVarChar(20), doc.Party).input("by", sql.Int, actorUserId)
       .query("INSERT INTO dbo.CrmTransferDeedDocument (DeedId, DocumentType, Label, Party, IsMandatory, Status, CreatedBy) VALUES (@d, @t, @l, @p, 1, N'Requested', @by)");
@@ -165,9 +183,7 @@ async function reviewDocument(db, id, docId, decision, remarks, actorUserId) {
   if (slot.Status !== "Uploaded") throw new DeedError("Only an uploaded document can be verified or rejected", 409);
   if (!["Verified", "Rejected"].includes(decision)) throw new DeedError("decision must be Verified or Rejected");
   if (decision === "Rejected" && !String(remarks || "").trim()) throw new DeedError("Say why it's rejected");
-  if (slot.UploadedByType !== "Portal" && slot.UploadedBy && Number(slot.UploadedBy) === Number(actorUserId)) {
-    throw new DeedError("You uploaded this document, so someone else has to verify it.", 403);
-  }
+  await assertMayVerifyOwn(slot, actorUserId);
   await db.request().input("s", sql.Int, docId).input("st", sql.NVarChar(20), decision).input("r", sql.NVarChar(1000), remarks || null).input("u", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmTransferDeedDocument SET Status = @st, Remarks = ISNULL(@r, Remarks), VerifiedBy = @u, VerifiedAt = SYSDATETIME() WHERE Id = @s");
   await log(db, id, decision === "Verified" ? "Document verified" : "Document rejected", { party: slot.Party, userId: actorUserId, remarks: [slot.Label, remarks].filter(Boolean).join(" — ") });
@@ -394,6 +410,8 @@ async function uploadDutyProof(db, id, file, b, ctx) {
   const amt = Number(b?.AmountPaid);
   if (!(amt > 0)) throw new DeedError("Enter the amount paid");
   const on = String(b?.PaidOn || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) throw new DeedError("The payment date isn't a valid date");
+  if (on > new Date().toISOString().slice(0, 10)) throw new DeedError("The payment date can't be in the future");
   await db.request().input("p", sql.Int, p.Id).input("ref", sql.NVarChar(100), String(b.PaidRef).trim()).input("on", sql.Date, on).input("a", sql.Decimal(18, 2), amt)
     .input("fn", sql.NVarChar(300), file.originalname).input("fb", sql.NVarChar(sql.MAX), file.buffer.toString("base64")).input("mt", sql.NVarChar(150), file.mimetype)
     .input("t", sql.NVarChar(20), ctx.actorType)
@@ -478,9 +496,9 @@ async function uploadRegisteredCopy(db, id, file, actorUserId) {
 
 async function verifyRegisteredCopy(db, id, approve, remarks, actorUserId) {
   const doc = (await db.request().input("d", sql.Int, id)
-    .query("SELECT Id, Status, UploadedBy FROM dbo.CrmTransferDeedDocument WHERE DeedId = @d AND DocumentType = N'RegisteredDeed' AND IsActive = 1")).recordset[0];
+    .query("SELECT Id, Status, UploadedBy, UploadedByType FROM dbo.CrmTransferDeedDocument WHERE DeedId = @d AND DocumentType = N'RegisteredDeed' AND IsActive = 1")).recordset[0];
   if (!doc || doc.Status !== "Uploaded") throw new DeedError("Upload the registered copy first", 409);
-  if (doc.UploadedBy && Number(doc.UploadedBy) === Number(actorUserId)) throw new DeedError("You uploaded this document, so someone else has to verify it.", 403);
+  await assertMayVerifyOwn(doc, actorUserId);
   if (!approve && !String(remarks || "").trim()) throw new DeedError("Say why it's rejected");
   await db.request().input("s", sql.Int, doc.Id).input("st", sql.NVarChar(20), approve ? "Verified" : "Rejected").input("r", sql.NVarChar(1000), remarks || null).input("u", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmTransferDeedDocument SET Status = @st, Remarks = ISNULL(@r, Remarks), VerifiedBy = @u, VerifiedAt = SYSDATETIME() WHERE Id = @s");
@@ -613,5 +631,5 @@ module.exports = {
   DeedError, PROXY_METHODS, openForCase, assignLegal, requestDocument, uploadDocument, reviewDocument, documentFile,
   submitForLegal, legalDecision, sendToParties, partyRespond, proposeDate, acceptDate, dateDecision, markExecuted,
   sendDutyInfo, uploadDutyProof, confirmDuty, dutyProof, scheduleRegistry, uploadRegisteredCopy, verifyRegisteredCopy, completeRegistry,
-  cancelDeed, deedState, listDeeds, partiesOf,
+  cancelDeed, deedState, listDeeds, partiesOf, requiredDocs,
 };

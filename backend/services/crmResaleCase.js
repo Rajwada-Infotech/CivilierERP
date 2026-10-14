@@ -35,11 +35,19 @@ const DOC_TYPES = {
 };
 const DEED_STEPS = ["Draft", "LegalApproved", "Consented", "Executed", "DutyPaid", "Registered"];
 
+/**
+ * An individual's PAN has 'P' as its 4th character (Income-tax PAN structure);
+ * a company, firm, trust, HUF ... has another letter. Individuals give PAN +
+ * Aadhaar + address; others PAN + address (they have no Aadhaar) — business
+ * decision 2026-10-14. Shared with Ownership Changes.
+ */
+const isIndividualPan = (pan) => { const p = String(pan || "").trim().toUpperCase(); return !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(p) || p[3] === "P"; };
+
 const idsOf = (r) => String(r.BookingIds || r.FromBookingId || "").split(",").map(Number).filter(Number.isInteger);
 
 async function loadCase(db, id) {
   const r = (await db.request().input("id", sql.Int, id).query(`
-    SELECT r.*, fc.CustomerName AS FromName, tc.CustomerName AS ToName,
+    SELECT r.*, fc.CustomerName AS FromName, tc.CustomerName AS ToName, fc.PanNo AS FromPan,
            tc.PanNo AS ToPan, tc.AadhaarNo AS ToAadhaar, tc.Address AS ToAddress, tc.Mobile AS ToMobile,
            b.BookingNo, COALESCE(b.UnitNo, b.BookingNo) AS Property,
            fi.InvoiceNo AS FeeInvoiceNo, fi.Status AS FeeInvoiceStatus,
@@ -74,9 +82,17 @@ async function sellerFacts(db, r) {
   const uncovered = Math.max(0, Math.round((demandedTotal - onAccount) * 100) / 100);
   const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN (N'Rejected', N'Withdrawn', N'Cancelled')`))[0] || null;
   const openRefund = (await q(`SELECT TOP 1 RefundNo FROM dbo.CrmRefund WHERE BookingId IN (${list}) AND Status NOT IN (N'Paid', N'Rejected', N'Cancelled')`))[0] || null;
+  // The seller's money still waiting for Finance: approved after the transfer
+  // it would land on the booking that is then the buyer's.
+  const pendingReceipts = await q(`
+    SELECT COALESCE(rp.RPDocNo, rp.DocNo) AS No, rp.RPAmount AS Amount FROM dbo.ReceivedPayment rp
+    WHERE rp.CrmBookingId IN (${list}) AND rp.RPStatus IN (N'Draft', N'Pending') AND rp.SourceCrmResaleId IS NULL
+    UNION ALL
+    SELECT mr.ReceiptNo, mr.Amount FROM dbo.CrmMoneyReceipt mr
+    WHERE mr.BookingId IN (${list}) AND mr.Status = N'Pending' AND mr.ReceivedPaymentId IS NULL`);
   const loans = await q(`SELECT BankName, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId IN (${list}) AND ISNULL(SanctionStatus, N'') NOT IN (N'Rejected', N'Withdrawn', N'Closed', N'NotApplied')`);
   const agreement = (await q(`SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId IN (${list}) ORDER BY CASE WHEN BookingId = ${Number(r.FromBookingId) || 0} THEN 0 ELSE 1 END`))[0] || null;
-  return { overdue, onAccount, demandedTotal, uncovered, openCancellation, openRefund, loans, agreement };
+  return { overdue, onAccount, demandedTotal, uncovered, openCancellation, openRefund, loans, agreement, pendingReceipts };
 }
 
 async function docsOf(db, id) {
@@ -98,7 +114,8 @@ async function caseState(db, id) {
   const hasLoan = r.SellerHasLoan != null ? !!r.SellerHasLoan : f.loans.length > 0;
   const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
   const done = r.Status === "Completed";
-  const dead = ["Rejected", "Cancelled"].includes(r.Status);
+  // A rejected case can be fixed and sent again — only a cancelled one is over.
+  const dead = r.Status === "Cancelled";
 
   // 2 clearance
   const clearanceBlockers = [];
@@ -107,6 +124,7 @@ async function caseState(db, id) {
   }
   if (f.openCancellation) clearanceBlockers.push(`Cancellation ${f.openCancellation.CancellationNo} is open on this property`);
   if (f.openRefund) clearanceBlockers.push(`Refund ${f.openRefund.RefundNo} is open on this property`);
+  if (f.pendingReceipts.length) clearanceBlockers.push(`${f.pendingReceipts.map((x) => x.No || "A payment").join(", ")} waiting for Finance — approve or reject ${f.pendingReceipts.length === 1 ? "it" : "them"} first`);
   if (hasLoan && !verified(docs, "SellerLoanNoc")) clearanceBlockers.push("The seller has a home loan — upload and verify their bank's NOC / closure letter");
 
   // 4 buyer
@@ -115,7 +133,7 @@ async function caseState(db, id) {
     if (!r.ToCustomerId) buyerBlockers.push("Choose the new buyer");
     else {
       if (!r.ToPan) buyerBlockers.push("Buyer's PAN is missing (Customers)");
-      if (!r.ToAadhaar) buyerBlockers.push("Buyer's Aadhaar is missing (Customers)");
+      if (!r.ToAadhaar && isIndividualPan(r.ToPan)) buyerBlockers.push("Buyer's Aadhaar is missing (Customers)");
       if (!r.ToAddress) buyerBlockers.push("Buyer's address is missing (Customers)");
       if (!r.BuyerApplicationId) buyerBlockers.push("Open the buyer's application from this case");
     }
@@ -157,7 +175,10 @@ async function caseState(db, id) {
       r.SellerClearedAt ? "Confirmed" : clearanceBlockers.length ? null : "All checks pass — confirm to continue"),
     ...(isResale ? [stage("noc", "Developer NOC", !!r.NocIssuedAt, r.SellerClearedAt ? [] : ["Seller clearance first"], r.NocNo || null)] : []),
     ...(isResale ? [stage("buyer", "New buyer", !buyerBlockers.length, buyerBlockers, r.ToName || null)] : []),
-    stage("approval", "Approval", ["Approved", "Completed"].includes(r.Status), r.Status === "Pending" ? ["Waiting in the Approval Inbox (Marketing Head → Director)"] : [], r.Status),
+    stage("approval", "Approval", ["Approved", "Completed"].includes(r.Status),
+      r.Status === "Pending" ? ["Waiting in the Approval Inbox (Marketing Head → Director)"]
+        : r.Status === "Rejected" ? [`Sent back${r.RejectionNote ? `: ${r.RejectionNote}` : ""} — fix it and send it again`]
+          : r.Status === "Draft" ? ["Send it for approval"] : [], r.Status),
     ...(isResale ? [stage("fee", "Transfer fee", feeOk, feeBlockers,
       fee > 0 ? [fmt(fee), r.FeeInvoiceNo, r.FeeReceiptNo && `${r.FeeReceiptNo} ${r.FeeReceiptStatus}`].filter(Boolean).join(" · ") : "No fee", !(fee > 0))] : []),
     stage("deed", deedType === "Assignment" ? "Deed of assignment" : deedType === "CancellationDeed" ? "Cancellation deed" : "Cancellation letter",
@@ -178,6 +199,8 @@ async function caseState(db, id) {
             : `Covered by ${fmt(f.onAccount)} paid on account (settles when the full price is in)` },
       { label: "No open cancellation or refund", ok: !f.openCancellation && !f.openRefund,
         hint: [f.openCancellation?.CancellationNo, f.openRefund?.RefundNo].filter(Boolean).join(", ") || null },
+      { label: "No seller payment waiting for Finance", ok: !f.pendingReceipts.length,
+        hint: f.pendingReceipts.length ? `${f.pendingReceipts.map((x) => `${x.No || "receipt"} ₹${Number(x.Amount || 0).toLocaleString("en-IN")}`).join(" · ")} — Finance → Received Payments / Money Receipts` : null },
       hasLoan
         ? { label: "Seller's bank NOC / loan-closure letter verified", ok: verified(docs, "SellerLoanNoc"), doc: "SellerLoanNoc",
             hint: f.loans.length ? `Loan with ${f.loans.map((l) => l.BankName).join(", ")}` : "Marked as having a loan" }
@@ -188,13 +211,17 @@ async function caseState(db, id) {
     buyer: [
       { label: "New buyer chosen", ok: !!r.ToCustomerId, hint: r.ToName || null },
       { label: "Buyer's PAN on file", ok: !!r.ToPan, link: "kyc" },
-      { label: "Buyer's Aadhaar on file", ok: !!r.ToAadhaar, link: "kyc" },
+      ...(isIndividualPan(r.ToPan) ? [{ label: "Buyer's Aadhaar on file", ok: !!r.ToAadhaar, link: "kyc" }] : []),
       { label: "Buyer's address on file", ok: !!r.ToAddress, link: "kyc" },
       { label: "Buyer's application opened (add co-applicants there)", ok: !!r.BuyerApplicationId, action: "buyer-application", link: r.BuyerApplicationId ? "application" : null },
     ],
-    approval: [{ label: "Approved by Marketing Head, then Director", ok: ["Approved", "Completed"].includes(r.Status), link: "inbox", hint: r.Status === "Pending" ? "Waiting in the Approval Inbox" : null }],
+    approval: [
+      { label: r.Status === "Rejected" ? "Fixed and sent again" : "Sent for approval", ok: !["Draft", "Rejected"].includes(r.Status), action: "submit",
+        hint: r.Status === "Rejected" ? `Sent back${r.RejectionNote ? `: ${r.RejectionNote}` : ""}` : r.Status === "Draft" ? "Steps above are done — send it to the approvers" : null },
+      { label: "Approved by Marketing Head, then Director", ok: ["Approved", "Completed"].includes(r.Status), link: "inbox", hint: r.Status === "Pending" ? "Waiting in the Approval Inbox" : null },
+    ],
     fee: [
-      { label: `Fee invoice issued to the buyer (${fmt(fee)} incl. GST)`, ok: !!r.FeeInvoiceId && r.FeeInvoiceStatus !== "Void", action: "fee-invoice", hint: r.FeeInvoiceNo || null },
+      { label: `Fee invoice issued to the buyer (${fmt(fee)}${Number(r.DeveloperFeeGstAmount) > 0 ? " incl. GST" : ", no GST"})`, ok: !!r.FeeInvoiceId && r.FeeInvoiceStatus !== "Void", action: "fee-invoice", hint: r.FeeInvoiceNo || null },
       { label: "Buyer's payment recorded", ok: !!r.FeeReceivedPaymentId && r.FeeReceiptStatus !== "Rejected", action: "fee-payment", hint: r.FeeReceiptNo || null },
       { label: "Payment approved by Finance", ok: feeApproved, hint: r.FeeReceivedPaymentId && !feeApproved ? "Finance → Received Payments" : null },
     ],
@@ -223,7 +250,7 @@ async function caseState(db, id) {
   return {
     case: {
       Id: r.Id, Kind: r.Kind, Status: r.Status, Property: r.Property, BookingNo: r.BookingNo, BookingIds: idsOf(r),
-      FromCustomerId: r.FromCustomerId, FromName: r.FromName, ToCustomerId: r.ToCustomerId, ToName: r.ToName,
+      FromCustomerId: r.FromCustomerId, FromName: r.FromName, ToCustomerId: r.ToCustomerId, ToName: r.ToName, FromPan: r.FromPan, ToPan: r.ToPan,
       AgreedValue: r.AgreedValue, OriginalValue: r.OriginalValue, DeveloperFeeAmount: r.DeveloperFeeAmount, DeveloperFeeGstAmount: r.DeveloperFeeGstAmount,
       SellerHasLoan: hasLoan, SellerHasLoanSetByStaff: r.SellerHasLoan != null, SellerClearedAt: r.SellerClearedAt,
       NocNo: r.NocNo, NocIssuedAt: r.NocIssuedAt, BuyerApplicationId: r.BuyerApplicationId, FeeInvoiceId: r.FeeInvoiceId,
@@ -266,6 +293,7 @@ async function setSellerLoan(db, id, hasLoan, actorUserId) {
 /** Stage 3: the developer's NOC for the transfer (resale only). */
 async function issueNoc(db, id, actorUserId) {
   const st = await caseState(db, id);
+  if (["Rejected", "Cancelled", "Completed"].includes(st.case.Status)) throw new CaseError(`This case is ${st.case.Status}`, 409);
   if (st.case.Kind === "BuyBack") throw new CaseError("A buy-back has no transfer NOC");
   if (st.case.NocIssuedAt) throw new CaseError(`NOC ${st.case.NocNo} is already issued`, 409);
   if (!st.case.SellerClearedAt) throw new CaseError("Confirm the seller clearance first", 409);
@@ -344,6 +372,7 @@ async function issueFeeInvoice(db, id, actorUserId, actorEmail) {
 /** Stage 6b: the buyer's fee payment — a Finance receipt (approved there) credited to the buyer. */
 async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
   const r = await loadCase(db, id);
+  if (["Rejected", "Cancelled", "Completed"].includes(r.Status)) throw new CaseError(`This case is ${r.Status}`, 409);
   if (!r.FeeInvoiceId || r.FeeInvoiceStatus === "Void") throw new CaseError("Issue the fee invoice first", 409);
   if (r.FeeReceivedPaymentId && r.FeeReceiptStatus !== "Rejected") throw new CaseError(`Payment ${r.FeeReceiptNo || ""} is already recorded`, 409);
   const mode = String(b?.PaymentMode || "").trim();
@@ -367,6 +396,27 @@ async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
     .query("UPDATE dbo.ReceivedPayment SET SourceCrmResaleId = @rid, RPStatus = CASE WHEN RPStatus = 'Draft' THEN 'Pending' ELSE RPStatus END WHERE RPPaymentID = @rp");
   await db.request().input("id", sql.Int, id).input("rp", sql.Int, rp.RPPaymentID).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmUnitResale SET FeeReceivedPaymentId = @rp, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  return caseState(db, id);
+}
+
+/**
+ * Send the case for approval (or again after it was sent back): every stage
+ * before approval must be done — seller clearance, and for a resale the NOC
+ * and the buyer's KYC / application (business decision 2026-10-14).
+ */
+async function submitForApproval(db, id, user) {
+  const st = await caseState(db, id);
+  if (!["Draft", "Rejected"].includes(st.case.Status)) throw new CaseError(st.case.Status === "Pending" ? "It is already waiting for approval" : `This case is ${st.case.Status}`, 409);
+  const idx = st.stages.findIndex((s) => s.key === "approval");
+  const open = st.stages.slice(0, idx).filter((s) => !s.ok && !s.na);
+  if (open.length) throw new CaseError(`Finish first: ${open.map((s) => `${s.label}${s.blockers[0] ? ` (${s.blockers[0]})` : ""}`).join("; ")}`, 409);
+  const { openResaleOn } = require("./crmResaleTransfer");
+  const other = await openResaleOn(db, st.case.BookingIds, id);
+  if (other) throw new CaseError(`This property has another open case (#${other.Id}) — cancel one of them`, 409);
+  const { transition } = require("./approvalService");
+  await transition("crm-resales", id, "Pending", user.email, user.role, null, user.userId);
+  await db.request().input("id", sql.Int, id).input("by", sql.Int, user.userId ?? null)
+    .query("UPDATE dbo.CrmUnitResale SET RejectionNote = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
   return caseState(db, id);
 }
 
@@ -411,4 +461,4 @@ async function documentFile(db, id, docId) {
     .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmResaleDocument WHERE Id = @d AND ResaleId = @id AND IsActive = 1")).recordset[0] || null;
 }
 
-module.exports = { caseState, confirmClearance, setSellerLoan, issueNoc, openBuyerApplication, issueFeeInvoice, recordFeePayment, assertReadyToFinish, addDocument, reviewDocument, documentFile, CaseError, DOC_TYPES, DEED_STEPS };
+module.exports = { isIndividualPan, submitForApproval, caseState, confirmClearance, setSellerLoan, issueNoc, openBuyerApplication, issueFeeInvoice, recordFeePayment, assertReadyToFinish, addDocument, reviewDocument, documentFile, CaseError, DOC_TYPES, DEED_STEPS };

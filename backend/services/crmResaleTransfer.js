@@ -39,32 +39,30 @@ async function movingBookings(db, bookingId) {
 
 /**
  * A resale / buy-back moves a booking that is still the developer's to move.
- * Once the property is conveyed — its sale deed registered, or its handover
- * started — it belongs to the buyer outright; selling it on is a private sale
- * between owners, outside the developer's booking. Returns the reason, or null.
+ * Once the property is conveyed — its sale deed registered — it belongs to
+ * the buyer outright; selling it on is a private sale between owners (an
+ * Ownership Change), outside the developer's booking. A handover alone does
+ * not convey it (business decision 2026-10-14): until the sale deed is
+ * registered the booking can still change hands. Returns the reason, or null.
  */
 async function conveyedReason(db, bookingIds) {
   const ids = (bookingIds || []).map(Number).filter(Number.isInteger);
   if (!ids.length) return null;
   const r = (await db.request().query(`
-    SELECT TOP 1 b.BookingNo,
-      CASE WHEN EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered') THEN N'its sale deed is registered'
-           WHEN EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id) THEN N'its handover has started'
-      END AS Why
+    SELECT TOP 1 b.BookingNo, N'its sale deed is registered' AS Why
     FROM dbo.CrmBooking b
     WHERE b.Id IN (${ids.join(",")})
-      AND (EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered')
-        OR EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id))`)).recordset[0];
+      AND EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered')`)).recordset[0];
   return r ? `${r.BookingNo}: ${r.Why} — the property is conveyed to its owner, so it can no longer be resold or bought back through its booking — record a new owner in Ownership Changes instead` : null;
 }
 
-/** An open resale or buy-back already on any of these bookings. */
-async function openResaleOn(db, bookingIds) {
+/** An open resale or buy-back already on any of these bookings (being prepared, waiting, approved, or sent back to fix). */
+async function openResaleOn(db, bookingIds, exceptId = null) {
   if (!bookingIds.length) return null;
   const likes = bookingIds.map((id) => `(',' + ISNULL(r.BookingIds, CAST(r.FromBookingId AS NVARCHAR(20))) + ',') LIKE '%,${Number(id)},%'`).join(" OR ");
   return (await db.request().query(`
     SELECT TOP 1 r.Id, r.Kind, r.Status FROM dbo.CrmUnitResale r
-    WHERE r.IsActive = 1 AND r.Status IN (N'Pending', N'Approved') AND (${likes})`)).recordset[0] || null;
+    WHERE r.IsActive = 1 AND r.Status IN (N'Draft', N'Pending', N'Approved', N'Rejected') AND (${likes})${exceptId ? ` AND r.Id <> ${Number(exceptId)}` : ""}`)).recordset[0] || null;
 }
 
 /**
@@ -268,7 +266,8 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
   try {
     resale = (await tx.request().input("id", sql.Int, resaleId)
       .query("SELECT * FROM dbo.CrmUnitResale WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id AND IsActive = 1")).recordset[0];
-    if (!resale || resale.Kind !== "BuyBack" || resale.Status === "Completed" || resale.PayoutNewPaymentId !== newPaymentId) {
+    // Only an approved buy-back completes (a cancelled or rejected one never does).
+    if (!resale || resale.Kind !== "BuyBack" || resale.Status !== "Approved" || resale.PayoutNewPaymentId !== newPaymentId) {
       await tx.rollback();
       return { done: false };
     }
