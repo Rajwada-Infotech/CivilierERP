@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { FolderKanban, Loader2, Save, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getUsersForRights } from "@/api/userApi";
 import { getRolesList } from "@/api/roleApi";
@@ -23,6 +23,13 @@ interface Inherited {
   roleName: string | null;
   roleProjectIds: number[];
 }
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_LINE = `${KEY} h-9 px-3 border border-foreground/40 text-foreground hover:border-foreground`;
+const FIELD = "w-full h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground outline-none";
 
 export default function ProjectAccess() {
   const rights = usePageRights("project-access");
@@ -174,31 +181,35 @@ export default function ProjectAccess() {
   })();
 
   const tabCls = (active: boolean) =>
-    `h-8 px-4 text-xs font-semibold transition-colors ${active ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`;
+    `h-8 px-4 ${KEY} ${active ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`;
 
   return (
     <>
     <Breadcrumbs items={[{ label: "Admin" }, { label: "Project Access" }]} />
-    <AdminShell
-      title="Project Access"
+    <SheetShell
+      eyebrow="CivilierERP · Admin · Rights"
+      title="Project access"
       subtitle="Limit which projects a user — or everyone in a role — can see in Material Requests, Purchase Orders, GRNs, Vehicle In/Out, Issues and every project dropdown."
-      icon={FolderKanban}
     >
-      <div className="rounded-xl border border-border bg-card p-5 space-y-5">
-        <div className="inline-flex rounded-lg border border-border overflow-hidden">
-          <button type="button" onClick={() => switchMode("user")} className={tabCls(mode === "user")}>By user</button>
-          <button type="button" onClick={() => switchMode("role")} className={tabCls(mode === "role")}>By role</button>
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+          <span className={HEAD}>{mode === "user" ? "Projects a person can see" : "Projects a role can see"}</span>
+          <div className="inline-flex items-stretch border border-foreground">
+            <button type="button" onClick={() => switchMode("user")} aria-pressed={mode === "user"} className={tabCls(mode === "user")}>By user</button>
+            <button type="button" onClick={() => switchMode("role")} aria-pressed={mode === "role"} className={`${tabCls(mode === "role")} border-l border-foreground`}>By role</button>
+          </div>
         </div>
+        <div className="p-4 space-y-5">
 
         <div className="flex flex-col sm:flex-row sm:items-end gap-3">
           <div className="flex-1 max-w-sm">
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">{mode === "user" ? "User" : "Role"}</label>
+            <label className={`${LBL} block mb-1.5`}>{mode === "user" ? "User" : "Role"}</label>
             {mode === "user" ? (
               <select
                 value={userId ?? ""}
                 onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : null)}
                 disabled={loading}
-                className="w-full h-9 px-2.5 rounded-lg border border-border bg-background text-sm"
+                className={FIELD}
               >
                 <option value="">Select a user…</option>
                 {users.map((u) => (
@@ -212,7 +223,7 @@ export default function ProjectAccess() {
                 value={roleId ?? ""}
                 onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : null)}
                 disabled={loading}
-                className="w-full h-9 px-2.5 rounded-lg border border-border bg-background text-sm"
+                className={FIELD}
               >
                 <option value="">Select a role…</option>
                 {roles.map((r) => (
@@ -226,9 +237,9 @@ export default function ProjectAccess() {
               type="button"
               onClick={save}
               disabled={!dirty || saving}
-              className="h-9 inline-flex items-center gap-1.5 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50"
+              className={`${KEY} h-9 px-5 bg-foreground text-card border border-foreground`}
             >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={13} />} Save
             </button>
           )}
         </div>
@@ -243,7 +254,7 @@ export default function ProjectAccess() {
           </div>
         ) : (
           <>
-            <p className="text-xs text-muted-foreground">{description}</p>
+            <p className="text-xs text-muted-foreground max-w-prose border-l-2 border-foreground/40 pl-3 py-0.5">{description}</p>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[12rem] max-w-xs">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -251,15 +262,15 @@ export default function ProjectAccess() {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search projects…"
-                  className="w-full h-9 pl-8 pr-2.5 rounded-lg border border-border bg-background text-sm"
+                  className={`${FIELD} pl-8`}
                 />
               </div>
               {canEditList && (
                 <>
-                  <button type="button" onClick={() => setAllVisible(true)} className="h-9 px-3 rounded-lg border border-border text-xs hover:bg-muted">
+                  <button type="button" onClick={() => setAllVisible(true)} className={KEY_LINE}>
                     Select shown
                   </button>
-                  <button type="button" onClick={() => setAllVisible(false)} className="h-9 px-3 rounded-lg border border-border text-xs hover:bg-muted">
+                  <button type="button" onClick={() => setAllVisible(false)} className={KEY_LINE}>
                     Clear shown
                   </button>
                   {mode === "user" && selected.size === 0 && inherited.roleProjectIds.length > 0 && (
@@ -269,7 +280,7 @@ export default function ProjectAccess() {
                         setSelected(new Set(inherited.roleProjectIds));
                         setDirty(true);
                       }}
-                      className="h-9 px-3 rounded-lg border border-border text-xs hover:bg-muted"
+                      className={KEY_LINE}
                     >
                       Start from the role's projects
                     </button>
@@ -277,11 +288,11 @@ export default function ProjectAccess() {
                 </>
               )}
             </div>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6">
               {visible.map((p) => (
                 <li key={p.id}>
-                  <label className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-border hover:bg-muted/40 cursor-pointer text-sm">
-                    <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={!canEditList} />
+                  <label className={`flex items-center gap-2.5 py-2 border-b border-foreground/15 cursor-pointer text-sm hover:bg-primary/5 ${selected.has(p.id) ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                    <input type="checkbox" className="h-4 w-4 accent-foreground" checked={selected.has(p.id)} onChange={() => toggle(p.id)} disabled={!canEditList} />
                     <span className="truncate">{p.label}</span>
                   </label>
                 </li>
@@ -290,8 +301,9 @@ export default function ProjectAccess() {
             </ul>
           </>
         )}
+        </div>
       </div>
-    </AdminShell>
+    </SheetShell>
     </>
   );
 }
