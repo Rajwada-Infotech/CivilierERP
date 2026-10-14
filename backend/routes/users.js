@@ -272,7 +272,9 @@ router.get(
                r.RName AS roleName,
                u.created_datetime, u.discontinue,
                ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
-               u.avatar_url,
+               -- lists get the small thumbnail when there is one (migration 575)
+               COALESCE(u.avatar_thumb, u.avatar_url) AS avatar_url,
+               CAST(CASE WHEN u.avatar_url IS NOT NULL AND u.avatar_thumb IS NULL THEN 1 ELSE 0 END AS BIT) AS avatar_needs_thumb,
                u.DepartmentId, d.DepartmentName
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
