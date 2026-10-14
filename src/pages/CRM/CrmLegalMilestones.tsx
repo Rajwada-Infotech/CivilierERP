@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/legal-milestones";
 
@@ -572,6 +573,8 @@ const CrmLegalMilestones: React.FC = () => {
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
   const [searchInput, setSearchInput] = useState("");
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -701,7 +704,7 @@ const CrmLegalMilestones: React.FC = () => {
           <div className="relative">
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search customer, booking... (Enter to search)"
+              placeholder="Search customer, booking..."
               className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
           <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
