@@ -397,8 +397,12 @@ router.get("/holdings", requirePageRight("crm-resales", "view"), async (req, res
         Paid: Math.round(group.reduce((s2, g) => s2 + Number(g.Paid || 0), 0) * 100) / 100,
       });
     }
-    const { openResaleOn } = require("../services/crmResaleTransfer");
-    for (const o of out) o.OpenDeal = await openResaleOn(pool, o.BookingIds);
+    const { openResaleOn, conveyedReason } = require("../services/crmResaleTransfer");
+    for (const o of out) {
+      o.OpenDeal = await openResaleOn(pool, o.BookingIds);
+      // sale deed registered: it can only change hands as an Ownership Change
+      o.Conveyed = !!(await conveyedReason(pool, o.BookingIds));
+    }
     res.json(out);
   } catch (e) {
     console.error("[crm-resales] GET /holdings:", e.message);

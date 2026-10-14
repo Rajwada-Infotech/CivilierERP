@@ -26,7 +26,8 @@ const API = "/api/crm/resales";
 // by the new buyer) is.
 // BUY-BACK is us buying the property back at an agreed price; Finance pays it
 // and the property returns to stock to be sold again at a new price.
-// Both go through the Approval Inbox (CRM head, then Finance).
+// Both start as a draft and go to the Approval Inbox through "Send for approval"
+// on the case, once the steps before it are done.
 const statusColor: Record<string, string> = {
   Draft: "text-muted-foreground bg-muted/60 border-border",
   Pending: "text-orange-600 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-900",
@@ -53,7 +54,7 @@ interface Deal {
 interface Holding {
   BookingId: number; BookingIds: number[]; BookingNos: string; UnitNo: string; Kind: string;
   ProjectName: string | null; BlockName: string | null; CustomerId: number; CustomerName: string | null; Mobile: string | null;
-  TotalValue: number; Paid: number; OpenDeal: { Id: number; Kind: string; Status: string } | null;
+  TotalValue: number; Paid: number; OpenDeal: { Id: number; Kind: string; Status: string } | null; Conveyed?: boolean;
 }
 
 const getJson = async (url: string) => {
@@ -328,7 +329,7 @@ const CrmResales: React.FC = () => {
                 onChange={(v) => setForm((f) => ({ ...f, FromBookingId: v }))}
                 placeholder="Choose a sold property"
                 searchPlaceholder="Search unit, booking or owner…"
-                options={holdings.filter((h) => !h.OpenDeal).map((h) => ({
+                options={holdings.filter((h) => !h.OpenDeal && !h.Conveyed).map((h) => ({
                   value: String(h.BookingId),
                   label: [h.UnitNo, h.Kind, h.CustomerName, h.BookingNos, h.ProjectName].filter(Boolean).join(" · "),
                 }))}
@@ -342,6 +343,7 @@ const CrmResales: React.FC = () => {
                   <span className="text-muted-foreground">Still due</span><span className="tabular-nums">{fmt(Math.max(0, holding.TotalValue - holding.Paid))}</span>
                 </div>
               )}
+              {!holding && <p className="mt-1 text-[0.6875rem] text-muted-foreground">Not listed? It has an open case, or its sale deed is registered — use Ownership Changes.</p>}
             </div>
 
             {form.Kind === "Resale" ? (
@@ -412,7 +414,7 @@ const CrmResales: React.FC = () => {
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setOpen(false)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
               <button onClick={save} disabled={saving} className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
-                {saving ? "Saving…" : "Send for approval"}
+                {saving ? "Saving…" : "Open case"}
               </button>
             </div>
           </div>

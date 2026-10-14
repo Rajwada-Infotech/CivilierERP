@@ -227,7 +227,7 @@ const CrmResaleCase: React.FC = () => {
             {ch.doc && <DocSlot type={ch.doc} active={active} />}
             {canEdit && active && canAct && !ch.ok && ch.action && ACTION_LABEL[ch.action] && (
               <button className={primary} disabled={!!busy || (ch.action === "clearance" && s.checks.slice(0, i).some((x) => !x.ok))}
-                onClick={() => call(ch.action!, `case/${ch.action}`, {}, "Done")}>{ACTION_LABEL[ch.action]}</button>
+                onClick={() => call(ch.action!, `case/${ch.action}`, {}, ch.action === "submit" ? "Sent — waiting in the Approval Inbox" : "Done")}>{ACTION_LABEL[ch.action]}</button>
             )}
           </div>
         </div>
