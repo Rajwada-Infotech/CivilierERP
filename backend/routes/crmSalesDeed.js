@@ -761,7 +761,10 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
               RegistrationDate = ISNULL(RegistrationDate, @regdt),
               Status = 'Registered'
             WHERE Id = @id
-          `).catch((e) => console.error("[crm-sales-deed/registry] sales-deed mirror failed:", e.message));
+          `);
+        // No .catch here: a failure must roll the registry back with it (it
+        // used to be swallowed, committing a Completed registry over a sale
+        // deed still unregistered).
       }
 
       await logRegistryHistory(id, 'Completed', `Reg No. ${b.RegistrationNo.trim()}${b.SubRegistrarOffice ? ` at ${b.SubRegistrarOffice}` : ''}`, actorId(req), 'Staff', tx);
