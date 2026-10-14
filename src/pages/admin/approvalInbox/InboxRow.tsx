@@ -2,13 +2,19 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { StatusBadge } from "@/components/StatusBadge";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Button } from "@/components/ui/button";
 import { confirmEngineerAssignment } from "@/api/dependencyActivityAssignmentApi";
 import { ClipboardCheck, ArrowUpRight, Inbox, CheckCircle2, XCircle, ArrowLeftRight, Warehouse, Building2, Eye, X, Loader2 } from "lucide-react";
 import { ApprovalReviewPanel } from "../ApprovalReviewPanel";
 import { InboxItem, MODULE_CONFIG, CRM_MODULES, CRM_APPROVER_ROLES, MR_APPROVER_ROLES, CRM_BOOKING_APPROVER_ROLES, DATE_APPROVER_ROLES, SUB_GATE_SUFFIX, REFUND_FINANCE_APPROVER_ROLES, SUB_GATE_MODULES, RESTRICTED_MODULES, needsBankReview, REVIEW_INSTEAD_LABEL, openInModulePath, fmtDate, fmtAmount, getEffectiveAmount } from "./config";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
 
 // One engineer confirming their own task assignment — deliberately not
 // routed through ApprovalActions (that component's whole job is picking an
@@ -36,7 +42,7 @@ const EngineerConfirmButton: React.FC<{ item: InboxItem; onDone: () => void }> =
   return (
     <Button
       size="sm"
-      className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
+      className={`${KEY} h-8 px-3 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 [&_svg]:size-3.5`}
       disabled={loading}
       onClick={handleConfirm}
     >
@@ -68,8 +74,9 @@ export const InboxRow: React.FC<{
     <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
       <button data-row-view
         onClick={() => setReviewOpen(true)}
-        className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
+        className={ACT}
         title="Review & Approve"
+        aria-label="Review and approve"
       >
         <Eye size={14} />
       </button>
@@ -90,7 +97,7 @@ export const InboxRow: React.FC<{
         // just 403 from transition()'s own per-level gate. Say so instead
         // of offering live-looking buttons that are guaranteed to fail.
         <span
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[0.625rem] font-medium text-muted-foreground bg-muted border border-border whitespace-nowrap"
+          className={`${TAG} text-muted-foreground border-dashed border-foreground/50`}
           title="Named on this approval workflow, but this record hasn't reached your level yet."
         >
           Waiting on Level {item._currentLevel}
@@ -166,8 +173,9 @@ export const InboxRow: React.FC<{
       {cfg?.navPath && !((REVIEW_INSTEAD_LABEL[item.Module] || needsBankReview(item)) && item.Status === "Pending") && (
         <button
           onClick={() => navigate(openInModulePath(item, cfg.navPath))}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+          className={ACT}
           title={`Open ${item.ModuleLabel} in preview`}
+          aria-label={`Open ${item.ModuleLabel}`}
         >
           <ArrowUpRight size={14} />
         </button>
@@ -189,40 +197,38 @@ export const InboxRow: React.FC<{
         />
       )}
       {/* ── Mobile card (< md) ─────────────────────────────────────────── */}
-      <div className="md:hidden border-b border-border last:border-0 px-4 py-3.5 space-y-3">
+      <div className="md:hidden border-b border-foreground/15 last:border-0 px-4 py-3.5 space-y-3">
         {/* Row 1: module + status */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div
-              className={`p-1.5 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}
-            >
+            <div className="w-7 h-7 flex items-center justify-center border border-foreground/40 text-foreground shrink-0">
               <Icon size={13} />
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold text-foreground truncate">
                 {item.ModuleLabel}
               </p>
-              <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">
+              <p className="text-[0.6875rem] text-muted-foreground font-heading tabular-nums truncate">
                 {item.Reference || `#${item.RecordId}`}
               </p>
             </div>
           </div>
-          <StatusBadge status={item.Status} />
+          <SheetMark text={item.Status} tone={statusTone(item.Status)} />
         </div>
 
         {/* Row 2: party / transfer route + date */}
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="font-mono text-[0.6875rem] font-semibold text-violet-600 dark:text-violet-400 truncate">
+              <span className="font-heading tabular-nums text-[0.6875rem] font-semibold text-foreground truncate">
                 {item.SourceTransferDocNo}
               </span>
               {item.FromGodownName && item.ToGodownName && (
                 <span className="flex items-center gap-1 text-[0.625rem] truncate">
-                  <Warehouse size={9} className="shrink-0 text-orange-500" />
+                  <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                   <span className="truncate">{item.FromGodownName}</span>
                   <ArrowLeftRight size={8} className="shrink-0" />
-                  <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                  <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                   <span className="truncate">{item.ToGodownName}</span>
                 </span>
               )}
@@ -236,10 +242,10 @@ export const InboxRow: React.FC<{
               </span>
               {item.FromGodownName && item.ToGodownName && (
                 <span className="flex items-center gap-1 text-[0.625rem] truncate">
-                  <Warehouse size={9} className="shrink-0 text-orange-500" />
+                  <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                   <span className="truncate">{item.FromGodownName}</span>
                   <ArrowLeftRight size={8} className="shrink-0" />
-                  <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                  <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                   <span className="truncate">{item.ToGodownName}</span>
                 </span>
               )}
@@ -270,17 +276,17 @@ export const InboxRow: React.FC<{
 
         {/* Row 3: amount + approved/rejected by */}
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-mono font-semibold text-foreground">
+          <p className="text-xs font-heading tabular-nums font-semibold text-foreground">
             {fmtAmount(effectiveAmount)}
           </p>
           <div className="flex items-center gap-1.5">
             {approvedBy && (
-              <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
+              <span className={`${TAG} text-foreground border-foreground truncate max-w-[120px]`}>
                 <CheckCircle2 size={9} /> {approvedBy}
               </span>
             )}
             {rejectedBy && (
-              <span className="flex items-center gap-1 text-[0.625rem] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
+              <span className={`${TAG} text-destructive border-destructive truncate max-w-[120px]`}>
                 <XCircle size={9} /> {rejectedBy}
               </span>
             )}
@@ -292,37 +298,20 @@ export const InboxRow: React.FC<{
       </div>
 
       {/* ── Desktop row (≥ md) ─────────────────────────────────────────── */}
-      <div className={`hidden md:flex items-stretch border-b border-border last:border-0 hover:bg-muted/20 transition-colors group`}>
-        {/* Left accent rail */}
-        <div className="w-[3px] shrink-0 self-stretch rounded-tl-sm rounded-bl-sm"
-          style={{ background: (() => {
-            const c = cfg?.color ?? "";
-            const m = c.match(/text-(\w+)-(\d+)/);
-            if (!m) return "var(--border)";
-            const map: Record<string, Record<string, string>> = {
-              blue: { 500: "#3b82f6" }, amber: { 500: "#f59e0b", 600: "#d97706" },
-              emerald: { 500: "#10b981", 600: "#059669" }, violet: { 500: "#8b5cf6", 600: "#7c3aed" },
-              rose: { 500: "#f43f5e" }, teal: { 500: "#14b8a6", 600: "#0d9488" },
-              indigo: { 400: "#818cf8", 500: "#6366f1" }, orange: { 500: "#f97316" },
-              cyan: { 500: "#06b6d4" }, fuchsia: { 500: "#d946ef", 600: "#c026d3" },
-              sky: { 500: "#0ea5e9" }, purple: { 500: "#a855f7" }, lime: { 600: "#65a30d" },
-            };
-            return map[m[1]]?.[m[2]] ?? "var(--border)";
-          })() }}
-        />
+      <div className="hidden md:flex items-stretch border-b border-foreground/15 last:border-0 hover:bg-primary/5 transition-colors group">
         {/* Wide screens: one table row. Narrower: a card — module on top,
             labelled details in a grid, actions on their own line. */}
         <div data-row className="flex-1 min-w-0 ai-row">
         {/* Col 1 — Module */}
         <div className="ai-c-mod flex items-center gap-3 min-w-0">
-          <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
-            <Icon size={15} />
+          <div className="w-8 h-8 !p-0 !rounded-none flex items-center justify-center border border-foreground/40 text-foreground shrink-0">
+            <Icon size={14} />
           </div>
           <div className="min-w-0">
             <p className="text-[0.8125rem] font-semibold text-foreground truncate leading-tight">
               {item.ModuleLabel}
             </p>
-            <p className="text-[0.6875rem] text-muted-foreground font-mono truncate mt-0.5">
+            <p className="text-[0.6875rem] text-muted-foreground font-heading tabular-nums truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
@@ -333,27 +322,27 @@ export const InboxRow: React.FC<{
         <div className="ai-meta">
         {/* Col 2 — Date */}
         <div className="ai-c-date">
-          <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Date</span>
+          <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Date</span>
           <p className="text-xs font-medium text-foreground">{fmtDate(item.RecordDate)}</p>
         </div>
 
         {/* Col 3 — Party / Transfer route */}
         <div className="ai-c-party min-w-0">
-        <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Party / Transfer</span>
+        <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Party / Transfer</span>
         {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="font-heading text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold">
               Transfer ref
             </span>
-            <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400 truncate">
+            <span className="font-heading tabular-nums text-xs font-semibold text-foreground truncate">
               {item.SourceTransferDocNo}
             </span>
             {item.FromGodownName && item.ToGodownName && (
               <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground truncate">
-                <Warehouse size={9} className="shrink-0 text-orange-500" />
+                <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                 <span className="truncate">{item.FromGodownName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
-                <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                 <span className="truncate">{item.ToGodownName}</span>
               </span>
             )}
@@ -361,28 +350,28 @@ export const InboxRow: React.FC<{
         ) : item.Module === "sale-orders" ? (
           <div className="flex flex-col gap-0.5 min-w-0">
             <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
-              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <Building2 size={9} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{item.ContractorName}</span>
               <ArrowLeftRight
                 size={8}
                 className="shrink-0 text-muted-foreground"
               />
-              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <Building2 size={9} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{item.SupplierName}</span>
             </span>
             {item.FromGodownName && item.ToGodownName && (
               <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground truncate">
-                <Warehouse size={9} className="shrink-0 text-orange-500" />
+                <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                 <span className="truncate">{item.FromGodownName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
-                <Warehouse size={9} className="shrink-0 text-emerald-500" />
+                <Warehouse size={9} className="shrink-0 text-muted-foreground" />
                 <span className="truncate">{item.ToGodownName}</span>
               </span>
             )}
           </div>
         ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="font-heading text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold">
               Account heads
             </span>
             <p className="text-xs text-foreground truncate" title={item.JournalVoucherSummary}>
@@ -391,14 +380,14 @@ export const InboxRow: React.FC<{
           </div>
         ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="font-heading text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold">
               From → To
             </span>
             <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
-              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <Building2 size={9} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{item.ContractorName}</span>
               <ArrowLeftRight size={8} className="shrink-0 text-muted-foreground" />
-              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <Building2 size={9} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{item.SupplierName}</span>
             </span>
           </div>
@@ -409,7 +398,7 @@ export const InboxRow: React.FC<{
 
         {/* Col 4 — Project */}
         <div className="ai-c-project min-w-0">
-          <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Project</span>
+          <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Project</span>
           {item.ProjectName ? (
             <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
               <Building2 size={10} className="shrink-0 text-muted-foreground" />
@@ -422,25 +411,23 @@ export const InboxRow: React.FC<{
 
         {/* Col 5 — Amount */}
         <div className="ai-c-amount min-w-0">
-        <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Amount</span>
-        <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
-          <p className="text-[0.8125rem] font-mono font-bold text-foreground tabular-nums">
-            {fmtAmount(effectiveAmount)}
-          </p>
-        </div>
+        <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Amount</span>
+        <p className="text-[0.8125rem] font-heading font-bold text-foreground tabular-nums">
+          {fmtAmount(effectiveAmount)}
+        </p>
         </div>
 
         {/* Col 6 — Approved/Rejected By */}
         <div className="ai-c-by min-w-0">
-        <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Approved / Rejected by</span>
+        <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Approved / Rejected by</span>
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
-            <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+            <span className={`${TAG} text-foreground border-foreground truncate max-w-[130px]`}>
               <CheckCircle2 size={9} /> {approvedBy}
             </span>
           )}
           {rejectedBy && (
-            <span className="flex items-center gap-1 text-[0.625rem] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+            <span className={`${TAG} text-destructive border-destructive truncate max-w-[130px]`}>
               <XCircle size={9} /> {rejectedBy}
             </span>
           )}
@@ -454,9 +441,9 @@ export const InboxRow: React.FC<{
 
         {/* Col 7 — Status */}
         <div className="ai-c-status">
-          <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Status</span>
+          <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Status</span>
           <div className="flex items-center">
-            <StatusBadge status={item.Status} />
+            <SheetMark text={item.Status} tone={statusTone(item.Status)} />
           </div>
         </div>
 
