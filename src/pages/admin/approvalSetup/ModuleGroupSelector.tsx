@@ -48,10 +48,10 @@ export function ModuleGroupSelector({
           <div key={group.id} className="relative">
             <div
               className={cn(
-                "inline-flex items-center rounded-lg border transition-all overflow-visible",
+                "inline-flex items-center border transition-all overflow-visible",
                 someSelected || allSelected
-                  ? "border-primary bg-primary/10"
-                  : "border-border bg-muted/30",
+                  ? "border-foreground"
+                  : "border-foreground/25",
               )}
             >
               <button
@@ -61,16 +61,16 @@ export function ModuleGroupSelector({
                 className={cn(
                   "flex items-center gap-1.5 pl-3 pr-2 py-2 text-sm transition-colors",
                   allSelected
-                    ? "text-primary font-medium"
+                    ? "text-foreground font-medium"
                     : someSelected
-                      ? "text-primary/70 font-medium"
+                      ? "text-foreground/70 font-medium"
                       : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 <span className="text-base">{group.icon}</span>
                 <span>{group.label}</span>
                 {selectedCount > 0 && (
-                  <span className="text-[0.625rem] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
+                  <span className="text-[0.625rem] font-bold text-foreground px-1.5 py-0.5">
                     {selectedCount}
                   </span>
                 )}
@@ -81,8 +81,8 @@ export function ModuleGroupSelector({
                 className={cn(
                   "px-2 py-2 border-l transition-colors",
                   isOpen
-                    ? "border-primary/30 text-primary"
-                    : "border-border text-muted-foreground hover:text-foreground",
+                    ? "border-foreground/40 text-foreground"
+                    : "border-foreground/25 text-muted-foreground hover:text-foreground",
                 )}
               >
                 <ChevronDown
@@ -95,7 +95,7 @@ export function ModuleGroupSelector({
             </div>
 
             {isOpen && (
-              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-0 sm:min-w-[200px]">
+              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-foreground/25 py-1 min-w-0 sm:min-w-[200px]">
                 {groupMods.map((m) => {
                   const active = selectedModules.includes(m.id);
                   return (
@@ -107,14 +107,14 @@ export function ModuleGroupSelector({
                       className={cn(
                         "w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors text-left",
                         active
-                          ? "text-primary bg-primary/5"
-                          : "text-foreground hover:bg-muted/50",
+                          ? "text-foreground"
+                          : "text-foreground",
                       )}
                     >
                       <span className="text-base">{m.icon}</span>
                       <span className="flex-1">{m.label}</span>
                       {active && (
-                        <Check className="w-3.5 h-3.5 shrink-0 text-primary" />
+                        <Check className="w-3.5 h-3.5 shrink-0 text-foreground" />
                       )}
                     </button>
                   );

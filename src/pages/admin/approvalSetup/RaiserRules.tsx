@@ -42,12 +42,12 @@ export function RaiserRules({ canEdit }: { canEdit: boolean }) {
   };
   if (!rules.length) return null;
   return (
-    <div className="mt-6 rounded-xl border border-border bg-card">
-      <div className="px-4 py-3 border-b border-border">
-        <h3 className="font-heading font-semibold text-sm text-foreground">Who may approve their own request</h3>
-        <p className="text-xs text-muted-foreground">On: whoever raised the request may approve it. Off: someone else has to. Rejecting one's own is always allowed.</p>
+    <div className="border border-foreground bg-card">
+      <div className="px-4 py-3 border-b border-foreground">
+        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Who may approve their own request</h3>
+        <p className="text-xs text-muted-foreground mt-1">On: whoever raised the request may approve it. Off: someone else has to. Rejecting one's own is always allowed.</p>
       </div>
-      <ul className="divide-y divide-border">
+      <ul className="divide-y divide-foreground/15">
         {rules.map((r) => {
           const n = nameOf(r.module);
           return (

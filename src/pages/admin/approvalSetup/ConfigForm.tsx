@@ -26,7 +26,7 @@ export function FormStep({
   return (
     <div className="flex gap-4">
       <div className="flex flex-col items-center flex-shrink-0">
-        <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
+        <div className="w-7 h-7 border border-foreground text-foreground text-xs font-bold flex items-center justify-center">
           {number}
         </div>
         <div className="w-0.5 flex-1 bg-border/50 mt-1" />
@@ -127,9 +127,9 @@ export function ConfigForm({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
+    <div className="border border-foreground/25 bg-card">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-foreground">
         <div>
           <h2 className="text-base font-semibold text-foreground">
             {initial ? "Edit Approval Rule" : "Create a New Approval Rule"}
@@ -174,7 +174,7 @@ export function ConfigForm({
             toggleModule={toggleModule}
           />
           {selectedModules.length > 0 && (
-            <p className="text-xs text-primary mt-2 font-medium">
+            <p className="text-xs text-foreground mt-2 font-medium">
               ✓ {selectedModules.length} area
               {selectedModules.length > 1 ? "s" : ""} selected
             </p>
@@ -184,7 +184,7 @@ export function ConfigForm({
         {/* Step 3: Approval steps */}
         <div className="flex gap-4">
           <div className="flex flex-col items-center flex-shrink-0">
-            <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
+            <div className="w-7 h-7 border border-foreground text-foreground text-xs font-bold flex items-center justify-center">
               3
             </div>
           </div>
@@ -202,8 +202,8 @@ export function ConfigForm({
 
             {/* Empty state */}
             {levels.length === 0 && !addingLevel && (
-              <div className="rounded-xl border-2 border-dashed border-border bg-muted/10 px-5 py-8 text-center mb-3">
-                <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto mb-3">
+              <div className="border border-dashed border-foreground/40 px-5 py-8 text-center mb-3">
+                <div className="w-12 h-12 flex items-center justify-center mx-auto mb-3">
                   <Users className="w-6 h-6 text-muted-foreground/40" />
                 </div>
                 <p className="text-sm font-medium text-foreground mb-1">
@@ -249,7 +249,7 @@ export function ConfigForm({
               {/* Arrow between last card and add row */}
               {levels.length > 0 && !addingLevel && (
                 <div className="flex items-center gap-3 py-1 pl-3.5">
-                  <div className="w-0.5 h-5 bg-primary/30" />
+                  <div className="w-0.5 h-5 bg-foreground/40" />
                 </div>
               )}
 
@@ -265,8 +265,8 @@ export function ConfigForm({
                   type="button"
                   onClick={() => setAddingLevel(true)}
                   className={cn(
-                    "inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border-2 border-dashed text-sm transition-all",
-                    "border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5",
+                    "inline-flex items-center gap-2 px-4 py-2.5 border-2 border-dashed text-sm transition-all",
+                    "border-foreground/25 text-muted-foreground hover:border-foreground hover:text-foreground",
                     levels.length > 0 && "ml-11",
                   )}
                 >
@@ -282,7 +282,7 @@ export function ConfigForm({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-muted/10 rounded-b-xl">
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-foreground">
         <p className="text-xs text-muted-foreground">
           {levels.length > 0 && selectedModules.length > 0
             ? `✓ Ready — ${levels.length} step${levels.length > 1 ? "s" : ""} across ${selectedModules.length} area${selectedModules.length > 1 ? "s" : ""}`
@@ -294,7 +294,7 @@ export function ConfigForm({
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 btn-module shadow-sm hover:opacity-90 text-white font-semibold px-5"
+            className="gap-1.5 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 font-heading uppercase tracking-[0.1em] text-[0.625rem] font-semibold px-5"
             onClick={submit}
             disabled={saving}
           >

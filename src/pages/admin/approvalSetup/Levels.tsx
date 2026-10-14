@@ -43,9 +43,9 @@ export function AddLevelRow({
   }
 
   return (
-    <div className="rounded-xl border-2 border-primary/30 bg-primary/3 p-4 space-y-3">
+    <div className="border border-foreground p-4 space-y-3">
       <div className="flex items-center gap-2 mb-1">
-        <div className="w-6 h-6 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center">
+        <div className="w-6 h-6 bg-foreground text-card text-xs font-bold flex items-center justify-center">
           {levelNumber}
         </div>
         <span className="text-sm font-semibold text-foreground">
@@ -113,15 +113,15 @@ export function AddLevelRow({
                     type="button"
                     onClick={() => setMode(opt.id)}
                     className={cn(
-                      "text-left p-3 rounded-lg border-2 transition-all",
+                      "text-left p-3 border-2 transition-all",
                       selected
-                        ? "border-primary bg-primary/5"
-                        : "border-border bg-background hover:border-primary/30",
+                        ? "border-foreground"
+                        : "border-foreground/25 bg-background hover:border-foreground/40",
                     )}
                   >
                     <div className="flex items-center gap-1.5 mb-1">
-                      <Icon className={cn("w-3.5 h-3.5", selected ? "text-primary" : "text-muted-foreground")} />
-                      <span className={cn("text-xs font-semibold", selected ? "text-primary" : "text-foreground")}>
+                      <Icon className={cn("w-3.5 h-3.5", selected ? "text-foreground" : "text-muted-foreground")} />
+                      <span className={cn("text-xs font-semibold", selected ? "text-foreground" : "text-foreground")}>
                         {opt.label}
                       </span>
                     </div>
@@ -137,7 +137,7 @@ export function AddLevelRow({
       <div className="flex gap-2 pt-1">
         <Button
           size="sm"
-          className="gap-1.5 btn-module text-white"
+          className="gap-1.5 rounded-none bg-foreground text-card border border-foreground hover:bg-foreground/85 font-heading uppercase tracking-[0.1em] text-[0.625rem]"
           onClick={confirm}
         >
           <Check className="w-3.5 h-3.5" /> {isEdit ? "Save changes" : "Add this step"}
@@ -191,41 +191,41 @@ export function LevelCard({
     <div className="flex items-stretch gap-3">
       {/* Step number + connector */}
       <div className="flex flex-col items-center flex-shrink-0 w-8">
-        {index > 0 && <div className="w-0.5 h-3 bg-primary/30" />}
-        <div className="w-8 h-8 rounded-full bg-primary text-white text-sm font-bold flex items-center justify-center shadow-sm">
+        {index > 0 && <div className="w-0.5 h-3 bg-foreground/40" />}
+        <div className="w-8 h-8 bg-foreground text-card text-sm font-bold flex items-center justify-center">
           {index + 1}
         </div>
         {index < total - 1 && (
-          <div className="w-0.5 flex-1 bg-primary/30 mt-1" />
+          <div className="w-0.5 flex-1 bg-foreground/40 mt-1" />
         )}
       </div>
 
       {/* Card */}
-      <div className="flex-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-1 hover:border-primary/30 hover:shadow-sm transition-all">
+      <div className="flex-1 flex items-center justify-between gap-3 border border-foreground/25 bg-card px-4 py-3 mb-1 hover:border-foreground/40 transition-all">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <div className="text-sm font-semibold text-foreground">
               {level.label}
             </div>
             {level.mode === "all" && levelUsers.length > 1 && (
-              <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-violet-600 bg-violet-500/10 border border-violet-500/20 rounded-full px-2 py-0.5">
+              <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-foreground border border-foreground/50 px-2 py-0.5">
                 <GitBranch className="w-2.5 h-2.5" /> All must approve
               </span>
             )}
           </div>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {levelUsers.length === 0 ? (
-              <span className="inline-flex items-center gap-1 text-[0.6875rem] text-amber-500 bg-[#ffe2021a] border border-amber-500/20 rounded-full px-2 py-0.5">
+              <span className="inline-flex items-center gap-1 text-[0.6875rem] text-foreground border border-dashed border-foreground/50 px-2 py-0.5">
                 <AlertCircle className="w-3 h-3" /> No one assigned yet
               </span>
             ) : (
               levelUsers.map((u) => (
                 <span
                   key={u.id}
-                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-[0.6875rem] bg-muted text-muted-foreground border border-border"
+                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 text-[0.6875rem] bg-muted text-muted-foreground border border-foreground/25"
                 >
                   <span
-                    className="w-4 h-4 rounded-full flex items-center justify-center text-[0.5rem] font-bold"
+                    className="w-4 h-4 flex items-center justify-center text-[0.5rem] font-bold"
                     style={{
                       background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.25)`,
                       color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
@@ -268,7 +268,7 @@ export function LevelCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 ml-1"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground hover: ml-1"
             onClick={onEdit}
             title="Edit who's assigned to this step"
           >

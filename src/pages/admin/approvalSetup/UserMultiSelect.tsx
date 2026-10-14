@@ -115,9 +115,9 @@ export function UserMultiSelect({
       <div
         ref={triggerRef}
         className={cn(
-          "min-h-10 flex flex-wrap gap-1.5 items-center px-3 py-2 rounded-lg border cursor-pointer transition-all",
-          "bg-muted/30 border-border hover:border-primary/50",
-          open && "border-primary ring-2 ring-primary/20",
+          "min-h-10 flex flex-wrap gap-1.5 items-center px-3 py-2 border cursor-pointer transition-all",
+          " border-foreground/25 hover:border-foreground",
+          open && "border-foreground",
         )}
         onClick={() => setOpen((o) => !o)}
       >
@@ -127,14 +127,14 @@ export function UserMultiSelect({
           selectedUsers.map((u) => (
             <span
               key={u.id}
-              className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+              className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 text-xs font-medium text-foreground border border-foreground/40"
             >
-              <span className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[0.5625rem] font-bold">
+              <span className="w-5 h-5 flex items-center justify-center text-[0.5625rem] font-bold">
                 {initials(u.name)}
               </span>
               {u.name.split(" ")[0]}
               <button
-                className="ml-0.5 opacity-60 hover:opacity-100 rounded-full hover:bg-primary/20 p-0.5"
+                className="ml-0.5 opacity-60 hover:opacity-100 hover: p-0.5"
                 onClick={(e) => {
                   e.stopPropagation();
                   toggle(u.id);
@@ -153,9 +153,9 @@ export function UserMultiSelect({
       {open && (
         <div
           style={dropdownStyle}
-          className="rounded-xl border border-border bg-popover shadow-xl overflow-hidden"
+          className="border border-foreground/25 bg-popover overflow-hidden"
         >
-          <div className="px-3 py-2 border-b border-border bg-muted/30 space-y-2">
+          <div className="px-3 py-2 border-b border-foreground space-y-2">
             <p className="text-xs text-muted-foreground font-medium">
               {selectedUsers.length === 0
                 ? "Select who can approve at this level"
@@ -170,7 +170,7 @@ export function UserMultiSelect({
                 onChange={(e) => setSearch(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
                 placeholder="Search by name or role…"
-                className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                className="w-full h-8 pl-8 pr-2 border border-foreground/25 bg-background text-xs focus:outline-none focus:border-foreground"
               />
             </div>
           </div>
@@ -191,13 +191,13 @@ export function UserMultiSelect({
                     key={u.id}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm transition-colors",
-                      "hover:bg-muted/60",
-                      sel && "bg-primary/5",
+                      " hover:bg-primary/5",
+                      sel && "",
                     )}
                     onClick={() => toggle(u.id)}
                   >
                     <span
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-[0.625rem] font-bold flex-shrink-0"
+                      className="w-7 h-7 flex items-center justify-center text-[0.625rem] font-bold flex-shrink-0"
                       style={{
                         background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.2)`,
                         color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
@@ -215,11 +215,11 @@ export function UserMultiSelect({
                     </div>
                     <div
                       className={cn(
-                        "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
-                        sel ? "border-primary bg-primary" : "border-border",
+                        "w-5 h-5 border-2 flex items-center justify-center flex-shrink-0 transition-all",
+                        sel ? "border-foreground bg-foreground" : "border-foreground/25",
                       )}
                     >
-                      {sel && <Check className="w-3 h-3 text-white" />}
+                      {sel && <Check className="w-3 h-3 text-card" />}
                     </div>
                   </div>
                 );
