@@ -38,7 +38,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = (props) =
       />
 
       {/* Modal takeover */}
-      <div className="relative w-full h-full sm:h-[min(90vh,880px)] sm:w-[min(94vw,1160px)] bg-background sm:rounded-2xl shadow-2xl ring-1 ring-border/60 flex flex-col overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+      <div className="sheet-frame relative w-full h-full sm:h-[min(90vh,880px)] sm:w-[min(94vw,1160px)] bg-card flex flex-col overflow-hidden animate-in zoom-in-95 fade-in duration-200" style={{ margin: 0, border: "1px solid hsl(var(--foreground))", boxShadow: "10px 10px 0 hsl(var(--foreground) / 0.12)" }}>
         <ReviewHeader r={r} />
 
         {/* Body — two columns on large screens: details left, chain pinned right */}
@@ -50,8 +50,8 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = (props) =
             <ReviewWorkAllocation r={r} />
 
             {item.RejectionNote && (
-              <div className="rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-2">
-                <p className="text-[0.5625rem] font-semibold uppercase tracking-widest text-red-500/80 mb-0.5">
+              <div className="border border-destructive px-3 py-2">
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-destructive mb-0.5">
                   Rejection Note
                 </p>
                 <p className="text-xs text-foreground">{item.RejectionNote}</p>
@@ -75,7 +75,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = (props) =
                   onClose();
                   navigate(openInModulePath(item, cfg.navPath));
                 }}
-                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl border border-border text-xs font-semibold text-muted-foreground hover:text-primary hover:bg-primary/8 hover:border-primary/30 transition-all"
+                className="flex items-center justify-center gap-2 w-full h-10 px-3 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10 transition-colors"
               >
                 <ArrowUpRight size={14} className="shrink-0" />
                 Open full record in {item.ModuleLabel}
@@ -84,7 +84,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = (props) =
           </div>
 
           {/* Right: approval chain, pinned — desktop only */}
-          <div className="hidden lg:block w-full sm:w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
+          <div className="hidden lg:block w-full sm:w-[340px] shrink-0 border-l border-foreground overflow-y-auto px-5 py-5">
             {chainSection}
           </div>
         </div>

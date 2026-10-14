@@ -8,7 +8,7 @@ export function ReviewFooter({ r }: { r: ApprovalReviewState }) {
   return (
     <>
       {/* Footer — the action bar, spanning full width */}
-      <div className="shrink-0 border-t border-border px-5 sm:px-6 py-4 bg-muted/10 flex items-center justify-between gap-3">
+      <div className="shrink-0 border-t border-foreground px-5 sm:px-6 py-4 flex items-center justify-between gap-3">
         <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
           {item.Status === "Pending" ? "Review the details above before taking action." : `This record is ${item.Status.toLowerCase()}.`}
         </p>
@@ -29,7 +29,7 @@ export function ReviewFooter({ r }: { r: ApprovalReviewState }) {
           reviewInstead={needsBankReview(item) && cfg?.navPath
             ? { label: "Review — set bank", onClick: () => { onClose(); navigate(openInModulePath(item, cfg.navPath)); } }
             : undefined}
-          className="[&_button]:h-10 [&_button]:px-5 [&_button]:text-sm [&_button]:font-semibold [&_button]:rounded-xl"
+          className="[&_button]:h-10 [&_button]:px-5"
           onSuccess={(action) => {
             if (action === "approve" || action === "reject") {
               onActionDone(action);

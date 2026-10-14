@@ -11,11 +11,11 @@ export function ReviewDetails({ r }: { r: ApprovalReviewState }) {
           work-allocation-engineer — its own Engineers/Materials/
           Checkpoints sections above already cover its full record. */}
       {!usesRungDetail && <div>
-        <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
+        <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2">Details</p>
         {loadingDetail ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-[46px] rounded-lg bg-muted animate-pulse" />
+              <div key={i} className="h-[46px] bg-muted animate-pulse" />
             ))}
           </div>
         ) : detailFailed || extraFields.length === 0 ? (

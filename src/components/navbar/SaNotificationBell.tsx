@@ -1,10 +1,10 @@
 import React, { useRef, useState } from "react";
 import { ChromeIcons } from "@/components/icons/moduleIcons";
-import { CheckCheck, Megaphone } from "lucide-react";
+import { CheckCheck } from "lucide-react";
 import { useSaNotifications } from "@/hooks/useSaNotifications";
-import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { NAV_PANEL_CSS } from "./navPanelStyles";
 
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -39,12 +39,8 @@ export const SaNotificationBell: React.FC = () => {
 
   return (
     <div className="relative" ref={ref}>
-      {/* Same button chrome as ReminderBell (the other bell right next to
-          this one) — plain icon + hover ring, no resting border/background
-          box — so the two read as a matched pair instead of one looking
-          like a separate chip. Badge stays orange (vs. ReminderBell's red)
-          as the one deliberate difference, so the two are still tellable
-          apart at a glance. */}
+      {/* Same button chrome as ReminderBell, right next to it; the count tag is ink here (red on Reminders) so the two
+          stay tellable apart at a glance. */}
       <button
         onClick={() => setOpen((p) => !p)}
         className="relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
@@ -60,53 +56,45 @@ export const SaNotificationBell: React.FC = () => {
 
       {open && (
         <>
+          <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
           {/* backdrop */}
           <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setOpen(false)} /></BodyPortal>
-          <div className="absolute right-0 top-full mt-3 z-50 w-80 rounded-2xl border border-border bg-popover shadow-xl overflow-hidden">
-            {/* header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
-              <div className="flex items-center gap-2">
-                <Megaphone size={14} className="text-orange-500" />
-                <span className="text-sm font-heading font-semibold text-foreground">Notifications</span>
-                {unreadCount > 0 && (
-                  <span className="text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-500">
-                    {unreadCount} new
-                  </span>
-                )}
+          <div className="np-sheet absolute right-0 top-full mt-3 z-50 w-[min(92vw,360px)] flex flex-col animate-in fade-in duration-200">
+            {/* Title block: what this is, how many are unread, and mark-all-read */}
+            <div className="np-head">
+              <div className="min-w-0">
+                <p className="np-label">CivilierERP · Notifications</p>
+                <p className="np-count">
+                  <span className="np-figure">{unreadCount}</span>
+                  <span className="np-label">unread</span>
+                </p>
               </div>
               {unreadCount > 0 && (
-                <button
-                  onClick={markAllRead}
-                  className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
-                  title="Mark all read"
-                >
-                  <CheckCheck size={13} /> All read
+                <button onClick={markAllRead} className="np-key" title="Mark all read">
+                  <CheckCheck size={12} /> All read
                 </button>
               )}
             </div>
 
-            {/* list */}
-            <div className="max-h-72 overflow-y-auto">
+            <div className="np-list thin-scroll" style={{ maxHeight: "min(60vh, 380px)" }}>
               {recent.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">No notifications yet</div>
-              ) : recent.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => handleClick(n)}
-                  className={`w-full text-left px-4 py-3 border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${!n.isRead ? "bg-orange-500/5" : ""}`}
-                >
-                  <div className="flex items-start gap-2">
-                    {!n.isRead && (
-                      <span className="mt-1.5 w-2 h-2 rounded-full bg-orange-500 shrink-0" />
-                    )}
-                    <div className={!n.isRead ? "" : "pl-4"}>
-                      <p className="text-xs font-medium text-foreground leading-snug">{n.title}</p>
-                      {n.body && <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-snug">{n.body}</p>}
-                      <p className="text-[0.625rem] text-muted-foreground mt-1">{timeAgo(n.createdAt)}</p>
-                    </div>
-                  </div>
-                </button>
-              ))}
+                <div className="np-empty">
+                  <p className="np-label ink">Nothing yet</p>
+                  <p>New notifications will show here.</p>
+                </div>
+              ) : (
+                recent.map((n, i) => (
+                  <button key={n.id} type="button" onClick={() => handleClick(n)} className={`np-row ${n.isRead ? "read" : ""}`}>
+                    <span className="np-num">{String(i + 1).padStart(2, "0")}</span>
+                    <i className={`np-dot ${n.isRead ? "" : "solid"}`} title={n.isRead ? "Read" : "Unread"} />
+                    <span className="np-text">
+                      <span className="np-name">{n.title}</span>
+                      {n.body && <span className="np-sub">{n.body}</span>}
+                    </span>
+                    <span className="np-label" style={{ whiteSpace: "nowrap", paddingTop: 2 }}>{timeAgo(n.createdAt)}</span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </>

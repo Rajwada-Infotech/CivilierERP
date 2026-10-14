@@ -185,12 +185,12 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
 
   const chainSection = (
     <>
-      <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+      <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-3 flex items-center gap-1.5">
         <UserCheck size={11} /> Approval Chain
       </p>
       {!approvalTable ? (
-        <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
-          <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center mx-auto mb-2">
+        <div className="border border-dashed border-foreground/40 px-4 py-5 text-center">
+          <div className="w-9 h-9 border border-foreground/30 flex items-center justify-center mx-auto mb-2">
             <UserCheck size={16} className="text-muted-foreground/50" />
           </div>
           <p className="text-xs font-medium text-muted-foreground">No tracked workflow</p>
@@ -199,7 +199,7 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
       ) : loadingChain ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-8 rounded-lg bg-muted animate-pulse" />
+            <div key={i} className="h-8 bg-muted animate-pulse" />
           ))}
         </div>
       ) : !chain || chain.steps.length === 0 ? (
@@ -477,7 +477,7 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
           });
         }}
         title="Print"
-        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+        className="w-8 h-8 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
       >
         <Printer size={16} />
       </button>
@@ -522,7 +522,7 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
             .catch(() => toast.error("Could not generate PDF", { id: toastId }));
         }}
         title="Generate PDF"
-        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+        className="w-8 h-8 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
       >
         <FileDown size={16} />
       </button>
