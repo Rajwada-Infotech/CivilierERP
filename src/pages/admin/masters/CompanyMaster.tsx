@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   Landmark,
   Plus,
@@ -30,6 +30,16 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { INDIA_STATE_CITIES, INDIA_STATES } from "@/lib/indiaStateCities";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const TAG = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground/40 px-1.5 py-0.5 whitespace-nowrap";
+const INPUT = "w-full px-3 py-2 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 disabled:cursor-not-allowed";
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -188,13 +198,13 @@ function LogoAvatar({
       <img
         src={logoUrl}
         alt={name}
-        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 flex-shrink-0`}
+        className={`${dim} object-contain border border-foreground/30 bg-card flex-shrink-0`}
       />
     );
   }
   return (
     <div
-      className={`${dim} rounded-lg bg-emerald-500/10 text-emerald-600 font-heading font-bold flex items-center justify-center flex-shrink-0`}
+      className={`${dim} border border-foreground text-foreground font-heading font-bold flex items-center justify-center flex-shrink-0`}
     >
       {name.charAt(0).toUpperCase()}
     </div>
@@ -266,7 +276,7 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
 
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className={LBL}>
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -277,53 +287,50 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
 
   const Section = ({ title }: { title: string }) => (
     <div className="col-span-full pt-2">
-      <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2">
-        {title}
-      </p>
+      <div className="flex items-center gap-3 mb-1">
+        <p className={`${HEAD} shrink-0`}>{title}</p>
+        <span className="flex-1 h-px bg-foreground" />
+      </div>
     </div>
   );
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="sheet-frame bg-card w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
         {/* Header */}
-        <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
+        <div className="p-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: RULE }}>
           <div className="flex items-center gap-3">
             <LogoAvatar logoUrl={c.logoUrl} name={c.name || "?"} size="md" />
             <div>
-              <h2 className="font-heading font-semibold text-foreground text-base">
+              <p className={LBL}>Company</p>
+              <h2 className="font-heading font-bold tracking-tight text-foreground text-lg">
                 {c.name}
               </h2>
               <div className="flex items-center gap-2 mt-0.5">
                 {c.code && (
-                  <span className="font-mono text-xs text-primary">
+                  <span className="font-heading text-xs font-semibold tabular-nums text-foreground">
                     {c.code}
                   </span>
                 )}
                 {c.type && (
-                  <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">
-                    {c.type}
-                  </span>
+                  <span className={TAG}>{c.type}</span>
                 )}
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                >
-                  {c.isActive ? "Active" : "Inactive"}
-                </span>
+                {c.isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => printCompanyPreview(c)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-8 px-3`}
               title="Print"
             >
               <Printer size={13} /> Print
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className={ACT}
+              aria-label="Close"
             >
               <X size={16} />
             </button>
@@ -383,10 +390,10 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
           </div>
         </div>
 
-        <div className="p-4 border-t border-border flex justify-end flex-shrink-0">
+        <div className="p-4 flex justify-end flex-shrink-0" style={{ borderTop: RULE }}>
           <button
             onClick={onClose}
-            className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+            className={`${KEY_LINE} h-9 px-5`}
           >
             Close
           </button>
@@ -420,7 +427,7 @@ function buildCompanyColumns(
       accessorKey: "Code",
       header: "Code",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-medium text-primary">
+        <span className="font-heading text-xs font-semibold tabular-nums text-foreground">
           {getValue() as string}
         </span>
       ),
@@ -429,7 +436,7 @@ function buildCompanyColumns(
       accessorKey: "Name",
       header: "Company Name",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">
+        <span className="font-semibold text-foreground">
           {getValue() as string}
         </span>
       ),
@@ -447,7 +454,7 @@ function buildCompanyColumns(
       accessorKey: "Type",
       header: "Type",
       cell: ({ getValue }) => (
-        <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600 whitespace-nowrap">
+        <span className={TAG}>
           {getValue() as string}
         </span>
       ),
@@ -485,11 +492,7 @@ function buildCompanyColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {active ? "Active" : "Inactive"}
-          </span>
+          active ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>
         );
       },
     },
@@ -501,7 +504,7 @@ function buildCompanyColumns(
         <div className="flex items-center justify-end gap-1">
           <button data-row-view
             onClick={() => openView(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
+            className={ACT} aria-label="View details"
             title="View details"
           >
             <Eye size={13} />
@@ -509,7 +512,7 @@ function buildCompanyColumns(
           {canEdit && (
             <button
               onClick={() => openEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              className={ACT} aria-label="Edit"
               title="Edit"
             >
               <Pencil size={13} />
@@ -518,7 +521,7 @@ function buildCompanyColumns(
           {canDelete && (
             <button
               onClick={() => setDeleteConfirm(row.original.Id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors" aria-label="Delete"
               title="Delete"
             >
               <Trash2 size={13} />
@@ -773,9 +776,9 @@ export default function CompanyMaster() {
     const showStar = options?.showAsterisk || options?.required;
     return (
       <div key={key}>
-        <label className="block text-xs font-medium text-muted-foreground mb-1">
+        <label className={`${LBL} block mb-1.5`}>
           {cleanLabel}
-          {showStar && <span className="text-red-500 ml-0.5">*</span>}
+          {showStar && <span className="text-destructive ml-0.5">*</span>}
         </label>
         {type === "date" ? (
           <>
@@ -792,7 +795,7 @@ export default function CompanyMaster() {
                 disabled={options?.disabled}
                 required={options?.required}
                 title={options?.title}
-                className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
+                className={`${INPUT} pl-8`}
               />
             </div>
             {options?.disabled && options?.title && (
@@ -814,11 +817,7 @@ export default function CompanyMaster() {
               disabled={options?.disabled}
               required={options?.required}
               title={options?.title}
-              className={`w-full px-3 py-2 text-sm rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed ${
-                key === "gstNumber" && gstError
-                  ? "border-red-400 focus:ring-red-400/30"
-                  : "border-border focus:ring-primary/30"
-              }`}
+              className={`${INPUT} ${key === "gstNumber" && gstError ? "!border-destructive" : ""}`}
             />
             {options?.disabled && options?.title && (
               <p className="mt-1 text-[0.6875rem] text-muted-foreground">
@@ -833,14 +832,14 @@ export default function CompanyMaster() {
 
   const se = (label: string, key: keyof Company, options: string[]) => (
     <div key={key}>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
+      <label className={`${LBL} block mb-1.5`}>
         {label}
       </label>
       <div className="relative">
         <select
           value={form[key] as string}
           onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
-          className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+          className={`${INPUT} pr-8 appearance-none`}
         >
           {options.map((o) => (
             <option key={o}>{o}</option>
@@ -859,40 +858,55 @@ export default function CompanyMaster() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Masters", "Company Master"]} />
-      <AdminShell
-        title="Company Master"
-        subtitle="Manage company profiles, legal and licensing details"
-        icon={Landmark}
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Companies"
+        subtitle="Company profiles under each enterprise, with their address, legal and GST details."
         action={
           rights.canCreate && (
-            <button
-              onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
-            >
-              <Plus size={13} /> Add Company
+            <button onClick={openNew} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+              <Plus size={13} /> New company
             </button>
           )
         }
       >
         {/* Table */}
         {!showForm && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center gap-3">
-              <div className="relative flex-1 max-w-sm">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+              {[
+                { label: "Companies", value: companies.length, note: "on record" },
+                { label: "Active", value: companies.filter((r: any) => r.IsActive).length, note: "offered in dropdowns" },
+                { label: "Inactive", value: companies.filter((r: any) => !r.IsActive).length, note: "hidden from dropdowns" },
+              ].map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {!showForm && (
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <p className="flex items-baseline gap-2.5 mr-auto">
+                <span className={HEAD}>Companies</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+              </p>
+              <div className="relative w-full sm:w-72">
                 <Search
-                  size={15}
+                  size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search by name, code, city…"
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className={`${INPUT} h-9 pl-9`}
                 />
               </div>
-              <span className="text-xs text-muted-foreground">
-                {filtered.length} compan{filtered.length !== 1 ? "ies" : "y"}
-              </span>
               <ExportMenu
                 data={filtered as unknown as Record<string, unknown>[]}
                 columns={exportColumns}
@@ -925,33 +939,36 @@ export default function CompanyMaster() {
 
         {/* Form */}
         {(rights.canCreate || rights.canEdit) && showForm && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="p-4 flex items-center justify-between" style={{ borderBottom: RULE }}>
               <div className="flex items-center gap-3">
                 <LogoAvatar
                   logoUrl={logoPreview}
                   name={form.name || "?"}
                   size="md"
                 />
-                <h2 className="font-heading font-semibold text-foreground">
-                  {editId != null ? `Edit — ${form.name || "Company"}` : "New Company"}
-                </h2>
+                <div>
+                  <p className={LBL}>Company</p>
+                  <h2 className="font-heading text-base font-bold tracking-tight text-foreground">
+                    {editId != null ? `Edit ${form.name || "company"}` : "New company"}
+                  </h2>
+                </div>
               </div>
               <button
                 onClick={() => setShowForm(false)}
-                className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
+                className={`${KEY_LINE} h-8 px-3`}
               >
                 Cancel
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
+            <div className="flex gap-0 px-4" style={{ borderBottom: RULE }}>
               {TABS.map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-3 -mb-px border-b-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${activeTab === tab ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 >
                   {tab}
                 </button>
@@ -963,7 +980,7 @@ export default function CompanyMaster() {
               {activeTab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="col-span-full">
-                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                    <label className={`${LBL} block mb-2`}>
                       Company Logo
                     </label>
                     <div className="flex items-center gap-4">
@@ -972,17 +989,17 @@ export default function CompanyMaster() {
                           <img
                             src={logoPreview}
                             alt="Logo preview"
-                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                            className="w-16 h-16 object-contain border border-foreground/40 bg-card"
                           />
                           <button
                             onClick={removeLogo}
-                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="Remove logo" className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <X size={11} />
                           </button>
                         </div>
                       ) : (
-                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                        <div className="w-16 h-16 border border-dashed border-foreground/50 flex items-center justify-center">
                           <Landmark
                             size={20}
                             className="text-muted-foreground/40"
@@ -1000,10 +1017,10 @@ export default function CompanyMaster() {
                         />
                         <label
                           htmlFor="company-logo-input"
-                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
+                          className={`${KEY_LINE} h-8 px-3 cursor-pointer`}
                         >
                           <Upload size={13} />
-                          {logoPreview ? "Change Logo" : "Upload Logo"}
+                          {logoPreview ? "Change logo" : "Upload logo"}
                         </label>
                         <p className="text-xs text-muted-foreground mt-1">
                           PNG, JPG, SVG · Max 2 MB
@@ -1023,7 +1040,7 @@ export default function CompanyMaster() {
 
                   {/* Enterprise dropdown */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    <label className={`${LBL} block mb-1.5`}>
                       Enterprise{" "}
                       <span className="text-xs text-muted-foreground/60">
                         (Parent)
@@ -1035,7 +1052,7 @@ export default function CompanyMaster() {
                         onChange={(e) =>
                           setForm((c) => ({ ...c, belongsTo: e.target.value }))
                         }
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         <option value="">— Select Enterprise —</option>
                         {enterprises.map((e: any) => {
@@ -1065,7 +1082,7 @@ export default function CompanyMaster() {
                       className="flex items-center gap-2 text-sm"
                     >
                       {form.isActive ? (
-                        <ToggleRight size={24} className="text-emerald-500" />
+                        <ToggleRight size={24} className="text-foreground" />
                       ) : (
                         <ToggleLeft
                           size={24}
@@ -1075,7 +1092,7 @@ export default function CompanyMaster() {
                       <span
                         className={
                           form.isActive
-                            ? "text-emerald-600 text-sm"
+                            ? "text-foreground font-medium text-sm"
                             : "text-muted-foreground text-sm"
                         }
                       >
@@ -1096,14 +1113,14 @@ export default function CompanyMaster() {
                     {fi("Registered Address", "registeredAddress")}
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">State</label>
+                    <label className={`${LBL} block mb-1.5`}>State</label>
                     <div className="relative">
                       <select
                         value={form.state ?? ""}
                         onChange={(e) =>
                           setForm((c) => ({ ...c, state: e.target.value, city: "" }))
                         }
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         <option value="">— Select State —</option>
                         {INDIA_STATES.map((s) => (
@@ -1114,7 +1131,7 @@ export default function CompanyMaster() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
+                    <label className={`${LBL} block mb-1.5`}>City</label>
                     <input
                       list="company-city-options"
                       type="text"
@@ -1124,7 +1141,7 @@ export default function CompanyMaster() {
                       }
                       disabled={!form.state}
                       placeholder={form.state ? "Type or select a city" : "Select state first"}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={INPUT}
                     />
                     <datalist id="company-city-options">
                       {(INDIA_STATE_CITIES[form.state] ?? []).map((c) => (
@@ -1150,19 +1167,19 @@ export default function CompanyMaster() {
                   {fi("TAN (Tax Deduction and Collection Account Number)", "tanNumber")}
 
                   <div className="col-span-full pt-2">
-                    <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
+                    <p className={`${HEAD} mb-3 pb-1.5 border-b border-foreground`}>
                       GST Details
                     </p>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    <label className={`${LBL} block mb-1.5`}>
                       GST Status
                     </label>
                     <div className="relative">
                       <select
                         value={form.gstType}
                         onChange={(e) => setGstStatus(e.target.value)}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         {gstStatuses.map((o) => (
                           <option key={o}>{o}</option>
@@ -1182,7 +1199,7 @@ export default function CompanyMaster() {
                       showAsterisk: form.gstType === "Registered",
                     })}
                     {gstError && (
-                      <p className="mt-1 text-[0.6875rem] text-red-500 flex items-center gap-1">
+                      <p className="mt-1 text-[0.6875rem] text-destructive flex items-center gap-1">
                         <span>⚠</span> {gstError}
                       </p>
                     )}
@@ -1201,7 +1218,7 @@ export default function CompanyMaster() {
                   )}
 
                   <div className="col-span-full pt-2">
-                    <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
+                    <p className={`${HEAD} mb-3 pb-1.5 border-b border-foreground`}>
                       Trade License
                     </p>
                   </div>
@@ -1209,7 +1226,7 @@ export default function CompanyMaster() {
                   {fi("Trade License Date", "tradeLicenseDate", "date")}
 
                   <div className="col-span-full pt-2">
-                    <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
+                    <p className={`${HEAD} mb-3 pb-1.5 border-b border-foreground`}>
                       Capital
                     </p>
                   </div>
@@ -1219,17 +1236,17 @@ export default function CompanyMaster() {
               )}
             </div>
 
-            <div className="p-4 border-t border-border flex justify-end gap-3">
+            <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: RULE }}>
               <button
                 onClick={() => setShowForm(false)}
-                className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+                className={`${KEY_LINE} h-9 px-4`}
               >
                 Cancel
               </button>
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                className={`${KEY_INK} h-9 px-5`}
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
@@ -1251,14 +1268,12 @@ export default function CompanyMaster() {
         {/* Delete confirm modal */}
         {deleteConfirm !== null && createPortal(
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <Trash2 size={18} className="text-red-500" />
-                </div>
+            <div className="sheet-frame bg-card p-6 w-80" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
+              <div className="pb-3 mb-4" style={{ borderBottom: RULE }}>
                 <div>
-                  <p className="font-heading font-semibold text-foreground">
-                    Deactivate Company?
+                  <p className={LBL}>Company</p>
+                  <p className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">
+                    Deactivate company
                   </p>
                   <p className="text-xs text-muted-foreground">
                     The company will be deactivated and hidden from all
@@ -1266,17 +1281,17 @@ export default function CompanyMaster() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                  className={`${KEY_LINE} flex-1 h-9`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => deleteMutation.mutate(deleteConfirm!)}
                   disabled={deleteMutation.isPending}
-                  className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 flex items-center justify-center gap-2"
+                  className={`${KEY} flex-1 h-9 bg-destructive text-destructive-foreground border border-destructive`}
                 >
                   {deleteMutation.isPending && (
                     <Loader2 size={13} className="animate-spin" />
@@ -1288,7 +1303,7 @@ export default function CompanyMaster() {
           </div>,
           document.body
         )}
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }
