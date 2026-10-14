@@ -33,3 +33,16 @@ describe("buyer KYC by PAN type", () => {
     expect(isIndividualPan("12345")).toBe(true);
   });
 });
+
+describe("deed KYC paper by PAN type", () => {
+  const { requiredDocs } = require("../services/crmTransferDeed");
+  const kyc = (docs, party) => docs.find((d) => d.Party === party && /KYC/.test(d.Label)).Label;
+  test("individuals give PAN & Aadhaar, a company PAN & address proof", () => {
+    const docs = requiredDocs("Assignment", { agreementRegistered: false, sellerPan: "ABCPE1234F", buyerPan: "AAACR1234F" });
+    expect(kyc(docs, "Seller")).toBe("Seller's KYC (PAN & Aadhaar)");
+    expect(kyc(docs, "Buyer")).toBe("Buyer's KYC (PAN & address proof)");
+  });
+  test("no PAN yet keeps asking for Aadhaar", () => {
+    expect(kyc(requiredDocs("CancellationDeed", { agreementRegistered: false }), "Seller")).toBe("Seller's KYC (PAN & Aadhaar)");
+  });
+});

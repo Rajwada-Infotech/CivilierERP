@@ -25,15 +25,22 @@ class DeedError extends Error { constructor(m, status = 400) { super(m); this.st
 const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
 const LIVE = ["Draft", "UnderReview", "LegalApproved", "WithParties", "PartiesApproved", "DateApproved", "Executed", "Registered"];
 
+/**
+ * What a party's KYC is: an individual gives PAN + Aadhaar, a company / firm /
+ * HUF / trust PAN + address proof (by the PAN's 4th letter — business
+ * decision 2026-10-14, same as the case's buyer checks).
+ */
+const kycLabel = (who, pan) => `${who}'s KYC (${require("./crmResaleCase").isIndividualPan(pan) ? "PAN & Aadhaar" : "PAN & address proof"})`;
+
 /** The papers each deed needs, and whose they are. */
-function requiredDocs(deedType, { agreementRegistered }) {
+function requiredDocs(deedType, { agreementRegistered, sellerPan = null, buyerPan = null }) {
   const docs = [
     { DocumentType: "DeedDraft", Label: deedType === "Assignment" ? "Deed of assignment — draft" : "Cancellation deed — draft", Party: "Company" },
-    { DocumentType: "SellerKyc", Label: "Seller's KYC (PAN & Aadhaar)", Party: "Seller" },
+    { DocumentType: "SellerKyc", Label: kycLabel("Seller", sellerPan), Party: "Seller" },
   ];
   if (agreementRegistered) docs.push({ DocumentType: "SellerAfs", Label: "Seller's registered agreement for sale (copy)", Party: "Seller" });
   if (deedType === "Assignment") {
-    docs.push({ DocumentType: "BuyerKyc", Label: "Buyer's KYC (PAN & Aadhaar)", Party: "Buyer" });
+    docs.push({ DocumentType: "BuyerKyc", Label: kycLabel("Buyer", buyerPan), Party: "Buyer" });
     docs.push({ DocumentType: "DeveloperNoc", Label: "Our NOC for the transfer (signed)", Party: "Company" });
   }
   return docs;
@@ -100,7 +107,7 @@ async function openForCase(db, resaleId, actorUserId) {
     .query(`INSERT INTO dbo.CrmTransferDeed (DeedNo, ResaleId, BookingId, DeedType, Status, SeniorApprovalStatus, CreatedBy)
             OUTPUT INSERTED.Id VALUES (@no, @r, @b, @t, N'Draft', N'Draft', @by)`);
   const id = ins.recordset[0].Id;
-  for (const doc of requiredDocs(deedType, { agreementRegistered: st.seller.agreement?.Status === "Registered" })) {
+  for (const doc of requiredDocs(deedType, { agreementRegistered: st.seller.agreement?.Status === "Registered", sellerPan: st.case.FromPan, buyerPan: st.case.ToPan })) {
     await db.request().input("d", sql.Int, id).input("t", sql.NVarChar(40), doc.DocumentType).input("l", sql.NVarChar(200), doc.Label)
       .input("p", sql.NVarChar(20), doc.Party).input("by", sql.Int, actorUserId)
       .query("INSERT INTO dbo.CrmTransferDeedDocument (DeedId, DocumentType, Label, Party, IsMandatory, Status, CreatedBy) VALUES (@d, @t, @l, @p, 1, N'Requested', @by)");
@@ -523,7 +530,7 @@ async function cancelDeed(db, id, remarks, actorUserId) {
 async function deedState(db, id) {
   const d = await loadDeed(db, id);
   const docs = (await db.request().input("d", sql.Int, id).query(`
-    SELECT x.Id, x.DocumentType, x.Label, x.Party, x.IsMandatory, x.Status, x.FileName, x.Remarks, x.UploadedByType, x.UploadedAt, x.VerifiedAt,
+    SELECT x.Id, x.DocumentType, x.Label, x.Party, x.IsMandatory, x.Status, x.FileName, x.Remarks, x.UploadedByType, x.UploadedBy, x.UploadedAt, x.VerifiedAt,
            u.name AS UploadedByName, v.name AS VerifiedByName
     FROM dbo.CrmTransferDeedDocument x LEFT JOIN dbo.Users u ON u.id = x.UploadedBy LEFT JOIN dbo.Users v ON v.id = x.VerifiedBy
     WHERE x.DeedId = @d AND x.IsActive = 1 ORDER BY CASE x.Party WHEN N'Company' THEN 0 WHEN N'Seller' THEN 1 ELSE 2 END, x.Id`)).recordset;
@@ -615,5 +622,5 @@ module.exports = {
   DeedError, PROXY_METHODS, openForCase, assignLegal, requestDocument, uploadDocument, reviewDocument, documentFile,
   submitForLegal, legalDecision, sendToParties, partyRespond, proposeDate, acceptDate, dateDecision, markExecuted,
   sendDutyInfo, uploadDutyProof, confirmDuty, dutyProof, scheduleRegistry, uploadRegisteredCopy, verifyRegisteredCopy, completeRegistry,
-  cancelDeed, deedState, listDeeds, partiesOf,
+  cancelDeed, deedState, listDeeds, partiesOf, requiredDocs,
 };

@@ -47,7 +47,7 @@ const idsOf = (r) => String(r.BookingIds || r.FromBookingId || "").split(",").ma
 
 async function loadCase(db, id) {
   const r = (await db.request().input("id", sql.Int, id).query(`
-    SELECT r.*, fc.CustomerName AS FromName, tc.CustomerName AS ToName,
+    SELECT r.*, fc.CustomerName AS FromName, tc.CustomerName AS ToName, fc.PanNo AS FromPan,
            tc.PanNo AS ToPan, tc.AadhaarNo AS ToAadhaar, tc.Address AS ToAddress, tc.Mobile AS ToMobile,
            b.BookingNo, COALESCE(b.UnitNo, b.BookingNo) AS Property,
            fi.InvoiceNo AS FeeInvoiceNo, fi.Status AS FeeInvoiceStatus,
@@ -250,7 +250,7 @@ async function caseState(db, id) {
   return {
     case: {
       Id: r.Id, Kind: r.Kind, Status: r.Status, Property: r.Property, BookingNo: r.BookingNo, BookingIds: idsOf(r),
-      FromCustomerId: r.FromCustomerId, FromName: r.FromName, ToCustomerId: r.ToCustomerId, ToName: r.ToName,
+      FromCustomerId: r.FromCustomerId, FromName: r.FromName, ToCustomerId: r.ToCustomerId, ToName: r.ToName, FromPan: r.FromPan, ToPan: r.ToPan,
       AgreedValue: r.AgreedValue, OriginalValue: r.OriginalValue, DeveloperFeeAmount: r.DeveloperFeeAmount, DeveloperFeeGstAmount: r.DeveloperFeeGstAmount,
       SellerHasLoan: hasLoan, SellerHasLoanSetByStaff: r.SellerHasLoan != null, SellerClearedAt: r.SellerClearedAt,
       NocNo: r.NocNo, NocIssuedAt: r.NocIssuedAt, BuyerApplicationId: r.BuyerApplicationId, FeeInvoiceId: r.FeeInvoiceId,
