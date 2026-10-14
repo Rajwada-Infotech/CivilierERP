@@ -10,6 +10,7 @@ import {
 } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
+import { logMutationActivity } from "@/lib/fetchWithAuth";
 import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "lucide-react";
 
 // ─── Role check ───────────────────────────────────────────────────────────────
@@ -54,6 +55,9 @@ async function authFetch(url: string, method: string, body?: object) {
       throw new Error("Server is busy — please try again in a moment.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
+  // A raw fetch skips fetchWithAuth's write logging, which left every approve / reject / submit made here out of
+  // the Activity Browser. Log it the same way.
+  logMutationActivity(method, url);
   return data;
 }
 

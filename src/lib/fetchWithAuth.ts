@@ -56,7 +56,9 @@ function getStoredUserForLogging(): { id?: string; name?: string; email?: string
 
 // Fire-and-forget — a logging failure must never affect the actual request.
 // Uses a raw fetch() rather than calling fetchWithAuth recursively.
-function logMutationActivity(method: string, url: string) {
+// Exported for the few writes that deliberately skip fetchWithAuth (ApprovalActions keeps the backend's own
+// 403 wording), so they still reach the Activity Browser.
+export function logMutationActivity(method: string, url: string) {
   if (typeof window === "undefined") return;
   const actionType = MUTATION_ACTION_TYPE[method.toUpperCase()];
   if (!actionType) return;
