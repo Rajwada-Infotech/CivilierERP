@@ -270,20 +270,15 @@ export default function UserProfile() {
             {/* Identity card */}
             <div className="lg:col-span-1">
               <div className="rounded-2xl border border-border bg-card overflow-hidden">
-                <div
-                  className="h-16 w-full"
-                  style={{
-                    background: "linear-gradient(135deg, #1f2937, #374151)",
-                  }}
-                />
-                <div className="px-4 pb-4 -mt-8">
+                <div className="h-[3px] w-full" style={{ background: "hsl(var(--foreground))" }} />
+                <div className="px-4 pb-4 pt-4">
                   <div className="flex items-end gap-3">
                     <div
-                      className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-heading font-black shadow-lg ring-4 ring-card overflow-hidden shrink-0"
+                      className="w-14 h-14 rounded-xl flex items-center justify-center text-foreground text-lg font-heading font-black border-[1.5px] border-foreground overflow-hidden shrink-0"
                       style={{
                         background: profile?.avatar_url
                           ? "transparent"
-                          : "linear-gradient(135deg, #374151, #6b7280)",
+                          : "hsl(var(--card))",
                       }}
                     >
                       {profile?.avatar_url ? (
@@ -629,7 +624,7 @@ export default function UserProfile() {
             }
           }}
         >
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+          <div className="pf-modal w-full max-w-sm bg-card overflow-hidden">
             {/* Modal header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
@@ -667,13 +662,13 @@ export default function UserProfile() {
               {/* Preview */}
               <div className="flex flex-col items-center gap-3">
                 <div
-                  className="w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center text-white text-2xl font-heading font-black shadow-lg"
+                  className="w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center text-foreground text-2xl font-heading font-black border-[1.5px] border-foreground"
                   style={{
                     background: avatarPreview
                       ? "transparent"
                       : profile?.avatar_url
                         ? "transparent"
-                        : "linear-gradient(135deg, #374151, #6b7280)",
+                        : "hsl(var(--card))",
                   }}
                 >
                   {avatarPreview ? (
