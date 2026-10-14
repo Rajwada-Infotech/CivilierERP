@@ -5,6 +5,7 @@ const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
+const worker = require("../worker");
 const {
   getRedis,
   redisZScore,
@@ -18,10 +19,19 @@ router.use(apiRateLimit);
 
 const metricsOnly = allowRoles("admin", "super_admin", "dba", "director");
 
+// Engagement is scored per user id; the reply swaps each id for the person's name (flat [name, score, ...] pairs).
 async function getTopEngagedUsers() {
   try {
     const redis = await getRedis();
-    return await redis.zrevrange("engagement:score", 0, 9, "WITHSCORES");
+    const flat = await redis.zrevrange("engagement:score", 0, 9, "WITHSCORES");
+    const ids = flat.filter((_, i) => i % 2 === 0).map(Number).filter(Number.isInteger);
+    if (ids.length === 0) return flat;
+    const names = new Map(
+      (await getPool().request().query(`SELECT id, name FROM dbo.users WHERE id IN (${ids.join(",")})`)).recordset.map(
+        (r) => [String(r.id), r.name],
+      ),
+    );
+    return flat.map((v, i) => (i % 2 === 0 ? names.get(String(v)) || `User ${v}` : v));
   } catch {
     return [];
   }
@@ -143,6 +153,7 @@ router.get("/", metricsOnly, async (req, res) => {
     const uptimeSeconds = Math.floor(process.uptime());
     const response = {
       ...redisMetrics,
+      workerOk: worker.isRunning(),
       predictedRPM,
       topEngagedUsers,
       users: dbMetrics.users,
