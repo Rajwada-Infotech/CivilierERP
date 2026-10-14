@@ -38,6 +38,7 @@ const DEED_ACTION: Record<string, string> = {
 };
 const ACTION_LABEL: Record<string, string> = {
   clearance: "Confirm seller is clear", noc: "Issue NOC", "buyer-application": "Open buyer's application", "fee-invoice": "Issue fee invoice",
+  submit: "Send for approval",
 };
 
 const Tick = ({ ok }: { ok: boolean }) => ok
@@ -71,7 +72,8 @@ const CrmResaleCase: React.FC = () => {
   useEffect(() => { if (st) setOpen(st.currentStage || st.stages[st.stages.length - 1]?.key || null); }, [st?.currentStage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isResale = c?.Kind !== "BuyBack";
-  const finished = !!c && ["Completed", "Cancelled", "Rejected"].includes(c.Status);
+  // A rejected case is sent back to be fixed and sent again — not finished.
+  const finished = !!c && ["Completed", "Cancelled"].includes(c.Status);
   const canEdit = rights.canEdit && !finished;
 
   const apply = (out: any) => {
@@ -225,7 +227,7 @@ const CrmResaleCase: React.FC = () => {
             {ch.doc && <DocSlot type={ch.doc} active={active} />}
             {canEdit && active && canAct && !ch.ok && ch.action && ACTION_LABEL[ch.action] && (
               <button className={primary} disabled={!!busy || (ch.action === "clearance" && s.checks.slice(0, i).some((x) => !x.ok))}
-                onClick={() => call(ch.action!, `case/${ch.action}`, {}, "Done")}>{ACTION_LABEL[ch.action]}</button>
+                onClick={() => call(ch.action!, `case/${ch.action}`, {}, ch.action === "submit" ? "Sent — waiting in the Approval Inbox" : "Done")}>{ACTION_LABEL[ch.action]}</button>
             )}
           </div>
         </div>
@@ -276,7 +278,7 @@ const CrmResaleCase: React.FC = () => {
         <div className="mt-3 h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={doneCount} aria-valuemax={steps.length}>
           <div className={`h-full ${c.Status === "Rejected" || c.Status === "Cancelled" ? "bg-muted-foreground/40" : "bg-emerald-500"}`} style={{ width: `${Math.round((doneCount / steps.length) * 100)}%` }} />
         </div>
-        {c.Status === "Rejected" && c.RejectionNote && <p className="mt-3 text-sm text-red-600">Rejected: {c.RejectionNote}</p>}
+        {["Rejected", "Cancelled"].includes(c.Status) && c.RejectionNote && <p className="mt-3 text-sm text-red-600">{c.Status === "Rejected" ? "Sent back: " : ""}{c.RejectionNote}</p>}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -337,7 +339,7 @@ const CrmResaleCase: React.FC = () => {
               <div><span className={label}>Paid so far</span><span className="tabular-nums">{fmt(c.OriginalValue)}</span></div>
               <div><span className={label}>{isResale ? "Price between buyers" : "Buy-back price"}</span><span className="tabular-nums">{fmt(c.AgreedValue)}</span></div>
             </div>
-            {isResale && <div><span className={label}>Our transfer fee</span><span className="tabular-nums">{Number(c.DeveloperFeeAmount) > 0 ? `${fmt(c.DeveloperFeeAmount)} + GST = ${fmt(c.FeeTotal)}` : "None"}</span></div>}
+            {isResale && <div><span className={label}>Our transfer fee</span><span className="tabular-nums">{Number(c.DeveloperFeeAmount) > 0 ? (Number(c.DeveloperFeeGstAmount) > 0 ? `${fmt(c.DeveloperFeeAmount)} + GST = ${fmt(c.FeeTotal)}` : `${fmt(c.DeveloperFeeAmount)} (no GST)`) : "None"}</span></div>}
             {c.NocNo && <div><span className={label}>NOC</span>{c.NocNo}</div>}
             {c.DeedRegNo && <div><span className={label}>Registered deed</span>{c.DeedRegNo}<span className="block text-[0.6875rem] text-muted-foreground">{date(c.DeedRegDate)} · {c.DeedRegOffice}</span></div>}
           </section>

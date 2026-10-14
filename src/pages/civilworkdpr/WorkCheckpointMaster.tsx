@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   getCheckpoints,
@@ -12,11 +12,14 @@ import {
   deleteActivityCheckpoint,
   type ActivityCheckpoint,
 } from "@/api/activityCheckpointApi";
-import { ClipboardCheck, ListChecks, Plus, Pencil, Trash2, X, Check, Timer, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Check, Timer, CalendarDays } from "lucide-react";
 
 const inputCls =
-  "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+  "w-full h-9 px-3 text-sm bg-card border border-foreground/40 focus:border-foreground text-foreground transition-colors focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 disabled:cursor-not-allowed";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 shrink-0";
 
 // The "calendar mark": a checkpoint that's updated every day (photo + date) rather
 // than ticked once — Work Allocation shows a calendar and live camera for it.
@@ -30,10 +33,10 @@ function DailyToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: bo
       disabled={disabled}
       onClick={() => onChange(!on)}
       title={on ? "Daily update: ON — Work Allocation shows a calendar and camera" : "Daily update: OFF"}
-      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[0.625rem] font-semibold transition-colors disabled:opacity-50 ${
+      className={`${KEY} h-7 px-2 shrink-0 border ${
         on
-          ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
-          : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+          ? "bg-foreground text-card border-foreground"
+          : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"
       }`}
     >
       <CalendarDays size={11} /> Daily
@@ -93,7 +96,7 @@ function CheckpointRow({
 
   if (editing) {
     return (
-      <div className="flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/5 px-3 py-2">
+      <div className="flex items-center gap-1.5 border border-foreground px-2 py-1.5 my-1">
         <input
           ref={inputRef}
           value={value}
@@ -107,10 +110,10 @@ function CheckpointRow({
           className="flex-1 bg-transparent text-sm text-foreground focus:outline-none disabled:opacity-50"
         />
         <DailyToggle on={isDaily} onChange={setIsDaily} disabled={saving} />
-        <button type="button" onClick={save} disabled={saving} className="w-6 h-6 shrink-0 rounded-md bg-cyan-500 text-white flex items-center justify-center hover:bg-cyan-600 disabled:opacity-40 transition-colors">
+        <button type="button" onClick={save} disabled={saving} aria-label="Save" className="w-7 h-7 shrink-0 bg-foreground text-card flex items-center justify-center disabled:opacity-40 transition-opacity">
           <Check size={12} />
         </button>
-        <button type="button" onClick={() => { setEditing(false); setValue(checkpoint.fieldName); setIsDaily(checkpoint.isDaily); }} disabled={saving} className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors">
+        <button type="button" onClick={() => { setEditing(false); setValue(checkpoint.fieldName); setIsDaily(checkpoint.isDaily); }} disabled={saving} aria-label="Cancel" className="w-7 h-7 shrink-0 text-muted-foreground hover:text-foreground flex items-center justify-center transition-colors">
           <X size={12} />
         </button>
       </div>
@@ -118,28 +121,28 @@ function CheckpointRow({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
-      <span className="flex items-center gap-2 text-sm text-foreground">
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-foreground/15">
+      <span className="flex flex-wrap items-center gap-2 text-sm text-foreground">
         {checkpoint.fieldName}
         {checkpoint.minWaitDays != null && checkpoint.minWaitDays > 0 && (
-          <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
+          <span className={`${TAG} text-foreground border border-foreground/50`}>
             <Timer size={9} /> {checkpoint.minWaitDays}d wait
           </span>
         )}
         {checkpoint.isDaily && (
-          <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+          <span className={`${TAG} text-foreground border border-dashed border-foreground`}>
             <CalendarDays size={9} /> Daily
           </span>
         )}
       </span>
       <div className="flex items-center gap-1 shrink-0">
         {canEdit && (
-          <button type="button" onClick={() => setEditing(true)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Edit">
+          <button type="button" onClick={() => setEditing(true)} className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors" title="Edit" aria-label="Edit">
             <Pencil size={13} />
           </button>
         )}
         {canDelete && (
-          <button type="button" onClick={remove} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Remove">
+          <button type="button" onClick={remove} className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors" title="Remove" aria-label="Remove">
             <Trash2 size={13} />
           </button>
         )}
@@ -188,36 +191,47 @@ export default function WorkCheckpointMaster() {
           { label: "Work Checkpoint Master" },
         ]}
       />
-      <CivilWorkDprShell
-        title="Work Checkpoint Master"
-        subtitle="One general list of checkpoints — Work Allocation picks the ones that apply to each activity, e.g. 'Wall surface cleaned', 'Water curing done'"
-        icon={ClipboardCheck}
+      <SheetShell
+        eyebrow="CivilierERP · Civil Work DPR"
+        title="Work checkpoints"
+        subtitle="One general list of checks. Work Allocation picks the ones that apply to each activity, such as wall surface cleaned or water curing done."
       >
         {!rights.canView ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          <div className="p-8 text-center text-sm text-muted-foreground border border-dashed border-foreground/40">
             You don't have access to this page.
           </div>
         ) : (
           <>
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-                <span className="flex items-center gap-2 text-sm font-heading font-semibold text-foreground">
-                  <ListChecks size={14} className="text-cyan-600 dark:text-cyan-400" />
-                  Checkpoints
-                </span>
-                <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-                  {isLoading ? "…" : checkpoints.length}
-                </span>
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+                {[
+                  { label: "Checkpoints", value: checkpoints.length, note: "in the list" },
+                  { label: "Daily", value: checkpoints.filter((c) => c.isDaily).length, note: "updated each day with a photo" },
+                  { label: "With a wait", value: checkpoints.filter((c) => (c.minWaitDays ?? 0) > 0).length, note: "hold the next step for days" },
+                ].map((x) => (
+                  <div key={x.label}>
+                    <p className="label">{x.label}</p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
+                ))}
               </div>
-              <div className="p-5 space-y-3">
+            </div>
+
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="flex items-baseline gap-2.5 px-4 py-3" style={{ borderBottom: RULE }}>
+                <span className={HEAD}>Checkpoints</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{isLoading ? "…" : checkpoints.length}</span>
+              </div>
+              <div className="px-4 pt-2 pb-4">
                 {isLoading ? (
-                  <div className="h-20 rounded-lg border border-border bg-muted/30 animate-pulse" />
+                  <div className="mt-2 h-20 border border-foreground/20 bg-muted/30 animate-pulse" />
                 ) : (
                   <>
                     {checkpoints.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No checkpoints yet — add the first one below.</p>
+                      <p className="py-3 text-sm text-muted-foreground">No checkpoints yet — add the first one below.</p>
                     ) : (
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-x-8 sm:grid-cols-2">
                         {checkpoints.map((cp) => (
                           <CheckpointRow
                             key={cp.id}
@@ -232,7 +246,7 @@ export default function WorkCheckpointMaster() {
                     )}
 
                     {rights.canCreate && (
-                      <div className="flex items-center gap-1.5 pt-2">
+                      <div className="flex items-center gap-1.5 pt-4">
                         <input
                           value={newField}
                           onChange={(e) => setNewField(e.target.value)}
@@ -249,7 +263,7 @@ export default function WorkCheckpointMaster() {
                           type="button"
                           onClick={handleAdd}
                           disabled={adding || !newField.trim()}
-                          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:opacity-90 disabled:opacity-50 transition-all"
+                          className={`${KEY} h-9 px-4 shrink-0 bg-foreground text-card border border-foreground`}
                         >
                           <Plus size={13} /> Add
                         </button>
@@ -261,7 +275,7 @@ export default function WorkCheckpointMaster() {
             </div>
           </>
         )}
-      </CivilWorkDprShell>
+      </SheetShell>
     </>
   );
 }

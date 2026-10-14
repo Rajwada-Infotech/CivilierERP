@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useInSheet } from "@/components/sheet/useInSheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Button } from "./ui/button";
 import {
@@ -10,6 +11,7 @@ import {
 } from "./ui/dialog";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
+import { logMutationActivity } from "@/lib/fetchWithAuth";
 import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "lucide-react";
 
 // ─── Role check ───────────────────────────────────────────────────────────────
@@ -54,6 +56,9 @@ async function authFetch(url: string, method: string, body?: object) {
       throw new Error("Server is busy — please try again in a moment.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
+  // A raw fetch skips fetchWithAuth's write logging, which left every approve / reject / submit made here out of
+  // the Activity Browser. Log it the same way.
+  logMutationActivity(method, url);
   return data;
 }
 
@@ -137,6 +142,10 @@ export function ApprovalActions({
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  // Drawn in ink, squared, on a drawing-sheet page (the Approval Inbox); unchanged elsewhere.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sheet = useInSheet(rootRef);
+  const SK = "rounded-none h-8 px-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] gap-1.5 [&_svg]:size-3.5";
 
   // Fallback: holding "edit" on the "approval-inbox" page via Menu Rights
   // also unlocks the buttons — mirrors the backend's transition() gate in
@@ -245,14 +254,14 @@ export function ApprovalActions({
   if (!showSubmit && !showApproveReject) return null;
 
   return (
-    <div className={`flex items-center gap-2 ${className ?? ""}`}>
+    <div ref={rootRef} className={`flex items-center gap-2 ${className ?? ""}`}>
       {/* Submit button — visible to all users on Draft/Issued */}
       {showSubmit && (
         <button
           disabled={loading !== null}
           onClick={() => handleAction("submit")}
           title="Submit for Approval"
-          className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"
+          className={sheet ? `${SK} inline-flex items-center border border-foreground text-foreground hover:bg-primary/10 disabled:opacity-50` : "relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"}
         >
           {loading === "submit" ? (
             <Loader2 className="w-3 h-3 animate-spin" />
@@ -269,7 +278,7 @@ export function ApprovalActions({
           {reviewInstead ? (
             <Button
               size="sm"
-              className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-cyan-600 hover:bg-cyan-700 text-white [&_svg]:size-3.5"
+              className={sheet ? `${SK} border border-foreground bg-card text-foreground hover:bg-primary/10` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-cyan-600 hover:bg-cyan-700 text-white [&_svg]:size-3.5"}
               onClick={reviewInstead.onClick}
             >
               <ClipboardCheck className="w-3.5 h-3.5" />
@@ -278,7 +287,7 @@ export function ApprovalActions({
           ) : (
             <Button
               size="sm"
-              className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
+              className={sheet ? `${SK} bg-foreground text-card border border-foreground hover:bg-foreground/85` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"}
               disabled={loading !== null}
               onClick={() => handleAction("approve")}
             >
@@ -293,7 +302,7 @@ export function ApprovalActions({
 
           <Button
             size="sm"
-            className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"
+            className={sheet ? `${SK} bg-card text-destructive border border-destructive hover:bg-destructive/10` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"}
             disabled={loading !== null}
             onClick={() => setRejectOpen(true)}
           >
@@ -309,9 +318,9 @@ export function ApprovalActions({
 
       {/* Rejection note dialog */}
       <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={sheet ? "sheet-frame sm:max-w-md" : "sm:max-w-md"} style={sheet ? { margin: 0 } : undefined}>
           <DialogHeader>
-            <DialogTitle>Reject Record</DialogTitle>
+            <DialogTitle className={sheet ? "font-heading text-lg font-bold tracking-tight pb-3 border-b border-foreground" : undefined}>{sheet ? "Reject record" : "Reject Record"}</DialogTitle>
           </DialogHeader>
           <Textarea
             placeholder="Reason for rejection (optional but recommended)"

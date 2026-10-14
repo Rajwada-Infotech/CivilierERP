@@ -1,9 +1,11 @@
-// Maker-checker on requests that pay money out: whoever raised a cancellation
-// refund, a refund or a brokerage payout can't approve it themselves.
+// Maker-checker: whoever raised a request can't approve it themselves —
+// unless Approval Setup lets the raiser approve in that module
+// (dbo.ApprovalRaiserRule, migration 571).
 let mockMaker = 7;
+let mockRaiserMay = false;
 jest.mock("../db", () => {
   const request = () => {
-    const r = { input() { return r; }, async query() { return { recordset: [{ Maker: mockMaker }] }; } };
+    const r = { input() { return r; }, async query(q) { return { recordset: [/ApprovalRaiserRule/.test(q) ? { RaiserMayApprove: mockRaiserMay } : { Maker: mockMaker }] }; } };
     return r;
   };
   return {
@@ -25,6 +27,16 @@ describe("maker-checker", () => {
     for (const m of ["crm-cancellations", "crm-brokerage"]) {
       await expect(transition(m, 1, "Approved", "a@x.com", "admin", null, 9)).rejects.toMatchObject({ status: 403 });
     }
+  });
+  test("when Approval Setup lets the raiser approve, they get past the check", async () => {
+    mockMaker = 7; mockRaiserMay = true;
+    await expect(transition("crm-resales", 1, "Approved", "a@x.com", "admin", null, 7))
+      .rejects.not.toMatchObject({ status: 403 });
+    mockRaiserMay = false;
+  });
+  test("with the setting off the same resale is refused", async () => {
+    mockMaker = 7; mockRaiserMay = false;
+    await expect(transition("crm-resales", 1, "Approved", "a@x.com", "admin", null, 7)).rejects.toMatchObject({ status: 403 });
   });
   test("a different approver gets past the check", async () => {
     mockMaker = 7;

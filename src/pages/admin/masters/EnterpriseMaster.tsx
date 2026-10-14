@@ -17,7 +17,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   getEnterprises,
   addEnterprise,
@@ -75,11 +75,15 @@ const empty: Partial<Enterprise> = {
 
 type Tab = "general" | "address" | "legal";
 
-const ENTITY_COLORS: Record<string, string> = {
-  Enterprise: "bg-purple-500/10 text-purple-600",
-  Company: "bg-blue-500/10 text-blue-600",
-  "Business Unit": "bg-[#ffe2021a] text-amber-600",
-};
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+const TAG = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground/40 px-1.5 py-0.5 whitespace-nowrap";
+const INPUT = "w-full px-3 py-2 text-sm border border-foreground/40 focus:border-foreground bg-card text-foreground focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 disabled:cursor-not-allowed";
 
 function LogoAvatar({
   logo,
@@ -96,13 +100,13 @@ function LogoAvatar({
       <img
         src={logo}
         alt={name}
-        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 flex-shrink-0`}
+        className={`${dim} object-contain border border-foreground/30 bg-card flex-shrink-0`}
       />
     );
   }
   return (
     <div
-      className={`${dim} rounded-lg bg-blue-500/10 text-blue-600 font-heading font-bold flex items-center justify-center flex-shrink-0`}
+      className={`${dim} border border-foreground text-foreground font-heading font-bold flex items-center justify-center flex-shrink-0`}
     >
       {name.charAt(0).toUpperCase()}
     </div>
@@ -119,7 +123,7 @@ function EnterpriseViewModal({
 }) {
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className={LBL}>
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -130,9 +134,10 @@ function EnterpriseViewModal({
 
   const Section = ({ title }: { title: string }) => (
     <div className="col-span-full pt-2">
-      <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2">
-        {title}
-      </p>
+      <div className="flex items-center gap-3 mb-1">
+        <p className={`${HEAD} shrink-0`}>{title}</p>
+        <span className="flex-1 h-px bg-foreground" />
+      </div>
     </div>
   );
 
@@ -203,9 +208,9 @@ function EnterpriseViewModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="sheet-frame bg-card w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
         {/* Header */}
-        <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
+        <div className="p-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: RULE }}>
           <div className="flex items-center gap-3">
             <LogoAvatar
               logo={enterprise.logo}
@@ -213,36 +218,30 @@ function EnterpriseViewModal({
               size="md"
             />
             <div>
-              <h2 className="font-heading font-semibold text-foreground text-base">
+              <p className={LBL}>Enterprise</p>
+              <h2 className="font-heading font-bold tracking-tight text-foreground text-lg">
                 {enterprise.name}
               </h2>
               <div className="flex items-center gap-2 mt-0.5">
                 {enterprise.entity_type && (
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[enterprise.entity_type] || "bg-muted text-muted-foreground"}`}
-                  >
-                    {enterprise.entity_type}
-                  </span>
+                  <span className={TAG}>{enterprise.entity_type}</span>
                 )}
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${enterprise.status === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-                >
-                  {enterprise.status || "Inactive"}
-                </span>
+                {enterprise.status === "Active" ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>{enterprise.status || "Inactive"}</span>}
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={printPreview}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-8 px-3`}
               title="Print"
             >
               <Printer size={13} /> Print
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className={ACT}
+              aria-label="Close"
             >
               <X size={16} />
             </button>
@@ -263,7 +262,7 @@ function EnterpriseViewModal({
             <Row label="Status" value={enterprise.status} />
             {enterprise.discontinue && (
               <div className="col-span-full">
-                <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/10 text-red-600">
+                <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-destructive border border-destructive px-1.5 py-0.5">
                   Discontinued
                 </span>
               </div>
@@ -320,10 +319,10 @@ function EnterpriseViewModal({
           </div>
         </div>
 
-        <div className="p-4 border-t border-border flex justify-end flex-shrink-0">
+        <div className="p-4 flex justify-end flex-shrink-0" style={{ borderTop: RULE }}>
           <button
             onClick={onClose}
-            className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+            className={`${KEY_LINE} h-9 px-5`}
           >
             Close
           </button>
@@ -353,7 +352,7 @@ function buildEnterpriseColumns(
       accessorKey: "name",
       header: "Name",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">
+        <span className="font-semibold text-foreground">
           {getValue() as string}
         </span>
       ),
@@ -373,11 +372,7 @@ function buildEnterpriseColumns(
       cell: ({ getValue }) => {
         const v = getValue() as string;
         return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[v || ""] || "bg-muted text-muted-foreground"}`}
-          >
-            {v || "—"}
-          </span>
+          v ? <span className={TAG}>{v}</span> : <span className="text-muted-foreground">—</span>
         );
       },
     },
@@ -385,7 +380,7 @@ function buildEnterpriseColumns(
       accessorKey: "pan",
       header: "PAN (Permanent Account Number)",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-heading text-xs tabular-nums text-muted-foreground">
           {(getValue() as string) || "—"}
         </span>
       ),
@@ -415,11 +410,7 @@ function buildEnterpriseColumns(
         const status = getValue() as string | null;
         const isActive = status === "Active";
         return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {status || "Inactive"}
-          </span>
+          isActive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>{status || "Inactive"}</span>
         );
       },
     },
@@ -431,7 +422,7 @@ function buildEnterpriseColumns(
         <div className="flex items-center justify-end gap-1">
           <button data-row-view
             onClick={() => openView(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
+            className={ACT} aria-label="View details"
             title="View details"
           >
             <Eye size={13} />
@@ -439,7 +430,7 @@ function buildEnterpriseColumns(
           {rights.canEdit && (
             <button
               onClick={() => openEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+              className={ACT} aria-label="Edit"
               title="Edit"
             >
               <Pencil size={13} />
@@ -448,7 +439,7 @@ function buildEnterpriseColumns(
           {rights.canDelete && (
             <button
               onClick={() => setDeleteTarget(row.original.id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+              className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors" aria-label="Delete"
               title="Delete"
             >
               <Trash2 size={13} />
@@ -632,9 +623,9 @@ export default function EnterpriseMaster() {
     required = false,
   ) => (
     <div>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
+      <label className={`${LBL} block mb-1.5`}>
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {required && <span className="text-destructive ml-0.5">*</span>}
       </label>
       {type === "date" ? (
         <div className="relative">
@@ -645,7 +636,7 @@ export default function EnterpriseMaster() {
           <DateInput
             value={(form[key] as string) ?? ""}
             onChange={(e) => set(key, e.target.value)}
-            className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+            className={`${INPUT} pl-8`}
           />
         </div>
       ) : (
@@ -654,7 +645,7 @@ export default function EnterpriseMaster() {
           value={(form[key] as string) ?? ""}
           onChange={(e) => set(key, e.target.value)}
           placeholder={placeholder || label}
-          className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+          className={INPUT}
         />
       )}
     </div>
@@ -662,14 +653,14 @@ export default function EnterpriseMaster() {
 
   const sel = (label: string, key: keyof Enterprise, options: string[]) => (
     <div>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">
+      <label className={`${LBL} block mb-1.5`}>
         {label}
       </label>
       <div className="relative">
         <select
           value={(form[key] as string) ?? ""}
           onChange={(e) => set(key, e.target.value)}
-          className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+          className={`${INPUT} pr-8 appearance-none`}
         >
           <option value="">— Select —</option>
           {options.map((o) => (
@@ -685,7 +676,7 @@ export default function EnterpriseMaster() {
   );
 
   if (error)
-    return <div className="p-6 text-red-500">Failed to load enterprises.</div>;
+    return <div className="p-6 text-sm text-destructive">Failed to load enterprises.</div>;
 
   return (
     <>
@@ -693,41 +684,56 @@ export default function EnterpriseMaster() {
         items={["Dashboard", "Admin", "Masters", "Enterprise Master"]}
       />
 
-      <AdminShell
-        title="Enterprise Master"
-        subtitle="Manage enterprises for the companies and projects"
-        icon={Building2}
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="Enterprises"
+        subtitle="The enterprises that companies and projects sit under, with their address and legal registrations."
         action={
           !showForm &&
           rights.canCreate && (
-            <button
-              onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
-            >
-              <Plus size={13} /> Add Enterprise
+            <button onClick={openNew} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+              <Plus size={13} /> New enterprise
             </button>
           )
         }
       >
         {/* Table */}
         {!showForm && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center gap-3">
-              <div className="relative flex-1 max-w-sm">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+              {[
+                { label: "Enterprises", value: safeRows.length, note: "on record" },
+                { label: "Active", value: safeRows.filter((r) => r.status === "Active").length, note: "in use" },
+                { label: "Discontinued", value: safeRows.filter((r) => r.discontinue).length, note: "kept for history" },
+              ].map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {!showForm && (
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <p className="flex items-baseline gap-2.5 mr-auto">
+                <span className={HEAD}>Enterprises</span>
+                <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
+              </p>
+              <div className="relative w-full sm:w-72">
                 <Search
-                  size={15}
+                  size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search name, type…"
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className={`${INPUT} h-9 pl-9`}
                 />
               </div>
-              <span className="text-xs text-muted-foreground">
-                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
-              </span>
               <ExportMenu
                 data={filtered as unknown as Record<string, unknown>[]}
                 columns={exportColumns}
@@ -757,35 +763,38 @@ export default function EnterpriseMaster() {
 
         {/* Form */}
         {showForm && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+            <div className="p-4 flex items-center justify-between" style={{ borderBottom: RULE }}>
               <div className="flex items-center gap-3">
                 <LogoAvatar
                   logo={logoPreview || null}
                   name={form.name || "?"}
                   size="md"
                 />
-                <h2 className="font-heading font-semibold text-foreground">
-                  {editId != null
-                    ? `Edit — ${form.name || "Enterprise"}`
-                    : "New Enterprise"}
-                </h2>
+                <div>
+                  <p className={LBL}>Enterprise</p>
+                  <h2 className="font-heading text-base font-bold tracking-tight text-foreground">
+                    {editId != null
+                      ? `Edit ${form.name || "enterprise"}`
+                      : "New enterprise"}
+                  </h2>
+                </div>
               </div>
               <button
                 onClick={() => setShowForm(false)}
-                className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
+                className={`${KEY_LINE} h-8 px-3`}
               >
                 Cancel
               </button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
+            <div className="flex gap-0 px-4" style={{ borderBottom: RULE }}>
               {(["general", "address", "legal"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${tab === t ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-3 -mb-px border-b-2 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${tab === t ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 >
                   {t === "legal" ? "Legal / Compliance" : t}
                 </button>
@@ -797,7 +806,7 @@ export default function EnterpriseMaster() {
               {tab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="col-span-full">
-                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                    <label className={`${LBL} block mb-2`}>
                       Enterprise Logo
                     </label>
                     <div className="flex items-center gap-4">
@@ -806,17 +815,17 @@ export default function EnterpriseMaster() {
                           <img
                             src={logoPreview}
                             alt="Logo preview"
-                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                            className="w-16 h-16 object-contain border border-foreground/40 bg-card"
                           />
                           <button
                             onClick={removeLogo}
-                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="Remove logo" className="absolute -top-2 -right-2 w-5 h-5 bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <X size={11} />
                           </button>
                         </div>
                       ) : (
-                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                        <div className="w-16 h-16 border border-dashed border-foreground/50 flex items-center justify-center">
                           <Building2
                             size={20}
                             className="text-muted-foreground/40"
@@ -834,10 +843,10 @@ export default function EnterpriseMaster() {
                         />
                         <label
                           htmlFor="enterprise-logo-input"
-                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
+                          className={`${KEY_LINE} h-8 px-3 cursor-pointer`}
                         >
                           <Upload size={13} />
-                          {logoPreview ? "Change Logo" : "Upload Logo"}
+                          {logoPreview ? "Change logo" : "Upload logo"}
                         </label>
                         <p className="text-xs text-muted-foreground mt-1">
                           PNG, JPG, SVG · Max 2 MB
@@ -856,10 +865,10 @@ export default function EnterpriseMaster() {
                   {/* Locked, not a dropdown — this page only ever manages
                       business_type='E' rows, so Type can only be Enterprise. */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    <label className={`${LBL} block mb-1.5`}>
                       Type
                     </label>
-                    <div className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-muted/30 text-foreground cursor-not-allowed">
+                    <div className="w-full px-3 py-2 text-sm border border-dashed border-foreground/40 text-muted-foreground cursor-not-allowed">
                       Enterprise
                     </div>
                   </div>
@@ -873,7 +882,7 @@ export default function EnterpriseMaster() {
                       className="flex items-center gap-2 text-sm"
                     >
                       {form.discontinue ? (
-                        <ToggleRight size={24} className="text-red-500" />
+                        <ToggleRight size={24} className="text-destructive" />
                       ) : (
                         <ToggleLeft
                           size={24}
@@ -883,7 +892,7 @@ export default function EnterpriseMaster() {
                       <span
                         className={
                           form.discontinue
-                            ? "text-red-500"
+                            ? "text-destructive"
                             : "text-muted-foreground"
                         }
                       >
@@ -906,7 +915,7 @@ export default function EnterpriseMaster() {
 
                   {/* State dropdown */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">State</label>
+                    <label className={`${LBL} block mb-1.5`}>State</label>
                     <div className="relative">
                       <select
                         value={(form.state as string) ?? ""}
@@ -914,7 +923,7 @@ export default function EnterpriseMaster() {
                           set("state", e.target.value);
                           set("city", ""); // reset city when state changes
                         }}
-                        className="w-full px-3 py-2 pr-8 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary appearance-none"
+                        className={`${INPUT} pr-8 appearance-none`}
                       >
                         <option value="">— Select State —</option>
                         {INDIA_STATES.map((s) => (
@@ -927,7 +936,7 @@ export default function EnterpriseMaster() {
 
                   {/* City — suggestions from selected state, but any city can be typed */}
                   <div>
-                    <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
+                    <label className={`${LBL} block mb-1.5`}>City</label>
                     <input
                       list="enterprise-city-options"
                       type="text"
@@ -935,7 +944,7 @@ export default function EnterpriseMaster() {
                       onChange={(e) => set("city", e.target.value)}
                       disabled={!form.state}
                       placeholder={form.state ? "Type or select a city" : "Select state first"}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={INPUT}
                     />
                     <datalist id="enterprise-city-options">
                       {(INDIA_STATE_CITIES[form.state as string] ?? []).map((c) => (
@@ -976,17 +985,17 @@ export default function EnterpriseMaster() {
               )}
             </div>
 
-            <div className="p-4 border-t border-border flex justify-end gap-3">
+            <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: RULE }}>
               <button
                 onClick={() => setShowForm(false)}
-                className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+                className={`${KEY_LINE} h-9 px-4`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving || !form.name?.trim()}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className={`${KEY_INK} h-9 px-5`}
               >
                 {saving ? "Saving…" : editId != null ? "Update" : "Save"}
               </button>
@@ -1005,30 +1014,28 @@ export default function EnterpriseMaster() {
         {/* Delete Confirm */}
         {deleteTarget && createPortal(
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <Trash2 size={18} className="text-red-500" />
-                </div>
+            <div className="sheet-frame bg-card p-6 w-80" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
+              <div className="pb-3 mb-4" style={{ borderBottom: RULE }}>
                 <div>
-                  <p className="font-heading font-semibold text-foreground">
-                    Delete Enterprise?
+                  <p className={LBL}>Enterprise</p>
+                  <p className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">
+                    Delete enterprise
                   </p>
                   <p className="text-xs text-muted-foreground">
                     This action cannot be undone.
                   </p>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={() => setDeleteTarget(null)}
-                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                  className={`${KEY_LINE} flex-1 h-9`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600"
+                  className={`${KEY} flex-1 h-9 bg-destructive text-destructive-foreground border border-destructive`}
                 >
                   Delete
                 </button>
@@ -1037,7 +1044,7 @@ export default function EnterpriseMaster() {
           </div>,
           document.body
         )}
-      </AdminShell>
+      </SheetShell>
     </>
   );
 }
