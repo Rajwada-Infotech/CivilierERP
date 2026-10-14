@@ -9,6 +9,7 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
+import { NAV_PANEL_CSS } from "@/components/navbar/navPanelStyles";
 import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import {
   ChevronDown,
@@ -254,83 +255,62 @@ const UserMenuContent: React.FC<{
     transition: `opacity 240ms ease ${i * 55}ms, transform 240ms cubic-bezier(0.16,1,0.3,1) ${i * 55}ms`,
   });
 
+  // Drawn on the sheet like the other top-bar panels: a title block with a square avatar, the name and email, and the
+  // role as a squared tag in the role's own colour; then numbered rows with square marks, Sign Out in red.
   return (
     <>
-      {/* ── Identity banner ── */}
-      <div
-        className="relative -m-1 mb-1 px-4 pt-4 pb-3.5 rounded-none overflow-hidden"
-        style={cascade(0)}
-      >
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: accent
-              ? `linear-gradient(135deg, ${accent.color}1F 0%, transparent 70%)`
-              : "linear-gradient(135deg, hsl(var(--primary) / 0.12) 0%, transparent 70%)",
-          }}
-        />
-        <div className="relative z-10 flex items-center gap-3">
-          <div
-            className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-heading font-bold text-primary-foreground shrink-0 overflow-hidden ring-2 ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
-            style={accent ? { boxShadow: `0 0 0 2px ${accent.color}40` } : undefined}
-          >
+      <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
+      <div className="np-head" style={{ ...cascade(0), display: "block" }}>
+        <p className="np-label">CivilierERP · Signed in</p>
+        <div className="np-who">
+          <span className="np-avatar">
             {currentUser?.avatarUrl ? (
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.name}
-                className="w-full h-full object-cover rounded-full"
-              />
+              <img src={currentUser.avatarUrl} alt={currentUser.name} />
             ) : (
               currentUser?.initials || "?"
             )}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-heading font-semibold text-foreground truncate">
+          </span>
+          <span className="min-w-0">
+            <span className="np-name block truncate" style={{ fontFamily: "Sora, sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em" }}>
               {currentUser?.name}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {currentUser?.email}
-            </p>
-          </div>
-        </div>
-        <div className="relative z-10 mt-2.5">
-          {accent ? (
-            <span
-              className="inline-flex items-center text-[0.625rem] px-2 py-0.5 rounded-full font-heading font-semibold"
-              style={{ background: `${accent.color}1A`, color: accent.color }}
-            >
-              {accent.label}
             </span>
-          ) : (
-            <span className="inline-flex items-center text-[0.625rem] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-              User · {currentUser?.pagePermissions?.length || 0} pages
-            </span>
-          )}
+            <span className="np-sub block truncate">{currentUser?.email}</span>
+          </span>
         </div>
+        {accent ? (
+          <span className="np-role" style={{ color: accent.color }}>{accent.label}</span>
+        ) : (
+          <span className="np-role" style={{ color: "hsl(var(--muted-foreground))" }}>
+            User · {currentUser?.pagePermissions?.length || 0} pages
+          </span>
+        )}
       </div>
 
-      <div className="border-t border-border/60" style={cascade(1)} />
-
-      <button
-        onMouseDown={() => {
-          onClose();
-          if (isSuperAdmin) navigate("/superadmin/profile");
-          else if (isDba) navigate("/dba/profile");
-          else if (currentUser?.role === "admin") navigate("/admin/profile");
-          else navigate("/user/profile");
-        }}
-        style={cascade(2)}
-        className="w-full flex items-center gap-2 px-3 py-2 mt-1 text-sm rounded-none hover:bg-muted transition-colors text-foreground"
-      >
-        <Profile size={14} /> Profile
-      </button>
-      <button
-        onMouseDown={handleLogout}
-        style={cascade(3)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-none hover:bg-destructive/10 transition-colors text-destructive"
-      >
-        <Logout size={14} /> Sign Out
-      </button>
+      <div className="np-list">
+        <button
+          type="button"
+          onMouseDown={() => {
+            onClose();
+            if (isSuperAdmin) navigate("/superadmin/profile");
+            else if (isDba) navigate("/dba/profile");
+            else if (currentUser?.role === "admin") navigate("/admin/profile");
+            else navigate("/user/profile");
+          }}
+          style={cascade(1)}
+          className="np-row center"
+        >
+          <span className="np-num">01</span>
+          <span className="np-mark"><Profile size={14} /></span>
+          <span className="np-name">Profile</span>
+          <span />
+        </button>
+        <button type="button" onMouseDown={handleLogout} style={cascade(2)} className="np-row center danger">
+          <span className="np-num">02</span>
+          <span className="np-mark"><Logout size={14} /></span>
+          <span className="np-name">Sign Out</span>
+          <span />
+        </button>
+      </div>
     </>
   );
 };
@@ -767,7 +747,7 @@ export const TopNavbar = () => {
           <Dropdown
             open={userOpen}
             onClose={closeUser}
-            className="right-0 w-56 p-1"
+            className="right-0 w-[17rem] p-0 np-sheet"
             trigger={
               <div className="relative">
                 <button
@@ -813,7 +793,7 @@ export const TopNavbar = () => {
           <Dropdown
             open={userOpen}
             onClose={closeUser}
-            className="right-0 w-56 p-1"
+            className="right-0 w-[17rem] p-0 np-sheet"
             trigger={
               <div className="relative">
                 <button
