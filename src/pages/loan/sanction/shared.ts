@@ -172,5 +172,14 @@ export const LOAN_TYPE_COLORS: Record<LoanType, string> = {
 };
 
 export const inputCls =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 placeholder:text-muted-foreground";
-export const labelCls = "text-xs font-semibold uppercase tracking-widest text-muted-foreground";
+  "w-full border border-foreground/40 focus:border-foreground bg-card px-3 py-2 text-sm text-foreground focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-60";
+export const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+
+// Drawing-sheet ink: a heading, a rule, and the two key styles.
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+export const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors";
+export const ACT_DEL = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-destructive hover:border-destructive transition-colors";

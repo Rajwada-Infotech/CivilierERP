@@ -1,7 +1,6 @@
 import { Percent } from "lucide-react";
 import { type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { PAYMENT_MODES } from "@/pages/finance/payment/types";
-import { MODE_STYLE } from "@/pages/finance/payment/constants";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { type CustomerOption } from "@/api/loanSanctionApi";
 import { DateInput } from "@/components/ui/date-input";
@@ -19,7 +18,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="space-y-2">
             <label className={labelCls}>
-              Lender {isBankLoan ? "Bank" : isCustomerToCompany ? "Customer" : "Company"} <span className="text-red-500">*</span>
+              Lender {isBankLoan ? "Bank" : isCustomerToCompany ? "Customer" : "Company"} <span className="text-destructive">*</span>
             </label>
             {isBankLoan ? (
               // Any bank the loan is actually from — not
@@ -83,7 +82,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
             </div>
           )}
           <div className="space-y-2">
-            <label className={labelCls}>Borrower {isCustomerLoan && !isCustomerToCompany ? "Customer" : "Company"} <span className="text-red-500">*</span></label>
+            <label className={labelCls}>Borrower {isCustomerLoan && !isCustomerToCompany ? "Customer" : "Company"} <span className="text-destructive">*</span></label>
             {isCustomerLoan && !isCustomerToCompany ? (
               <CustomerComboField
                 customers={customers as CustomerOption[]}
@@ -166,7 +165,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
           )}
 
           <div className="space-y-2">
-            <label className={labelCls}>Loan Date <span className="text-red-500">*</span></label>
+            <label className={labelCls}>Loan Date <span className="text-destructive">*</span></label>
             <DateInput
               className={inputCls}
               value={form.loanDate}
@@ -174,7 +173,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
             />
           </div>
           <div className="space-y-2">
-            <label className={labelCls}>Amount <span className="text-red-500">*</span></label>
+            <label className={labelCls}>Amount <span className="text-destructive">*</span></label>
             <input
               type="number"
               className={inputCls}
@@ -198,7 +197,7 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between rounded-lg border border-border px-3.5 py-3">
+        <div className="flex items-center justify-between border border-foreground/30 px-3.5 py-3">
           <div>
             <p className="text-sm font-medium text-foreground">
               {isInterCompanyType ? "Activate Interest & Tenure" : "Interest-bearing loan"}
@@ -212,13 +211,13 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
           <button
             type="button"
             onClick={() => set("hasInterest", !form.hasInterest)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-              form.hasInterest ? "bg-emerald-500" : "bg-muted"
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+              form.hasInterest ? "bg-foreground" : "bg-muted-foreground/30"
             }`}
           >
             <span
-              className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
-                form.hasInterest ? "translate-x-6" : "translate-x-1"
+              className={`inline-block h-3.5 w-3.5 rounded-full bg-card transform transition-transform ${
+                form.hasInterest ? "translate-x-4" : "translate-x-0.5"
               }`}
             />
           </button>
@@ -251,9 +250,9 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
           </div>
         )}
         {(form.interestRate || form.tenureMonths) && form.amount && (
-          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3.5 py-3 space-y-2">
+          <div className="border border-foreground px-3.5 py-3 space-y-2">
             <div className="flex items-center gap-2">
-              <Percent size={13} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <Percent size={13} className="text-foreground shrink-0" />
               <p className="text-xs text-muted-foreground">
                 Estimated EMI:{" "}
                 <span className="font-semibold text-foreground">{fmt(estimatedEmi)}</span> / month for{" "}
@@ -261,15 +260,15 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
                 {form.hasInterest && form.interestRate ? ` at ${form.interestRate}% p.a.` : " (flat, no interest)"}.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3 pt-1 border-t border-emerald-500/15">
+            <div className="grid grid-cols-2 gap-3 pt-1 border-t border-foreground/30">
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                <p className="text-[0.625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground">
                   Total Interest
                 </p>
                 <p className="text-sm font-semibold text-foreground">{fmt(estimatedTotalInterest)}</p>
               </div>
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                <p className="text-[0.625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground">
                   Total Repayable
                 </p>
                 <p className="text-sm font-semibold text-foreground">{fmt(estimatedTotalRepayable)}</p>
@@ -284,7 +283,6 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
           <label className={labelCls}>Payment Mode</label>
           <div className="flex flex-wrap gap-2">
             {(isExternalLenderLoan ? LOAN_BANK_PAYMENT_MODES : PAYMENT_MODES).map((m) => {
-              const s = MODE_STYLE[m] ?? { ring: "ring-border bg-muted", text: "text-muted-foreground", dot: "bg-muted-foreground" };
               const active = form.paymentMode === m;
               return (
                 <button
@@ -310,13 +308,12 @@ export function NewLoanForm({ ls }: { ls: LoanSanctionState }) {
                       set("demandDraftDate", "");
                     }
                   }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                  className={`flex items-center gap-1.5 h-8 px-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] border transition-colors ${
                     active
-                      ? `${s.ring} ${s.text} border-transparent shadow-sm`
-                      : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                      ? "bg-foreground text-card border-foreground"
+                      : "bg-card border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"
                   }`}
                 >
-                  {active && <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />}
                   {m}
                 </button>
               );

@@ -12,26 +12,26 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
       {tab === "chain" && viewingLoan && (
         <div className="space-y-5">
           {/* Progress bar */}
-          <div className="rounded-xl border border-border p-4 space-y-2.5">
+          <div className="border border-foreground/30 p-4 space-y-2.5">
             <div className="flex items-center justify-between text-xs">
               <span className="font-medium text-foreground">Repayment Progress</span>
               <span className="text-muted-foreground">
                 {totalEmis ? `${paidEmis} of ${totalEmis} installments paid` : "No EMI schedule"}
               </span>
             </div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div className="h-2 bg-muted overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all"
+                className="h-full bg-foreground transition-all"
                 style={{ width: `${totalEmis ? (paidEmis / totalEmis) * 100 : 0}%` }}
               />
             </div>
             {nextDue ? (
-              <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 pt-1">
+              <div className="flex items-center gap-2 text-xs text-foreground pt-1">
                 <AlertCircle size={12} />
                 Next EMI ({fmt(nextDue.EMIAmount)}) due {fmtDate(nextDue.DueDate)}
               </div>
             ) : totalEmis > 0 ? (
-              <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 pt-1">
+              <div className="flex items-center gap-2 text-xs text-foreground pt-1">
                 <CheckCircle2 size={12} />
                 Fully repaid
               </div>
@@ -48,7 +48,7 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
             {payments.map((p, i, arr) => (
               <ChainNode
                 key={p.PaymentId}
-                icon={<Receipt size={13} className="text-emerald-500" />}
+                icon={<Receipt size={13} className="text-current" />}
                 title={`${p.PaymentType === "LumpSum" ? "Lump Sum Payment" : `${p.EmisCovered} EMI${p.EmisCovered === 1 ? "" : "s"} Paid`} — ${p.PaymentRef}`}
                 subtitle={(() => {
                   const instrLabel = paymentInstrumentLabel(p);
@@ -73,7 +73,7 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
                 to a progress bar that's clearly already moved. */}
             {payments.length === 0 && paidEmis > 0 && (
               <ChainNode
-                icon={<Receipt size={13} className="text-amber-500" />}
+                icon={<Receipt size={13} className="text-current" />}
                 title={`${paidEmis} installment${paidEmis === 1 ? "" : "s"} marked paid`}
                 subtitle={`Payment details not on record for ${paidEmis === 1 ? "this installment" : "these installments"} — recorded before the repayment system was updated.${schedule.find((e) => e.IsPaid)?.PaidDate ? ` Earliest paid: ${fmtDate(schedule.find((e) => e.IsPaid)!.PaidDate!)}.` : ""}`}
                 done
@@ -82,7 +82,7 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
             )}
             {viewingLoan.Status === "Closed" && (
               <ChainNode
-                icon={<FileCheck2 size={13} className="text-emerald-500" />}
+                icon={<FileCheck2 size={13} className="text-current" />}
                 title="Loan Fully Repaid — Closed"
                 subtitle={
                   viewingLoan.NOCFileName
@@ -97,7 +97,7 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
             )}
             {viewingLoan.Status !== "Closed" && payments.length === 0 && paidEmis === 0 && (
               <ChainNode
-                icon={<Circle size={13} className="text-amber-500" />}
+                icon={<Circle size={13} className="text-current" />}
                 title="No payments yet"
                 subtitle="Pay from Finance → Payment (Loan EMIs tab) — an installment or a lump sum."
                 done={false}
@@ -109,9 +109,9 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
           {/* Close Loan CTA in Repayment History tab — same logic as in
               Overview: show only when all EMIs paid and loan still open */}
           {viewingLoan.Status !== "Closed" && (totalEmis === 0 || paidEmis === totalEmis) && outstandingAmount <= 0 && (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
+            <div className="border border-foreground p-4 flex items-center justify-between gap-4">
               <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                <p className="text-sm font-semibold text-foreground">
                   All installments paid — ready to close
                 </p>
                 <p className="text-[0.6875rem] text-muted-foreground">
@@ -121,7 +121,7 @@ export function HistoryTab({ ls }: { ls: LoanSanctionState }) {
               <button
                 onClick={handleCloseLoan}
                 disabled={closingLoan}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                className="shrink-0 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 bg-foreground text-card border border-foreground"
               >
                 <CheckCircle2 size={14} />
                 {closingLoan ? "Closing…" : "Close Loan"}

@@ -13,8 +13,8 @@ export function PostingTab({ ls }: { ls: LoanSanctionState }) {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2">
-              <Wallet size={14} className="text-emerald-600" />
-              <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+              <Wallet size={14} className="text-foreground" />
+              <span className="text-[0.625rem] font-heading font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground">
                 Journal Entry — Loan Posting
               </span>
             </div>
@@ -22,20 +22,20 @@ export function PostingTab({ ls }: { ls: LoanSanctionState }) {
               loanPostingLoading ? (
                 <span className="text-[0.625rem] text-muted-foreground">Loading…</span>
               ) : loanPostingData?.isPosted ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                <span className="flex items-center gap-1 px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground">
                   <CheckCircle2 size={10} /> Posted · {loanPostingData.jvNo || viewingLoan?.LoanNo}
                 </span>
               ) : loanPosting ? (
                 <span className="flex items-center gap-1.5 text-[0.625rem] text-muted-foreground">
-                  <span className="w-2.5 h-2.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="w-2.5 h-2.5 border-2 border-foreground border-t-transparent rounded-full animate-spin" />
                   Posting…
                 </span>
               ) : loanPostingError ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
+                <span className="flex items-center gap-1 px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-destructive border border-destructive">
                   <AlertCircle size={10} /> {loanPostingError}
                 </span>
               ) : (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/20">
+                <span className="flex items-center gap-1 px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-dashed border-foreground">
                   <AlertCircle size={10} /> Not disbursed
                 </span>
               )
@@ -74,42 +74,42 @@ export function PostingTab({ ls }: { ls: LoanSanctionState }) {
                 ? "Bank's own account group"
                 : "Loans and Advances";
             return (
-              <div className="rounded-xl border border-border overflow-hidden">
-                <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
+              <div className="border border-foreground/30 overflow-hidden">
+                <div className={`grid ${gridCols} border-b border-foreground px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                   <span>Account</span>
                   <span>Account Group</span>
                   <span className="text-right">Debit (₹)</span>
                   <span className="text-right">Credit (₹)</span>
                 </div>
-                <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}>
+                <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-foreground/50 items-center gap-1 sm:gap-2`}>
                   <div className="flex items-center gap-2 min-w-0 pl-1">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
+                    <span className="font-heading text-[0.5625rem] font-semibold w-5 shrink-0 text-foreground">Dr</span>
                     <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0">
                       Loan — {displayBorrower || "Borrower"}
                       {readOnly && viewingLoan?.BorrowerLHeadCode && ` (${viewingLoan.BorrowerLHeadCode})`}
                     </span>
                   </div>
                   <span className="text-[0.6875rem] text-muted-foreground truncate">{borrowerGroup}</span>
-                  <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">{fmt(displayAmount)}</span>
-                  <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400" />
+                  <span className="text-xs text-right font-heading tabular-nums text-foreground">{fmt(displayAmount)}</span>
+                  <span className="text-xs text-right font-heading tabular-nums text-foreground" />
                 </div>
-                <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}>
+                <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-foreground/50 items-center gap-1 sm:gap-2`}>
                   <div className="flex items-center gap-2 min-w-0 pl-1">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-rose-500" />
+                    <span className="font-heading text-[0.5625rem] font-semibold w-5 shrink-0 text-muted-foreground">Cr</span>
                     <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0">
                       Loan — {displayLender || "Lender"}
                       {readOnly && viewingLoan?.LenderLHeadCode && ` (${viewingLoan.LenderLHeadCode})`}
                     </span>
                   </div>
                   <span className="text-[0.6875rem] text-muted-foreground truncate">{lenderGroup}</span>
-                  <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400" />
-                  <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">{fmt(displayAmount)}</span>
+                  <span className="text-xs text-right font-heading tabular-nums text-foreground" />
+                  <span className="text-xs text-right font-heading tabular-nums text-foreground">{fmt(displayAmount)}</span>
                 </div>
-                <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2`}>
-                  <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
+                <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-t border-foreground text-xs font-bold gap-1 sm:gap-2`}>
+                  <span className="font-heading uppercase tracking-[0.12em] text-muted-foreground text-[0.625rem]">Total</span>
                   <span />
-                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(displayAmount)}</span>
-                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(displayAmount)}</span>
+                  <span className="text-right text-foreground font-heading tabular-nums">{fmt(displayAmount)}</span>
+                  <span className="text-right text-foreground font-heading tabular-nums">{fmt(displayAmount)}</span>
                 </div>
               </div>
             );
@@ -123,26 +123,26 @@ export function PostingTab({ ls }: { ls: LoanSanctionState }) {
               GRN's Posting tab status banner. */}
           {readOnly && !loanPostingLoading && (
             loanPostingData?.isPosted ? (
-              <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                <p className="text-xs text-emerald-700 dark:text-emerald-400">
+              <div className="flex items-center gap-2.5 border border-foreground px-4 py-3">
+                <CheckCircle2 size={13} className="text-foreground flex-shrink-0" />
+                <p className="text-xs text-foreground">
                   Posted to General Ledger as <span className="font-semibold">{loanPostingData.jvNo || viewingLoan?.LoanNo}</span>. Entries are visible in the Trial Balance.
                 </p>
               </div>
             ) : loanPostingError ? (
-              <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+              <div className="flex items-center gap-2.5 border border-destructive px-4 py-3">
                 <AlertCircle size={13} className="text-destructive flex-shrink-0" />
                 <p className="text-xs text-destructive">Auto-posting failed: {loanPostingError}</p>
               </div>
             ) : loanPosting ? (
-              <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-2.5 border border-foreground/30 px-4 py-3">
                 <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                 <p className="text-xs text-muted-foreground">Posting to General Ledger…</p>
               </div>
             ) : (
-              <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-                <AlertCircle size={13} className="text-amber-600 flex-shrink-0" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex items-center gap-2.5 border border-dashed border-foreground px-4 py-3">
+                <AlertCircle size={13} className="text-foreground flex-shrink-0" />
+                <p className="text-xs text-foreground">
                   {viewingLoan?.LoanType === "Bank Loan"
                     ? <>Not yet disbursed — go to Finance &gt; Received Payment's "Disburse a Bank Loan" picker to record it.</>
                     : <>Not yet disbursed — go to Finance &gt; Payment's "Loan Disbursement" picker to record it.</>}
@@ -162,21 +162,21 @@ export function PostingTab({ ls }: { ls: LoanSanctionState }) {
           {readOnly && (loanPostingData?.repaymentPostings?.length ?? 0) > 0 && (
             <div className="space-y-4 pt-2">
               <div className="flex items-center gap-2">
-                <Receipt size={14} className="text-emerald-600" />
-                <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                <Receipt size={14} className="text-foreground" />
+                <span className="text-[0.625rem] font-heading font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground">
                   Repayment Postings
                 </span>
               </div>
               {loanPostingData.repaymentPostings.map((rp: any) => (
                 <div key={rp.paymentId} className="space-y-2">
                   <div className="flex items-center gap-2 flex-wrap text-[0.625rem] text-muted-foreground">
-                    <span className="font-mono">{rp.paymentRef}</span>
+                    <span className="font-heading tabular-nums">{rp.paymentRef}</span>
                     <span>·</span>
                     <span>{fmtDate(rp.paymentDate)}</span>
                     <span>·</span>
                     <span>{rp.paymentType === "LumpSum" ? "Lump Sum" : "EMI"}</span>
                     <span>·</span>
-                    <span className="font-mono">{fmt(rp.amount)}</span>
+                    <span className="font-heading tabular-nums">{fmt(rp.amount)}</span>
                   </div>
                   <div className="space-y-4">
                     {rp.postings.map((p: any, i: number) => (

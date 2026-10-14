@@ -13,15 +13,15 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
   return (
     <>
       {editingDetails && (
-        <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-4 space-y-4">
+        <div className="border border-foreground p-4 space-y-4">
           <SectionLabel icon={Pencil} label="Edit Loan Details" />
           {paidEmis > 0 && viewingLoan?.Status !== "Closed" && (
-            <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
+            <p className="text-[0.6875rem] text-foreground flex items-center gap-1.5 -mt-2">
               <AlertTriangle size={11} /> {paidEmis} installment{paidEmis === 1 ? " is" : "s are"} already paid and stay as they are. Changing the amount, interest or tenure rebuilds only the unpaid installments for the principal still outstanding.
             </p>
           )}
           {viewingLoan?.Status === "Closed" && (
-            <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
+            <p className="text-[0.6875rem] text-foreground flex items-center gap-1.5 -mt-2">
               <AlertTriangle size={11} /> This loan is closed: only Loan Doc No, Purpose, Remarks and bank A/C tags can be edited.
             </p>
           )}
@@ -63,19 +63,19 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
                 onChange={(e) => setEditForm((f) => ({ ...f, tenureMonths: e.target.value.replace(/[^0-9]/g, "") }))}
               />
             </div>
-            <div className="space-y-1.5 col-span-2 flex items-center justify-between rounded-lg border border-border px-3.5 py-2.5">
+            <div className="space-y-1.5 col-span-2 flex items-center justify-between border border-foreground/30 px-3.5 py-2.5">
               <span className="text-sm font-medium text-foreground">Interest-bearing loan</span>
               <button
                 type="button"
                 disabled={viewingLoan?.Status === "Closed"}
                 onClick={() => setEditForm((f) => ({ ...f, hasInterest: !f.hasInterest }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
-                  editForm.hasInterest ? "bg-emerald-500" : "bg-muted"
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+                  editForm.hasInterest ? "bg-foreground" : "bg-muted-foreground/30"
                 }`}
               >
                 <span
-                  className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
-                    editForm.hasInterest ? "translate-x-6" : "translate-x-1"
+                  className={`inline-block h-3.5 w-3.5 rounded-full bg-card transform transition-transform ${
+                    editForm.hasInterest ? "translate-x-4" : "translate-x-0.5"
                   }`}
                 />
               </button>
@@ -185,7 +185,7 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
                         ...(m !== "Demand Draft" ? { demandDraftNo: "", demandDraftDate: "" } : {}),
                       }))
                     }
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    className={`px-3 py-1.5 text-xs font-semibold border transition-colors ${
                       editForm.paymentMode === m ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40"
                     }`}
                   >
@@ -257,7 +257,7 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
             <button
               type="button"
               onClick={() => setEditingDetails(false)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
             >
               <XIcon size={12} /> Cancel
             </button>
@@ -265,7 +265,7 @@ export function EditDetailsForm({ ls }: { ls: LoanSanctionState }) {
               type="button"
               onClick={handleSaveDetails}
               disabled={savingDetails}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 bg-foreground text-card border border-foreground"
             >
               <Save size={12} /> {savingDetails ? "Saving…" : "Save"}
             </button>

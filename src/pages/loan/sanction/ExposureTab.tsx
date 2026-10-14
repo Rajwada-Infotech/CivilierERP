@@ -15,7 +15,7 @@ export function ExposureTab({ ls }: { ls: LoanSanctionState }) {
       {tab === "exposure" && (
         <div className="space-y-6">
           {!exposureLenderCompanyId && !exposureBorrowerCompanyId ? (
-            <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+            <div className="border border-dashed border-foreground/40 py-10 text-center text-sm text-muted-foreground">
               Select a Lender and/or Borrower Company in Overview to see their loan exposure here.
             </div>
           ) : (

@@ -118,7 +118,7 @@ export function LoanOverview({ ls }: { ls: LoanSanctionState }) {
             />
           </div>
           {/* Amount progress bar */}
-          <div className="rounded-xl border border-border bg-muted/10 px-3.5 py-2.5 space-y-1.5">
+          <div className="border border-foreground/30 px-3.5 py-2.5 space-y-1.5">
             <div className="flex items-center justify-between text-[0.6875rem] font-medium text-muted-foreground">
               <span>Repayment progress</span>
               <span className="font-heading font-bold text-foreground tabular-nums">
@@ -127,22 +127,21 @@ export function LoanOverview({ ls }: { ls: LoanSanctionState }) {
                   : "—"}
               </span>
             </div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div className="h-2 bg-muted overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all duration-500"
+                className="h-full bg-foreground transition-all duration-500"
                 style={{
                   width: `${totalScheduledAmount > 0
                     ? Math.min(100, (paidAmount / totalScheduledAmount) * 100)
                     : 0}%`,
-                  boxShadow: "0 0 8px rgba(16,185,129,0.5)",
                 }}
               />
             </div>
             {nextDue && viewingLoan?.Status !== "Closed" && (
               <p className={`text-[0.6875rem] flex items-center gap-1 ${
                 new Date(nextDue.DueDate) < new Date(new Date().toDateString())
-                  ? "text-red-600 dark:text-red-400"
-                  : "text-amber-600 dark:text-amber-400"
+                  ? "text-destructive"
+                  : "text-foreground"
               }`}>
                 <AlertCircle size={11} />
                 {new Date(nextDue.DueDate) < new Date(new Date().toDateString())
@@ -155,9 +154,9 @@ export function LoanOverview({ ls }: { ls: LoanSanctionState }) {
               and loan is still Sanctioned (not yet formally closed).
               The backend double-checks this before closing. */}
           {viewingLoan?.Status !== "Closed" && (totalEmis === 0 || paidEmis === totalEmis) && outstandingAmount <= 0 && (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] p-4 flex items-center justify-between gap-4">
+            <div className="border border-foreground p-4 flex items-center justify-between gap-4">
               <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                <p className="text-sm font-semibold text-foreground">
                   All installments paid — ready to close
                 </p>
                 <p className="text-[0.6875rem] text-muted-foreground">
@@ -168,7 +167,7 @@ export function LoanOverview({ ls }: { ls: LoanSanctionState }) {
               <button
                 onClick={handleCloseLoan}
                 disabled={closingLoan}
-                className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                className="shrink-0 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 bg-foreground text-card border border-foreground"
               >
                 <CheckCircle2 size={14} />
                 {closingLoan ? "Closing…" : "Close Loan"}
@@ -191,7 +190,7 @@ export function LoanOverview({ ls }: { ls: LoanSanctionState }) {
                 href={`/api/loan-sanction/document/${d.AttachmentId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted/40 transition-colors"
+                className="flex items-center gap-2 border border-foreground/30 px-3 py-2 text-xs hover:bg-primary/5 transition-colors"
               >
                 <FileText size={12} className="text-muted-foreground shrink-0" />
                 <span className="flex-1 truncate font-medium text-foreground">{d.FileName}</span>
@@ -214,7 +213,7 @@ export function LoanOverview({ ls }: { ls: LoanSanctionState }) {
           type="button"
           disabled={uploadingDocument}
           onClick={() => documentInputRef.current?.click()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted/40 disabled:opacity-60 transition-colors"
+          className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
         >
           <Upload size={12} /> {uploadingDocument ? "Uploading…" : "Attach Document"}
         </button>

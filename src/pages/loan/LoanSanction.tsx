@@ -7,11 +7,10 @@
 //   ExposureTab, ScheduleTab, HistoryTab, PostingTab   the other tabs
 //   DeleteLoanDialog
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { GlassShell } from "@/components/dashboard/GlassShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Plus } from "lucide-react";
-import { MoneyRecive } from "iconsax-react";
-import { ACCENT, LOAN_EXPORT_COLUMNS } from "./sanction/shared";
+import { LOAN_EXPORT_COLUMNS, RULE, KEY_INK, KEY_LINE } from "./sanction/shared";
 import { useLoanSanction } from "./sanction/useLoanSanction";
 import { LoanList } from "./sanction/LoanList";
 import { LoanDetailHeader } from "./sanction/LoanDetailHeader";
@@ -30,11 +29,12 @@ export default function LoanSanctionPage() {
   const { showForm, tab, saving, loans, isLoading, openCreate, closeForm, handleSave, readOnly } = ls;
 
   return (
-    <GlassShell
-      title="Loan Sanction"
-      subtitle="Sanction inter-company, bank and customer loans"
-      icon={MoneyRecive as any}
-      accentColor={ACCENT}
+    <>
+    <Breadcrumbs items={[{ label: "Loan", path: "/loan" }, { label: "Loan Sanction" }]} />
+    <SheetShell
+      eyebrow="CivilierERP · Loan"
+      title="Loan sanction"
+      subtitle="Inter-company, bank and customer loans: who lent to whom, on what terms, and how the repayment stands."
       action={
         !showForm ? (
           <div className="flex items-center gap-2">
@@ -45,23 +45,19 @@ export default function LoanSanctionPage() {
               filename="loan-sanctions"
               disabled={isLoading || !loans.length}
             />
-            <button
-              onClick={openCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
-            >
+            <button onClick={openCreate} className={`${KEY_INK} h-9 px-4 shrink-0`}>
               <Plus size={13} />
-              <span className="hidden sm:inline">New Loan</span>
+              <span className="hidden sm:inline">New loan</span>
             </button>
           </div>
         ) : undefined
       }
     >
-      <Breadcrumbs items={[{ label: "Loan", path: "/loan" }, { label: "Loan Sanction" }]} />
 
       {!showForm ? (
         <LoanList ls={ls} />
       ) : (
-        <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
           <LoanDetailHeader ls={ls} />
 
           <div className="p-4 sm:p-5 space-y-4">
@@ -92,19 +88,12 @@ export default function LoanSanctionPage() {
           </div>
 
           {!readOnly && (
-            <div className="flex justify-end gap-3 px-7 sm:px-8 pb-7 sm:pb-8 pt-2">
-              <button
-                onClick={closeForm}
-                className="px-3.5 py-1.5 rounded-lg border border-border text-xs hover:bg-muted transition-colors"
-              >
+            <div className="flex justify-end gap-2 px-4 sm:px-5 py-3" style={{ borderTop: RULE }}>
+              <button onClick={closeForm} className={`${KEY_LINE} h-9 px-4`}>
                 Cancel
               </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-              >
-                {saving ? "Sanctioning…" : "Sanction Loan"}
+              <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-5`}>
+                {saving ? "Sanctioning…" : "Sanction loan"}
               </button>
             </div>
           )}
@@ -112,7 +101,7 @@ export default function LoanSanctionPage() {
       )}
 
       <DeleteLoanDialog ls={ls} />
-
-    </GlassShell>
+    </SheetShell>
+    </>
   );
 }

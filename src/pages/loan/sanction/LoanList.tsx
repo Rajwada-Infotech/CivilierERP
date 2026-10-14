@@ -4,6 +4,8 @@ import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
 import { type LoanSanction } from "@/api/loanSanctionApi";
 import { ACCENT, fmt, sanctionInstrumentLabel, sanctionInstrumentLabelCompact, LOAN_TYPE_COLORS } from "./shared";
 import type { LoanSanctionState } from "./useLoanSanction";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { RULE, HEAD, ACT, ACT_DEL, labelCls } from "./shared";
 
 // The list view: company filter strip and the table of sanctioned loans.
 export function LoanList({ ls }: { ls: LoanSanctionState }) {
@@ -13,16 +15,15 @@ export function LoanList({ ls }: { ls: LoanSanctionState }) {
       id: "loanNo",
       header: "Loan No",
       cell: ({ row }) => (
-        <span className="font-mono text-xs font-medium text-foreground">{row.original.LoanNo}</span>
+        <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{row.original.LoanNo}</span>
       ),
     },
     {
       id: "loanType",
       header: "Type",
       cell: ({ row }) => {
-        const c = LOAN_TYPE_COLORS[row.original.LoanType];
         return (
-          <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-medium" style={{ background: `${c}18`, color: c }}>
+          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-foreground/40 px-1.5 py-0.5 whitespace-nowrap">
             {row.original.LoanType}
           </span>
         );
@@ -49,7 +50,7 @@ export function LoanList({ ls }: { ls: LoanSanctionState }) {
     {
       id: "amount",
       header: "Amount",
-      cell: ({ row }) => <span className="font-medium text-foreground">{fmt(row.original.Amount)}</span>,
+      cell: ({ row }) => <span className="font-heading font-semibold tabular-nums text-foreground">{fmt(row.original.Amount)}</span>,
     },
     {
       id: "emi",
@@ -60,10 +61,10 @@ export function LoanList({ ls }: { ls: LoanSanctionState }) {
         const pct = total ? Math.round((paid / total) * 100) : 0;
         return (
           <div className="flex items-center gap-2 w-28">
-            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
+            <div className="flex-1 h-1.5 border border-foreground/60 overflow-hidden">
+              <div className="h-full bg-foreground" style={{ width: `${pct}%` }} />
             </div>
-            <span className="text-[0.6875rem] text-muted-foreground shrink-0">
+            <span className="text-[0.6875rem] tabular-nums text-muted-foreground shrink-0">
               {paid}/{total}
             </span>
           </div>
@@ -83,24 +84,16 @@ export function LoanList({ ls }: { ls: LoanSanctionState }) {
         // redundant and backwards).
         const fullyPaid = (row.original.TotalEMIs ?? 0) > 0 && row.original.PaidEMIs === row.original.TotalEMIs;
         const label = closed ? "Closed" : fullyPaid ? "Paid" : "Sanctioned";
-        const dotColor = closed ? "bg-slate-400" : fullyPaid ? "bg-emerald-500" : "bg-blue-500";
-        const textColor = closed
-          ? "text-slate-600 dark:text-slate-400"
-          : fullyPaid
-            ? "text-emerald-600 dark:text-emerald-400"
-            : "text-blue-600 dark:text-blue-400";
+
         const instrument = sanctionInstrumentLabelCompact(row.original);
         const instrumentFull = sanctionInstrumentLabel(row.original);
         return (
           <div className="flex flex-col gap-0.5">
-            <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${textColor}`}>
-              <span className={`w-1.5 h-1.5 rounded-full inline-block ${dotColor}`} />
-              {label}
-            </span>
+            <SheetMark text={label} tone={closed || fullyPaid ? "done" : "waiting"} />
             {instrument && (
               <span
                 title={instrumentFull ?? undefined}
-                className="inline-block w-fit whitespace-nowrap text-[0.625rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full"
+                className="inline-block w-fit whitespace-nowrap text-[0.625rem] tabular-nums text-muted-foreground"
               >
                 {instrument}
               </span>
@@ -117,22 +110,22 @@ export function LoanList({ ls }: { ls: LoanSanctionState }) {
         <div className="flex items-center gap-1">
           <button data-row-view
             onClick={() => openView(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="View"
+            className={ACT}
+            title="View" aria-label="View"
           >
             <Eye size={13} />
           </button>
           <button
             onClick={() => openEditDetails(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-            title="Edit details"
+            className={ACT}
+            title="Edit details" aria-label="Edit details"
           >
             <Pencil size={13} />
           </button>
           <button
             onClick={() => setDeleteTarget(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-            title="Delete"
+            className={ACT_DEL}
+            title="Delete" aria-label="Delete"
           >
             <Trash2 size={13} />
           </button>
@@ -145,54 +138,44 @@ export function LoanList({ ls }: { ls: LoanSanctionState }) {
 
   return (
     <>
-      <div
-        className="rounded-xl px-4 py-3 mb-4 flex flex-wrap items-center gap-x-5 gap-y-3"
-        style={{
-          background: isDark ? "rgba(15,17,26,0.4)" : "rgba(248,250,252,0.72)",
-          border: isDark ? "1px solid rgba(34,197,94,0.14)" : "1px solid rgba(34,197,94,0.14)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-        }}
-      >
-        <div className="flex items-center gap-2">
-          <div
-            className="flex items-center justify-center w-6 h-6 rounded-md shrink-0"
-            style={{ background: "rgba(34,197,94,0.15)" }}
-          >
-            <Filter size={12} style={{ color: ACCENT }} />
-          </div>
-          <span className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
-            Filter loans
-          </span>
-        </div>
-
-        <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
-
-        {listCompanyId != null && (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            {companies.find((c) => c.id === listCompanyId)?.label ?? "1 company"}
-            <button
-              type="button"
-              onClick={() => setListCompanyId(null)}
-              className="text-emerald-600/60 dark:text-emerald-400/60 hover:text-destructive transition-colors"
-            >
-              <XIcon size={9} />
-            </button>
-          </span>
-        )}
-
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-          <span className="font-heading font-semibold text-foreground tabular-nums">{loans.length}</span>
-          <span>{loans.length === 1 ? "loan" : "loans"}</span>
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+          {[
+            { label: "Loans", value: String(loans.length), note: listCompanyId != null ? "for this company" : "across every company" },
+            { label: "Sanctioned", value: fmt(loans.reduce((s, l) => s + Number(l.Amount || 0), 0)), note: "in all" },
+            { label: "Running", value: String(loans.filter((l) => l.Status !== "Closed").length), note: "not yet closed" },
+            { label: "Closed", value: String(loans.filter((l) => l.Status === "Closed").length), note: "NOC issued" },
+          ].map((x) => (
+            <div key={x.label}>
+              <p className="label">{x.label}</p>
+              <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+              <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+            </div>
+          ))}
         </div>
       </div>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+
+      <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+      <div
+        className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
+        style={{
+          borderBottom: RULE,
+        }}
+      >
+        <p className="flex items-baseline gap-2.5">
+          <span className={HEAD}>Loans</span>
+          <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{loans.length}</span>
+        </p>
+        <div className="ml-auto flex items-center gap-2">
+          <span className={labelCls}>Company</span>
+          <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
+        </div>
+      </div>
         <DataTable
           columns={columns}
           data={loans}
           loading={isLoading}
-          emptyMessage={listCompanyId ? "No loans sanctioned yet for this company. Click 'New Loan' to get started." : "No loans sanctioned yet. Click 'New Loan' to get started."}
+          emptyMessage={listCompanyId ? "No loans sanctioned yet for this company. Use New loan to start one." : "No loans sanctioned yet. Use New loan to start one."}
         />
       </div>
     </>

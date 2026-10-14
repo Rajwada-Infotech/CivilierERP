@@ -102,7 +102,7 @@ export function LoanChequePicker({
         {loadingLots ? (
           <div className={`${inputCls} flex items-center text-xs text-muted-foreground`}>Loading lots…</div>
         ) : lots.length === 0 ? (
-          <div className={`${inputCls} flex items-center text-xs text-amber-600`}>No active cheque lots found.</div>
+          <div className={`${inputCls} flex items-center text-xs text-foreground`}>No active cheque lots found.</div>
         ) : (
           <select
             className={inputCls}
@@ -142,7 +142,7 @@ export function LoanChequePicker({
           ))}
         </select>
         {activeLot && availableCheques.length === 0 && !loadingCheques && (
-          <p className="text-[0.6875rem] text-amber-600">No available cheques left in this lot.</p>
+          <p className="text-[0.6875rem] text-foreground">No available cheques left in this lot.</p>
         )}
       </div>
       <div className="space-y-2">

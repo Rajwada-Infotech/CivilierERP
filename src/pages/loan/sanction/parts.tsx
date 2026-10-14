@@ -4,16 +4,13 @@ import { FileText, CalendarClock, ChevronDown, Search } from "lucide-react";
 import { type CustomerOption } from "@/api/loanSanctionApi";
 import { fmt } from "./shared";
 
-export function SectionLabel({ icon: Icon, label }: { icon: typeof FileText; label: string }) {
+export function SectionLabel({ icon: _Icon, label }: { icon: typeof FileText; label: string }) {
   return (
-    <div className="flex items-center gap-2 -mb-2">
-      <div className="w-5 h-5 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
-        <Icon size={11} className="text-emerald-600 dark:text-emerald-400" />
-      </div>
-      <span className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">
+    <div className="flex items-center gap-3 -mb-1 pt-1">
+      <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground shrink-0">
         {label}
       </span>
-      <div className="flex-1 h-px bg-gradient-to-r from-border to-transparent" />
+      <div className="flex-1 h-px bg-foreground" />
     </div>
   );
 }
@@ -30,41 +27,14 @@ export function InfoCard({
   icon?: typeof FileText;
 }) {
   return (
-    <div
-      className={`relative overflow-hidden rounded-xl border px-3 py-2.5 transition-colors ${
-        accent
-          ? "border-emerald-500/25 bg-emerald-500/[0.05]"
-          : "border-border bg-muted/10 hover:bg-muted/[0.15]"
-      }`}
-    >
-      {accent && (
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.10) 0%, transparent 65%)" }}
-        />
-      )}
-      <div className="relative flex items-start justify-between gap-2 mb-1">
-        <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
+    <div className={`border px-3 py-2.5 ${accent ? "border-foreground" : "border-foreground/30"}`}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground leading-tight">
           {label}
         </p>
-        {Icon && (
-          <div
-            className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
-              accent ? "bg-emerald-500/15" : "bg-muted"
-            }`}
-          >
-            <Icon size={10} className={accent ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"} />
-          </div>
-        )}
+        {Icon && <Icon size={11} className={accent ? "text-foreground" : "text-muted-foreground"} />}
       </div>
-      <p
-        className={`relative truncate ${
-          accent
-            ? "text-base font-bold text-emerald-600 dark:text-emerald-400"
-            : "text-sm font-semibold text-foreground"
-        }`}
-        title={value}
-      >
+      <p className={`truncate ${accent ? "font-heading text-base font-bold tabular-nums text-foreground" : "text-sm font-semibold text-foreground"}`} title={value}>
         {value}
       </p>
     </div>
@@ -83,12 +53,12 @@ export function StatTile({
   accent: string;
 }) {
   return (
-    <div className="rounded-xl border border-border p-3.5" style={{ borderColor: `${accent}30` }}>
+    <div className="border border-foreground/30 p-3.5">
       <div className="flex items-center gap-1.5 mb-1.5">
-        <Icon size={12} style={{ color: accent }} />
-        <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">{label}</span>
+        <Icon size={12} className="text-muted-foreground" />
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label}</span>
       </div>
-      <p className="text-base font-bold text-foreground">{value}</p>
+      <p className="font-heading text-lg font-bold tabular-nums text-foreground">{value}</p>
     </div>
   );
 }
@@ -112,13 +82,13 @@ export function ChainNode({
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
         <div
-          className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 border ${
-            done ? "bg-emerald-500/15 border-emerald-500/40" : "bg-[#ffe2021a] border-amber-500/30"
+          className={`w-7 h-7 flex items-center justify-center shrink-0 border ${
+            done ? "bg-foreground text-card border-foreground" : "border-dashed border-foreground text-foreground"
           }`}
         >
           {icon}
         </div>
-        {!isLast && <div className="w-px flex-1 bg-border my-1.5" />}
+        {!isLast && <div className="w-px flex-1 bg-foreground/40 my-1.5" />}
       </div>
       <div className={`flex-1 flex items-center justify-between gap-3 ${isLast ? "pb-0" : "pb-8"}`}>
         <div>
@@ -139,20 +109,20 @@ export function ChainNode({
 export function PostingCard({ p }: { p: { companyId: number | null; companyName: string | null; voucherNo: string; lines: any[] } }) {
   const total = p.lines.reduce((s: number, l: any) => s + (l.debit || 0), 0);
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b bg-muted/40 border-border">
+    <div className="border border-foreground overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-foreground">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
-            {p.companyName || "Company"}'s Books
+          <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+            {p.companyName || "Company"}'s books
           </span>
-          <span className="text-[0.625rem] font-mono text-muted-foreground">{p.voucherNo}</span>
+          <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{p.voucherNo}</span>
         </div>
-        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
-          ✓ Posted
+        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 bg-foreground text-card whitespace-nowrap">
+          Posted
         </span>
       </div>
-      <div className="divide-y divide-border/50">
-        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+      <div className="divide-y divide-foreground/15">
+        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 font-heading text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold gap-2">
           <span>Account</span>
           <span className="text-right">Debit (₹)</span>
           <span className="text-right">Credit (₹)</span>
@@ -160,23 +130,23 @@ export function PostingCard({ p }: { p: { companyId: number | null; companyName:
         {p.lines.map((l: any, li: number) => (
           <div key={li} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${l.debit > 0 ? "bg-emerald-500" : "bg-rose-500"}`} />
+              <span className={`font-heading text-[0.5625rem] font-semibold w-5 shrink-0 ${l.debit > 0 ? "text-foreground" : "text-muted-foreground"}`}>{l.debit > 0 ? "Dr" : "Cr"}</span>
               <span className="text-xs text-foreground truncate">
                 {l.lHeadName || `Head #${l.lHeadId}`}{l.groupName ? ` (${l.groupName})` : ""}
               </span>
             </div>
-            <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+            <span className="text-xs text-right font-heading tabular-nums text-foreground">
               {l.debit > 0 ? fmt(l.debit) : ""}
             </span>
-            <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+            <span className="text-xs text-right font-heading tabular-nums text-foreground">
               {l.credit > 0 ? fmt(l.credit) : ""}
             </span>
           </div>
         ))}
-        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
-          <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
-          <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(total)}</span>
-          <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(total)}</span>
+        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 border-t border-foreground text-xs font-bold gap-2">
+          <span className="font-heading uppercase tracking-[0.12em] text-muted-foreground text-[0.5625rem]">Total</span>
+          <span className="text-right text-foreground font-heading tabular-nums">{fmt(total)}</span>
+          <span className="text-right text-foreground font-heading tabular-nums">{fmt(total)}</span>
         </div>
       </div>
     </div>
@@ -257,8 +227,9 @@ export function CustomerComboField({
         width: rect.width,
         maxHeight,
         zIndex: 9999,
+        boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)",
       }}
-      className="overflow-y-auto rounded-lg border border-border bg-card shadow-2xl py-1"
+      className="overflow-y-auto border border-foreground bg-card py-1"
     >
       {filtered.length === 0 ? (
         <p className="px-4 py-3 text-xs text-muted-foreground text-center">No customers found</p>
@@ -269,17 +240,15 @@ export function CustomerComboField({
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => { onChange(String(c.id), c.source); setOpen(false); setQuery(""); }}
-            className={`w-full text-left px-4 py-3 text-sm hover:bg-muted/60 transition-colors flex items-center justify-between gap-2 ${
+            className={`w-full text-left px-4 py-3 text-sm hover:bg-primary/5 transition-colors flex items-center justify-between gap-2 ${
               String(c.id) === value && selected?.source === c.source
-                ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                ? "text-foreground font-semibold bg-primary/10"
                 : "text-foreground"
             }`}
           >
             <span className="truncate">{c.label}</span>
-            <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-bold uppercase tracking-wide ${
-              c.source === "CRM"
-                ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
-                : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+            <span className={`shrink-0 px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border ${
+              c.source === "CRM" ? "border-foreground" : "border-dashed border-foreground/60"
             }`}>
               {c.source}
             </span>
@@ -383,8 +352,9 @@ export function ComboField({
         width: rect.width,
         maxHeight,
         zIndex: 9999,
+        boxShadow: "5px 5px 0 hsl(var(--foreground) / 0.12)",
       }}
-      className="overflow-y-auto rounded-lg border border-border bg-card shadow-2xl py-1"
+      className="overflow-y-auto border border-foreground bg-card py-1"
     >
       {options.map((o) => (
         <button
@@ -392,8 +362,8 @@ export function ComboField({
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { onChange(o.value); setOpen(false); }}
-          className={`w-full text-left px-4 py-3 text-sm hover:bg-muted/60 transition-colors ${
-            value === o.value ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-foreground"
+          className={`w-full text-left px-4 py-3 text-sm hover:bg-primary/5 transition-colors ${
+            value === o.value ? "text-foreground font-semibold bg-primary/10" : "text-foreground"
           }`}
         >
           {o.label}

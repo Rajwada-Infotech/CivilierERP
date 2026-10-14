@@ -24,16 +24,16 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
           </div>
 
           {viewingLoan.Status !== "Closed" && (
-            <div className="rounded-xl border border-border bg-muted/10 p-3.5 flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
+            <div className="border border-foreground/30 p-3.5 flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
               <Wallet size={13} className="shrink-0" />
               EMIs are paid from the <span className="font-semibold text-foreground">Finance → Payment</span> page (Loan EMIs tab) — this view is read-only.
             </div>
           )}
 
-          <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
+          <div className="border border-foreground/30 overflow-hidden overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/30 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
+                <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground">
                   <th className="text-left px-3 py-2.5">#</th>
                   <th className="text-left px-3 py-2.5">Due Date</th>
                   <th className="text-right px-3 py-2.5">Principal</th>
@@ -43,7 +43,7 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
                   <th className="text-center px-3 py-2.5">Paid</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-foreground/15">
                 {scheduleLoading ? (
                   <tr>
                     <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-xs">
@@ -64,7 +64,7 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
                       <tr
                         key={emi.EMIId}
                         className={
-                          emi.IsPaid ? "bg-emerald-500/5" : isNext ? "bg-amber-500/5" : undefined
+                          emi.IsPaid ? undefined : isNext ? "bg-primary/5" : undefined
                         }
                       >
                         <td className="px-3 py-2.5 text-muted-foreground">{emi.InstallmentNo}</td>
@@ -72,28 +72,28 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
                           <span className="flex items-center gap-1.5">
                             {fmtDate(emi.DueDate)}
                             {isNext && (
-                              <span className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                              <span className="px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground border border-dashed border-foreground">
                                 NEXT
                               </span>
                             )}
                             {isOverdue && (
-                              <span className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
+                              <span className="px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-destructive border border-destructive">
                                 OVERDUE
                               </span>
                             )}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono">{fmt(emi.PrincipalComponent)}</td>
-                        <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
+                        <td className="px-3 py-2.5 text-right font-heading tabular-nums">{fmt(emi.PrincipalComponent)}</td>
+                        <td className="px-3 py-2.5 text-right font-heading tabular-nums text-muted-foreground">
                           {fmt(emi.InterestComponent)}
                         </td>
-                        <td className="px-3 py-2.5 text-right font-mono font-medium">{fmt(emi.EMIAmount)}</td>
-                        <td className="px-3 py-2.5 font-mono text-xs text-muted-foreground">
+                        <td className="px-3 py-2.5 text-right font-heading tabular-nums font-medium">{fmt(emi.EMIAmount)}</td>
+                        <td className="px-3 py-2.5 font-heading tabular-nums text-xs text-muted-foreground">
                           {chequeByPaymentId.get(emi.PaymentId)?.chequeNo ?? "—"}
                         </td>
                         <td className="px-3 py-2.5 text-center">
                           {emi.IsPaid ? (
-                            <CheckCircle2 size={15} className="text-emerald-500 inline-block" />
+                            <CheckCircle2 size={15} className="text-foreground inline-block" />
                           ) : (
                             <Circle size={15} className="text-muted-foreground/40 inline-block" />
                           )}
@@ -107,9 +107,9 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
           </div>
 
           {viewingLoan.Status === "Closed" && (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="border border-foreground p-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
-                <FileCheck2 size={16} className="text-emerald-500 shrink-0" />
+                <FileCheck2 size={16} className="text-foreground shrink-0" />
                 <div>
                   <p className="text-xs font-semibold text-foreground">Loan fully repaid and closed</p>
                   <p className="text-[0.6875rem] text-muted-foreground">
@@ -124,7 +124,7 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
                   href={`/api/loan-sanction/noc/${viewingLoan.NOCAttachmentId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted/40 transition-colors"
+                  className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 border border-foreground text-foreground hover:bg-primary/10"
                 >
                   <FileText size={12} /> View NOC
                 </a>
@@ -144,7 +144,7 @@ export function ScheduleTab({ ls }: { ls: LoanSanctionState }) {
                     type="button"
                     disabled={uploadingNoc}
                     onClick={() => nocInputRef.current?.click()}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 transition-colors"
+                    className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-9 px-4 bg-foreground text-card border border-foreground"
                   >
                     <Upload size={12} /> {uploadingNoc ? "Uploading…" : "Upload NOC"}
                   </button>

@@ -10,7 +10,7 @@ export function NewLoanTypePicker({ ls }: { ls: LoanSanctionState }) {
       {!readOnly && (
         <>
           <div className="space-y-2">
-            <label className={labelCls}>Loan Type <span className="text-red-500">*</span></label>
+            <label className={labelCls}>Loan Type <span className="text-destructive">*</span></label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {LOAN_TYPES.map((lt) => (
                 <button
@@ -38,10 +38,10 @@ export function NewLoanTypePicker({ ls }: { ls: LoanSanctionState }) {
                       set("paymentMode", "NEFT");
                     }
                   }}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                  className={`px-3 py-2 text-sm font-medium border transition-colors ${
                     form.loanType === lt
-                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                      : "border-border text-muted-foreground hover:bg-muted/40"
+                      ? "border-foreground bg-foreground text-card"
+                      : "border-border text-muted-foreground hover:bg-primary/5"
                   }`}
                 >
                   {lt}
@@ -68,10 +68,10 @@ export function NewLoanTypePicker({ ls }: { ls: LoanSanctionState }) {
                         set("paymentMode", "NEFT");
                       }
                     }}
-                    className={`px-3 py-2 rounded-lg text-left text-sm font-medium border transition-colors ${
+                    className={`px-3 py-2 text-left text-sm font-medium border transition-colors ${
                       form.customerLoanDirection === d.key
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                        : "border-border text-muted-foreground hover:bg-muted/40"
+                        ? "border-foreground bg-foreground text-card"
+                        : "border-border text-muted-foreground hover:bg-primary/5"
                     }`}
                   >
                     <span className="block">{d.label}</span>
@@ -104,10 +104,10 @@ export function NewLoanTypePicker({ ls }: { ls: LoanSanctionState }) {
                 type="button"
                 onClick={() => documentInputRef.current?.click()}
                 title="Attach loan document (agreement, sanction letter etc.)"
-                className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border transition-colors ${
                   pendingDocumentFile
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : "border-border text-muted-foreground hover:bg-muted/40"
+                    ? "border-foreground bg-foreground text-card"
+                    : "border-border text-muted-foreground hover:bg-primary/5"
                 }`}
               >
                 <Upload size={12} />
