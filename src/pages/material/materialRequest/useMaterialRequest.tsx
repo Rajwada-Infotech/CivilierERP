@@ -21,6 +21,7 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { planImport, type PlannedRequest } from "./mrImport";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { MR_TEMPLATE_COLUMNS, CartItem, FormHeader, defaultHeader, blankCartItem, PRIORITY_COLOR, fmtDate, TAG, ACT } from "./config";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
@@ -32,6 +33,7 @@ export function useMaterialRequest() {
   const queryClient = useQueryClient();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [importPlan, setImportPlan] = useState<{ fileName: string; plan: PlannedRequest[] } | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRecord, setViewingRecord] = useState<any>(null);
@@ -788,7 +790,16 @@ export function useMaterialRequest() {
       const text = await file.text();
       const rows = parseCsv(text);
       if (!rows.length) { toast.error("CSV is empty"); return; }
-      toast.success(`${rows.length} rows read — full import coming soon`);
+      const plan = await planImport(rows, {
+        companies: companies as any[],
+        projects: projects as any[],
+        finYears: finYears as any[],
+        docTypes: mrDocTypes,
+        uoms: uoms as any[],
+        itemsFor: (projectId) => mrApi.getMRItemOptions(projectId),
+      });
+      if (!plan.length) { toast.error("No rows with data in the CSV"); return; }
+      setImportPlan({ fileName: file.name, plan });
     } catch (err: any) {
       toast.error(err?.message || "Failed to parse CSV");
     } finally {
@@ -883,6 +894,8 @@ export function useMaterialRequest() {
     handleDownloadTemplate,
     handleImportClick,
     handleImportFileChange,
+    importPlan,
+    setImportPlan,
   };
 }
 

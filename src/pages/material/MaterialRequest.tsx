@@ -13,10 +13,11 @@ import { useMaterialRequest } from "./materialRequest/useMaterialRequest";
 import { MRList } from "./materialRequest/MRList";
 import { MRForm } from "./materialRequest/MRForm";
 import { MRViewModal } from "./materialRequest/MRViewModal";
+import { MRImportDialog } from "./materialRequest/MRImportDialog";
 
 export default function MaterialRequest() {
   const m = useMaterialRequest();
-  const { rights, importFileInputRef, importing, viewMode, setViewMode, listData, loadingList, handleDownloadTemplate, handleImportClick, handleImportFileChange } = m;
+  const { rights, importFileInputRef, importing, viewMode, setViewMode, listData, loadingList, handleDownloadTemplate, handleImportClick, handleImportFileChange, importPlan, setImportPlan, invalidate } = m;
 
   return (
     <>
@@ -40,10 +41,12 @@ export default function MaterialRequest() {
                 <Download size={12} />
                 <span className="hidden sm:inline">Template</span>
               </button>
+              {rights.canCreate && (
               <button onClick={handleImportClick} disabled={importing} title="Import from CSV" className={`${KEY_LINE} h-9 px-3`}>
                 {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-                <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
+                <span className="hidden sm:inline">{importing ? "Reading…" : "Import CSV"}</span>
               </button>
+              )}
               {rights.canCreate && (
                 <button onClick={() => setViewMode("form")} className={`${KEY_INK} h-9 px-4`}>
                   <Plus size={13} /> New request
@@ -56,6 +59,9 @@ export default function MaterialRequest() {
         {viewMode === "list" && <MRList m={m} />}
         {viewMode === "form" && <MRForm m={m} />}
         <MRViewModal m={m} />
+        {importPlan && (
+          <MRImportDialog fileName={importPlan.fileName} plan={importPlan.plan} onClose={() => setImportPlan(null)} onCreated={invalidate} />
+        )}
       </SheetShell>
     </>
   );

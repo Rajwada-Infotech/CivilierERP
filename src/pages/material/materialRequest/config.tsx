@@ -9,7 +9,7 @@ export const MR_TEMPLATE_COLUMNS = [
   { header: "Company", accessor: "Company" },
   { header: "Project/Site", accessor: "Project/Site" },
   { header: "Financial Year", accessor: "Financial Year" },
-  { header: "Priority (Normal/High/Critical/Low)", accessor: "Priority (Normal/High/Critical/Low)" },
+  { header: "Priority (Low/Normal/High/Urgent)", accessor: "Priority (Low/Normal/High/Urgent)" },
   { header: "Required By Date (YYYY-MM-DD)", accessor: "Required By Date (YYYY-MM-DD)" },
   { header: "Reason", accessor: "Reason" },
   { header: "Remarks", accessor: "Remarks" },
