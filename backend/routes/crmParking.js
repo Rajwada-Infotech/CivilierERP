@@ -431,10 +431,13 @@ async function releaseAllParkingForBooking(pool, bookingId) {
   for (const row of rows.recordset) {
     await pool.request().input("id", sql.Int, row.Id)
       .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
-    const milestone = await pool.request().input("paid", sql.Int, row.Id)
+    // Every open milestone of the slot, not just the first one returned
+    // (a Paid one stays as the payment record).
+    const milestones = await pool.request().input("paid", sql.Int, row.Id)
       .query("SELECT Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid");
-    if (milestone.recordset.length && milestone.recordset[0].Status !== CrmStatus.PAID) {
-      await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
+    for (const ms of milestones.recordset) {
+      if (ms.Status === CrmStatus.PAID) continue;
+      await pool.request().input("mid", sql.Int, ms.Id)
         .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
     }
   }

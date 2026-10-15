@@ -257,6 +257,7 @@ async function caseState(db, id) {
       DeedType: deedType, DeedStatus: deedStatus, DeedStep: deedIdx, DeedNext: deedNext, TransferDeedId: td?.deed.Id || null, TransferDeedNo: td?.deed.DeedNo || null,
       FeeTotal: fee, FeeInvoiceNo: r.FeeInvoiceNo, FeeInvoiceStatus: r.FeeInvoiceStatus, FeeReceivedPaymentId: r.FeeReceivedPaymentId,
       FeeReceiptNo: r.FeeReceiptNo, FeeReceiptStatus: r.FeeReceiptStatus,
+      PayoutNewPaymentId: r.PayoutNewPaymentId ?? null, // the page disables "Send payout to Finance" once sent
       DeedExecutionDate: r.DeedExecutionDate, DeedStampDuty: r.DeedStampDuty, DeedRegistrationFee: r.DeedRegistrationFee,
       DeedDutyPaidAt: r.DeedDutyPaidAt, DeedDutyPaidRef: r.DeedDutyPaidRef, DeedRegNo: r.DeedRegNo, DeedRegDate: r.DeedRegDate, DeedRegOffice: r.DeedRegOffice,
       DeedSellerConsentAt: r.DeedSellerConsentAt, DeedBuyerConsentAt: r.DeedBuyerConsentAt,

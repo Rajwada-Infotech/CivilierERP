@@ -1659,6 +1659,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
         .input("rm",    sql.NVarChar(200), b.RmName || null)
         .input("rmc",   sql.NVarChar(20),  b.RmContact || null)
         .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("notesSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("ub",    sql.Int,           actor)
         .query(`
           UPDATE dbo.CrmLoanDetail SET
@@ -1666,7 +1667,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
             LoanAmount = ISNULL(@amt, LoanAmount), SanctionStatus = ISNULL(@st, SanctionStatus),
             SanctionDate = ISNULL(@sdate, SanctionDate),
             LoanAccountNo = ISNULL(@acc, LoanAccountNo), RmName = ISNULL(@rm, RmName), RmContact = ISNULL(@rmc, RmContact),
-            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            Notes = CASE WHEN @notesSet = 1 THEN @notes ELSE Notes END, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE BookingId = @bid
         `);
     } else {
