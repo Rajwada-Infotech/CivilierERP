@@ -419,7 +419,22 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
     const project = await getProject(pool, projectId);
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    await syncExistingStructure(pool, projectId);
+    // Two tabs (or a refetch) opening the page at once both passed the
+    // "not there yet" checks and inserted the same backfilled rows - a floor
+    // then counted twice. One sync per project at a time, all-or-nothing.
+    {
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request().input("r", sql.NVarChar(100), `crm-auto-setup-sync-${projectId}`)
+          .query("EXEC sp_getapplock @Resource = @r, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000");
+        await syncExistingStructure(tx, projectId);
+        await tx.commit();
+      } catch (e) {
+        try { await tx.rollback(); } catch { /* rolled back */ }
+        throw e;
+      }
+    }
 
     const blocks = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
@@ -922,6 +937,14 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       it.LayoutTypeId = resolved.layoutTypeId;
     }
 
+    // Checked before anything is written - it used to run after the template
+    // was saved, so a refused plan left the template changed anyway.
+    if (requestedPlanIds.length) {
+      const applicable = await getApplicablePaymentPlans(pool, { projectId });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      if (requestedPlanIds.some((pid) => !applicableIds.has(pid))) return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block." });
+    }
+
     const tx = pool.transaction();
     await tx.begin();
     try {
@@ -996,10 +1019,6 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
 
     // Validate and sync block-level payment plan tags if provided.
     if (requestedPlanIds.length) {
-      const applicable = await getApplicablePaymentPlans(pool, { projectId });
-      const applicableIds = new Set(applicable.map((p) => p.Id));
-      const invalid = requestedPlanIds.filter((pid) => !applicableIds.has(pid));
-      if (invalid.length) return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block." });
       await syncBlockPaymentPlanTags(pool, blockId, requestedPlanIds);
     } else if (req.body.PaymentPlanIds !== undefined) {
       // Explicit empty array = clear all plan tags for this block.
