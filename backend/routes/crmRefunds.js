@@ -179,9 +179,31 @@ const REFUND_SELECT = `
 `;
 
 // ── GET / — list ──────────────────────────────────────────────────────────
+// Self-repair: a refund still "with Finance" whose payout voucher Finance has
+// already approved (paid). Marking it Paid runs when the voucher is approved,
+// but that step is non-fatal there — if it failed (a database error at that
+// moment) nothing re-ran it, leaving the refund stuck. markCrmRefundPaid is
+// idempotent, so this simply finishes the job. Never blocks the list.
+async function settlePaidRefunds(pool, userEmail) {
+  try {
+    const stuck = (await pool.request().query(`
+      SELECT r.Id, r.FinanceNewPaymentId FROM dbo.CrmRefund r
+      JOIN dbo.NewPayment np ON np.PPaymentID = r.FinanceNewPaymentId
+      WHERE r.Status IN ('FinanceApproved', 'FinancePending') AND np.Status = 'Approved'`)).recordset;
+    for (const s of stuck) {
+      try {
+        const out = await markCrmRefundPaid(pool, s.Id, s.FinanceNewPaymentId, userEmail);
+        console.warn(`[crm-refunds] settled refund ${s.Id} whose voucher was already paid:`, out?.reason || "ok");
+      } catch (e) { console.error(`[crm-refunds] could not settle refund ${s.Id}:`, e.message); }
+    }
+    if (stuck.length) await bumpCacheVersion("crm-refunds");
+  } catch (e) { console.error("[crm-refunds] settlePaidRefunds:", e.message); }
+}
+
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    await settlePaidRefunds(pool, req.user?.email || req.user?.name || null);
     const { status, search } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
@@ -450,8 +472,15 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     const pool = getPool();
     const b = req.body || {};
     const sourceType = b.SourceType;
-    if (!["CancellationHeldCredit", "OverpaymentOnAccount", "Manual"].includes(sourceType)) {
-      return res.status(400).json({ error: "SourceType must be CancellationHeldCredit, OverpaymentOnAccount or Manual" });
+    // Every refund pays back money we hold: a cancelled booking's held credit
+    // or an overpayment. A 'Manual' refund (any customer, any amount, nothing
+    // behind it) is not allowed — business decision 2026-10-14; no screen
+    // raised one. Older Manual rows, if any, still display and run as before.
+    if (sourceType === "Manual") {
+      return res.status(400).json({ error: "A refund must come from a held credit (a cancelled booking) or an overpayment — choose it under Source of funds" });
+    }
+    if (!["CancellationHeldCredit", "OverpaymentOnAccount"].includes(sourceType)) {
+      return res.status(400).json({ error: "SourceType must be CancellationHeldCredit or OverpaymentOnAccount" });
     }
     const gross = Number(b.GrossAmount);
     if (!Number.isFinite(gross) || gross <= 0) return res.status(400).json({ error: "GrossAmount must be a positive number" });
@@ -465,17 +494,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     let deductionPct = 0;
     let dueDate = null;
 
-    if (sourceType === "Manual") {
-      customerId = b.CustomerId !== undefined && b.CustomerId !== null && b.CustomerId !== "" ? parseInt(b.CustomerId, 10) : null;
-      if (customerId == null) return res.status(400).json({ error: "CustomerId is required for a manual refund" });
-      bookingId = b.BookingId !== undefined && b.BookingId !== null && b.BookingId !== "" ? parseInt(b.BookingId, 10) : null;
-      if (bookingId != null) {
-        const bk = await pool.request().input("bid", sql.Int, bookingId)
-          .query("SELECT CompanyId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
-        companyId = bk.recordset[0]?.CompanyId ?? null;
-        projectId = bk.recordset[0]?.ProjectId ?? null;
-      }
-    } else {
+    {
       sourceOnAccountId = b.SourceOnAccountId !== undefined && b.SourceOnAccountId !== null && b.SourceOnAccountId !== "" ? parseInt(b.SourceOnAccountId, 10) : null;
       if (sourceOnAccountId == null) return res.status(400).json({ error: "SourceOnAccountId is required for this source" });
       const oaRow = await pool.request().input("id", sql.Int, sourceOnAccountId).query(`

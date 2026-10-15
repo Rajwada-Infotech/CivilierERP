@@ -260,7 +260,7 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
  */
 async function maybeAutoCreateAgreement(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
   if (existing.recordset.length) return null;
 
   const prereq = await validateAgreementPreparationPrerequisites(pool, bookingId);
@@ -404,7 +404,7 @@ async function maybeAutoCreateLegalMilestone(pool, bookingId, actorUserId) {
   if (existing.recordset.length) return null;
 
   const agr = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid AND Status <> 'Cancelled'");
   if (!agr.recordset.length) {
     const deed = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
@@ -1176,7 +1176,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // that's fast-tracked and already has an Executed/Registered agreement by
   // the time Milestone #1 clears shouldn't sit needlessly locked.
   const agr = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
   const agreementExecuted = ["Executed", "Registered"].includes(agr.recordset[0]?.Status);
 
   const tranches = buildBrokerageTranches(plan, totalBrokerageAmount, agreementExecuted);

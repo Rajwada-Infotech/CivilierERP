@@ -116,7 +116,7 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id AND h.Status <> '${CrmStatus.CANCELLED}')
       ORDER BY b.BookingNo
     `);
 
@@ -127,7 +127,7 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
       // Sub-Registrar) — mandatory for every booking, regardless of
       // project type.
       const agr = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+        .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
       if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
 
       // 2. Possession Notice must be Acknowledged by the customer
@@ -209,7 +209,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     // Mandatory for every booking, regardless of project type.
     const agr = await pool.request()
       .input("bid", sql.Int, parseInt(b.BookingId))
-      .query(`SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid`);
+      .query(`SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC`);
     if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) {
       return res.status(400).json({ error: "Handover requires the Agreement for Sale to be Registered (AFS registered at Sub-Registrar) first" });
     }
@@ -273,7 +273,7 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "A handover already exists for this booking" });
+      return res.status(409).json({ error: "This booking already has a handover in progress or completed — a new one can be scheduled only after cancelling it" });
     console.error("[crm-handover] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -359,18 +359,21 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       .input("sdt",  sql.Date, b.ScheduledDate || null)
       .input("adt",  sql.Date, b.ActualHandoverDate || null)
       .input("khb",  sql.Int,  b.KeyHandoverBy ? parseInt(b.KeyHandoverBy) : null)
-      .input("fdc",  sql.Bit,  b.FinalDuesCleared ? 1 : 0)
-      .input("ack",  sql.Bit,  b.CustomerAcknowledged ? 1 : 0)
+      // A field the caller didn't send keeps its value (a stage move sends
+      // only Status) — it used to reset both ticks to "no" and wipe the notes.
+      .input("fdc",  sql.Bit,  b.FinalDuesCleared === undefined ? null : (b.FinalDuesCleared ? 1 : 0))
+      .input("ack",  sql.Bit,  b.CustomerAcknowledged === undefined ? null : (b.CustomerAcknowledged ? 1 : 0))
       .input("st",   sql.NVarChar(30), b.Status || null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes === undefined ? null : (b.Notes || ""))
+      .input("keepNote", sql.Bit, b.Notes === undefined ? 1 : 0)
       .input("ub",   sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmHandover SET
           ScheduledDate = ISNULL(@sdt, ScheduledDate),
           ActualHandoverDate = ISNULL(@adt, ActualHandoverDate),
           KeyHandoverBy = ISNULL(@khb, KeyHandoverBy),
-          FinalDuesCleared = @fdc, CustomerAcknowledged = @ack,
-          Status = ISNULL(@st, Status), Notes = @note,
+          FinalDuesCleared = ISNULL(@fdc, FinalDuesCleared), CustomerAcknowledged = ISNULL(@ack, CustomerAcknowledged),
+          Status = ISNULL(@st, Status), Notes = CASE WHEN @keepNote = 1 THEN Notes ELSE NULLIF(@note, N'') END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

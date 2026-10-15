@@ -421,6 +421,7 @@ async function getSystemMetrics() {
       pipelineCommands.push(["get", `metrics:hour:${hourIdx}:total_load`]);
       pipelineCommands.push(["get", `metrics:hour:${hourIdx}:count`]);
     }
+    pipelineCommands.push(["info", "persistence"]);
 
     const results = await redisPipelineExec(pipelineCommands);
     if (!results) return cachedMetrics; // Redis down — return last known
@@ -443,10 +444,16 @@ async function getSystemMetrics() {
     const rpmHistory = [];
     for (let h = 0; h < 12; h++) {
       const idx = 6 + h * 2;
-      const total = Number(results?.[idx]?.[1] || 0);
+      // Every request adds 1 to the hour's count, so an hour's average per minute is count / 60.
       const count = Number(results?.[idx + 1]?.[1] || 0);
-      rpmHistory[h] = count > 0 ? Math.round(total / count) : 0;
+      rpmHistory[h] = Math.round(count / 60);
     }
+
+    // Persistence is healthy when the last RDB save succeeded and, if AOF is on, its last write did too.
+    const persistInfo = results?.[6 + 24]?.[1] || "";
+    const rdbOk = !/rdb_last_bgsave_status:err/.test(persistInfo);
+    const aofOn = /aof_enabled:1/.test(persistInfo);
+    const aofOk = redisOk && rdbOk && (!aofOn || !/aof_last_write_status:err/.test(persistInfo));
 
     const predictedHistory = rpmHistory.map((r) => Math.round(r * 1.15));
 
@@ -459,7 +466,7 @@ async function getSystemMetrics() {
       predictedHistory,
       redisOk,
       workerOk: true,
-      aofOk: true,
+      aofOk,
       lastUpdated: now,
     };
   } catch (err) {

@@ -405,7 +405,7 @@ export default function ContractorCategoryAdmin() {
           <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
             <AlertDialogCancel className={`${KEY_LINE} h-9 px-4 rounded-none`}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className={`${KEY} h-9 px-5 rounded-none bg-destructive text-destructive-foreground border border-destructive hover:bg-destructive/90`}
+              className={`${KEY} h-9 px-5 rounded-none !bg-destructive !text-destructive-foreground border border-destructive hover:!bg-destructive/90`}
               onClick={() =>
                 deleteTarget && deleteMutation.mutate(deleteTarget.id)
               }

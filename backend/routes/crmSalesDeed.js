@@ -314,7 +314,7 @@ router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "vi
       .query("SELECT TOP 1 Id AS QPId, QPNo, Status AS QPStatus, ConfirmedAmount FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
 
     const registry = await pool.request().input("bid", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id AS RegistryId, RegNo, Status AS RegistryStatus, ScheduledDate FROM dbo.CrmRegistry WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Id AS RegistryId, RegNo, Status AS RegistryStatus, ScheduledDate FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
 
     const gate = await getProjectSaleGate(pool, bookingId);
 
@@ -474,7 +474,7 @@ router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view
       JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -595,7 +595,7 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
     res.status(201).json({ success: true, id: registryId, RegNo: regNo });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
-      return res.status(409).json({ error: "Registry tracking already started for this booking" });
+      return res.status(409).json({ error: "This booking already has a registry in progress or completed — a new one can be started only after cancelling it" });
     console.error("[crm-sales-deed/registry] POST error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
@@ -761,7 +761,10 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
               RegistrationDate = ISNULL(RegistrationDate, @regdt),
               Status = 'Registered'
             WHERE Id = @id
-          `).catch((e) => console.error("[crm-sales-deed/registry] sales-deed mirror failed:", e.message));
+          `);
+        // No .catch here: a failure must roll the registry back with it (it
+        // used to be swallowed, committing a Completed registry over a sale
+        // deed still unregistered).
       }
 
       await logRegistryHistory(id, 'Completed', `Reg No. ${b.RegistrationNo.trim()}${b.SubRegistrarOffice ? ` at ${b.SubRegistrarOffice}` : ''}`, actorId(req), 'Staff', tx);
@@ -1571,6 +1574,13 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
     // rather than composes; this ordering mirrors the identical, already-
     // established pattern in crmCancellations.js's /approve).
     const transitionResult = await approvalTransition("crm-sales-deed-senior", id, 'Approved', userEmail, req.user?.role, req.body?.Remarks, actorId(req));
+    // A rule with more than one level answers 'Pending' until its LAST level
+    // signs. Marking the deed Approved and sending it to the customer here
+    // used to skip every level after the first (as the director approval,
+    // the agreement approvals and the cancellation approval already avoid).
+    if (transitionResult.newStatus !== "Approved") {
+      return res.json({ success: true, status: transitionResult.newStatus, message: "Approved at this level — waiting for the next approver" });
+    }
 
     // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
     // The status flip and both approval-log entries land together — a
@@ -1900,7 +1910,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
 
     if (b.RegistrationNo && !row.RegistrationNo) {
       const registry = await pool.request().input("bid", sql.Int, row.BookingId)
-        .query("SELECT Status FROM dbo.CrmRegistry WHERE BookingId = @bid");
+        .query("SELECT TOP 1 Status FROM dbo.CrmRegistry WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
       if (!registry.recordset.length || registry.recordset[0].Status !== "Completed") {
         return res.status(400).json({ error: "Registration number can't be recorded until Registry is marked Completed (Query Payment must be Confirmed first)" });
       }
@@ -2545,14 +2555,31 @@ router.put("/:id/cancel", requirePageRight("crm-sales-deed", "edit"), async (req
       return res.status(400).json({ error: `Cannot cancel a deed in status '${currentStatus}'` });
     }
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("ub", sql.Int, actorId(req))
-      .query(`UPDATE dbo.CrmSalesDeed SET Status = 'Cancelled', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+    // The deed's open registry appointment goes with it (decided 2026-10-14):
+    // left open, completing it later marked the CANCELLED deed Registered.
+    const tx = pool.transaction();
+    await tx.begin();
+    let closedRegistries = [];
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmSalesDeed SET Status = 'Cancelled', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+      closedRegistries = (await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req))
+        .query(`UPDATE dbo.CrmRegistry SET Status = 'Cancelled', CancelledReason = N'Sale deed cancelled', CancelledAt = SYSDATETIME(),
+                  CancelledBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+                OUTPUT INSERTED.Id
+                WHERE SalesDeedId = @id AND Status NOT IN ('Completed', 'Cancelled')`)).recordset.map((r) => r.Id);
+      for (const rid of closedRegistries) await logRegistryHistory(rid, 'Cancelled', 'Sale deed cancelled', actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
 
     logDeedApprovalHistory(id, 'Cancelled', 'Sale deed cancelled by staff', actorId(req), 'Staff').catch(e => console.error("Error logging cancellation:", e));
 
-    res.json({ success: true, status: 'Cancelled' });
+    res.json({ success: true, status: 'Cancelled', registriesCancelled: closedRegistries.length });
   } catch (e) {
     console.error("[crm-sales-deed] cancel error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });

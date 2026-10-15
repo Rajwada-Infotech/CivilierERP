@@ -267,10 +267,13 @@ router.get("/:id/activity", async (req, res) => {
 });
 
 // ── POST upload-avatar ───────────────────────────────────────────────────────
+const THUMB_RE = /^data:image\/(jpeg|webp|png);base64,[A-Za-z0-9+/=]+$/;
+const validThumb = (t) => typeof t === "string" && t.length <= 60_000 && THUMB_RE.test(t);
+
 router.post("/:id/upload-avatar", async (req, res) => {
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
-  const { avatar } = req.body;
+  const { avatar, thumb } = req.body;
   if (!avatar)
     return res.status(400).json({ error: "No avatar data provided" });
 
@@ -292,10 +295,28 @@ router.post("/:id/upload-avatar", async (req, res) => {
       .request()
       .input("id", sql.Int, req.params.id)
       .input("avatar_url", sql.NVarChar(sql.MAX), avatar)
-      .query("UPDATE dbo.users SET avatar_url = @avatar_url WHERE id = @id");
+      // small list thumbnail made by the browser (migration 575); a bad one is just skipped
+      .input("thumb", sql.NVarChar(sql.MAX), validThumb(thumb) ? thumb : null)
+      .query("UPDATE dbo.users SET avatar_url = @avatar_url, avatar_thumb = @thumb WHERE id = @id");
     res.json({ message: "Avatar updated", avatar_url: avatar });
   } catch (err) {
     console.error("POST /user-profile/:id/upload-avatar error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT avatar thumbnail — for a picture uploaded before thumbnails existed
+// (migration 575): the Users page makes one in the browser and saves it here.
+router.put("/:id/avatar-thumb", async (req, res) => {
+  if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+  const { thumb } = req.body || {};
+  if (!validThumb(thumb)) return res.status(400).json({ error: "Invalid thumbnail" });
+  try {
+    await getPool().request().input("id", sql.Int, req.params.id).input("thumb", sql.NVarChar(sql.MAX), thumb)
+      .query("UPDATE dbo.users SET avatar_thumb = @thumb WHERE id = @id AND avatar_url IS NOT NULL");
+    res.json({ message: "Thumbnail saved" });
+  } catch (err) {
+    console.error("PUT /user-profile/:id/avatar-thumb error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -309,7 +330,7 @@ router.delete("/:id/avatar", async (req, res) => {
     await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .query("UPDATE dbo.users SET avatar_url = NULL WHERE id = @id");
+      .query("UPDATE dbo.users SET avatar_url = NULL, avatar_thumb = NULL WHERE id = @id");
     res.json({ message: "Avatar removed" });
   } catch (err) {
     console.error("DELETE /user-profile/:id/avatar error:", err);

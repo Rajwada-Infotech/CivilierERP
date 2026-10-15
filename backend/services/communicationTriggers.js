@@ -1,32 +1,21 @@
 const { sql } = require("../db");
+const { send } = require("./messageProviders");
 
-// Mock providers - replace these with actual API calls (e.g. Twilio, SendGrid, MSG91)
-async function sendMockSms(mobile, message) {
-  console.log(`[SMS MOCK] To: ${mobile} | Message: ${message}`);
-}
-
-async function sendMockEmail(email, subject, htmlBody) {
-  console.log(`[EMAIL MOCK] To: ${email} | Subject: ${subject} | Body: ${htmlBody}`);
-}
-
-async function sendMockWhatsApp(mobile, message) {
-  console.log(`[WHATSAPP MOCK] To: ${mobile} | Message: ${message}`);
-}
+// Timeline channel name -> Communicator channel whose saved provider settings send it.
+const PROVIDER_CHANNEL = { SMS: "sms", Email: "email", WhatsApp: "whatsapp" };
 
 /**
  * Core engine for triggering automated communications and logging them.
  */
 async function sendAutoCommunication(pool, { bookingId, channel, subject, summary, content, toMobile, toEmail, systemUserId = 1 }) {
   try {
-    // 1. Actually send the message using the provider
-    if (channel === "SMS" && toMobile) {
-      await sendMockSms(toMobile, content);
-    } else if (channel === "Email" && toEmail) {
-      await sendMockEmail(toEmail, subject, content);
-    } else if (channel === "WhatsApp" && toMobile) {
-      await sendMockWhatsApp(toMobile, content);
-    } else {
-      // If no valid target is provided, we can't send
+    // 1. Send through the provider saved on the Communicator setup page; a channel
+    //    that isn't set up or is switched off sends nothing and logs nothing.
+    const to = channel === "Email" ? toEmail : toMobile;
+    if (!PROVIDER_CHANNEL[channel] || !to) return false;
+    const sent = await send(PROVIDER_CHANNEL[channel], { to, subject, text: content });
+    if (!sent.ok) {
+      if (!sent.skipped) console.error(`[communicationTriggers] ${channel} for booking ${bookingId} failed: ${sent.error}`);
       return false;
     }
 

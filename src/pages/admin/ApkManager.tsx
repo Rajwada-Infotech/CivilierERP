@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Smartphone, Upload, Download, Loader2, ShieldAlert, Pencil } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getAppCatalog,
@@ -19,7 +19,17 @@ const fmtDate = (d: string) =>
 const fmtMB = (b: number) => `${(b / (1024 * 1024)).toFixed(1)} MB`;
 
 const inp =
-  "w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
+  "w-full px-3 py-2 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none";
+
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
+// A mandatory build blocks the app until updated — the one thing on this page drawn in red.
+const MANDATORY = `${TAG} text-destructive border-destructive`;
 
 function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => void }) {
   const qc = useQueryClient();
@@ -41,17 +51,20 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && !publish.isPending && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle>Publish a new build — {app.label}</DialogTitle>
+          <div className="pb-3" style={{ borderBottom: RULE }}>
+            <p className={LBL}>{app.label}</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Publish a new build</DialogTitle>
+          </div>
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">APK file</p>
+            <p className={`${LBL} mb-1.5`}>APK file</p>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-border hover:bg-muted/40 text-sm text-left transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2.5 border border-dashed border-foreground/50 hover:border-foreground text-sm text-left transition-colors"
             >
               <Upload size={14} className="text-muted-foreground shrink-0" />
               <span className="truncate">{file ? `${file.name} (${fmtMB(file.size)})` : "Choose the .apk built for this app"}</span>
@@ -69,7 +82,7 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
             </p>
           </div>
           <div>
-            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">What's new</p>
+            <p className={`${LBL} mb-1.5`}>What's new</p>
             <textarea
               rows={4}
               className={inp}
@@ -80,7 +93,7 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
             />
           </div>
           <label className="flex items-start gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} className="mt-0.5" />
+            <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} className="mt-0.5 accent-foreground" />
             <span className="text-sm">
               <span className="font-medium">Mandatory update</span>
               <span className="block text-[0.6875rem] text-muted-foreground">
@@ -88,12 +101,12 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
               </span>
             </span>
           </label>
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
             <button
               type="button"
               disabled={publish.isPending}
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted disabled:opacity-50 transition-colors"
+              className={`${KEY_LINE} h-9 px-4`}
             >
               Cancel
             </button>
@@ -101,7 +114,7 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
               type="button"
               disabled={!file || publish.isPending}
               onClick={() => publish.mutate()}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white btn-module hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className={`${KEY_INK} h-9 px-5`}
             >
               {publish.isPending && <Loader2 size={14} className="animate-spin" />}
               {publish.isPending ? "Uploading…" : "Publish"}
@@ -129,21 +142,24 @@ function EditDialog({ release, onClose }: { release: AppRelease; onClose: () => 
   });
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
         <DialogHeader>
-          <DialogTitle>Edit release — build {release.versionCode}</DialogTitle>
+          <div className="pb-3" style={{ borderBottom: RULE }}>
+            <p className={LBL}>Build {release.versionCode}</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Edit release</DialogTitle>
+          </div>
         </DialogHeader>
         <div className="space-y-4">
           <textarea rows={4} className={inp} value={notes} maxLength={2000} onChange={(e) => setNotes(e.target.value)} />
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-            <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} /> Mandatory update
+            <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} className="accent-foreground" /> Mandatory update
           </label>
-          <div className="flex justify-end gap-2">
-            <button onClick={onClose} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+            <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
             <button
               onClick={() => save.mutate()}
               disabled={save.isPending}
-              className="px-5 py-2 rounded-lg text-sm font-semibold text-white btn-module hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className={`${KEY_INK} h-9 px-5`}
             >
               Save
             </button>
@@ -168,20 +184,39 @@ export default function ApkManager() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "APK Manager"]} />
-      <AdminShell title="APK Manager" subtitle="Publish new Android builds. Installed apps offer the update automatically." icon={Smartphone}>
+      <SheetShell
+        eyebrow="CivilierERP · Admin"
+        title="APK manager"
+        subtitle="Publish new Android builds. Installed apps offer the update automatically."
+      >
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "Apps", value: catalog.length, note: "in the catalogue" },
+              { label: "Published", value: catalog.filter((a) => a.current).length, note: "with a live build" },
+              { label: "Mandatory", value: catalog.filter((a) => a.current?.mandatory).length, note: "current builds that block until updated" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
         {isLoading ? (
           <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {catalog.map((a) => (
-              <div key={a.appKey} className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm p-5 flex flex-col gap-3">
+              <div key={a.appKey} className={`bg-card p-4 flex flex-col gap-3 border ${a.current ? "border-foreground" : "border-dashed border-foreground/50"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="font-heading font-semibold text-foreground truncate">{a.label}</p>
-                    <p className="text-[0.6875rem] font-mono text-muted-foreground truncate">{a.packageName}</p>
+                    <p className="font-heading text-base font-bold tracking-tight text-foreground truncate">{a.label}</p>
+                    <p className="text-[0.6875rem] font-heading tabular-nums text-muted-foreground truncate">{a.packageName}</p>
                   </div>
                   {a.current?.mandatory && (
-                    <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0">
+                    <span className={`${MANDATORY} shrink-0`}>
                       <ShieldAlert size={11} /> Mandatory
                     </span>
                   )}
@@ -198,7 +233,7 @@ export default function ApkManager() {
                       Published {fmtDate(a.current.publishedAt)}{a.current.publishedBy ? ` by ${a.current.publishedBy}` : ""}
                     </p>
                     {a.current.releaseNotes && (
-                      <p className="text-foreground/80 bg-muted/30 border border-border/50 rounded-lg px-3 py-2 whitespace-pre-wrap">{a.current.releaseNotes}</p>
+                      <p className="text-foreground/80 border-l-2 border-foreground/40 pl-3 py-1 whitespace-pre-wrap">{a.current.releaseNotes}</p>
                     )}
                   </div>
                 ) : (
@@ -208,14 +243,14 @@ export default function ApkManager() {
                 <div className="flex items-center gap-2 mt-auto pt-1">
                   <button
                     onClick={() => setPublishing(a)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white btn-module hover:opacity-90 transition-opacity"
+                    className={`${KEY_INK} h-9 px-4`}
                   >
                     <Upload size={13} /> Publish new build
                   </button>
                   {a.current && (
                     <a
                       href={a.current.downloadPath}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border hover:bg-muted transition-colors"
+                      className={`${KEY_LINE} h-9 px-3`}
                     >
                       <Download size={13} /> Download APK
                     </a>
@@ -226,10 +261,11 @@ export default function ApkManager() {
           </div>
         )}
 
-        <div className="mt-6 rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-border/60 flex items-center gap-3">
-            <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">Release history</h3>
-            <select className="ml-auto px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
+        <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+          <div className="px-4 py-3 flex items-center gap-3" style={{ borderBottom: RULE }}>
+            <h3 className={HEAD}>Release history</h3>
+            <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{history.length}</span>
+            <select className="ml-auto h-8 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-xs text-foreground outline-none" value={filter} onChange={(e) => setFilter(e.target.value)}>
               <option value="">All apps</option>
               {catalog.map((a) => (
                 <option key={a.appKey} value={a.appKey}>{a.label}</option>
@@ -238,7 +274,7 @@ export default function ApkManager() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
+              <thead className={LBL} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
                 <tr>
                   <th className="px-4 py-2 text-left">App</th>
                   <th className="px-4 py-2 text-left">Version</th>
@@ -249,24 +285,24 @@ export default function ApkManager() {
                   <th className="w-10" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/50">
+              <tbody className="divide-y divide-foreground/10">
                 {history.length === 0 ? (
                   <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No builds published yet.</td></tr>
                 ) : (
                   history.map((r) => (
-                    <tr key={r.id} className="hover:bg-muted/20">
+                    <tr key={r.id} className="hover:bg-primary/5">
                       <td className="px-4 py-2.5 font-medium">
                         {catalog.find((a) => a.appKey === r.appKey)?.label ?? r.appKey}
-                        {r.isCurrent && <span className="ml-2 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Current</span>}
-                        {r.mandatory && <span className="ml-1.5 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">Mandatory</span>}
+                        {r.isCurrent && <span className="ml-2 align-middle"><SheetMark text="Current" tone="done" /></span>}
+                        {r.mandatory && <span className={`${MANDATORY} ml-1.5`}>Mandatory</span>}
                       </td>
                       <td className="px-4 py-2.5">{r.versionName ?? "—"}</td>
-                      <td className="px-4 py-2.5 tabular-nums">{r.versionCode}</td>
+                      <td className="px-4 py-2.5 font-heading tabular-nums">{r.versionCode}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-muted-foreground">{fmtDate(r.publishedAt)}</td>
                       <td className="px-4 py-2.5 text-muted-foreground">{r.publishedBy ?? "—"}</td>
                       <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[280px] truncate" title={r.releaseNotes ?? ""}>{r.releaseNotes || "—"}</td>
                       <td className="px-2 py-2.5 text-center">
-                        <button onClick={() => setEditing(r)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Edit notes">
+                        <button onClick={() => setEditing(r)} className="w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors" title="Edit notes" aria-label="Edit notes">
                           <Pencil size={13} />
                         </button>
                       </td>
@@ -277,7 +313,7 @@ export default function ApkManager() {
             </table>
           </div>
         </div>
-      </AdminShell>
+      </SheetShell>
 
       {publishing && <PublishDialog app={publishing} onClose={() => setPublishing(null)} />}
       {editing && <EditDialog release={editing} onClose={() => setEditing(null)} />}

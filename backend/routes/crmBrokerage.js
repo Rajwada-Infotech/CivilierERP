@@ -324,7 +324,7 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     }
 
     const agr = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT Status FROM dbo.CrmAgreement WHERE BookingId = @bid");
+      .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
     if (!agr.recordset.length || ![CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(agr.recordset[0].Status)) {
       return res.status(400).json({ error: "Brokerage requires the agreement to be Executed first" });
     }
