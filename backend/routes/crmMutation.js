@@ -49,7 +49,7 @@ const MUT_SELECT = `
   JOIN dbo.CrmBooking b ON b.Id = m.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-  LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
+  LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND ISNULL(sd.Status, '') <> 'Cancelled'
   LEFT JOIN dbo.CrmRegistry reg ON reg.BookingId = b.Id AND reg.Status = 'Completed'
 `;
 
@@ -157,7 +157,7 @@ router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       JOIN dbo.CrmRegistry reg ON reg.BookingId = b.Id AND reg.Status = 'Completed'
-      LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id
+      LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND ISNULL(sd.Status, '') <> 'Cancelled'
       WHERE b.Status <> 'Cancelled'
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)
       ORDER BY b.CreatedAt DESC
@@ -229,7 +229,14 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
     const syncedDeedCopy = src.recordset[0] || null;
 
     const mutNo = await getNextDocNumber(pool, "MUT", "MUT");
-    const result = await pool.request()
+    // The mutation and its mandatory-document checklist are saved together —
+    // one mutation per booking and no cancel, so a half-saved one (no
+    // checklist) would have stuck on the booking for good.
+    const tx = pool.transaction();
+    await tx.begin();
+    let mutationId;
+    try {
+    const result = await tx.request()
       .input("no",   sql.NVarChar(30),  mutNo)
       .input("bid",  sql.Int,           bookingId)
       .input("ano",  sql.NVarChar(100), b.ApplicationNo   || null)
@@ -244,11 +251,11 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, 'Applied', @ano, @ad, @auth, @okhata, @fee, @rem, @cb, SYSDATETIME())
       `);
-    const mutationId = result.recordset[0].Id;
+    mutationId = result.recordset[0].Id;
 
     for (const doc of MANDATORY_DOC_TEMPLATE) {
       const synced = doc.type === 'RegisteredDeedCopy' ? syncedDeedCopy : null;
-      await pool.request()
+      await tx.request()
         .input('mid', sql.Int, mutationId)
         .input('dt', sql.NVarChar(50), doc.type)
         .input('lbl', sql.NVarChar(255), doc.label)
@@ -267,6 +274,12 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
              CASE WHEN @b64 IS NOT NULL THEN 'System' ELSE NULL END, CASE WHEN @b64 IS NOT NULL THEN SYSDATETIME() ELSE NULL END,
              @cb, SYSDATETIME(), @rem, @cb, SYSDATETIME())
         `);
+    }
+
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
     }
 
     await logMutationHistory(mutationId, 'Applied', syncedDeedCopy ? 'Registered deed copy synced automatically from Registry.' : null, actorId(req));
@@ -521,7 +534,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-mutation", "edit"), u
       const reqCheck = await pool.request()
         .input("mid", sql.Int, id)
         .input("dt", sql.NVarChar(50), DocumentType)
-        .query("SELECT TOP 1 Id FROM dbo.CrmMutationDocument WHERE MutationId = @mid AND DocumentType = @dt AND Status = 'Requested' AND IsMandatory = 1 ORDER BY CreatedAt ASC");
+        .query("SELECT TOP 1 Id FROM dbo.CrmMutationDocument WHERE MutationId = @mid AND DocumentType = @dt AND Status IN ('Requested', 'Rejected') AND IsMandatory = 1 ORDER BY CreatedAt ASC");
 
       if (reqCheck.recordset.length > 0) {
         await pool.request()
@@ -630,6 +643,11 @@ router.put("/:id/documents/:docId", requirePageRight("crm-mutation", "edit"), as
     }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    if (Status === "Verified") {
+      // Same rule as Sale Deed / Registry documents: nothing is verified without a file.
+      const f = await pool.request().input("docid", sql.Int, docId).query("SELECT FileBase64 FROM dbo.CrmMutationDocument WHERE Id = @docid");
+      if (!f.recordset[0]?.FileBase64) return res.status(400).json({ error: "Upload the file before verifying this document." });
+    }
 
     await pool.request()
       .input("docid", sql.Int, docId)

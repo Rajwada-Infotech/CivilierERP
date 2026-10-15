@@ -138,7 +138,8 @@ async function getCumulativeGstSplit(pool, bookingId, amount, side) {
       ? `SELECT ISNULL(SUM(inv.Amount), 0) AS Gross,
                 ISNULL((SELECT SUM(g.DebitAmount) FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND g.LHeadId = @adv AND ISNULL(g.IsReversed, 0) = 0), 0) AS Base
          FROM dbo.CrmInvoice inv
-         WHERE inv.BookingId = @bid AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id)`
+         WHERE inv.BookingId = @bid AND ISNULL(inv.Status, '') <> 'Void'
+           AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id AND ISNULL(g.IsReversed, 0) = 0)`
       : `SELECT ISNULL(SUM(g.DebitAmount), 0) AS Gross,
                 ISNULL(SUM(CASE WHEN g.LHeadId = @gst THEN g.CreditAmount ELSE 0 END), 0) AS Gst
          FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND ISNULL(g.IsReversed, 0) = 0`)).recordset[0] || {};
@@ -516,6 +517,57 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
  * customer's deposit is earmarked vs free" figure several screens read,
  * independent of which GL head the underlying cash actually sits on.
  */
+/**
+ * Keeps a CRM deposit's on-account tracker (OnAccountLedger + the party's
+ * OnAccountBalance) equal to what is really left of it: Amount - AppliedAmount,
+ * or nothing once it bounced. Applying to a milestone writes its own line
+ * (postCrmOnAccountApplied), but refunds, cancellation roll-overs, re-booking
+ * transfers, buy-backs and credit-note withdrawals used the deposit up with no
+ * line - Finance's On Account screen kept showing that money as available.
+ * Writes one adjusting line for the difference; a no-op when already equal or
+ * when the deposit was never put on the tracker. Safe to run again (it is also
+ * the backfill).
+ */
+// onlyDown (the default): only ever take the figure down. A Finance-side
+// adjustment against an invoice isn't linked to the deposit, so raising the
+// figure back up is left to the one path that really frees money (a bounce
+// un-applying other deposits).
+async function syncCrmOnAccountLedger(executor, onAccountId, userEmail, note = null, { onlyDown = true } = {}) {
+  const oa = (await executor.request().input("id", sql.Int, onAccountId).query(`
+    SELECT oa.Id, oa.ReceiptNo, oa.Amount, ISNULL(oa.AppliedAmount, 0) AS AppliedAmount, oa.Status,
+           b.CompanyId, b.ProjectId,
+           (SELECT TOP 1 l.PartyId FROM dbo.OnAccountLedger l
+             WHERE l.RefType = 'CrmOnAccountPayment' AND l.RefId = oa.Id AND l.TxnType = 'CREDIT') AS PartyId,
+           ISNULL((SELECT SUM(CASE WHEN l.TxnType = 'CREDIT' THEN l.Amount ELSE -l.Amount END) FROM dbo.OnAccountLedger l
+             WHERE l.RefId = oa.Id AND l.RefType IN ('CrmOnAccountPayment', 'CrmPaymentReceipt', 'CrmOnAccountAdjust')), 0) AS Tracked
+    FROM dbo.CrmOnAccountPayment oa
+    LEFT JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
+    WHERE oa.Id = @id`)).recordset[0];
+  if (!oa || oa.PartyId == null) return { synced: false, reason: "not on the tracker" };
+  const left = oa.Status === "Bounced" ? 0 : Math.max(0, Number(oa.Amount) - Number(oa.AppliedAmount));
+  const diff = Math.round((left - Number(oa.Tracked)) * 100) / 100;
+  if (Math.abs(diff) < 0.01 || (onlyDown && diff > 0)) return { synced: true, diff: 0 };
+  await executor.request()
+    .input("PartyId", sql.Int, oa.PartyId)
+    .input("TxnType", sql.NVarChar(10), diff > 0 ? "CREDIT" : "DEBIT")
+    .input("Amount", sql.Decimal(18, 2), Math.abs(diff))
+    .input("Diff", sql.Decimal(18, 2), diff)
+    .input("RefDocNo", sql.NVarChar(100), oa.ReceiptNo)
+    .input("RefId", sql.Int, oa.Id)
+    .input("CompanyId", sql.Int, oa.CompanyId ?? null)
+    .input("ProjectId", sql.Int, oa.ProjectId ?? null)
+    .input("Notes", sql.NVarChar(500), (note || `On-account ${oa.ReceiptNo} brought to what is left of it`).slice(0, 500))
+    .input("CreatedBy", sql.NVarChar(150), userEmail || "system")
+    .query(`
+      INSERT INTO dbo.OnAccountLedger
+        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+      VALUES
+        (@PartyId,'Customer',CAST(SYSDATETIME() AS DATE),@TxnType,@Amount,'CrmOnAccountAdjust',@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+      UPDATE dbo.AccountHeadMaster SET OnAccountBalance = ISNULL(OnAccountBalance, 0) + @Diff WHERE LHeadId = @PartyId;
+    `);
+  return { synced: true, diff };
+}
+
 async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEmail, txnDate) {
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
     SELECT oa.ReceiptNo, b.CompanyId, b.ProjectId, a.CustomerId, a.ApplicantName
@@ -1036,7 +1088,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, invoiceId).query(`
-    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate,
+    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Status,
            b.Id AS BookingId, b.CompanyId, b.ProjectId
     FROM dbo.CrmInvoice inv
     JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
@@ -1044,6 +1096,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   `);
   const row = r.recordset[0];
   if (!row) return { posted: false, reason: `CrmInvoice ${invoiceId} not found` };
+  if (row.Status === "Void") return { posted: false, reason: `${row.InvoiceNo} is void — not posted` };
   // "Final" = a Non-Invoice customer's one invoice for the grand total.
   if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking" && row.InvoiceType !== "Final")
     return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
@@ -1278,6 +1331,7 @@ module.exports = {
   postCrmReceiptToGL,
   postCrmOnAccountToGL,
   postCrmOnAccountApplied,
+  syncCrmOnAccountLedger,
   postCrmBrokerPaymentToGL,
   postCrmCancellationRefundToGL,
   postCrmRefundPaid,

@@ -321,21 +321,34 @@ router.put("/:id/cancel", requirePageRight("crm-resales", "edit"), async (req, r
     if (deed && ["Executed", "Registered"].includes(deed.Status)) {
       return res.status(409).json({ error: `${deed.DeedNo} is already ${deed.Status === "Registered" ? "registered" : "signed"} — the case can't be cancelled.` });
     }
-    const r = await pool.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req)).input("why", sql.NVarChar(500), `Cancelled: ${reason}`.slice(0, 500))
+    // The case, the buyer's draft application and the transfer deed are
+    // cancelled together — a failure part-way used to leave a cancelled case
+    // with its deed still live.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    const r = await tx.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req)).input("why", sql.NVarChar(500), `Cancelled: ${reason}`.slice(0, 500))
       .query(`UPDATE dbo.CrmUnitResale SET Status = N'${ResaleStatus.CANCELLED}', RejectionNote = @why, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
               WHERE Id = @id AND IsActive = 1 AND Status NOT IN (N'${ResaleStatus.COMPLETED}', N'${ResaleStatus.CANCELLED}')`);
-    if (!r.rowsAffected[0])
+    if (!r.rowsAffected[0]) {
+      await tx.rollback();
       return res.status(400).json({ error: "Not found, already cancelled, or completed — a completed resale has already moved the property and cannot be cancelled here." });
+    }
     // The buyer's application opened from the case never took the property.
-    await pool.request().input("id", sql.Int, id).query(`
+    await tx.request().input("id", sql.Int, id).query(`
       UPDATE a SET a.Status = N'Cancelled', a.UpdatedAt = SYSDATETIME()
       FROM dbo.CrmApplication a JOIN dbo.CrmUnitResale r ON r.BuyerApplicationId = a.Id
       WHERE r.Id = @id AND a.Status = N'Draft'`);
     if (deed) {
-      await pool.request().input("d", sql.Int, deed.Id).input("by", sql.Int, actorId(req))
+      await tx.request().input("d", sql.Int, deed.Id).input("by", sql.Int, actorId(req))
         .query("UPDATE dbo.CrmTransferDeed SET Status = N'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @d");
-      await pool.request().input("d", sql.Int, deed.Id).input("u", sql.Int, actorId(req))
+      await tx.request().input("d", sql.Int, deed.Id).input("u", sql.Int, actorId(req))
         .query("INSERT INTO dbo.CrmTransferDeedLog (DeedId, Action, ActorType, ActorUserId, Remarks) VALUES (@d, N'Cancelled with its case', N'Staff', @u, NULL)");
+    }
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
     }
     res.json({ success: true });
   } catch (e) {
@@ -505,7 +518,7 @@ router.put("/:id/reject", requirePageRight("crm-resales", "edit"), async (req, r
     const email = req.user?.email || req.user?.name;
     if (!email) return res.status(401).json({ error: "Sign in again" });
     const { transition } = require("../services/approvalService");
-    const result = await transition("crm-resales", id, "Rejected", email, req.user?.role, req.body?.note || null);
+    const result = await transition("crm-resales", id, "Rejected", email, req.user?.role, req.body?.note || null, req.user?.userId ?? null);
     await getPool().request().input("id", sql.Int, id).input("n", sql.NVarChar(500), req.body?.note || "Rejected")
       .query("UPDATE dbo.CrmUnitResale SET RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     await bumpResales();

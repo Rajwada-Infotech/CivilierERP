@@ -249,18 +249,21 @@ const CrmPaymentMilestones: React.FC = () => {
     ? Math.max(0, Number(editingMilestone.AmountDue) - Number(editingMilestone.AmountPaid || 0))
     : 0;
   const enteredPaid = payForm.AmountPaid ? parseFloat(payForm.AmountPaid) : 0;
-  const previewOverflow = editingMilestone && enteredPaid > Number(editingMilestone.AmountDue)
-    ? Math.round((enteredPaid - Number(editingMilestone.AmountDue)) * 100) / 100
+  // What's entered is a NEW payment, so it overflows past the balance still due.
+  const previewOverflow = editingMilestone && enteredPaid > editingBalance
+    ? Math.round((enteredPaid - editingBalance) * 100) / 100
     : 0;
 
   const handleOpenPayment = (m: any) => {
     setEditingId(m.Id);
     const remaining = Math.max(0, Number(m.AmountDue) - Number(m.AmountPaid || 0));
     setPayForm({
-      // Pre-fill with remaining balance if nothing is recorded yet; show existing value otherwise
-      AmountPaid: m.AmountPaid != null && Number(m.AmountPaid) > 0 ? String(m.AmountPaid) : (remaining > 0 ? String(remaining) : ""),
-      PaidDate: m.PaidDate ? String(m.PaidDate).slice(0, 10) : todayStr(),
-      PaymentMode: m.PaymentMode || "",
+      // The amount is recorded as a NEW payment (a receipt), not a running
+      // total - so it starts at what's still due. It used to show what was
+      // already paid on a part-paid instalment, and saving recorded it again.
+      AmountPaid: remaining > 0 ? String(remaining) : "",
+      PaidDate: todayStr(),
+      PaymentMode: "",
       // Deliberately NOT pre-filled from the KYC bank on file. The whole
       // point of this field is that a customer can pay from any of their
       // accounts — defaulting to the registered one would silently record
@@ -268,9 +271,10 @@ const CrmPaymentMilestones: React.FC = () => {
       // The bank on file stays visible just below as reference. Matches
       // Received Payment's own Customer Bank Name field, which also starts
       // empty.
-      BankName: m.BankName || "",
-      TransactionRef: m.TransactionRef || "",
-      Remarks: m.Remarks || "",
+      // A new payment's own details - never the previous payment's cheque / ref.
+      BankName: "",
+      TransactionRef: "",
+      Remarks: "",
       DepositBankId: m.DepositBankId != null ? String(m.DepositBankId)
         : projectBanks.length === 1 ? String(projectBanks[0].BId) : "",
     });
@@ -1078,7 +1082,7 @@ const CrmPaymentMilestones: React.FC = () => {
             <div className="space-y-4">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className={LABEL}>Amount Paid (₹)</label>
+                  <label className={LABEL}>Amount Received Now (₹)</label>
                   <input type="number" value={payForm.AmountPaid}
                     onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))}
                     className={`${FIELD} font-semibold tabular-nums`} />

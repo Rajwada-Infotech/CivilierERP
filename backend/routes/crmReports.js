@@ -284,6 +284,8 @@ router.get("/customer-report", requirePageRight("crm-customers", "view"), async 
                  JOIN dbo.PlotMaster pm ON pm.Id = app.PlotId
                  WHERE ap2.CustomerId = c.Id AND pm.BlockId = @cpbBlockId)
     )`); }
+    // A project-restricted user sees only customers with an application in their projects.
+    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication aps WHERE aps.CustomerId = c.Id${require("../services/projectScope").projectPredicate(req.projectScope, "aps.ProjectId")})`);
     const result = await r.query(`
       SELECT c.CustomerNo, c.CustomerName, c.Mobile, c.Email,
         (SELECT COUNT(*) FROM dbo.CrmBooking bk JOIN dbo.CrmApplication ap ON ap.Id = bk.ApplicationId
@@ -302,7 +304,7 @@ router.get("/application-funnel", requirePageRight("crm-applications", "view"), 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(a.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "b.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "um.BlockId" }); // no alias b here — the block comes from the picked unit
     const conds = ["a.IsActive = 1", ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);
@@ -513,6 +515,7 @@ router.get("/parking-report", requirePageRight("crm-parking-booking", "view"), a
     // — skipped for this report rather than half-implemented.
     if (companyId) { req0.input("cpbCompanyId", sql.Int, companyId); conds.push("(a.CompanyId = @cpbCompanyId OR b.CompanyId = @cpbCompanyId)"); }
     if (projectId) { req0.input("cpbProjectId", sql.Int, projectId); conds.push("(a.ProjectId = @cpbProjectId OR b.ProjectId = @cpbProjectId)"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "ISNULL(b.ProjectId, a.ProjectId)", "").trim());
     const result = await req0.query(`
       SELECT ISNULL(b.BookingNo, '(Standalone)') AS BookingNo,
         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, pa.ParkingSlotNo, pa.Quantity,
@@ -589,6 +592,7 @@ router.get("/construction-updates", requirePageRight("crm-construction-updates",
     const r = pool.request();
     dr.bind(r);
     if (projectId) { r.input("cpbProjectId", sql.Int, projectId); conds.push("u.ProjectId = @cpbProjectId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
     const result = await r.query(`
       SELECT u.ProjectName, CAST(u.UpdateDate AS DATE) AS UpdateDate,
         u.PercentComplete, u.Stage, u.Summary

@@ -156,6 +156,12 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
   const tx = new sql.Transaction(pool);
   await tx.begin();
   try {
+    // Re-check under a lock on the refund: two calls at once (paid + the
+    // manual "issue" button) both passed the check above and issued twice.
+    await tx.request().input("r", sql.Int, refundId).query("SELECT Id FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @r");
+    const liveNow = (await tx.request().input("r", sql.Int, refundId)
+      .query("SELECT COUNT(*) AS n FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0].n;
+    if (liveNow) { await tx.rollback(); return { none: "already issued" }; }
     for (let i = 0; i < pieces.length; i++) {
       const p = pieces[i];
       const gst = i === pieces.length - 1 ? r2(gstLeft) : r2((totalGst * p.amount) / net);
@@ -228,7 +234,7 @@ const SELECT_NOTE_DETAIL = `
          n.AgainstRef, n.AgainstDate, n.DocDate, n.TaxableValue, n.GstRate, n.GstAmount, n.TotalAmount, n.DeadlineDate,
          n.Remarks, n.CreatedBy, n.CreatedAt, n.CancelledAt, n.CancelledBy, n.CancelReason, n.ReplacesId, n.Source,
          n.ReasonType, n.ApprovalStatus, n.RequestedById, n.RequestedAt, n.ApprovedAt, n.RejectionNote, n.MilestoneId,
-         n.OnAccountId, n.MovedToAccount, n.CancelApprovalStatus, n.CancelRequestedById, n.CancelRequestedAt, n.CancelRequestReason,
+         n.OnAccountId, n.MovedToAccount, n.DueReducedBy, n.CancelApprovalStatus, n.CancelRequestedById, n.CancelRequestedAt, n.CancelRequestReason,
          r.RefundNo, r.SourceType AS RefundSource, r.Reason AS RefundReason, r.PaidAt AS RefundPaidAt, r.GrossAmount AS RefundGross,
          r.DeductionAmount AS RefundKept, r.NetAmount AS RefundNet,
          b.BookingNo, ISNULL(b.UnitNo, b.BookingNo) AS Property, b.HsnCode, b.ApplicationId,
@@ -577,7 +583,7 @@ async function applyAdjustment(pool, id, user) {
   const docNo = await getNextDocNumber(pool, "CRN", "CRN");
   const tx = new sql.Transaction(pool);
   await tx.begin();
-  let moved = 0, onAccountId = null, n;
+  let moved = 0, onAccountId = null, n, dueReducedBy = null;
   try {
     n = (await tx.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmGstNote WITH (UPDLOCK) WHERE Id = @id")).recordset[0];
     const amount = r2(n.TotalAmount);
@@ -588,6 +594,7 @@ async function applyAdjustment(pool, id, user) {
         .query("SELECT Id, AmountDue, AmountPaid, MilestoneName FROM dbo.CrmPaymentMilestone WITH (UPDLOCK) WHERE Id = @m")).recordset[0];
       if (m) {
         const newDue = r2(Math.max(0, Number(m.AmountDue) - amount));
+        dueReducedBy = r2(Number(m.AmountDue) - newDue);
         moved = r2(Math.max(0, Number(m.AmountPaid || 0) - newDue));
         if (moved > 0) {
           // The milestone's paid figure is the sum of its receipts: an
@@ -612,8 +619,9 @@ async function applyAdjustment(pool, id, user) {
       }
     }
     await tx.request().input("id", sql.Int, id).input("no", sql.NVarChar(16), docNo).input("mv", sql.Decimal(18, 2), moved || null).input("oa", sql.Int, onAccountId)
+      .input("dr", sql.Decimal(18, 2), dueReducedBy)
       .query(`UPDATE dbo.CrmGstNote SET DocNo = @no, Status = N'Issued', ApprovedAt = SYSDATETIME(), DocDate = CAST(SYSDATETIME() AS DATE),
-                MovedToAccount = @mv, OnAccountId = @oa WHERE Id = @id`);
+                MovedToAccount = @mv, OnAccountId = @oa, DueReducedBy = @dr WHERE Id = @id`);
     await tx.commit();
   } catch (e) {
     try { await tx.rollback(); } catch { /* rolled back */ }
@@ -726,7 +734,10 @@ async function reverseAdjustment(pool, n, user) {
         await tx.request().input("o", sql.Int, n.OnAccountId).input("no", sql.NVarChar(30), n.DocNo)
           .query("UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = Amount, Status = N'Applied', Notes = ISNULL(Notes, '') + CHAR(10) + N'Withdrawn: credit note ' + @no + N' cancelled.' WHERE Id = @o");
       }
-      await tx.request().input("m", sql.Int, n.MilestoneId).input("t", sql.Decimal(18, 2), r2(n.TotalAmount)).query(`
+      // Put back what really came off (it never went below zero), not the
+      // whole note - older notes have no record of it and keep the total.
+      const putBack = n.DueReducedBy != null ? r2(n.DueReducedBy) : r2(n.TotalAmount);
+      await tx.request().input("m", sql.Int, n.MilestoneId).input("t", sql.Decimal(18, 2), putBack).query(`
         UPDATE dbo.CrmPaymentMilestone SET AmountDue = AmountDue + @t,
           AmountPaid = (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m),
           Status = CASE WHEN (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmPaymentReceipt WHERE MilestoneId = @m) >= AmountDue + @t THEN N'Paid'

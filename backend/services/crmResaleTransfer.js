@@ -283,10 +283,14 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
       await releaseBookingInventoryLines(tx, id);
       // What sat on account was counted in the price paid back — use it up,
       // so it can't be refunded or transferred a second time.
-      await tx.request().input("b", sql.Int, id).input("rid", sql.Int, resaleId).query(`
+      const usedUp = await tx.request().input("b", sql.Int, id).input("rid", sql.Int, resaleId).query(`
         UPDATE dbo.CrmOnAccountPayment SET AppliedAmount = Amount, Status = 'Applied',
           Notes = ISNULL(Notes, '') + CHAR(10) + 'Paid back in buy-back #' + CAST(@rid AS NVARCHAR(20))
+        OUTPUT INSERTED.Id
         WHERE BookingId = @b AND Amount - ISNULL(AppliedAmount, 0) > 0.009`);
+      for (const u of usedUp.recordset) {
+        await require("./crmLedger").syncCrmOnAccountLedger(tx, u.Id, actorEmail, `Paid back in buy-back #${resaleId}`);
+      }
       await syncApplicationOnBookingTerminal(tx, id, "Cancelled", "BookingBoughtBack", `Bought back by the developer (buy-back #${resaleId})`, actorUserId);
       await tx.request().input("b", sql.Int, id).query("UPDATE dbo.CrmMoneyReceipt SET Status = 'Rejected', UpdatedAt = SYSDATETIME() WHERE BookingId = @b AND Status = 'Pending'");
       await tx.request().input("b", sql.Int, id).input("by", sql.Int, actorUserId).query(`

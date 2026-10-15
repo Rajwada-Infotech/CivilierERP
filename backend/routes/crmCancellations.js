@@ -2,6 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const { reversePostingBySource } = require("../services/generalLedger");
 // Project access: a cancellation belongs to its booking's project.
 const { projectParamGuard, projectPredicate } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
@@ -563,11 +564,17 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await releaseAllParkingForBooking(tx, bookingId);
 
       // Orphaned Brokerage Clawback
-      // Void any pending brokerage tranches for this cancelled booking, and flag paid ones for clawback.
+      // Void any unpaid brokerage tranches for this cancelled booking, and flag paid ones for clawback.
+      // An Approved tranche (accrued, not yet paid) is voided too and its accrual reversed — left
+      // Approved, its rejected voucher let 'retry finance hand-off' raise a fresh payout for a
+      // cancelled booking.
+      const accrued = (await tx.request().input("bid", sql.Int, bookingId)
+        .query(`SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid AND Status = '${CrmStatus.APPROVED}'`)).recordset;
+      for (const a of accrued) await reversePostingBySource(tx, "CrmBrokerage", a.Id);
       await tx.request().input("bid", sql.Int, bookingId).query(`
         UPDATE dbo.CrmBrokerageMaster
         SET Status = '${CrmStatus.VOIDED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Auto-voided due to booking cancellation.'
-        WHERE BookingId = @bid AND Status = '${CrmStatus.PENDING}';
+        WHERE BookingId = @bid AND Status IN ('${CrmStatus.PENDING}', '${CrmStatus.APPROVED}');
 
         UPDATE dbo.CrmBrokerageMaster
         SET Status = '${CrmStatus.CLAWBACK_REQUIRED}', UpdatedAt = SYSDATETIME(), Notes = ISNULL(Notes, '') + char(10) + 'Clawback required due to booking cancellation.'
@@ -584,7 +591,8 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
         WHERE SourceCrmBrokerageId IN (
           SELECT Id FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid
         )
-        AND Status NOT IN ('Paid', 'Rejected', 'Deleted')
+        AND Status IN ('Draft', 'Pending')   -- unpaid only: a paid voucher is Status 'Approved' (the old
+                                            -- NOT IN ('Paid', ...) rejected real, already-paid payouts)
       `);
 
       // guardAndConvertHold() closes the Unit's hold to 'Converted' the moment
@@ -630,13 +638,18 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       if (heldTotal > 0) {
         // Fold the booking's still-open on-account rows into the hold so they
         // aren't double-counted (their money is now represented by the Held row).
-        await tx.request().input("bid", sql.Int, bookingId)
+        const rolled = await tx.request().input("bid", sql.Int, bookingId)
           .query(`
             UPDATE dbo.CrmOnAccountPayment
             SET AppliedAmount = Amount, Status = 'Applied',
                 Notes = ISNULL(Notes,'') + char(10) + 'Rolled into held credit on booking cancellation.'
+            OUTPUT INSERTED.Id
             WHERE BookingId = @bid AND ISNULL(Status,'') IN ('Unapplied','PartiallyApplied')
           `);
+        // Their free part now lives in the Held row - off the on-account figure.
+        for (const r of rolled.recordset) {
+          await require("../services/crmLedger").syncCrmOnAccountLedger(tx, r.Id, req.user?.email || req.user?.name || "system", "Rolled into held credit on booking cancellation");
+        }
         const heldIns = await tx.request()
           .input("no", sql.NVarChar(30), cancellationNo ? `${cancellationNo}-HOLD` : null)
           .input("bid", sql.Int, bookingId)

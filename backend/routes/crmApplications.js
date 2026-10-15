@@ -554,7 +554,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // taken; the old hold is only released afterward, once the new one is
     // confirmed in place.
     const newUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null;
-    const unitIsChanging = newUnitId !== existingUnitId;
+    // Only a save that actually sends a unit (or switches to plots) changes it:
+    // the wizard's step saves send just { CurrentStep }, and treating that as
+    // "unit -> none" released the application's hold after step 1.
+    const unitSent = b.PreferredUnitId !== undefined || preferredPlotIds.length > 0;
+    const unitIsChanging = unitSent && newUnitId !== existingUnitId;
     if (unitIsChanging && newUnitId !== null) {
       try {
         await placeHoldIfNeeded(pool, {
@@ -608,7 +612,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       ? parseFloat(b.BrokerageRatePercent)
       : (bridge?.commissionRate ?? null);
 
-    await pool.request()
+    // The application row and its unit / plot lines are saved together — a
+    // failure part-way used to leave the old lines deleted and the new ones
+    // not written (the application with no unit / plot picked).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    await tx.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
       .input("mob",  sql.NVarChar(20),  b.Mobile || null)
@@ -636,7 +646,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       .input("dbid", sql.Int,           b.DepositBankId !== undefined && b.DepositBankId !== null && b.DepositBankId !== "" ? parseInt(b.DepositBankId) : null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null).input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          brokerId)
       .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
@@ -654,7 +664,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           ProjectId = ISNULL(@pid, ProjectId), PreferredUnitId = CASE WHEN @plotselected = 1 THEN NULL WHEN @uid IS NOT NULL THEN @uid ELSE PreferredUnitId END,
           CompanyId = ISNULL(@cid, CompanyId),
           InterestedProject = ISNULL(@proj, InterestedProject), InterestedUnit = ISNULL(@unit, InterestedUnit),
-          PropertyType = @pt, BhkPreference = @bhk,
+          PropertyType = ISNULL(@pt, PropertyType), BhkPreference = ISNULL(@bhk, BhkPreference),
           Source = ISNULL(@src, Source),
           PlatformId = ISNULL(@platid, PlatformId), CampaignId = ISNULL(@campid, CampaignId),
           AdId = ISNULL(@adid, AdId), ChannelPartnerId = ISNULL(@cpid, ChannelPartnerId),
@@ -669,7 +679,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
-          Notes = @note,
+          Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END,
           CurrentStep = CASE WHEN @cstep IS NOT NULL AND @cstep > CurrentStep THEN @cstep ELSE CurrentStep END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
@@ -677,10 +687,10 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // Update CrmApplicationUnit lines if PreferredUnitIds was provided
     if (b.PreferredUnitIds !== undefined) {
       const rawIds = Array.isArray(b.PreferredUnitIds) ? b.PreferredUnitIds : [];
-      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
+      await tx.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
       if (rawIds.length > 0) {
         for (const uidStr of rawIds) {
-          await pool.request()
+          await tx.request()
             .input("aid", sql.Int, id)
             .input("uid", sql.Int, parseInt(uidStr))
             .input("pri", sql.Bit, String(uidStr) === String(b.PreferredUnitId) ? 1 : 0)
@@ -689,14 +699,19 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
     if (b.PreferredPlotIds !== undefined) {
-      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
+      await tx.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
       for (let index = 0; index < preferredPlotIds.length; index++) {
-        await pool.request()
+        await tx.request()
           .input("aid", sql.Int, id)
           .input("pid", sql.Int, preferredPlotIds[index])
           .input("pri", sql.Bit, index === 0 ? 1 : 0)
           .query("INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedAt) VALUES (@aid, @pid, 'Active', @pri, SYSDATETIME())");
       }
+    }
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
     }
 
 
