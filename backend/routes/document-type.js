@@ -67,7 +67,7 @@ const MODULE_LINKS = {
 // gated this way — only auth (already applied globally) is required here.
 router.get(
   "/",
-  cache("document-type", 300, { shared: true }),
+  cache("document-type", 300, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

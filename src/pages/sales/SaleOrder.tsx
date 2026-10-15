@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { ServerPager } from "@/components/ServerPager";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SalesShell } from "@/components/sales/SalesShell";
@@ -567,12 +568,21 @@ function SOItemRow({
 function SaleOrderHistory() {
   const rights = usePageRights("sale-order");
   const queryClient = useQueryClient();
+  // Server-paged: one page of orders per request (newest first), however many exist.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["sale-orders"],
-    queryFn: () => getSaleOrders({ limit: 50, page: 1 }),
+    queryKey: ["sale-orders", "history", page, pageSize],
+    queryFn: () => getSaleOrders({ page, limit: pageSize }),
     staleTime: 60_000,
+    placeholderData: keepPreviousData, // keep the current rows on screen while the next page loads
   });
   const orders: SaleOrderDoc[] = data?.data ?? [];
+  const total = Number(data?.total ?? 0);
+  // A page past the end (rows removed since it was opened, e.g. the last one on it deleted) comes back empty.
+  useEffect(() => {
+    if (!isFetching && page > 1 && data && orders.length === 0) setPage(1);
+  }, [isFetching, page, data, orders.length]);
   const [viewingOrder, setViewingOrder] = useState<SaleOrderDoc | null>(null);
 
   // One request for every visible row's approval trail instead of one per
@@ -736,6 +746,8 @@ function SaleOrderHistory() {
           </tbody>
         </table>
       </div>
+
+      <ServerPager page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
 
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/*  VIEW / PRINT MODAL                                                */}

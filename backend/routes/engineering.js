@@ -949,7 +949,7 @@ router.put("/work-done/:id/reject", async (req, res) => {
 // ── GET /engineering/work-orders-with-activities ──────────────────────────────
 router.get(
   "/work-orders-with-activities",
-  cache("eng-wo-with-activities", 300),
+  cache("eng-wo-with-activities", 300, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -1125,7 +1125,7 @@ router.get("/boq-items/:boqId", async (req, res) => {
 // Lightweight list of Approved BOQs for the Work Order BOQ picker.
 router.get(
   "/approved-boqs",
-  cache("eng-approved-boqs", 120),
+  cache("eng-approved-boqs", 120, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

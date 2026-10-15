@@ -20,7 +20,7 @@ const { cache } = require("../middleware/cache");
  *   - Recent payments made               : last 8 rows
  *   - Recent received payments           : last 8 rows
  */
-router.get("/", cache("finance-dashboard", 60), async (req, res) => {
+router.get("/", cache("finance-dashboard", 60, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
 

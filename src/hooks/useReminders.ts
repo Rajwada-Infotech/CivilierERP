@@ -269,10 +269,10 @@ export async function fetchAllReminders(
       : Promise.resolve(null);
 
   const [poRes, grnRes, tdsRes, woRes] = await Promise.allSettled([
-    maybeFetch("/api/purchase-orders", "purchase_order"),
-    maybeFetch("/api/grns", "grn"),
+    maybeFetch("/api/purchase-orders?limit=500", "purchase_order"),
+    maybeFetch("/api/grns?limit=500", "grn"),
     maybeFetch("/api/tds-master", "tds"),
-    maybeFetch("/api/work-orders", "work_order"),
+    maybeFetch("/api/work-orders?limit=100", "work_order"),
   ]);
 
   const toList = async (res: PromiseSettledResult<Response | null>) => {

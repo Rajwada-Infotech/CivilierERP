@@ -11,7 +11,7 @@ router.use(authMiddleware);
 router.use(apiRateLimit);
 
 // GET /projects — project dropdown (mirrors unitMaster.js /projects)
-router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600), async (req, res) => {
+router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`

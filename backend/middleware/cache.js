@@ -12,6 +12,10 @@ const {
   getPredictedRPM,
 } = require("../redis");
 
+// Version bumped by middleware/writeInvalidator.js after every successful write; caches made with
+// { dropOnAnyWrite: true } fold it into their key.
+const ANY_WRITE_NAMESPACE = "any-write";
+
 // ─── IN-PROCESS VERSION CACHE ─────────────────────────────────────────────────
 // Avoids a Redis GET for the version number on every request.
 // Re-fetches from Redis at most every VERSION_TTL_MS.
@@ -141,12 +145,15 @@ async function computeDynamicTtl(fallback = 300) {
  *
  * Options:
  *   shared: true    — one cache entry for all users (master data routes).
+ *   dropOnAnyWrite: true — also dropped whenever ANY write succeeds anywhere in the API (see
+ *                    middleware/writeInvalidator.js). For lists, dashboards and reports built from many tables,
+ *                    whose writers can't all be made to bump this namespace.
  *   fixedTtl: true  — keep exactly `ttl` (skip the load-based dynamic TTL, which can only lengthen it to 60–300 s).
  *
  * Adds req.timing stages when req.timing is present:
  *   cache.version_check  cache.lookup  cache.lock  cache.write
  */
-function cache(namespace, ttl = 300, { shared = false, fixedTtl = false } = {}) {
+function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnAnyWrite = false } = {}) {
   return async (req, res, next) => {
     try {
       // Fast-exit: Redis is down, skip all cache logic
@@ -170,7 +177,10 @@ function cache(namespace, ttl = 300, { shared = false, fixedTtl = false } = {}) 
 
       // Version check — served from memory, rarely touches Redis
       const vStart = req.timing?.startStage();
-      const version = await redisOp(() => localVersionCache.get(namespace), 0);
+      const nsVersion = await redisOp(() => localVersionCache.get(namespace), 0);
+      const version = dropOnAnyWrite
+        ? `${nsVersion}.${await redisOp(() => localVersionCache.get(ANY_WRITE_NAMESPACE), 0)}`
+        : nsVersion;
       if (vStart) req.timing.mark("cache.version_check", vStart);
 
       const key = `cache:${namespace}:v${version}:${scopeId}:${routeScope}`;
@@ -297,4 +307,4 @@ function cache(namespace, ttl = 300, { shared = false, fixedTtl = false } = {}) 
   };
 }
 
-module.exports = { cache, localVersionCache };
+module.exports = { cache, localVersionCache, ANY_WRITE_NAMESPACE };

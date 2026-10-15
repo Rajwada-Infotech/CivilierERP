@@ -90,6 +90,8 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN YEAR(GRNDate)  = YEAR(GETDATE())
                       AND MONTH(GRNDate) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount,
           COUNT(CASE WHEN CAST(GRNDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount,
+          ISNULL(SUM(CASE WHEN YEAR(GRNDate)  = YEAR(GETDATE())
+                           AND MONTH(GRNDate) = MONTH(GETDATE()) THEN TotalAmount ELSE 0 END), 0) AS ThisMonthValue,
           ISNULL(SUM(TotalAmount), 0) AS TotalValue,
           ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected')
                           THEN TotalAmount ELSE 0 END), 0) AS OpenValue
@@ -101,11 +103,11 @@ router.get("/", async (req, res) => {
       safeQuery(`
         SELECT
           COUNT(*)                                                                     AS TotalCount,
-          COUNT(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected') THEN 1 END)  AS OpenCount,
+          COUNT(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected','Received','Cancelled') THEN 1 END) AS OpenCount,
           COUNT(CASE WHEN ISNULL(Status,'') = 'Approved' THEN 1 END)                  AS ApprovedCount,
           COUNT(CASE WHEN ISNULL(Status,'') = 'Pending'  THEN 1 END)                  AS PendingCount,
           ISNULL(SUM(TotalAmount), 0)                                                  AS TotalValue,
-          ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected')
+          ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected','Received','Cancelled')
                           THEN TotalAmount ELSE 0 END), 0)                             AS OpenValue
         FROM dbo.PurchaseOrders
         WHERE 1=1${poP}
@@ -152,12 +154,12 @@ router.get("/", async (req, res) => {
       `),
 
       // ── Recent GRNs (last 6) ─────────────────────────────────────────
-      // FIX: removed TotalAmount (column doesn't exist), use correct POID casing
       safeQuery(`
         SELECT TOP 6
           grn.GRNID,
           grn.GRNNo,
           grn.GRNDate,
+          grn.TotalAmount,
           grn.Status,
           grn.Remarks,
           grn.CreatedDate,
@@ -208,10 +210,11 @@ router.get("/", async (req, res) => {
       safeQuery(`
         SELECT TOP 6
           eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.EStatus,
-          eb.EProjectName, eb.EDocumentType, eb.ESourceType, eb.ECreatedAt,
+          ISNULL(pj.name, eb.EProjectName) AS EProjectName, eb.EDocumentType, eb.ESourceType, eb.ECreatedAt,
           ah.LHeadName AS SupplierName
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = eb.LHeadId
+        LEFT JOIN dbo.enterprise pj ON pj.id = ${ebResolvedProjectSql("eb")}
         WHERE ISNULL(eb.EStatus, '') != 'Draft'${ebP}
         ORDER BY eb.Eid DESC
       `),
@@ -248,7 +251,7 @@ router.get("/", async (req, res) => {
           SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END) -
           SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END) AS NetStock
         FROM dbo.StockLedger sl
-        LEFT JOIN dbo.Item_Master_Group img ON img.M_Code = sl.ItemID
+        LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = sl.ItemID
         WHERE 1=1${slP("sl.GodownID")}
         GROUP BY sl.ItemID, img.M_Name
         ORDER BY TotalIn DESC
@@ -371,6 +374,7 @@ router.get("/", async (req, res) => {
         thisMonth: gr.ThisMonthCount ?? 0,
         today: gr.TodayCount ?? 0,
         totalValue: parseFloat(gr.TotalValue ?? 0),
+        thisMonthValue: parseFloat(gr.ThisMonthValue ?? 0),
         openValue: parseFloat(gr.OpenValue ?? 0),
       },
       purchaseOrders: {

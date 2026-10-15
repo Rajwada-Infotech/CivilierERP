@@ -1,8 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart3,
-  CheckCircle2,
   X,
   Receipt,
   HardHat,
@@ -10,7 +9,9 @@ import {
   Puzzle,
   Users,
   ChevronRight,
-
+  ChevronDown,
+  Search,
+  UserRound,
   Landmark,
   TrendingUp,
   ClipboardList,
@@ -545,9 +546,13 @@ const civilWorkDprSetupItems: SetupItem[] = [
 ];
 
 export const MobileNav: React.FC = () => {
-  const [open, setOpen] = useState(false);
+  // Which full-height sheet is open from the bottom bar: the module menu, or "Me" (profile, theme, sign out).
+  const [sheet, setSheet] = useState<null | "menu" | "me">(null);
+  const open = sheet !== null;
+  const setOpen = (v: boolean) => { if (!v) setSheet(null); };
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"nav" | "setup" | "theme">("nav");
+  const [showSetup, setShowSetup] = useState(false);
+  const [query, setQuery] = useState("");
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -573,8 +578,9 @@ export const MobileNav: React.FC = () => {
 
   // Close on route change
   useEffect(() => {
-    setOpen(false);
+    setSheet(null);
     setExpandedGroup(null);
+    setQuery("");
   }, [location.pathname]);
 
   // Lock body scroll when open
@@ -767,633 +773,448 @@ export const MobileNav: React.FC = () => {
     sage: "#6b8f71",
   };
 
-  const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [
-    { id: "nav", label: "Navigation" },
-    {
-      id: "setup",
-      label: setupConfig.available ? `Setup · ${setupConfig.label}` : "Setup",
-    },
-    { id: "theme", label: "Appearance" },
+  const modColor = (alpha?: number) =>
+    alpha == null
+      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
+      : `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / ${alpha})`;
+  const ActiveModIcon = activeMod.icon;
+
+  const visibleSetupItems = setupConfig.items.filter((it) => !it.pageKey || canAccessPage(it.pageKey));
+
+  // Open the group that holds the current page, so the menu opens where you are.
+  useEffect(() => {
+    if (sheet !== "menu") return;
+    const g = navItems.find((it) => it.children?.some((c) => c.path === location.pathname));
+    setExpandedGroup(g ? g.label : null);
+    setShowSetup(visibleSetupItems.some((it) => it.path === location.pathname));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet]);
+
+  // Find-a-page: every page of this module and its Setup, by name.
+  const searchResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const out: { label: string; path: string; where: string; icon?: React.ElementType }[] = [];
+    navItems.forEach((it) => {
+      if (it.path && it.label.toLowerCase().includes(q)) out.push({ label: it.label, path: it.path, where: activeMod.label, icon: it.icon });
+      it.children?.forEach((c) => {
+        if (c.label.toLowerCase().includes(q) || it.label.toLowerCase().includes(q))
+          out.push({ label: c.label, path: c.path, where: it.label, icon: it.icon });
+      });
+    });
+    visibleSetupItems.forEach((it) => {
+      if (it.label.toLowerCase().includes(q)) out.push({ label: it.label, path: it.path, where: "Setup", icon: it.icon });
+    });
+    return out.slice(0, 40);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, navItems.length, activeModKey, visibleSetupItems.length]);
+
+  const profilePath = isSuperAdmin
+    ? "/superadmin/profile"
+    : isDba
+      ? "/dba/profile"
+      : currentUser?.role === "admin"
+        ? "/admin/profile"
+        : "/user/profile";
+
+  const roleLabel = isSuperAdmin ? "Super Admin" : isDba ? "DBA" : isAdmin ? "Admin" : (currentUser?.role || "User");
+
+  const switchModule = (id: string, meta: ModuleMeta) => {
+    if (id === "admin") {
+      navigate(
+        isAdminTier
+          ? "/admin/dashboard"
+          : firstAccessibleAdminPath((pk) => canAccessPage(pk as any)) ?? "/admin/approval/inbox",
+      );
+    } else {
+      setActiveModule(id as any);
+      navigate(meta.route);
+    }
+    setSheet(null);
+  };
+
+  const Avatar = ({ size }: { size: number }) => (
+    <span
+      className="relative inline-flex shrink-0 overflow-hidden rounded-full"
+      style={{
+        width: size,
+        height: size,
+        background: currentUser?.avatarUrl
+          ? "hsl(var(--muted))"
+          : `linear-gradient(135deg, ${modColor()}, hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 15, 20)}%))`,
+      }}
+    >
+      {currentUser?.avatarUrl ? (
+        <img src={currentUser.avatarUrl} alt={currentUser.name} className="h-full w-full object-cover" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center font-heading font-bold text-white" style={{ fontSize: size * 0.38 }}>
+          {currentUser?.initials || "?"}
+        </span>
+      )}
+    </span>
+  );
+
+  // ── Bottom bar items ──────────────────────────────────────────────────────
+  const barItems: { id: string; label: string; icon: React.ElementType; active: boolean; onClick: () => void }[] = [
+    { id: "home", label: "Home", icon: Home, active: !sheet && location.pathname === "/home", onClick: () => go("/home") },
+    { id: "menu", label: "Menu", icon: LayoutGrid, active: sheet === "menu", onClick: () => setSheet(sheet === "menu" ? null : "menu") },
+    { id: "reports", label: "Reports", icon: BarChart3, active: !sheet && location.pathname.startsWith("/reports"), onClick: () => go("/reports") },
+    { id: "me", label: "Me", icon: UserRound, active: sheet === "me", onClick: () => setSheet(sheet === "me" ? null : "me") },
   ];
+
+  const rowBase = "w-full flex items-center gap-3 px-3 min-h-[46px] rounded-xl text-left transition-colors active:scale-[0.99]";
 
   return (
     <>
       {logoutOverlay}
+      <style>{`
+        @keyframes mnFade { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes mnSheet { from { transform: translateY(100%) } to { transform: translateY(0) } }
+      `}</style>
 
-      {/* ── FAB trigger ─────────────────────────────────────────────────────── */}
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="Open navigation"
-        className="fixed z-50 md:hidden"
-        style={{
-          bottom: "max(1.25rem, env(safe-area-inset-bottom, 1.25rem))",
-          right: "max(1.25rem, env(safe-area-inset-right, 1.25rem))",
-        }}
-      >
-        <span
-          className="absolute inset-0 rounded-2xl animate-pulse"
-          style={{
-            background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
-            filter: "blur(8px)",
-            transform: "scale(1.3)",
-          }}
-        />
-        <span
-          className="relative flex items-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold shadow-2xl"
-          style={{
-            background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 12, 20)}%))`,
-            color: "white",
-          }}
-        >
-          <Grip size={16} />
-          <span className="text-xs tracking-wide font-heading">
-            {activeMod.label}
-          </span>
-        </span>
-      </button>
-
-      {/* ── Full-screen overlay ──────────────────────────────────────────────── */}
+      {/* ── Sheet (above the bar) ────────────────────────────────────────────── */}
       {open && (
-        <div
-          className="fixed inset-0 z-[60] md:hidden"
-          style={{ animation: "fadeInOverlay 200ms ease-out both" }}
-        >
-          <style>{`
-            @keyframes fadeInOverlay { from { opacity: 0 } to { opacity: 1 } }
-            @keyframes slideUpPanel { from { transform: translateY(100%) } to { transform: translateY(0) } }
-            @keyframes popIn {
-              from { opacity: 0; transform: scale(0.92) translateY(8px) }
-              to   { opacity: 1; transform: scale(1) translateY(0) }
-            }
-            .nav-item-enter { animation: popIn 220ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
-          `}</style>
-
-          {/* Backdrop */}
+        <div className="fixed inset-0 z-[60] md:hidden" style={{ animation: "mnFade 180ms ease-out both" }}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSheet(null)} />
           <div
-            className="absolute inset-0 bg-background/70 backdrop-blur-md"
-            onClick={() => setOpen(false)}
-          />
-
-          {/* Panel */}
-          <div
-            className="absolute inset-x-0 bottom-0 flex flex-col rounded-t-[2rem] border-t border-border overflow-hidden"
+            role="dialog"
+            aria-label={sheet === "menu" ? `${activeMod.label} menu` : "Account"}
+            className="absolute inset-x-0 flex flex-col overflow-hidden rounded-t-[1.75rem] border-t border-border shadow-2xl"
             style={{
-              maxHeight: "93svh",
-              animation:
-                "slideUpPanel 300ms cubic-bezier(0.32, 0.72, 0, 1) both",
+              bottom: "calc(64px + env(safe-area-inset-bottom, 0px))",
+              maxHeight: "calc(100svh - 64px - env(safe-area-inset-bottom, 0px) - 24px)",
               background: "hsl(var(--card))",
+              animation: "mnSheet 280ms cubic-bezier(0.32, 0.72, 0, 1) both",
             }}
           >
-            {/* Colour accent bar */}
-            <div
-              className="h-1 w-full flex-shrink-0 rounded-full"
-              style={{
-                background: `linear-gradient(90deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.min(activeMod.l + 20, 90)}%))`,
-              }}
-            />
-
-            {/* Drag handle */}
-            <div className="flex justify-center pt-2 pb-1 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+            <div className="flex justify-center pt-2.5 pb-1 shrink-0">
+              <div className="h-1 w-10 rounded-full bg-muted-foreground/25" />
             </div>
 
-            {/* ── Header row ─────────────────────────────────────────────────── */}
-            <div className="flex items-center gap-2.5 px-4 py-3 flex-shrink-0">
-              {/* Avatar */}
-              <div
-                className="relative w-8 h-8 rounded-lg flex-shrink-0 overflow-hidden"
-                style={
-                  currentUser?.avatarUrl
-                    ? { background: "hsl(var(--muted))" }
-                    : {
-                        background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 15, 20)}%))`,
-                      }
-                }
-              >
-                {currentUser?.avatarUrl ? (
-                  <img
-                    src={currentUser.avatarUrl}
-                    alt={currentUser.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="w-full h-full flex items-center justify-center text-white font-heading font-bold text-sm">
-                    {currentUser?.initials || "?"}
+            {sheet === "menu" && (
+              <>
+                {/* Header: current module, switch, close */}
+                <div className="flex items-center gap-3 px-4 pt-1 pb-3 shrink-0">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm" style={{ background: modColor() }}>
+                    <ActiveModIcon size={20} />
                   </span>
-                )}
-                {isSuperAdmin && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-violet-600 border-2 border-card flex items-center justify-center">
-                    <Crown size={9} className="text-white" />
-                  </span>
-                )}
-                {!isSuperAdmin && isDba && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-600 border-2 border-card flex items-center justify-center">
-                    <Data size={9} className="text-white" />
-                  </span>
-                )}
-                {!isSuperAdmin && !isDba && isAdmin && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-blue-600 border-2 border-card flex items-center justify-center">
-                    <ShieldTick size={9} className="text-white" />
-                  </span>
-                )}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <p className="font-heading font-semibold text-xs text-foreground truncate leading-tight">
-                  {currentUser?.name}
-                </p>
-                <p className="text-[0.6875rem] text-muted-foreground truncate leading-tight">
-                  {currentUser?.email}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => {
-                    setOpen(false);
-                    navigate(
-                      isSuperAdmin
-                        ? "/superadmin/profile"
-                        : isDba
-                          ? "/dba/profile"
-                          : currentUser?.role === "admin"
-                            ? "/admin/profile"
-                            : "/user/profile",
-                    );
-                  }}
-                  className="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
-                >
-                  <Profile size={15} className="text-muted-foreground" />
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="w-7 h-7 rounded-lg border border-destructive/30 flex items-center justify-center hover:bg-destructive/10 transition-colors"
-                >
-                  <Logout size={15} className="text-destructive" />
-                </button>
-                <button
-                  onClick={() => setOpen(false)}
-                  className="w-7 h-7 rounded-lg border border-border flex items-center justify-center hover:bg-muted transition-colors"
-                >
-                  <X size={15} className="text-muted-foreground" />
-                </button>
-              </div>
-            </div>
-
-            {/* ── Module strip ─────────────────────────────────────────────────── */}
-            <div className="px-4 pb-3 flex-shrink-0">
-              <div
-                className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
-                style={{ scrollbarWidth: "none" }}
-              >
-                {moduleModules.map(([id, meta]) => {
-                  const isActive = isAdminPage
-                    ? id === "admin"
-                    : activeModule === id;
-                  const Icon = meta.icon;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => {
-                        if (id === "admin") {
-                          navigate(
-                            isAdminTier
-                              ? "/admin/dashboard"
-                              : firstAccessibleAdminPath((pk) => canAccessPage(pk as any)) ?? "/admin/approval/inbox",
-                          );
-                          setOpen(false);
-                          return;
-                        }
-                        setActiveModule(id as any);
-                        navigate(meta.route);
-                        setOpen(false);
-                      }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg flex-shrink-0 transition-all duration-200 text-[0.6875rem] font-heading font-medium border"
-                      style={
-                        isActive
-                          ? {
-                              background: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.15)`,
-                              borderColor: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.4)`,
-                              color: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
-                              backdropFilter: "blur(8px)",
-                            }
-                          : {
-                              borderColor: "hsl(var(--border))",
-                              color: "hsl(var(--muted-foreground))",
-                              background: "transparent",
-                            }
-                      }
-                    >
-                      <Icon size={13} />
-                      {meta.label}
-                      {isActive && (
-                        <span
-                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
-                          }}
-                        />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* ── Tab bar ─────────────────────────────────────────────────────── */}
-            <div className="px-4 pb-2.5 flex-shrink-0">
-              <div className="flex gap-1 p-0.5 rounded-lg bg-muted">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className="flex-1 py-1.5 rounded-md text-[0.6875rem] font-heading font-medium transition-all text-center"
-                    style={
-                      activeTab === tab.id
-                        ? {
-                            background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`,
-                            color: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`,
-                          }
-                        : { color: "hsl(var(--muted-foreground))" }
-                    }
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* ── Scrollable content ───────────────────────────────────────────── */}
-            <div className="flex-1 overflow-y-auto overscroll-contain pb-6">
-              {/* ── Navigation tab ──────────────────────────────────────────────── */}
-              {activeTab === "nav" && (
-                <div className="px-4 space-y-0.5 pt-1">
-                  {/* Quick links */}
-                  <div className="grid grid-cols-2 gap-1.5 mb-2">
-                    {[
-                      { label: "Home", icon: Home, path: "/home" },
-                      { label: "Reports", icon: BarChart3, path: "/reports" },
-                      { label: "Widgets", icon: Puzzle, path: "/widgets" },
-                      { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
-                    ].map(({ label, icon: Icon, path }, i) => {
-                      const active = location.pathname === path;
-                      return (
-                        <button
-                          key={path}
-                          onClick={() => go(path)}
-                          className="nav-item-enter flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-heading transition-all text-left"
-                          style={{
-                            animationDelay: `${i * 35}ms`,
-                            borderColor: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.4)`
-                              : "hsl(var(--border))",
-                            background: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                              : "transparent",
-                            color: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                              : "hsl(var(--foreground))",
-                          }}
-                        >
-                          <Icon
-                            size={15}
-                            style={{ opacity: active ? 1 : 0.5 }}
-                          />
-                          {label}
-                        </button>
-                      );
-                    })}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[0.625rem] uppercase tracking-[0.18em] text-muted-foreground">{activeModKey === "__none__" ? "Menu" : "You are in"}</p>
+                    <p className="truncate font-heading text-base font-bold text-foreground">{activeModKey === "__none__" ? "Choose a module" : activeMod.label}</p>
                   </div>
+                  <button onClick={() => setSheet(null)} aria-label="Close menu" className="flex h-9 w-9 items-center justify-center rounded-full border border-border">
+                    <X size={16} className="text-muted-foreground" />
+                  </button>
+                </div>
 
-                  {navItems.length > 0 ? (
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
-                      {isAdminPage ? "Admin" : `${activeMod.label} Module`}
-                    </p>
-                  ) : !activeModule && !isAdminPage ? (
-                    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
-                      Select a module above to get started
-                    </p>
-                  ) : null}
+                {/* Search */}
+                <div className="px-4 pb-3 shrink-0">
+                  <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3">
+                    <Search size={15} className="text-muted-foreground" />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={activeModKey === "__none__" ? "Find a page…" : `Find a page in ${activeMod.label}…`}
+                      className="h-11 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                    />
+                    {query && (
+                      <button onClick={() => setQuery("")} aria-label="Clear search"><X size={14} className="text-muted-foreground" /></button>
+                    )}
+                  </div>
+                </div>
 
-                  {navItems.map((item, idx) => {
-                    const active = isItemActive(item);
-                    const isExpanded = expandedGroup === item.label;
-
-                    if (item.children) {
-                      return (
-                        <div
-                          key={item.label}
-                          className="nav-item-enter"
-                          style={{ animationDelay: `${(idx + 4) * 40}ms` }}
-                        >
+                <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pb-5 space-y-4">
+                  {/* Modules: always shown - swipe for more */}
+                  {!query.trim() && (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between px-1">
+                        <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-[0.18em] text-muted-foreground">All modules</p>
+                        <p className="text-[0.625rem] text-muted-foreground">{moduleModules.length} · swipe →</p>
+                      </div>
+                    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 snap-x" style={{ scrollbarWidth: "none" }}>
+                      {moduleModules.map(([id, meta]) => {
+                        const isActive = isAdminPage ? id === "admin" : activeModule === id;
+                        const Icon = meta.icon;
+                        const c = `hsl(${meta.h} ${meta.s}% ${meta.l}%)`;
+                        return (
                           <button
-                            onClick={() =>
-                              setExpandedGroup(isExpanded ? null : item.label)
-                            }
-                            className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left border"
+                            key={id}
+                            onClick={() => switchModule(id, meta)}
+                            ref={isActive ? (el) => el?.scrollIntoView({ block: "nearest", inline: "center" }) : undefined}
+                            className="flex w-[4.5rem] shrink-0 snap-start flex-col items-center gap-1.5 rounded-2xl border px-1 py-2.5 transition-colors"
                             style={{
-                              borderColor: active
-                                ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.35)`
-                                : isExpanded
-                                  ? "hsl(var(--border))"
-                                  : "transparent",
-                              background: active
-                                ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                                : isExpanded
-                                  ? "hsl(var(--muted) / 0.5)"
-                                  : "transparent",
+                              borderColor: isActive ? c : "hsl(var(--border))",
+                              background: isActive ? `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.10)` : "transparent",
                             }}
                           >
-                            <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                              style={{
-                                background:
-                                  active || isExpanded
-                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.15)`
-                                    : "hsl(var(--muted))",
-                              }}
-                            >
-                              <item.icon
-                                size={15}
-                                style={{
-                                  color:
-                                    active || isExpanded
-                                      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                      : "hsl(var(--muted-foreground))",
-                                }}
-                              />
-                            </div>
-                            <span
-                              className="flex-1"
-                              style={{
-                                color: active
-                                  ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                  : "hsl(var(--foreground))",
-                              }}
-                            >
-                              {item.label}
+                            <span className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.14)`, color: c }}>
+                              <Icon size={17} />
                             </span>
-                            <ChevronRight
-                              size={14}
-                              className="text-muted-foreground transition-transform duration-200"
-                              style={{
-                                transform: isExpanded
-                                  ? "rotate(90deg)"
-                                  : "rotate(0deg)",
-                              }}
-                            />
+                            <span className="w-full truncate text-center text-[0.625rem] font-heading font-medium text-foreground">{meta.label}</span>
                           </button>
+                        );
+                      })}
+                    </div>
+                    </div>
+                  )}
 
-                          {isExpanded && (
-                            <div
-                              className="ml-5 mt-1 mb-1 pl-4 border-l-2 space-y-0.5"
-                              style={{
-                                borderColor: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
-                              }}
-                            >
-                              {item.children.map((child, ci) => {
-                                const childActive =
-                                  location.pathname === child.path;
-                                const ChildIcon = child.icon;
+                  {query.trim() ? (
+                    /* Search results */
+                    <div className="space-y-1">
+                      {searchResults.length === 0 ? (
+                        <p className="py-8 text-center text-sm text-muted-foreground">No page matches “{query}”.</p>
+                      ) : (
+                        searchResults.map((r) => {
+                          const Icon = r.icon;
+                          const active = location.pathname === r.path;
+                          return (
+                            <button key={r.path + r.where} onClick={() => go(r.path)} className={rowBase} style={{ background: active ? modColor(0.1) : undefined }}>
+                              {Icon && <Icon size={16} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} />}
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-heading text-foreground">{r.label}</span>
+                                <span className="block truncate text-[0.6875rem] text-muted-foreground">{r.where}</span>
+                              </span>
+                              <ChevronRight size={14} className="text-muted-foreground" />
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {/* Pages */}
+                      {navItems.length > 0 && (
+                        <p className="-mb-2 px-1 text-[0.625rem] font-heading font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                          {activeMod.label} pages
+                        </p>
+                      )}
+                      {navItems.length === 0 ? null : (
+                        <div className="rounded-2xl border border-border p-1.5 space-y-0.5">
+                          {navItems.map((item) => {
+                            const active = isItemActive(item);
+                            if (item.children) {
+                              const isExpanded = expandedGroup === item.label;
+                              return (
+                                <div key={item.label}>
+                                  <button
+                                    onClick={() => setExpandedGroup(isExpanded ? null : item.label)}
+                                    className={rowBase}
+                                    style={{ background: isExpanded ? "hsl(var(--muted) / 0.5)" : undefined }}
+                                    aria-expanded={isExpanded}
+                                  >
+                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: active ? modColor(0.15) : "hsl(var(--muted))" }}>
+                                      <item.icon size={16} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} />
+                                    </span>
+                                    <span className="flex-1 text-sm font-heading" style={{ color: active ? modColor() : "hsl(var(--foreground))", fontWeight: active ? 600 : 500 }}>
+                                      {item.label}
+                                    </span>
+                                    <span className="text-[0.625rem] tabular-nums text-muted-foreground">{item.children.length}</span>
+                                    <ChevronDown size={15} className="text-muted-foreground transition-transform duration-200" style={{ transform: isExpanded ? "rotate(180deg)" : undefined }} />
+                                  </button>
+                                  {isExpanded && (
+                                    <div className="ml-7 mt-0.5 mb-1 border-l pl-2 space-y-0.5" style={{ borderColor: modColor(0.3) }}>
+                                      {item.children.map((child) => {
+                                        const childActive = location.pathname === child.path;
+                                        return (
+                                          <button
+                                            key={child.path}
+                                            onClick={() => go(child.path)}
+                                            className="w-full flex items-center gap-2 rounded-lg px-3 min-h-[42px] text-left text-sm font-heading transition-colors"
+                                            style={{ background: childActive ? modColor(0.12) : undefined, color: childActive ? modColor() : "hsl(var(--muted-foreground))", fontWeight: childActive ? 600 : 400 }}
+                                          >
+                                            <span className="flex-1">{child.label}</span>
+                                            {!!child.count && (
+                                              <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[0.625rem] font-medium text-destructive-foreground">{child.count}</span>
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            return (
+                              <button key={item.path} onClick={() => go(item.path!)} className={rowBase} style={{ background: active ? modColor(0.1) : undefined }}>
+                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: active ? modColor(0.18) : "hsl(var(--muted))" }}>
+                                  <item.icon size={16} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} />
+                                </span>
+                                <span className="flex-1 text-sm font-heading" style={{ color: active ? modColor() : "hsl(var(--foreground))", fontWeight: active ? 600 : 500 }}>
+                                  {item.label}
+                                </span>
+                                {active && <span className="h-2 w-2 rounded-full" style={{ background: modColor() }} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Setup */}
+                      {setupConfig.available && visibleSetupItems.length > 0 && (
+                        <div className="rounded-2xl border border-border">
+                          <button onClick={() => setShowSetup((v) => !v)} className={`${rowBase} rounded-2xl`} aria-expanded={showSetup}>
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                              <Settings size={16} className="text-muted-foreground" />
+                            </span>
+                            <span className="flex-1 text-sm font-heading font-medium text-foreground">{setupConfig.label} Setup</span>
+                            <span className="text-[0.625rem] tabular-nums text-muted-foreground">{visibleSetupItems.length}</span>
+                            <ChevronDown size={15} className="text-muted-foreground transition-transform duration-200" style={{ transform: showSetup ? "rotate(180deg)" : undefined }} />
+                          </button>
+                          {showSetup && (
+                            <div className="grid gap-1.5 p-1.5 pt-0" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                              {visibleSetupItems.map(({ icon: Icon, label, path, color }) => {
+                                const active = location.pathname === path;
                                 return (
                                   <button
-                                    key={child.path}
-                                    onClick={() => go(child.path)}
-                                    className="nav-item-enter w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left"
-                                    style={{
-                                      animationDelay: `${ci * 30}ms`,
-                                      background: childActive
-                                        ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.12)`
-                                        : "transparent",
-                                      color: childActive
-                                        ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                        : "hsl(var(--muted-foreground))",
-                                    }}
+                                    key={path}
+                                    onClick={() => go(path)}
+                                    className="flex flex-col items-center gap-1.5 rounded-xl border p-2 transition-colors active:scale-95"
+                                    style={{ borderColor: active ? modColor(0.45) : "hsl(var(--border))", background: active ? modColor(0.1) : "transparent" }}
                                   >
-                                    {ChildIcon && (
-                                      <ChildIcon
-                                        size={14}
-                                        className="flex-shrink-0"
-                                      />
-                                    )}
-                                    <span className="flex-1">
-                                      {child.label}
+                                    <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: active ? modColor(0.18) : "hsl(var(--muted))" }}>
+                                      <Icon size={15} className={color} />
                                     </span>
-                                    {!!child.count && (
-                                      <span className="text-[0.625rem] bg-destructive text-destructive-foreground px-1.5 py-0.5 rounded-full font-medium">
-                                        {child.count}
-                                      </span>
-                                    )}
+                                    <span className="line-clamp-2 w-full text-center text-[0.625rem] font-heading leading-tight text-muted-foreground">
+                                      {label.replace(/ Master$/, "")}
+                                    </span>
                                   </button>
                                 );
                               })}
                             </div>
                           )}
                         </div>
-                      );
-                    }
+                      )}
 
+                      {/* Widgets (the one quick link not in the bottom bar) */}
+                      <button onClick={() => go("/widgets")} className={`${rowBase} border border-border rounded-2xl`}>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+                          <Puzzle size={16} className="text-muted-foreground" />
+                        </span>
+                        <span className="flex-1 text-sm font-heading font-medium text-foreground">Widgets</span>
+                        <ChevronRight size={14} className="text-muted-foreground" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+
+            {sheet === "me" && (
+              <div className="overflow-y-auto overscroll-contain px-4 pb-6">
+                {/* Profile card */}
+                <div className="flex items-center gap-3 rounded-2xl border border-border p-3">
+                  <Avatar size={48} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-heading text-sm font-bold text-foreground">{currentUser?.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{currentUser?.email}</p>
+                    <span className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-semibold" style={{ background: modColor(0.12), color: modColor() }}>
+                      {isSuperAdmin ? <Crown size={10} /> : isDba ? <Data size={10} /> : isAdmin ? <ShieldTick size={10} /> : null}
+                      {roleLabel}
+                    </span>
+                  </div>
+                  <button onClick={() => setSheet(null)} aria-label="Close" className="flex h-9 w-9 items-center justify-center self-start rounded-full border border-border">
+                    <X size={16} className="text-muted-foreground" />
+                  </button>
+                </div>
+
+                <button onClick={() => go(profilePath)} className={`${rowBase} mt-3 border border-border rounded-2xl`}>
+                  <Profile size={17} className="text-muted-foreground" />
+                  <span className="flex-1 text-sm font-heading font-medium text-foreground">My profile</span>
+                  <ChevronRight size={14} className="text-muted-foreground" />
+                </button>
+
+                {/* Theme */}
+                <p className="mt-5 mb-2 px-1 text-[0.625rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Appearance</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => {
+                    const isSelected = theme === t;
                     return (
                       <button
-                        key={item.path}
-                        onClick={() => go(item.path!)}
-                        className="nav-item-enter w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm font-heading transition-all text-left border"
-                        style={{
-                          animationDelay: `${(idx + 4) * 40}ms`,
-                          borderColor: active
-                            ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.35)`
-                            : "transparent",
-                          background: active
-                            ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                            : "transparent",
-                        }}
+                        key={t}
+                        onClick={() => setTheme(t)}
+                        className="flex items-center gap-2.5 rounded-xl border px-3 min-h-[48px] text-left transition-colors"
+                        style={{ borderColor: isSelected ? bg : "hsl(var(--border))", background: isSelected ? `${bg}18` : "transparent" }}
+                        aria-pressed={isSelected}
                       >
-                        <div
-                          className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                          style={{
-                            background: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
-                              : "hsl(var(--muted))",
-                          }}
-                        >
-                          <item.icon
-                            size={15}
-                            style={{
-                              color: active
-                                ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                                : "hsl(var(--muted-foreground))",
-                            }}
-                          />
-                        </div>
-                        <span
-                          className="flex-1"
-                          style={{
-                            color: active
-                              ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`
-                              : "hsl(var(--foreground))",
-                            fontWeight: active ? 600 : 400,
-                          }}
-                        >
-                          {item.label}
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg shadow-sm" style={{ background: bg }}>
+                          {isSelected && (
+                            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                              <path d="M3 8l3.5 3.5L13 5" stroke={themeCheck[t]} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
                         </span>
-                        {active && (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                            style={{
-                              background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%)`,
-                            }}
-                          />
-                        )}
+                        <span className="text-sm font-heading font-medium text-foreground">{label}</span>
                       </button>
                     );
                   })}
                 </div>
-              )}
 
-              {/* ── Setup tab ───────────────────────────────────────────────────── */}
-              {activeTab === "setup" && (
-                <div className="px-4 pt-1.5">
-                  {setupConfig.available ? (
-                    <>
-                      <div className="flex items-center gap-2 mb-2 px-1">
-                        <Settings size={13} className="text-muted-foreground" />
-                        <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
-                          {setupConfig.label} Setup
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {setupConfig.items
-                          .filter((it) => !it.pageKey || canAccessPage(it.pageKey))
-                          .map(
-                          ({ icon: Icon, label, path, color }, i) => {
-                            const active = location.pathname === path;
-                            return (
-                              <button
-                                key={path}
-                                onClick={() => go(path)}
-                                className="nav-item-enter group flex flex-col items-center gap-1.5 p-2 rounded-xl border transition-all duration-150 active:scale-95"
-                                style={{
-                                  animationDelay: `${i * 30}ms`,
-                                  borderColor: active
-                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.4)`
-                                    : "hsl(var(--border))",
-                                  background: active
-                                    ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.10)`
-                                    : "transparent",
-                                }}
-                              >
-                                <div
-                                  className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-                                  style={{
-                                    background: active
-                                      ? `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.18)`
-                                      : "hsl(var(--muted))",
-                                  }}
-                                >
-                                  <Icon size={15} className={color} />
-                                </div>
-                                <span className="text-[0.625rem] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2 w-full">
-                                  {label.replace(/ Master$/, "")}
-                                </span>
-                              </button>
-                            );
-                          },
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center gap-3 py-10 text-center">
-                      <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
-                        <Settings size={20} className="text-muted-foreground" />
-                      </div>
-                      <p className="text-sm font-heading text-muted-foreground">
-                        Select a module to access Setup
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ── Theme tab ───────────────────────────────────────────────────── */}
-              {activeTab === "theme" && (
-                <div className="px-4 pt-2">
-                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
-                    Colour theme
-                  </p>
-                  <div className="grid grid-cols-1 gap-2">
-                    {(
-                      Object.entries(THEME_DOTS) as [
-                        Theme,
-                        { bg: string; label: string },
-                      ][]
-                    ).map(([t, { bg, label }], i) => {
-                      const isSelected = theme === t;
-                      return (
-                        <button
-                          key={t}
-                          onClick={() => setTheme(t)}
-                          className="nav-item-enter flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left"
-                          style={{
-                            animationDelay: `${i * 50}ms`,
-                            borderColor: isSelected
-                              ? `${bg}66`
-                              : "hsl(var(--border))",
-                            background: isSelected ? `${bg}18` : "transparent",
-                          }}
-                        >
-                          <div
-                            className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center shadow-sm"
-                            style={{ background: bg }}
-                          >
-                            {isSelected && (
-                              <svg
-                                width="16"
-                                height="16"
-                                viewBox="0 0 16 16"
-                                fill="none"
-                              >
-                                <path
-                                  d="M3 8l3.5 3.5L13 5"
-                                  stroke={themeCheck[t]}
-                                  strokeWidth="2.2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-heading font-medium text-foreground">
-                              {label}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {t === "dark"
-                                ? "Deep indigo dark"
-                                : t === "light"
-                                  ? "Clean bright"
-                                  : t === "sage"
-                                    ? "Calm sage green"
-                                    : "Soft glass tone"}
-                            </p>
-                          </div>
-                          {isSelected && (
-                            <span
-                              className="text-[0.625rem] font-heading px-2 py-1 rounded-lg"
-                              style={{ background: `${bg}22`, color: bg }}
-                            >
-                              Active
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+                <button
+                  onClick={handleLogout}
+                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-destructive/30 min-h-[48px] text-sm font-heading font-semibold text-destructive active:bg-destructive/10"
+                >
+                  <Logout size={17} /> Sign out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
+
+      {/* ── Bottom tab bar ───────────────────────────────────────────────────── */}
+      <nav
+        aria-label="Main"
+        className="fixed inset-x-0 bottom-0 z-[61] md:hidden border-t border-border"
+        style={{
+          background: "hsl(var(--card) / 0.92)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        }}
+      >
+        <div className="grid h-16" style={{ gridTemplateColumns: `repeat(${barItems.length}, minmax(0, 1fr))` }}>
+          {barItems.map(({ id, label, icon: Icon, active, onClick }) => {
+            const isMenu = id === "menu";
+            return (
+              <button
+                key={id}
+                onClick={onClick}
+                aria-label={isMenu ? `${label} menu` : label}
+                aria-current={active && !isMenu && id !== "me" ? "page" : undefined}
+                className="relative flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform"
+              >
+                {active && !isMenu && <span className="absolute top-0 h-0.5 w-8 rounded-full" style={{ background: modColor() }} />}
+                {isMenu ? (
+                  <span
+                    className="relative flex h-9 w-12 items-center justify-center rounded-2xl text-white shadow-md"
+                    style={{ background: modColor(), boxShadow: `0 6px 16px -6px ${modColor(0.7)}` }}
+                  >
+                    {sheet === "menu" ? <X size={18} /> : <Icon size={18} />}
+                    {/* The open module, so "Menu" plainly means "this module's pages and every other module". */}
+                    {sheet !== "menu" && activeModKey !== "__none__" && (
+                      <span className="absolute -top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 bg-card" style={{ borderColor: "hsl(var(--card))", color: modColor() }}>
+                        <ActiveModIcon size={11} />
+                      </span>
+                    )}
+                  </span>
+                ) : id === "me" ? (
+                  <span className="rounded-full" style={{ boxShadow: active ? `0 0 0 2px ${modColor()}` : undefined }}>
+                    <Avatar size={24} />
+                  </span>
+                ) : (
+                  <Icon size={21} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} strokeWidth={active ? 2.3 : 1.8} />
+                )}
+                <span
+                  className="max-w-full truncate px-1 text-[0.625rem] font-heading leading-none"
+                  style={{ color: active || isMenu ? modColor() : "hsl(var(--muted-foreground))", fontWeight: active || isMenu ? 600 : 500 }}
+                >
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </>
   );
 };

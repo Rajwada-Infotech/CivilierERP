@@ -57,7 +57,7 @@ const serializeGST = (gstStr) => {
 
 router.get(
   "/meta/companies",
-  cache("wo-meta-companies", 600),
+  cache("wo-meta-companies", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -76,7 +76,7 @@ router.get(
 
 router.get(
   "/meta/projects",
-  cache("wo-meta-projects", 600),
+  cache("wo-meta-projects", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -95,7 +95,7 @@ router.get(
 
 router.get(
   "/meta/contractors",
-  cache("wo-meta-contractors", 600),
+  cache("wo-meta-contractors", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -115,7 +115,7 @@ router.get(
 
 router.get(
   "/meta/activity-groups",
-  cache("wo-meta-act-groups", 600),
+  cache("wo-meta-act-groups", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -137,7 +137,7 @@ router.get(
 
 router.get(
   "/meta/activities",
-  cache("wo-meta-activities", 600),
+  cache("wo-meta-activities", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -175,7 +175,7 @@ router.get(
   },
 );
 
-router.get("/meta/uoms", cache("wo-meta-uoms", 600), async (req, res) => {
+router.get("/meta/uoms", cache("wo-meta-uoms", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -249,7 +249,8 @@ router.get("/meta/items", async (req, res) => {
 
 router.get(
   "/",
-  cache("work-orders", 300, { shared: true }),
+  // dropOnAnyWrite: a work order's status also changes from the Approval Inbox, which doesn't bump "work-orders".
+  cache("work-orders", 300, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -257,14 +258,31 @@ router.get(
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+      // List filters (the View All page): status as the page shows it (blank = Draft), and free text over
+      // document no., company, project and contractor - the same fields its search box always covered.
+      const status = String(req.query.status || "").trim().toLowerCase();
+      const search = String(req.query.search || "").trim();
 
-      const listRequest = pool
-        .request()
-        .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, limit);
-      if (companyId) listRequest.input("companyId", sql.Int, companyId);
+      // Scope only (company + project rights) - the base for the summary figures, which ignore the list filters.
+      const scopeWhere = `${companyId ? "WHERE h.CompanyId = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "h.ProjectId")}`;
+      const filterWhere =
+        (status && status !== "all" ? ` AND LOWER(ISNULL(NULLIF(h.Status, ''), 'Draft')) = @status` : "") +
+        (search
+          ? ` AND (h.DocumentNumber LIKE @search ESCAPE '\\' OR ec.name LIKE @search ESCAPE '\\'
+                OR ep.name LIKE @search ESCAPE '\\' OR ahm.LHeadName LIKE @search ESCAPE '\\')`
+          : "");
 
-      const result = await listRequest.query(`
+      const bind = (r) => {
+        if (companyId) r.input("companyId", sql.Int, companyId);
+        if (status && status !== "all") r.input("status", sql.NVarChar(50), status);
+        if (search) r.input("search", sql.NVarChar(260), `%${search.replace(/[\\%_[]/g, (c) => "\\" + c)}%`);
+        return r;
+      };
+
+      const listRequest = bind(pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit));
+
+      const [result, statsResult] = await Promise.all([
+        listRequest.query(`
         SELECT h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt,
           ec.name AS CompanyName, h.CompanyId,
@@ -285,7 +303,7 @@ router.get(
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
-        ${companyId ? "WHERE h.CompanyId = @companyId" : "WHERE 1=1"}${projectPredicate(req.projectScope, "h.ProjectId")}
+        ${scopeWhere}${filterWhere}
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,
@@ -294,19 +312,45 @@ router.get(
           ec.name, ep.name, ahm.LHeadName, ams.LHeadName, td.Prefix, td.Description
         ORDER BY h.CreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+      `),
+        // Summary figures over every work order in scope (not the filtered list), as the page always showed them.
+        bind(pool.request()).query(`
+        SELECT COUNT(*) AS count,
+          ISNULL(SUM(h.TotalAmount), 0) AS totalAmount,
+          SUM(CASE WHEN LOWER(ISNULL(h.Status, '')) = 'approved' THEN 1 ELSE 0 END) AS approved,
+          SUM(CASE WHEN LOWER(ISNULL(h.Status, '')) = 'pending'  THEN 1 ELSE 0 END) AS pending
+        FROM dbo.WorkOrderHeader h
+        ${scopeWhere}
+      `),
+      ]);
 
-      const total = result.recordset[0]?._total ?? 0;
+      // A filtered page past the end has no rows to carry _total; fall back to a count for that case.
+      let total = result.recordset[0]?._total;
+      if (total == null) {
+        total = offset === 0 ? 0 : (await bind(pool.request()).query(`
+          SELECT COUNT(*) AS n FROM dbo.WorkOrderHeader h
+          LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
+          LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
+          LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+          ${scopeWhere}${filterWhere}`)).recordset[0].n;
+      }
       const data = result.recordset.map((r) => {
         const { _total, ...rest } = r;
         return { ...rest, GST: serializeGST(rest.GST) };
       });
+      const st = statsResult.recordset[0] || {};
       res.json({
         data,
         page,
         limit,
         total,
         totalPages: Math.ceil(total / limit),
+        stats: {
+          count: Number(st.count || 0),
+          totalAmount: Number(st.totalAmount || 0),
+          approved: Number(st.approved || 0),
+          pending: Number(st.pending || 0),
+        },
       });
     } catch (err) {
       console.error("[GET /work-orders]", err.message);

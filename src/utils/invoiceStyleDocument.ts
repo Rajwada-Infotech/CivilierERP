@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { DM_SANS_FACE_CSS, embedDmSans, printWhenFontsReady } from "@/utils/documentFont";
 import { cellText, latin, rgb, toDataUrl, type LetterheadDoc } from "@/utils/letterheadDocument";
+import { chooseSignature, fitStamp, type SignatureStamp } from "@/utils/signatureChoice";
 
 export interface InvoiceStyleMeta {
   /** Extra header facts shown beside No. / Date (e.g. Due Date). */
@@ -43,7 +44,12 @@ const headerMeta = (d: LetterheadDoc, extra?: InvoiceStyleMeta["meta"]) => [
   ...(extra ?? []),
 ];
 
-export function printInvoiceStyle(d: LetterheadDoc, extra?: InvoiceStyleMeta["meta"]) {
+/** Prints the document; an Authorised Signatory line first offers a signature from the library. */
+export async function printInvoiceStyle(d: LetterheadDoc, extra?: InvoiceStyleMeta["meta"]) {
+  printInvoiceStyleNow(d, extra, await chooseSignature(d.signLabel));
+}
+
+function printInvoiceStyleNow(d: LetterheadDoc, extra: InvoiceStyleMeta["meta"] | undefined, stamp: SignatureStamp | null) {
   const c = d.company;
   const safeLogo = c.logo && /^(https?:\/\/|data:image\/|\/)/i.test(c.logo) ? escapeHtml(c.logo) : "";
   const meta = headerMeta(d, extra);
@@ -132,6 +138,8 @@ export function printInvoiceStyle(d: LetterheadDoc, extra?: InvoiceStyleMeta["me
   .sigrow { display: flex; justify-content: flex-end; }
   .sig { width: 64mm; text-align: right; font-size: 10.5px; }
   .sig .line { border-top: 1px solid ${INK}; margin: 14mm 0 1.5mm; }
+  .sig .stamp { display: block; height: 12mm; max-width: 60mm; object-fit: contain; margin: 2mm 0 0 auto; }
+  .sig .stamp + .line { margin-top: 0.5mm; }
   .sig h5 { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
   .sig b { display: block; font-size: 11.5px; }
   .contact { margin-top: 4mm; text-align: right; font-size: 9.5px; color: #4b5563; line-height: 1.5; }
@@ -153,7 +161,7 @@ export function printInvoiceStyle(d: LetterheadDoc, extra?: InvoiceStyleMeta["me
     </table>
     <div class="lower"><div class="notes">${notesHtml}</div><div class="sum">${sumHtml}</div></div>
     <div class="grow"></div>
-    <div class="sigrow"><div class="sig"><div class="line"></div><h5>${escapeHtml(d.signLabel)}</h5><b>${escapeHtml(d.signName || "—")}</b>
+    <div class="sigrow"><div class="sig">${stamp ? `<img class="stamp" src="${escapeHtml(stamp.image)}" alt="" />` : ""}<div class="line"></div><h5>${escapeHtml(d.signLabel)}</h5><b>${escapeHtml(d.signName || "—")}</b>
       <div class="contact">${contact}</div></div></div>
     <div class="terms"><h4>${escapeHtml((d.termsTitle || "Terms & Conditions :").replace(/\s*:$/, ""))}</h4>${escapeHtml(d.terms)}</div>
   </div>
@@ -171,7 +179,12 @@ export function printInvoiceStyle(d: LetterheadDoc, extra?: InvoiceStyleMeta["me
   printWhenFontsReady(win);
 }
 
+/** Saves the document as PDF; an Authorised Signatory line first offers a signature from the library. */
 export async function downloadInvoiceStylePdf(d: LetterheadDoc, filename: string, extra?: InvoiceStyleMeta["meta"]) {
+  return downloadInvoiceStylePdfNow(d, filename, extra, await chooseSignature(d.signLabel));
+}
+
+async function downloadInvoiceStylePdfNow(d: LetterheadDoc, filename: string, extra: InvoiceStyleMeta["meta"] | undefined, stamp: SignatureStamp | null) {
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -354,6 +367,15 @@ export async function downloadInvoiceStylePdf(d: LetterheadDoc, filename: string
 
   // signature + contact bottom-right, terms bottom-left above the corner shape
   const sigY = Math.max(Math.max(sy, ny) + 8, 190);
+  if (stamp) {
+    try {
+      const { w, h } = fitStamp(stamp.ratio, 54, 12);
+      const fmt = /^data:image\/png/i.test(stamp.image) ? "PNG" : "JPEG";
+      doc.addImage(stamp.image, fmt, RIGHT - w, sigY + 14 - h - 0.6, w, h, undefined, "FAST");
+    } catch {
+      // an unreadable image just leaves the line blank
+    }
+  }
   doc.setDrawColor(...rgb(INK));
   doc.setLineWidth(0.25);
   doc.line(RIGHT - 56, sigY + 14, RIGHT, sigY + 14);
