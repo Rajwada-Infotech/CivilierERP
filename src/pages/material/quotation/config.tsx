@@ -6,10 +6,20 @@ import { printStatusLabel } from "@/utils/printStatus";
 // ─── Shared styles ──────────────────────────────────────────────────────────────
 
 export const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+  "w-full text-sm border border-foreground/40 px-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 export const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+  "w-full text-sm border border-foreground/40 px-3 py-2.5 pr-8 bg-card text-foreground focus:outline-none focus:border-foreground transition-colors appearance-none disabled:opacity-60";
+
+export const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+export const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors disabled:opacity-40";
+export const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
 
 export const Field = ({
   label,
@@ -23,7 +33,7 @@ export const Field = ({
   className?: string;
 }) => (
   <div className={className}>
-    <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+    <label className="block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
       {label}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -47,15 +57,14 @@ export const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
-export const SectionHeader = ({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub?: string }) => (
-  <div className="flex items-center gap-3 pb-3 border-b border-border mb-4">
-    <div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
-      <Icon size={13} className="text-emerald-600 dark:text-emerald-400" />
-    </div>
-    <div>
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-    </div>
+// A section's ruled heading on the sheet (the icon is kept in the signature but not drawn).
+/** "PartiallyQuoted" -> "Partially quoted" for display. */
+export const spaced = (s: string) => s.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/ (\w)/g, (_m, c: string) => " " + c.toLowerCase());
+
+export const SectionHeader = ({ title, sub }: { icon?: React.ElementType; title: string; sub?: string }) => (
+  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 pb-2.5 mb-4 border-b border-foreground/30">
+    <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title}</p>
+    {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
   </div>
 );
 

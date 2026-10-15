@@ -1,41 +1,36 @@
-import { Trash2, ArrowLeft, Users, Send, Package, Printer } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusBadge } from "@/components/StatusBadge";
-import { fmtDate } from "./config";
+import { Trash2, ArrowLeft, Send, Printer } from "lucide-react";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { printStatusLabel } from "@/utils/printStatus";
+import { fmtDate, HEAD, LBL, RULE, KEY, KEY_INK, KEY_LINE, spaced } from "./config";
 import type { QtState } from "./useQuotation";
+
+const thCls = "px-4 py-2.5 font-semibold";
 
 // One quotation opened for reading: details, items, suppliers, print / send / delete.
 export function QtView({ m }: { m: QtState }) {
-  const { rights, viewingRecord, header, items, suppliers, deleteMutation, sendMutation, goToList, handlePrint } = m;
+  const { rights, viewingRecord, deleteMutation, sendMutation, goToList, handlePrint } = m;
   if (!viewingRecord) return null;
   const r = viewingRecord;
+  const status = r.Status || "Draft";
   return (
     <div className="space-y-4">
       {/* View header */}
-      <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 py-3.5 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20">
-        <div className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l-xl bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
+      <div className="bg-card flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ border: RULE }}>
         <div className="flex items-center gap-3 min-w-0">
-          <button
-            type="button"
-            onClick={goToList}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-          >
-            <ArrowLeft size={15} />
-            <span className="hidden sm:inline">Back</span>
+          <button type="button" onClick={goToList} className={`${KEY_LINE} h-8 px-3 shrink-0`}>
+            <ArrowLeft size={12} /> Back
           </button>
-          <span className="text-emerald-500/40">|</span>
-          <span className="font-mono font-bold text-foreground text-sm">{r.DocNo}</span>
-          <StatusBadge status={r.Status} />
+          <div className="min-w-0">
+            <p className={LBL}>Request for quotation</p>
+            <div className="flex flex-wrap items-center gap-2 mt-0.5">
+              <span className="font-heading font-bold tracking-tight text-foreground text-base">{r.DocNo}</span>
+              <SheetMark text={spaced(printStatusLabel(status))} tone={statusTone(status)} />
+            </div>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => handlePrint(r)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="Print"
-          >
-            <Printer size={13} /> <span className="hidden sm:inline">Print</span>
+          <button type="button" onClick={() => handlePrint(r)} className={`${KEY_LINE} h-8 px-3`} title="Print">
+            <Printer size={12} /> <span className="hidden sm:inline">Print</span>
           </button>
           {rights.canDelete && r.Status === "Draft" && (
             <button
@@ -46,102 +41,100 @@ export function QtView({ m }: { m: QtState }) {
                   deleteMutation.mutate(r.QuotationId, { onSuccess: goToList });
                 }
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+              className={`${KEY} h-8 px-3 border border-destructive text-destructive hover:bg-destructive/10`}
               title="Delete"
             >
-              <Trash2 size={13} /> <span className="hidden sm:inline">Delete</span>
+              <Trash2 size={12} /> <span className="hidden sm:inline">Delete</span>
             </button>
           )}
           {rights.canEdit && r.Status === "Draft" && (
-            <Button type="button" size="sm" onClick={() => sendMutation.mutate(r.QuotationId)} disabled={sendMutation.isPending} className="gap-1.5 btn-module text-white hover:opacity-90 border-0">
-              <Send size={13} /> Send to Suppliers
-            </Button>
+            <button type="button" onClick={() => sendMutation.mutate(r.QuotationId)} disabled={sendMutation.isPending} className={`${KEY_INK} h-8 px-4`}>
+              <Send size={12} /> {sendMutation.isPending ? "Sending…" : "Send to suppliers"}
+            </button>
           )}
         </div>
       </div>
 
       {/* Meta grid */}
-      <Card className="border-border shadow-sm">
-        <CardContent className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-5">
-          {[
-            { label: "Company", value: r.CompanyName },
-            { label: "Project", value: r.ProjectName },
-            { label: "Date", value: fmtDate(r.DocDate) },
-            { label: "Source MR", value: r.SourceMRDocNo },
-          ].map(({ label, value }) => (
-            <div key={label}>
-              <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1">{label}</p>
-              <p className="text-sm font-medium">{value || "—"}</p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <div className="bg-card grid grid-cols-2 sm:grid-cols-4" style={{ border: RULE }}>
+        {[
+          { label: "Company", value: r.CompanyName },
+          { label: "Project", value: r.ProjectName },
+          { label: "Date", value: fmtDate(r.DocDate) },
+          { label: "Source MR", value: r.SourceMRDocNo, strong: true },
+        ].map(({ label, value, strong }, i) => (
+          <div key={label} className="px-4 py-3" style={{ borderLeft: i % 4 ? "1px solid hsl(var(--foreground) / 0.2)" : undefined }}>
+            <p className={`${LBL} mb-1`}>{label}</p>
+            <p className={`text-sm truncate ${strong ? "font-heading font-semibold tracking-wide" : "font-medium"}`}>{value || "—"}</p>
+          </div>
+        ))}
+      </div>
 
       {/* Items */}
-      <Card className="border-border shadow-sm">
-        <CardHeader className="px-5 py-3.5 border-b border-border">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Package size={14} className="text-emerald-500" /> Items
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+          <span className={HEAD}>
+            Items <span className="font-normal text-muted-foreground tabular-nums ml-1">{(r.items || []).length}</span>
+          </span>
+        </div>
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-muted/40 border-b border-border text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                <th className="px-5 py-2.5 w-8">#</th>
-                <th className="px-5 py-2.5">Item</th>
-                <th className="px-5 py-2.5 text-right">UOM</th>
-                <th className="px-5 py-2.5 text-right">Qty</th>
+              <tr className={`${LBL} text-left`} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
+                <th className={`${thCls} w-10`}>#</th>
+                <th className={thCls}>Item</th>
+                <th className={`${thCls} text-right`}>UOM</th>
+                <th className={`${thCls} text-right`}>Qty</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-foreground/10">
               {(r.items || []).map((it: any, idx: number) => (
-                <tr key={idx} className="border-b border-border/50 last:border-0">
-                  <td className="px-5 py-2.5 text-muted-foreground text-xs">{idx + 1}</td>
-                  <td className="px-5 py-2.5 font-medium">{it.ItemName || it.ItemId}</td>
-                  <td className="px-5 py-2.5 text-muted-foreground text-right">{it.UOMName || it.UOMCode}</td>
-                  <td className="px-5 py-2.5 font-semibold text-right">{it.Quantity}</td>
+                <tr key={idx}>
+                  <td className="px-4 py-2.5 text-muted-foreground text-xs font-heading tabular-nums">{String(idx + 1).padStart(2, "0")}</td>
+                  <td className="px-4 py-2.5 font-medium">{it.ItemName || it.ItemId}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground text-right">{it.UOMName || it.UOMCode}</td>
+                  <td className="px-4 py-2.5 font-heading font-semibold tabular-nums text-right">{it.Quantity}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Suppliers */}
-      <Card className="border-border shadow-sm">
-        <CardHeader className="px-5 py-3.5 border-b border-border">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Users size={14} className="text-emerald-500" /> Suppliers
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {(!r.suppliers || r.suppliers.length === 0) ? (
-            <p className="text-sm text-muted-foreground p-5 text-center">No suppliers tagged.</p>
-          ) : (
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="px-4 py-3" style={{ borderBottom: RULE }}>
+          <span className={HEAD}>
+            Suppliers <span className="font-normal text-muted-foreground tabular-nums ml-1">{(r.suppliers || []).length}</span>
+          </span>
+        </div>
+        {(!r.suppliers || r.suppliers.length === 0) ? (
+          <p className="text-sm text-muted-foreground p-5 text-center">No suppliers tagged.</p>
+        ) : (
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-muted/40 border-b border-border text-left text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                  <th className="px-5 py-2.5">Supplier</th>
-                  <th className="px-5 py-2.5">Status</th>
-                  <th className="px-5 py-2.5">Invited</th>
+                <tr className={`${LBL} text-left`} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
+                  <th className={thCls}>Supplier</th>
+                  <th className={thCls}>Status</th>
+                  <th className={thCls}>Invited</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-foreground/10">
                 {r.suppliers.map((s) => (
-                  <tr key={s.Id} className="border-b border-border/50 last:border-0">
-                    <td className="px-5 py-2.5 font-medium">{s.SupplierName}</td>
-                    <td className="px-5 py-2.5">
-                      <StatusBadge status={s.Status} />
+                  <tr key={s.Id}>
+                    <td className="px-4 py-2.5 font-medium">{s.SupplierName}</td>
+                    <td className="px-4 py-2.5">
+                      <SheetMark text={printStatusLabel(s.Status || "Pending")} tone={statusTone(s.Status || "Pending")} />
                     </td>
-                    <td className="px-5 py-2.5 text-muted-foreground">{fmtDate(s.InvitedAt)}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground tabular-nums">{fmtDate(s.InvitedAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

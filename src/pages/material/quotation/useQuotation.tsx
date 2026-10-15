@@ -13,10 +13,10 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import { printStatusLabel } from "@/utils/printStatus";
 import { Eye, Trash2, Edit3 } from "lucide-react";
 import { type ColumnDef } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { fetchNextDocNumber, fetchDocTypes, type DocType } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { usePageRights } from "@/hooks/usePageRights";
-import { fmtDate, FormHeader, defaultHeader } from "./config";
+import { fmtDate, FormHeader, defaultHeader, ACT, spaced } from "./config";
 
 export function useQuotation() {
   const rights = usePageRights("quotation");
@@ -336,7 +336,7 @@ export function useQuotation() {
       accessorKey: "DocNo",
       header: "Doc No",
       cell: ({ getValue }) => (
-        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+        <span className="font-heading font-semibold tracking-wide text-foreground text-sm">
           {String(getValue() || "—")}
         </span>
       ),
@@ -363,7 +363,7 @@ export function useQuotation() {
       meta: { className: "hidden sm:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm">
-          <span className="font-semibold">{row.original.SubmittedCount || 0}</span>
+          <span className="font-heading font-semibold tabular-nums">{row.original.SubmittedCount || 0}</span>
           <span className="text-muted-foreground">/{row.original.SupplierCount || 0} quoted</span>
         </span>
       ),
@@ -374,7 +374,7 @@ export function useQuotation() {
       header: "Items",
       meta: { className: "hidden sm:table-cell" },
       cell: ({ getValue }) => (
-        <span className="inline-flex items-center gap-1 text-xs font-medium bg-muted px-2 py-0.5 rounded-full">
+        <span className="font-heading text-xs font-semibold tabular-nums">
           {Number(getValue() || 0)}
         </span>
       ),
@@ -384,14 +384,17 @@ export function useQuotation() {
       accessorKey: "DocDate",
       header: "Date",
       meta: { className: "hidden sm:table-cell" },
-      cell: ({ getValue }) => <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>,
+      cell: ({ getValue }) => <span className="text-sm text-muted-foreground tabular-nums">{fmtDate(getValue() as string)}</span>,
     },
     {
       id: "Status",
       accessorKey: "Status",
       header: "Status",
       meta: { className: "hidden sm:table-cell" },
-      cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
+      cell: ({ getValue }) => {
+        const s = (getValue() as string) || "Draft";
+        return <SheetMark text={spaced(printStatusLabel(s))} tone={statusTone(s)} />;
+      },
     },
     {
       id: "actions",
@@ -403,8 +406,9 @@ export function useQuotation() {
             <button data-row-view
               type="button"
               onClick={() => handleView(row.original)}
-              className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className={`${ACT} hover:text-foreground hover:border-foreground`}
               title="View"
+              aria-label="View"
             >
               <Eye size={14} />
             </button>
@@ -412,8 +416,9 @@ export function useQuotation() {
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
-                className="p-1.5 rounded-md text-blue-400 hover:bg-blue-400/10 transition-colors"
+                className={`${ACT} hover:text-foreground hover:border-foreground`}
                 title="Edit"
+                aria-label="Edit"
               >
                 <Edit3 size={14} />
               </button>
@@ -425,8 +430,9 @@ export function useQuotation() {
                 onClick={() => {
                   if (confirm("Delete this quotation?")) deleteMutation.mutate(row.original.QuotationId);
                 }}
-                className="p-1.5 rounded-md text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                className={`${ACT} hover:text-destructive hover:border-destructive`}
                 title="Delete"
+                aria-label="Delete"
               >
                 <Trash2 size={14} />
               </button>
