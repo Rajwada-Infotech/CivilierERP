@@ -553,7 +553,15 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
     }
 
     const regNo = await getNextDocNumber(pool, "REG", "REG");
-    const result = await pool.request()
+    // The registry and its mandatory-document checklist are saved together:
+    // a registry left with no checklist rows passed the completion check
+    // ("all mandatory documents verified" with none required) and could be
+    // completed without the registration receipt.
+    const tx = pool.transaction();
+    await tx.begin();
+    let registryId;
+    try {
+    const result = await tx.request()
       .input("no",   sql.NVarChar(30), regNo)
       .input("bid",  sql.Int, bookingId)
       .input("sdid", sql.Int, deed.recordset[0]?.Id != null ? deed.recordset[0].Id : null)
@@ -563,13 +571,13 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @sdid, 'Pending', @cb, SYSDATETIME())
       `);
-    const registryId = result.recordset[0].Id;
+    registryId = result.recordset[0].Id;
 
     // Seed the full realistic mandatory-document checklist up front. ExecutedDeed
     // is inserted pre-filled and pre-verified when it was already synced above.
     for (const doc of REG_MANDATORY_DOC_TEMPLATE) {
       const synced = doc.type === 'ExecutedDeed' ? syncedExecutedDeed : null;
-      await pool.request()
+      await tx.request()
         .input('rid', sql.Int, registryId)
         .input('dt', sql.NVarChar(50), doc.type)
         .input('lbl', sql.NVarChar(255), doc.label)
@@ -588,6 +596,12 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
              CASE WHEN @b64 IS NOT NULL THEN 'System' ELSE NULL END, CASE WHEN @b64 IS NOT NULL THEN SYSDATETIME() ELSE NULL END,
              @cb, SYSDATETIME(), @rem, @cb, SYSDATETIME())
         `);
+    }
+
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
     }
 
     await logRegistryHistory(registryId, 'Started', syncedExecutedDeed ? 'Executed Deed copy synced automatically from the Sale Deed.' : null, actorId(req));

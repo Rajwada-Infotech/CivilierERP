@@ -608,7 +608,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       ? parseFloat(b.BrokerageRatePercent)
       : (bridge?.commissionRate ?? null);
 
-    await pool.request()
+    // The application row and its unit / plot lines are saved together — a
+    // failure part-way used to leave the old lines deleted and the new ones
+    // not written (the application with no unit / plot picked).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    await tx.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.ApplicantName || null)
       .input("mob",  sql.NVarChar(20),  b.Mobile || null)
@@ -677,10 +683,10 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // Update CrmApplicationUnit lines if PreferredUnitIds was provided
     if (b.PreferredUnitIds !== undefined) {
       const rawIds = Array.isArray(b.PreferredUnitIds) ? b.PreferredUnitIds : [];
-      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
+      await tx.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
       if (rawIds.length > 0) {
         for (const uidStr of rawIds) {
-          await pool.request()
+          await tx.request()
             .input("aid", sql.Int, id)
             .input("uid", sql.Int, parseInt(uidStr))
             .input("pri", sql.Bit, String(uidStr) === String(b.PreferredUnitId) ? 1 : 0)
@@ -689,14 +695,19 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
     if (b.PreferredPlotIds !== undefined) {
-      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
+      await tx.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
       for (let index = 0; index < preferredPlotIds.length; index++) {
-        await pool.request()
+        await tx.request()
           .input("aid", sql.Int, id)
           .input("pid", sql.Int, preferredPlotIds[index])
           .input("pri", sql.Bit, index === 0 ? 1 : 0)
           .query("INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedAt) VALUES (@aid, @pid, 'Active', @pri, SYSDATETIME())");
       }
+    }
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
     }
 
 
