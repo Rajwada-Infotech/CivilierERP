@@ -330,13 +330,14 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
       .input("done", sql.Date, b.Done || null)
       .input("st",   sql.NVarChar(30), b.Status || null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
       .input("ub",   sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmLegalMilestone SET
           ${step}Due    = ISNULL(@due, ${step}Due),
           ${step}Done   = ISNULL(@done, ${step}Done),
           ${step}Status = ISNULL(@st, ${step}Status),
-          ${step}Notes  = @note,
+          ${step}Notes  = CASE WHEN @noteSet = 1 THEN @note ELSE ${step}Notes END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

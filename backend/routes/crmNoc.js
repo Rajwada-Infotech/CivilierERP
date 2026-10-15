@@ -396,9 +396,12 @@ router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res)
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await approvalTransition("crm-noc", id, CrmStatus.APPROVED, userEmail, req.user?.role);
-    await getPool().request()
-      .input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmNoc SET ApprovalDate = ISNULL(ApprovalDate, CAST(SYSDATETIME() AS DATE)) WHERE Id = @id");
+    // Only the final level approves the NOC - an intermediate level leaves it Pending.
+    if (result.newStatus === CrmStatus.APPROVED) {
+      await getPool().request()
+        .input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmNoc SET ApprovalDate = ISNULL(ApprovalDate, CAST(SYSDATETIME() AS DATE)) WHERE Id = @id");
+    }
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-noc] approve error:", e.message);

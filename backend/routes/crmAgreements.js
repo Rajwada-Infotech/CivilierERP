@@ -1243,6 +1243,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
         .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
         .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
         .input("leg",   sql.Int,           newLegalExecutiveId)
         .input("ub",    sql.Int,           actor)
@@ -1252,7 +1253,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
             LegalAddress = ISNULL(@laddr, LegalAddress),
             PanNo = ISNULL(@pan, PanNo),
             AadhaarNo = ISNULL(@aadh, AadhaarNo),
-            Notes = @note, VersionNo = VersionNo + @bump,
+            Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END, VersionNo = VersionNo + @bump,
             LegalExecutiveId = @leg,
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
@@ -1617,7 +1618,9 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
         .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
         .input("fname", sql.NVarChar(300),  b.FileName     || null)
         .input("iby",   sql.NVarChar(200),  b.IssuedBy     || null)
-        .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
+        // A new upload always starts Uploaded - Verified / Rejected only come
+        // from the review route (the screen never sends a status here).
+        .input("st",    sql.NVarChar(30),   "Uploaded")
         .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
         .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
         .input("ver",   sql.Int,            nextVersion)
