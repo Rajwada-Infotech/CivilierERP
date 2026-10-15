@@ -352,13 +352,27 @@ async function issueFeeInvoice(db, id, actorUserId, actorEmail) {
   const total = Math.round((Number(r.DeveloperFeeAmount) + Number(r.DeveloperFeeGstAmount || 0)) * 100) / 100;
   const { getNextDocNumber } = require("./docNumber");
   const invNo = await getNextDocNumber(db, "INV", "INV");
-  const ins = await db.request().input("no", sql.NVarChar(50), invNo).input("b", sql.Int, r.FromBookingId)
+  // Two clicks at once both passed the "already issued" check above and made
+  // two invoices: claim the case under a lock and re-check before writing.
+  const tx = db.transaction();
+  await tx.begin();
+  try {
+  const live = (await tx.request().input("id", sql.Int, id)
+    .query(`SELECT i.Status AS InvStatus, r.FeeInvoiceId FROM dbo.CrmUnitResale r WITH (UPDLOCK, HOLDLOCK)
+            LEFT JOIN dbo.CrmInvoice i ON i.Id = r.FeeInvoiceId WHERE r.Id = @id`)).recordset[0];
+  if (live?.FeeInvoiceId && live.InvStatus !== "Void") throw new CaseError("The fee invoice was just issued — refresh", 409);
+  const ins = await tx.request().input("no", sql.NVarChar(50), invNo).input("b", sql.Int, r.FromBookingId)
     .input("amt", sql.Decimal(18, 2), total).input("rid", sql.Int, id).input("by", sql.Int, actorUserId)
     .input("d", sql.NVarChar(500), `Transfer fee — ${r.Property} passing to ${r.ToName} (resale case #${id})`)
     .query(`INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, Status, CreatedBy, CreatedAt, ResaleId)
             OUTPUT INSERTED.Id VALUES (@no, @b, N'TransferFee', @amt, CAST(SYSDATETIME() AS DATE), @d, N'Generated', @by, SYSDATETIME(), @rid)`);
-  await db.request().input("id", sql.Int, id).input("inv", sql.Int, ins.recordset[0].Id).input("by", sql.Int, actorUserId)
+  await tx.request().input("id", sql.Int, id).input("inv", sql.Int, ins.recordset[0].Id).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmUnitResale SET FeeInvoiceId = @inv, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back */ }
+    throw e;
+  }
   // The fee is earned when it is invoiced: Dr buyer / Cr transfer fee + GST output.
   // Idempotent per case, so the transfer's own call is then a no-op.
   let ledger = null;
@@ -384,7 +398,16 @@ async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
             LEFT JOIN dbo.enterprise e ON e.id = b.CompanyId WHERE b.Id = @b`)).recordset[0] || {};
   const { createReceivedPaymentInternal } = require("../routes/receivedPayment");
   const dt = (await db.request().query("SELECT TOP 1 TypeOfDocId FROM dbo.TypeOfDoc WHERE IsActive = 1 AND links_to LIKE '%Received Payment%' ORDER BY TypeOfDocId")).recordset[0];
-  const rp = await createReceivedPaymentInternal(db, {
+  // Same race as the invoice: the receipt and the case link are written
+  // together, after re-checking under a lock that no live payment exists.
+  const tx = db.transaction();
+  await tx.begin();
+  try {
+  const live = (await tx.request().input("id", sql.Int, id)
+    .query(`SELECT r.FeeReceivedPaymentId, p.RPStatus FROM dbo.CrmUnitResale r WITH (UPDLOCK, HOLDLOCK)
+            LEFT JOIN dbo.ReceivedPayment p ON p.RPPaymentID = r.FeeReceivedPaymentId WHERE r.Id = @id`)).recordset[0];
+  if (live?.FeeReceivedPaymentId && live.RPStatus !== "Rejected") throw new CaseError("The fee payment was just recorded — refresh", 409);
+  const rp = await createReceivedPaymentInternal(tx, {
     RPReceivedFrom: r.ToName, RPCustomerName: r.ToName,
     RPProjectName: bk.ProjectName, RPProjectId: bk.ProjectId, RPCompanyId: bk.CompanyId, RPCompanyName: bk.CompanyName || null,
     RPDocDate: b?.ReceivedDate || new Date().toISOString().slice(0, 10), RPDocTypeId: dt?.TypeOfDocId,
@@ -392,10 +415,15 @@ async function recordFeePayment(db, id, b, actorUserId, actorEmail) {
     RPRemarks: `Transfer fee — ${r.FeeInvoiceNo} (resale case #${id})`,
     RPDepositBankId: null, RPDepositBankName: null,
   }, actorEmail || String(actorUserId));
-  await db.request().input("rp", sql.Int, rp.RPPaymentID).input("rid", sql.Int, id)
+  await tx.request().input("rp", sql.Int, rp.RPPaymentID).input("rid", sql.Int, id)
     .query("UPDATE dbo.ReceivedPayment SET SourceCrmResaleId = @rid, RPStatus = CASE WHEN RPStatus = 'Draft' THEN 'Pending' ELSE RPStatus END WHERE RPPaymentID = @rp");
-  await db.request().input("id", sql.Int, id).input("rp", sql.Int, rp.RPPaymentID).input("by", sql.Int, actorUserId)
+  await tx.request().input("id", sql.Int, id).input("rp", sql.Int, rp.RPPaymentID).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmUnitResale SET FeeReceivedPaymentId = @rp, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back */ }
+    throw e;
+  }
   return caseState(db, id);
 }
 
