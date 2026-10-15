@@ -123,7 +123,7 @@ type TypeFilter = "all" | "default" | "storage";
 const TYPE_FILTERS: { key: TypeFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "default", label: "Project Default" },
-  { key: "storage", label: "Storage" },
+  { key: "storage", label: "Secondary" },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -377,7 +377,7 @@ export default function GodownAdmin() {
       <SheetShell
         eyebrow="CivilierERP · Admin"
         title="Godowns"
-        subtitle="Warehouse and storage locations across companies and projects. Each project keeps one default godown."
+        subtitle="Warehouse and storage locations across companies and projects. Each project keeps one default godown; any other is secondary."
         action={
           rights.canCreate && (
             <button onClick={openAdd} className={`${KEY_INK} h-9 px-4 shrink-0`}>
@@ -465,7 +465,7 @@ export default function GodownAdmin() {
                       <div className="flex flex-wrap gap-1.5">
                         <span className={cn(TAG, g.IsProjectDefault ? "bg-foreground text-card" : "text-foreground border border-foreground/50")}>
                           {g.IsProjectDefault && <Star className="h-2.5 w-2.5 fill-current" />}
-                          {g.IsProjectDefault ? "Project default" : "Storage"}
+                          {g.IsProjectDefault ? "Project default" : "Secondary"}
                         </span>
                         {g.EnterpriseName && (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 border border-foreground/25 text-[0.6875rem] text-muted-foreground">
@@ -496,7 +496,8 @@ export default function GodownAdmin() {
                           onCheckedChange={(val) => toggleMutation.mutate({ g, active: val })}
                           disabled={g.IsProjectDefault || toggleMutation.isPending}
                           title={g.IsProjectDefault ? "This project's default godown cannot be deactivated" : ""}
-                          className="data-[state=checked]:bg-foreground"
+                          // Locked (project default) switches stay full black rather than the faded disabled look.
+                          className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-foreground/25 disabled:opacity-100"
                         />
                         <span className={LBL}>{g.IsActive ? "Live" : "Paused"}</span>
                       </div>
@@ -692,7 +693,7 @@ export default function GodownAdmin() {
                 id="gd-active"
                 checked={form.IsActive}
                 onCheckedChange={(val) => setField("IsActive", val)}
-                className="data-[state=checked]:bg-foreground"
+                className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-foreground/25"
               />
               <Label htmlFor="gd-active" className="cursor-pointer">
                 Active
