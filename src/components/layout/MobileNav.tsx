@@ -71,6 +71,22 @@ import {
   ShoppingCart,
 } from "iconsax-react";
 
+import {
+  IconChartBar as TbChartBar,
+  IconChevronDown as TbChevronDown,
+  IconChevronRight as TbChevronRight,
+  IconCrown as TbCrown,
+  IconDatabase as TbDatabase,
+  IconHome as TbHome,
+  IconLayoutGrid as TbLayoutGrid,
+  IconLogout as TbLogout,
+  IconMenu2 as TbMenu2,
+  IconSearch as TbSearch,
+  IconSettings as TbSettings,
+  IconShieldCheck as TbShieldCheck,
+  IconUser as TbUser,
+  IconX as TbX,
+} from "@tabler/icons-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, firstAccessibleAdminPath, hasAnyAdminPageRight, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
 import { ALL_MODULES, hexToHsl } from "./moduleDefs";
@@ -846,10 +862,10 @@ export const MobileNav: React.FC = () => {
 
   // ── Bottom bar items ──────────────────────────────────────────────────────
   const barItems: { id: string; label: string; icon: React.ElementType; active: boolean; onClick: () => void }[] = [
-    { id: "home", label: "Home", icon: Home, active: !sheet && location.pathname === "/home", onClick: () => go("/home") },
-    { id: "menu", label: "Menu", icon: LayoutGrid, active: sheet === "menu", onClick: () => setSheet(sheet === "menu" ? null : "menu") },
-    { id: "reports", label: "Reports", icon: BarChart3, active: !sheet && location.pathname.startsWith("/reports"), onClick: () => go("/reports") },
-    { id: "me", label: "Me", icon: UserRound, active: sheet === "me", onClick: () => setSheet(sheet === "me" ? null : "me") },
+    { id: "home", label: "Home", icon: TbHome, active: !sheet && location.pathname === "/home", onClick: () => go("/home") },
+    { id: "menu", label: "Menu", icon: TbMenu2, active: sheet === "menu", onClick: () => setSheet(sheet === "menu" ? null : "menu") },
+    { id: "reports", label: "Reports", icon: TbChartBar, active: !sheet && location.pathname.startsWith("/reports"), onClick: () => go("/reports") },
+    { id: "me", label: "Me", icon: TbUser, active: sheet === "me", onClick: () => setSheet(sheet === "me" ? null : "me") },
   ];
 
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -884,20 +900,20 @@ export const MobileNav: React.FC = () => {
                     <p className="mn-title truncate">{activeModKey === "__none__" ? "Choose a module" : activeMod.label}</p>
                   </div>
                   <button onClick={() => setSheet(null)} aria-label="Close menu" className="mn-key">
-                    <X size={15} />
+                    <TbX size={15} stroke={1.5} />
                   </button>
                 </div>
 
                 {/* Search */}
                 <div className="mn-search">
-                  <Search size={15} />
+                  <TbSearch size={15} stroke={1.5} />
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={activeModKey === "__none__" ? "Find a page…" : `Find a page in ${activeMod.label}…`}
                   />
                   {query && (
-                    <button onClick={() => setQuery("")} aria-label="Clear search"><X size={14} /></button>
+                    <button onClick={() => setQuery("")} aria-label="Clear search"><TbX size={14} stroke={1.5} /></button>
                   )}
                 </div>
 
@@ -958,7 +974,7 @@ export const MobileNav: React.FC = () => {
                                   <span className="mn-name">{r.label}</span>
                                   <span className="mn-sub">{r.where}</span>
                                 </span>
-                                <ChevronRight size={14} className="mn-chev" />
+                                <TbChevronRight size={14} stroke={1.5} className="mn-chev" />
                               </button>
                             );
                           })}
@@ -991,7 +1007,7 @@ export const MobileNav: React.FC = () => {
                                       <span className="mn-mark"><item.icon size={15} /></span>
                                       <span className="mn-text"><span className="mn-name">{item.label}</span></span>
                                       <span className="mn-count">{item.children.length}</span>
-                                      <ChevronDown size={15} className="mn-chev" style={{ transform: isExpanded ? "rotate(180deg)" : undefined }} />
+                                      <TbChevronDown size={15} stroke={1.5} className="mn-chev" style={{ transform: isExpanded ? "rotate(180deg)" : undefined }} />
                                     </button>
                                     {isExpanded && (
                                       <div className="mn-children">
@@ -1024,7 +1040,7 @@ export const MobileNav: React.FC = () => {
                                   <span className="mn-num">{pad(++rowNo)}</span>
                                   <span className="mn-mark"><item.icon size={15} /></span>
                                   <span className="mn-text"><span className="mn-name">{item.label}</span></span>
-                                  {active ? <i className="mn-here" /> : <ChevronRight size={14} className="mn-chev" />}
+                                  {active ? <i className="mn-here" /> : <TbChevronRight size={14} stroke={1.5} className="mn-chev" />}
                                 </button>
                               );
                             })}
@@ -1036,11 +1052,11 @@ export const MobileNav: React.FC = () => {
                       {setupConfig.available && visibleSetupItems.length > 0 && (
                         <section>
                           <button onClick={() => setShowSetup((v) => !v)} className="mn-sec mn-sec-btn" aria-expanded={showSetup}>
-                            <Settings size={12} />
+                            <TbSettings size={12} stroke={1.5} />
                             <span className="mn-label ink">{setupConfig.label} Setup</span>
                             <span className="mn-rule" />
                             <span className="mn-label">{visibleSetupItems.length}</span>
-                            <ChevronDown size={14} className="mn-chev" style={{ transform: showSetup ? "rotate(180deg)" : undefined }} />
+                            <TbChevronDown size={14} stroke={1.5} className="mn-chev" style={{ transform: showSetup ? "rotate(180deg)" : undefined }} />
                           </button>
                           {showSetup && (
                             <div className="mn-grid">
@@ -1062,9 +1078,9 @@ export const MobileNav: React.FC = () => {
                       <div className="mn-box">
                         <button onClick={() => go("/widgets")} className="mn-row">
                           <span className="mn-num">{pad(++rowNo)}</span>
-                          <span className="mn-mark"><Puzzle size={15} /></span>
+                          <span className="mn-mark"><TbLayoutGrid size={15} stroke={1.5} /></span>
                           <span className="mn-text"><span className="mn-name">Widgets</span></span>
-                          <ChevronRight size={14} className="mn-chev" />
+                          <TbChevronRight size={14} stroke={1.5} className="mn-chev" />
                         </button>
                       </div>
                     </>
@@ -1083,21 +1099,21 @@ export const MobileNav: React.FC = () => {
                     <p className="mn-title truncate">{currentUser?.name}</p>
                     <p className="mn-sub truncate">{currentUser?.email}</p>
                     <span className="mn-role">
-                      {isSuperAdmin ? <Crown size={10} /> : isDba ? <Data size={10} /> : isAdmin ? <ShieldTick size={10} /> : null}
+                      {isSuperAdmin ? <TbCrown size={10} stroke={1.5} /> : isDba ? <TbDatabase size={10} stroke={1.5} /> : isAdmin ? <TbShieldCheck size={10} stroke={1.5} /> : null}
                       {roleLabel}
                     </span>
                   </div>
                   <button onClick={() => setSheet(null)} aria-label="Close" className="mn-key self-start">
-                    <X size={15} />
+                    <TbX size={15} stroke={1.5} />
                   </button>
                 </div>
 
                 <div className="mn-box">
                   <button onClick={() => go(profilePath)} className="mn-row">
                     <span className="mn-num">01</span>
-                    <span className="mn-mark"><Profile size={15} /></span>
+                    <span className="mn-mark"><TbUser size={15} stroke={1.5} /></span>
                     <span className="mn-text"><span className="mn-name">My profile</span></span>
-                    <ChevronRight size={14} className="mn-chev" />
+                    <TbChevronRight size={14} stroke={1.5} className="mn-chev" />
                   </button>
                 </div>
 
@@ -1131,7 +1147,7 @@ export const MobileNav: React.FC = () => {
                 <div className="mn-box">
                   <button onClick={handleLogout} className="mn-row danger">
                     <span className="mn-num">02</span>
-                    <span className="mn-mark"><Logout size={15} /></span>
+                    <span className="mn-mark"><TbLogout size={15} stroke={1.5} /></span>
                     <span className="mn-text"><span className="mn-name">Sign out</span></span>
                   </button>
                 </div>
@@ -1161,7 +1177,7 @@ export const MobileNav: React.FC = () => {
                 {active && !isMenu && <span className="mn-tab-mark" />}
                 {isMenu ? (
                   <span className={`mn-menu-key ${sheet === "menu" ? "open" : ""}`}>
-                    {sheet === "menu" ? <X size={18} /> : <Icon size={18} />}
+                    {sheet === "menu" ? <TbX size={18} stroke={1.5} /> : <Icon size={18} stroke={1.75} />}
                     {/* The open module, so "Menu" plainly means "this module's pages and every other module". */}
                     {sheet !== "menu" && activeModKey !== "__none__" && (
                       <span className="mn-menu-mod">
@@ -1174,7 +1190,7 @@ export const MobileNav: React.FC = () => {
                     <Avatar size={24} />
                   </span>
                 ) : (
-                  <Icon size={20} strokeWidth={active ? 2.2 : 1.7} />
+                  <Icon size={20} stroke={active ? 2 : 1.5} />
                 )}
                 <span className="mn-tab-label">{label}</span>
               </button>
