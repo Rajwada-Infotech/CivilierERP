@@ -893,6 +893,20 @@
   main :not(table *):is([class^="min-w-["], [class*=" min-w-["]) {
     min-width: 0 !important;
   }
+  /* …except the top bar's drop-down panels (notifications, account, theme): the
+     cap above sized them to their 32px icon. On a phone they hang under the
+     bar across the screen instead. */
+  .fixed .np-sheet.absolute {
+    position: fixed;
+    top: calc(3.5rem + 6px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    margin-top: 0;
+    max-height: calc(100dvh - 3.5rem - 16px);
+    overflow-y: auto;
+  }
 
   /* Fixed 3–6 column grids (forms, stat rows) reflow into as many columns
      as fit, down to one. */
