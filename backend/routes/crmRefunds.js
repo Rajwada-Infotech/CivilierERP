@@ -383,7 +383,9 @@ router.get("/gst-notes/:noteId", requirePageRight("crm-refunds", "view"), async 
     if (!n) return res.status(404).json({ error: "Credit note not found" });
     const { CompanyLogo, ...rest } = n;
     // The other documents of the same refund (a split into voucher + credit notes).
-    const siblings = (await gst.list(getPool(), { refundId: n.RefundId })).filter((x) => x.Id !== id)
+    // A note with no refund (an invoice adjustment) has none - without the
+    // refund filter this listed every note in the system.
+    const siblings = (n.RefundId == null ? [] : await gst.list(getPool(), { refundId: n.RefundId })).filter((x) => x.Id !== id)
       .map((x) => ({ Id: x.Id, DocNo: x.DocNo, DocType: x.DocType, Status: x.Status, TotalAmount: x.TotalAmount, AgainstRef: x.AgainstRef }));
     res.json({ ...rest, siblings });
   } catch (e) { gstFail(res, e, "GET /gst-notes/:noteId"); }
@@ -856,7 +858,9 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     `);
     if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ error: "Refund not found" }); }
     const rf = cur.recordset[0];
-    if (rf.Status !== "FinancePending") {
+    // "Approved" with no voucher = approval recorded, then the server stopped
+    // before the voucher step; Finance raises it here instead of it sticking.
+    if (rf.Status !== "FinancePending" && !(rf.Status === "Approved" && !rf.FinanceNewPaymentId)) {
       await tx.rollback();
       return res.status(400).json({ error: `Cannot finance-approve — status must be FinancePending (currently '${rf.Status}')` });
     }

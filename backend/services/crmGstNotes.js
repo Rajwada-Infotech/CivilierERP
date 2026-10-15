@@ -156,6 +156,12 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
   const tx = new sql.Transaction(pool);
   await tx.begin();
   try {
+    // Re-check under a lock on the refund: two calls at once (paid + the
+    // manual "issue" button) both passed the check above and issued twice.
+    await tx.request().input("r", sql.Int, refundId).query("SELECT Id FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @r");
+    const liveNow = (await tx.request().input("r", sql.Int, refundId)
+      .query("SELECT COUNT(*) AS n FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0].n;
+    if (liveNow) { await tx.rollback(); return { none: "already issued" }; }
     for (let i = 0; i < pieces.length; i++) {
       const p = pieces[i];
       const gst = i === pieces.length - 1 ? r2(gstLeft) : r2((totalGst * p.amount) / net);
