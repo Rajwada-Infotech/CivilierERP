@@ -49,7 +49,10 @@ const MAKER_COLUMNS = {
 
 // Checks outside the approval levels that follow the same setting: who
 // verifies a paper they uploaded themselves.
-const RAISER_RULE_EXTRA = { "crm-transfer-deed-papers": "Transfer deed papers (verify what you uploaded)" };
+const RAISER_RULE_EXTRA = {
+  "crm-transfer-deed-papers": "Transfer deed papers (verify what you uploaded)",
+  "crm-resale-case-papers": "Resale case papers (verify what you uploaded)",
+};
 
 /** Whether the raiser of a request in this module may approve it (Approval Setup). */
 async function raiserMayApprove(module) {

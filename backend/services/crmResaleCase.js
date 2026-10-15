@@ -443,14 +443,18 @@ async function addDocument(db, id, type, file, remarks, actorUserId) {
   return r.recordset[0].Id;
 }
 
-/** Verify / reject a case document. The uploader can't verify their own. */
+/** Verify / reject a case document. Whether the uploader may verify their own
+ *  is the Approval Setup switch "crm-resale-case-papers" (off unless set). */
 async function reviewDocument(db, id, docId, decision, remarks, actorUserId) {
   const d = (await db.request().input("d", sql.Int, docId).input("id", sql.Int, id)
     .query("SELECT Id, CreatedBy, Status FROM dbo.CrmResaleDocument WHERE Id = @d AND ResaleId = @id AND IsActive = 1")).recordset[0];
   if (!d) throw new CaseError("Document not found", 404);
   if (!["Verified", "Rejected"].includes(decision)) throw new CaseError("decision must be Verified or Rejected");
   if (decision === "Rejected" && !String(remarks || "").trim()) throw new CaseError("Say why it's rejected");
-  if (d.CreatedBy && actorUserId && Number(d.CreatedBy) === Number(actorUserId)) throw new CaseError("You uploaded this document, so someone else has to verify it.", 403);
+  if (d.CreatedBy && actorUserId && Number(d.CreatedBy) === Number(actorUserId)
+      && !(await require("./approvalService").raiserMayApprove("crm-resale-case-papers"))) {
+    throw new CaseError("You uploaded this document, so someone else has to verify it (Approval Setup).", 403);
+  }
   await db.request().input("d", sql.Int, docId).input("s", sql.NVarChar(20), decision).input("rem", sql.NVarChar(1000), remarks || null).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmResaleDocument SET Status = @s, Remarks = ISNULL(@rem, Remarks), VerifiedBy = @by, VerifiedAt = SYSDATETIME() WHERE Id = @d");
   return caseState(db, id);

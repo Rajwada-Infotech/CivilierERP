@@ -518,7 +518,7 @@ router.put("/:id/reject", requirePageRight("crm-resales", "edit"), async (req, r
     const email = req.user?.email || req.user?.name;
     if (!email) return res.status(401).json({ error: "Sign in again" });
     const { transition } = require("../services/approvalService");
-    const result = await transition("crm-resales", id, "Rejected", email, req.user?.role, req.body?.note || null);
+    const result = await transition("crm-resales", id, "Rejected", email, req.user?.role, req.body?.note || null, req.user?.userId ?? null);
     await getPool().request().input("id", sql.Int, id).input("n", sql.NVarChar(500), req.body?.note || "Rejected")
       .query("UPDATE dbo.CrmUnitResale SET RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     await bumpResales();
