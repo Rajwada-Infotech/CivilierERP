@@ -1311,6 +1311,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
         .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
         .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
         .input("rem",   sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("remSet", sql.Bit, "Remarks" in b ? 1 : 0)
         .input("ub",    sql.Int,           actorId(req))
         .query(`
           UPDATE dbo.CrmPaymentMilestone SET
@@ -1320,7 +1321,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
             [Percent]      = ISNULL(@pct,   [Percent]),
             RequiredDocuments = ISNULL(@rdocs, RequiredDocuments),
             ResponsibleDepartment = ISNULL(@dept, ResponsibleDepartment),
-            Remarks   = @rem,
+            Remarks   = CASE WHEN @remSet = 1 THEN @rem ELSE Remarks END,
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           OUTPUT INSERTED.BookingId
           WHERE Id = @id
