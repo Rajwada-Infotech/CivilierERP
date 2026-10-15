@@ -496,7 +496,8 @@ export default function GodownAdmin() {
                           onCheckedChange={(val) => toggleMutation.mutate({ g, active: val })}
                           disabled={g.IsProjectDefault || toggleMutation.isPending}
                           title={g.IsProjectDefault ? "This project's default godown cannot be deactivated" : ""}
-                          className="data-[state=checked]:bg-foreground"
+                          // Locked (project default) switches stay full black rather than the faded disabled look.
+                          className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-foreground/25 disabled:opacity-100"
                         />
                         <span className={LBL}>{g.IsActive ? "Live" : "Paused"}</span>
                       </div>
@@ -692,7 +693,7 @@ export default function GodownAdmin() {
                 id="gd-active"
                 checked={form.IsActive}
                 onCheckedChange={(val) => setField("IsActive", val)}
-                className="data-[state=checked]:bg-foreground"
+                className="data-[state=checked]:bg-foreground data-[state=unchecked]:bg-foreground/25"
               />
               <Label htmlFor="gd-active" className="cursor-pointer">
                 Active
