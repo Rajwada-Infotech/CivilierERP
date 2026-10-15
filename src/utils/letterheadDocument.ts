@@ -9,6 +9,7 @@
 import { toast } from "sonner";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { DM_SANS_FACE_CSS, embedDmSans, printWhenFontsReady } from "@/utils/documentFont";
+import { chooseSignature, fitStamp, type SignatureStamp } from "@/utils/signatureChoice";
 
 export interface LetterheadCompany {
   name: string;
@@ -111,7 +112,12 @@ export const cellText = (v: string | number | null | undefined) =>
 
 // ─── Print (HTML) ────────────────────────────────────────────────────────────
 
-export function printLetterhead(d: LetterheadDoc) {
+/** Prints the document; an Authorised Signatory line first offers a signature from the library. */
+export async function printLetterhead(d: LetterheadDoc) {
+  printLetterheadNow(d, await chooseSignature(d.signLabel));
+}
+
+function printLetterheadNow(d: LetterheadDoc, stamp: SignatureStamp | null) {
   const c = d.company;
   const safeLogo = c.logo && /^(https?:\/\/|data:image\/|\/)/i.test(c.logo) ? escapeHtml(c.logo) : "";
   const logoHtml = safeLogo ? `<div class="logo"><img src="${safeLogo}" alt="" /></div>` : "";
@@ -207,6 +213,8 @@ export function printLetterhead(d: LetterheadDoc) {
   .notes h4, .sig h4 { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 1.5mm; }
   .sig { text-align: right; font-size: 10.5px; }
   .sig .line { width: 52mm; border-top: 1px solid ${INK}; margin: 14mm 0 1.5mm auto; }
+  .sig .stamp { display: block; height: 12mm; max-width: 52mm; object-fit: contain; margin: 2mm 0 0 auto; }
+  .sig .stamp + .line { margin-top: 0.5mm; }
   .sig b { display: block; font-size: 11.5px; }
   .terms { margin-top: 9mm; padding-top: 3mm; border-top: 1px solid ${INK}; font-size: 9.5px; color: #374151; line-height: 1.5; white-space: pre-wrap; }
 </style></head><body>
@@ -235,7 +243,7 @@ export function printLetterhead(d: LetterheadDoc) {
     <div class="grow"></div>
     <div class="bottom">
       <div class="notes">${notesHtml}</div>
-      <div class="sig"><div class="line"></div><h4>${escapeHtml(d.signLabel)}</h4><b>${escapeHtml(d.signName || "—")}</b></div>
+      <div class="sig">${stamp ? `<img class="stamp" src="${escapeHtml(stamp.image)}" alt="" />` : ""}<div class="line"></div><h4>${escapeHtml(d.signLabel)}</h4><b>${escapeHtml(d.signName || "—")}</b></div>
     </div>
     <div class="terms"><b>${escapeHtml(d.termsTitle || "Terms & Conditions :")}</b> ${escapeHtml(d.terms)}</div>
   </div>
@@ -287,7 +295,12 @@ export async function toDataUrl(src?: string | null): Promise<string | null> {
   }
 }
 
+/** Saves the document as PDF; an Authorised Signatory line first offers a signature from the library. */
 export async function downloadLetterheadPdf(d: LetterheadDoc, filename: string) {
+  return downloadLetterheadPdfNow(d, filename, await chooseSignature(d.signLabel));
+}
+
+async function downloadLetterheadPdfNow(d: LetterheadDoc, filename: string, stamp: SignatureStamp | null) {
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -529,6 +542,15 @@ export async function downloadLetterheadPdf(d: LetterheadDoc, filename: string) 
     const wrapped = doc.splitTextToSize(latin(n.lines.join("\n")), 80);
     doc.text(wrapped, LEFT, ny + 5);
     ny += 5 + wrapped.length * 4 + 3;
+  }
+  if (stamp) {
+    try {
+      const { w, h } = fitStamp(stamp.ratio, 50, 12);
+      const fmt = /^data:image\/png/i.test(stamp.image) ? "PNG" : "JPEG";
+      doc.addImage(stamp.image, fmt, RIGHT - w, y + 14 - h - 0.6, w, h, undefined, "FAST");
+    } catch {
+      // an unreadable image just leaves the line blank
+    }
   }
   doc.setDrawColor(...rgb(INK));
   doc.setLineWidth(0.25);
