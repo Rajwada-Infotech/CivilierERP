@@ -59,7 +59,13 @@ export const SaNotificationBell: React.FC = () => {
           <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
           {/* backdrop */}
           <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setOpen(false)} /></BodyPortal>
-          <div className="np-sheet absolute right-0 top-full mt-3 z-50 w-[min(92vw,360px)] flex flex-col animate-in fade-in duration-200">
+          {/* Phones: a panel fixed under the top bar, centred on the screen (pinned to the bell it ran off the
+              right edge, and the phone rule capping w-[…] boxes to their parent squeezed it to the bell's width).
+              Wider screens: dropped from the bell as before. Width set inline so that rule can't touch it. */}
+          <div
+            className="np-sheet fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-full -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 flex flex-col animate-in fade-in duration-200"
+            style={{ width: "min(calc(100vw - 1.5rem), 360px)" }}
+          >
             {/* Title block: what this is, how many are unread, and mark-all-read */}
             <div className="np-head">
               <div className="min-w-0">
