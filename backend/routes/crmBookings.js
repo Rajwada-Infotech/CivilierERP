@@ -2266,15 +2266,29 @@ router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "ed
       WHERE InvoiceId = @iid AND Status IN (N'Issued', N'TimeBarred', N'Draft', N'Pending', N'Rejected')`)).recordset[0];
     if (cn) return res.status(409).json({ error: `"${row.InvoiceNo}" has ${cn.No} against it — cancel that first (Finance → Credit Notes)` });
 
-    await pool.request()
-      .input("iid", sql.Int, invoiceId)
-      .input("by", sql.Int, actorId(req))
-      .input("reason", sql.NVarChar(500), reason)
-      .query(`
-        UPDATE dbo.CrmInvoice SET
-          Status = 'Void', VoidedBy = @by, VoidedAt = SYSDATETIME(), VoidReason = @reason
-        WHERE Id = @iid
-      `);
+    // The void, its ledger reversal and the cached PDF go together: the
+    // invoice's posting (advance released to income) used to stay live, so a
+    // void + re-issue booked the income twice; the cached PDF kept saying
+    // GENERATED.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const upd = await tx.request()
+        .input("iid", sql.Int, invoiceId)
+        .input("by", sql.Int, actorId(req))
+        .input("reason", sql.NVarChar(500), reason)
+        .query(`
+          UPDATE dbo.CrmInvoice SET
+            Status = 'Void', VoidedBy = @by, VoidedAt = SYSDATETIME(), VoidReason = @reason, PdfBase64 = NULL
+          WHERE Id = @iid AND Status <> 'Void'
+        `);
+      if (!upd.rowsAffected[0]) { await tx.rollback(); return res.status(400).json({ error: `"${row.InvoiceNo}" is already void` }); }
+      await require("../services/generalLedger").reversePostingBySource(tx, "CrmInvoice", invoiceId);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
     await logCrmAudit(pool, "CrmInvoice", invoiceId, actorId(req), [
       { field: "Status", oldVal: row.Status, newVal: "Void" },
       { field: "VoidReason", oldVal: null, newVal: reason },

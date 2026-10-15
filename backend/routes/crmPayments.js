@@ -87,7 +87,7 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   // sweeping it onto individual milestones in order.
   const totals = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
     SELECT
-      ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
+      ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Bounced'), 0) AS TotalReceived, -- a bounced cheque is not money received
       ISNULL(GrandTotal, TotalValue) AS BookingTotal
     FROM dbo.CrmBooking WHERE Id = @bid
   `);
@@ -335,7 +335,7 @@ async function autoApplyOnAccountIfFullyFunded(pool, bookingId, actorUserId, act
   try {
     const totals = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT
-        ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
+        ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Bounced'), 0) AS TotalReceived, -- a bounced cheque is not money received
         ISNULL(GrandTotal, TotalValue) AS BookingTotal
       FROM dbo.CrmBooking WHERE Id = @bid
     `);
@@ -1151,7 +1151,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       // applyOnAccountToMilestone above) — surfaced here so the frontend can
       // show how much of the booking's GrandTotal is actually on hand yet.
       pool.request().input("bid", sql.Int, bid).query(`
-        SELECT ISNULL(SUM(Amount), 0) AS OnAccountTotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+        SELECT ISNULL(SUM(Amount), 0) AS OnAccountTotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND ISNULL(Status, '') <> 'Bounced'
       `),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });

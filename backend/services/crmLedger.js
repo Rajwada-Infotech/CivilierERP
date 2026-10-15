@@ -138,7 +138,8 @@ async function getCumulativeGstSplit(pool, bookingId, amount, side) {
       ? `SELECT ISNULL(SUM(inv.Amount), 0) AS Gross,
                 ISNULL((SELECT SUM(g.DebitAmount) FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND g.LHeadId = @adv AND ISNULL(g.IsReversed, 0) = 0), 0) AS Base
          FROM dbo.CrmInvoice inv
-         WHERE inv.BookingId = @bid AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id)`
+         WHERE inv.BookingId = @bid AND ISNULL(inv.Status, '') <> 'Void'
+           AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id AND ISNULL(g.IsReversed, 0) = 0)`
       : `SELECT ISNULL(SUM(g.DebitAmount), 0) AS Gross,
                 ISNULL(SUM(CASE WHEN g.LHeadId = @gst THEN g.CreditAmount ELSE 0 END), 0) AS Gst
          FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND ISNULL(g.IsReversed, 0) = 0`)).recordset[0] || {};
@@ -1036,7 +1037,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, invoiceId).query(`
-    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate,
+    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Status,
            b.Id AS BookingId, b.CompanyId, b.ProjectId
     FROM dbo.CrmInvoice inv
     JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
@@ -1044,6 +1045,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   `);
   const row = r.recordset[0];
   if (!row) return { posted: false, reason: `CrmInvoice ${invoiceId} not found` };
+  if (row.Status === "Void") return { posted: false, reason: `${row.InvoiceNo} is void — not posted` };
   // "Final" = a Non-Invoice customer's one invoice for the grand total.
   if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking" && row.InvoiceType !== "Final")
     return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
