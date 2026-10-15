@@ -137,7 +137,7 @@ export function MaintenanceWatcher() {
       <Link
         to="/admin/system-maintenance"
         role="status"
-        className="fixed bottom-4 left-4 z-[1900] flex items-center gap-2 rounded-full bg-amber-500 px-3.5 py-2 text-xs font-medium text-amber-950 shadow-lg transition-opacity hover:opacity-90"
+        className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] md:bottom-4 left-4 z-[1900] flex items-center gap-2 rounded-full bg-amber-500 px-3.5 py-2 text-xs font-medium text-amber-950 shadow-lg transition-opacity hover:opacity-90"
       >
         <Construction size={14} />
         {data.enforced ? "Maintenance is ON" : "Maintenance starting"} - everyone else is{data.enforced ? "" : " about to be"} held
