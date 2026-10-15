@@ -1,14 +1,11 @@
 import { ItemPicker } from "../ItemPicker";
-import { CalendarDays, FileText, Save, Plus, X, ClipboardList, Hash, AlertTriangle, CheckCircle2, ShoppingCart, Package, ArrowLeft, RotateCcw, Check, ChevronDown } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CalendarDays, Save, Plus, X, Hash, ArrowLeft, RotateCcw, Check, ChevronDown } from "lucide-react";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { relevantUOMs, convertQuantity } from "@/lib/uomConversion";
 import { alternatesForItem, getItemUomFactor, convertItemQuantity } from "@/lib/itemUomAlternates";
 import { DateInput } from "@/components/ui/date-input";
-import { inputCls, selectCls, blankCartItem, PRIORITY_OPTIONS, Field } from "./config";
+import { inputCls, selectCls, blankCartItem, PRIORITY_OPTIONS, Field, HEAD, LBL, RULE, KEY_INK, KEY_LINE, ACT } from "./config";
 import type { MRState } from "./useMaterialRequest";
 
 // Create / edit a material request: header, items, save.
@@ -17,44 +14,29 @@ export function MRForm({ m }: { m: MRState }) {
   return (
     <div className="space-y-5">
       {woSource && !editingId && (
-        <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-2.5 text-xs text-orange-700 dark:text-orange-300">
+        <div className="border-l-2 border-foreground pl-3 py-1 text-xs text-foreground/80">
           Raised from Work Order <strong>{woSource.docNo}</strong>. The items below are the work order's materials — change, add or remove anything, then save.
         </div>
       )}
       {/* Header card */}
-      <Card className="border-border shadow-sm">
-        <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
-          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={goToList}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            >
-              <ArrowLeft size={15} />
-              <span className="hidden sm:inline">Back</span>
-            </button>
-            <span className="text-emerald-500/40">|</span>
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
-                <ClipboardList size={12} className="text-emerald-400" />
-              </div>
-              <h2 className="text-sm font-heading font-bold text-foreground truncate">
-                {editingId ? "Edit Material Request" : "New Material Request"}
-              </h2>
-            </div>
-          </div>
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+          <button type="button" onClick={goToList} className={`${KEY_LINE} h-8 px-3 shrink-0`}>
+            <ArrowLeft size={12} /> Back
+          </button>
+          <h2 className="font-heading text-base font-bold tracking-tight text-foreground truncate">
+            {editingId ? "Edit material request" : "New material request"}
+          </h2>
         </div>
 
-        <CardContent className="p-5 space-y-4">
+        <div className="p-4 space-y-4">
           {/* Doc number / Type of Doc */}
-          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
-            <FileText size={13} className="text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
-              Request No:
+          <div className="flex flex-wrap items-center gap-3 border border-dashed border-foreground/50 px-4 py-3">
+            <span className={`${LBL} mr-2 whitespace-nowrap`}>
+              Request no
             </span>
             {editingId ? (
-              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm break-all">
+              <span className="font-heading font-bold tracking-wide text-foreground text-sm break-all">
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
             ) : (
@@ -111,7 +93,7 @@ export function MRForm({ m }: { m: MRState }) {
                   />
                 </div>
                 {header.docNoPreview && (
-                  <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider whitespace-nowrap">
+                  <span className="font-heading text-sm font-bold text-foreground tracking-wider whitespace-nowrap">
                     {header.docNoPreview}
                   </span>
                 )}
@@ -256,98 +238,73 @@ export function MRForm({ m }: { m: MRState }) {
           {/* Row 3: Reason | Remarks */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Reason for Request" required>
-              <Textarea
+              <textarea
                 value={header.reason}
                 onChange={(e) => setH("reason", e.target.value)}
                 rows={2}
-                className="resize-none text-sm"
+                className={`${inputCls} resize-none`}
                 placeholder="State the reason for this material request…"
               />
             </Field>
             <Field label="Remarks">
-              <Textarea
+              <textarea
                 value={header.remarks}
                 onChange={(e) => setH("remarks", e.target.value)}
                 rows={2}
-                className="resize-none text-sm"
+                className={`${inputCls} resize-none`}
                 placeholder="Optional notes…"
               />
             </Field>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Items card */}
-      <Card className="border-border shadow-sm">
-        <CardHeader className="px-4 sm:px-6 py-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-              <ShoppingCart
-                size={15}
-                className="text-emerald-600 dark:text-emerald-400"
-              />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-sm font-semibold">
-                Requested Items
-              </CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {cart.length} line item{cart.length !== 1 ? "s" : ""}
-                {header.projectId && (
-                  <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-medium">
-                    · Stock from project godown
-                  </span>
-                )}
-                {availableSupplyDays !== null && (
-                  <span className="ml-2 text-amber-600 dark:text-amber-400 font-medium">
-                    · Only items deliverable within {availableSupplyDays} day{availableSupplyDays === 1 ? "" : "s"} are listed
-                  </span>
-                )}
-              </p>
-            </div>
+      {/* Items */}
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={{ borderBottom: RULE }}>
+          <div className="min-w-0">
+            <span className={HEAD}>
+              Requested items <span className="font-normal text-muted-foreground tabular-nums ml-1">{cart.length}</span>
+            </span>
+            <p className="text-xs text-muted-foreground mt-1">
+              {header.projectId && <span>Stock shown is from the project's godown.</span>}
+              {availableSupplyDays !== null && (
+                <span className="ml-1">
+                  Only items deliverable within {availableSupplyDays} day{availableSupplyDays === 1 ? "" : "s"} are listed.
+                </span>
+              )}
+            </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={addCartRow}
-            className="gap-1.5 h-8 text-xs self-start sm:self-auto"
-          >
-            <Plus size={13} /> Add Item
-          </Button>
-        </CardHeader>
+          <button type="button" onClick={addCartRow} className={`${KEY_LINE} h-8 px-3 self-start sm:self-auto`}>
+            <Plus size={12} /> Add item
+          </button>
+        </div>
 
-        <CardContent className="p-6 space-y-4">
+        <div className="p-4 space-y-3">
           {/* Column headers — visible on md+ */}
-          <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_auto] gap-4 px-1 pb-1 border-b border-border/50">
-            <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
-              Item
-            </span>
-            <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
-              Unit (UOM)
-            </span>
-            <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
-              Quantity
-            </span>
-            <span className="w-8" />
+          <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_auto] gap-3 pl-9 pr-1 pb-1">
+            <span className={LBL}>Item</span>
+            <span className={LBL}>Unit (UOM)</span>
+            <span className={LBL}>Quantity</span>
+            <span className="w-10" />
           </div>
 
           {cart.map((ci, idx) => (
             <div
               key={ci._key}
-              className="group relative rounded-xl border border-border bg-card hover:border-emerald-500/30 hover:shadow-sm transition-all duration-150"
+              className="relative flex border border-foreground/30 bg-card hover:border-foreground transition-colors"
             >
-              {/* Row number pill */}
-              <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[0.625rem] font-bold text-muted-foreground shadow-sm">
-                {idx + 1}
+              {/* Row number */}
+              <div className="w-8 shrink-0 flex items-start justify-center pt-4 border-r border-foreground/20 font-heading text-[0.6875rem] font-semibold tabular-nums text-muted-foreground">
+                {String(idx + 1).padStart(2, "0")}
               </div>
 
-              <div className="p-4 pl-5">
+              <div className="p-3 flex-1 min-w-0">
                 {/* Main row: item | uom | qty | remove — all on one line on desktop */}
                 <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-start">
                   {/* Item selector */}
                   <div className="space-y-1.5">
-                    <label className="md:hidden text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <label className={`md:hidden ${LBL}`}>
                       Item *
                     </label>
                     <ItemPicker
@@ -369,7 +326,7 @@ export function MRForm({ m }: { m: MRState }) {
 
                   {/* UOM selector */}
                   <div className="space-y-1.5">
-                    <label className="md:hidden text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <label className={`md:hidden ${LBL}`}>
                       Unit (UOM) *
                     </label>
                     <div className="relative">
@@ -524,7 +481,7 @@ export function MRForm({ m }: { m: MRState }) {
 
                   {/* Quantity */}
                   <div className="space-y-1.5">
-                    <label className="md:hidden text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <label className={`md:hidden ${LBL}`}>
                       Quantity *
                     </label>
                     <div className="relative">
@@ -532,7 +489,7 @@ export function MRForm({ m }: { m: MRState }) {
                         size={12}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <Input
+                      <input
                         type="number"
                         min={0}
                         step="0.01"
@@ -540,7 +497,7 @@ export function MRForm({ m }: { m: MRState }) {
                         onChange={(e) =>
                           updateCartItem(ci._key, "Quantity", e.target.value)
                         }
-                        className="pl-8 h-10 font-mono"
+                        className={`${inputCls} pl-8 h-10 font-heading tabular-nums`}
                         placeholder="0.00"
                       />
                     </div>
@@ -608,7 +565,8 @@ export function MRForm({ m }: { m: MRState }) {
                       onClick={() => removeCartRow(ci._key)}
                       disabled={cart.length === 1}
                       title="Remove row"
-                      className="h-10 w-10 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-25"
+                      aria-label="Remove row"
+                      className={`${ACT} h-10 w-10 hover:text-destructive hover:border-destructive`}
                     >
                       <X size={15} />
                     </button>
@@ -617,14 +575,14 @@ export function MRForm({ m }: { m: MRState }) {
 
                 {/* Remarks — always full width below, only shown when item picked */}
                 {ci.ItemId && (
-                  <div className="mt-3 pt-3 border-t border-border/40">
-                    <Input
+                  <div className="mt-3 pt-3 border-t border-foreground/15">
+                    <input
                       value={ci.Remarks}
                       onChange={(e) =>
                         updateCartItem(ci._key, "Remarks", e.target.value)
                       }
                       placeholder="Line remarks (optional)"
-                      className="h-9 text-sm text-muted-foreground placeholder:text-muted-foreground/50"
+                      className={`${inputCls} h-9 py-1.5`}
                     />
                   </div>
                 )}
@@ -634,44 +592,41 @@ export function MRForm({ m }: { m: MRState }) {
 
           {/* Cart summary */}
           {cart.some((ci) => ci.ItemId && ci.Quantity) && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted/20 px-5 py-3.5 text-sm mt-2">
-              <div className="flex items-center gap-3 text-muted-foreground">
-                <Package size={14} />
-                <span>
-                  <span className="font-semibold text-foreground">
-                    {cart.filter((ci) => ci.ItemId).length}
-                  </span>{" "}
-                  item{cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""} ·{" "}
-                  <span className="font-semibold text-foreground font-mono">
-                    {cart
-                      .reduce((s, ci) => s + (Number(ci.Quantity) || 0), 0)
-                      .toFixed(2)}
-                  </span>{" "}
-                  units total
-                </span>
-              </div>
-              {cartIsValid ? (
-                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-                  <CheckCircle2 size={13} /> Ready to save
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-amber-600 font-medium">
-                  <AlertTriangle size={13} /> Complete all items
-                </span>
-              )}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm mt-1 -mx-4 -mb-4" style={{ borderTop: RULE }}>
+              <span className="text-muted-foreground">
+                <span className="font-heading font-semibold text-foreground tabular-nums">
+                  {cart.filter((ci) => ci.ItemId).length}
+                </span>{" "}
+                item{cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""}
+                {(() => {
+                  // Bags and tonnes don't add up — one total per unit.
+                  const byUom = new Map<string, number>();
+                  for (const ci of cart) {
+                    if (!ci.ItemId || !Number(ci.Quantity)) continue;
+                    const u = uomMap[ci.UOMCode]?.Symbol || uomMap[ci.UOMCode]?.UOMName || ci.UOMCode || "—";
+                    byUom.set(u, (byUom.get(u) || 0) + Number(ci.Quantity));
+                  }
+                  return Array.from(byUom.entries()).map(([u, q]) => (
+                    <span key={u}>
+                      {" · "}
+                      <span className="font-heading font-semibold text-foreground tabular-nums">
+                        {q.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                      </span>{" "}
+                      {u}
+                    </span>
+                  ));
+                })()}
+              </span>
+              {cartIsValid ? <SheetMark text="Ready to save" tone="done" /> : <SheetMark text="Complete every item" tone="waiting" />}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Save bar */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 bg-card" style={{ border: RULE }}>
         <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-          {canSave ? (
-            <span className="text-emerald-500 font-medium">Ready to save</span>
-          ) : (
-            "Fill in the required fields to save"
-          )}
+          {canSave ? "Ready to save." : "Fill in the required fields to save."}
         </p>
         <div className="flex items-center gap-2 sm:ml-auto">
           <button
@@ -684,29 +639,29 @@ export function MRForm({ m }: { m: MRState }) {
                 !header.remarks.trim() &&
                 cart.every((ci) => !ci.ItemId && !ci.Quantity))
             }
-            className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            className={`${KEY_LINE} flex-1 sm:flex-none h-9 px-4`}
           >
             <RotateCcw size={12} /> Reset
           </button>
           <button
             onClick={onSave}
             disabled={!canSave || isSaving || saved}
-            className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+            className={`${KEY_INK} flex-1 sm:flex-none h-9 px-5 whitespace-nowrap`}
           >
             {saved ? (
               <Check size={14} />
             ) : isSaving ? (
-              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span className="w-3.5 h-3.5 border-2 border-card/30 border-t-card rounded-full animate-spin" />
             ) : (
               <Save size={14} />
             )}
             {saved
-              ? "Saved!"
+              ? "Saved"
               : isSaving
                 ? "Saving…"
                 : editingId
-                  ? "Update Request"
-                  : "Save Request"}
+                  ? "Update request"
+                  : "Save request"}
           </button>
         </div>
       </div>

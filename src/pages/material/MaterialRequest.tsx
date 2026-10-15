@@ -6,10 +6,9 @@
 //   MRViewModal          one request opened for reading
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ExportMenu } from "@/components/ExportMenu";
-import { Plus, Send, Download, Upload, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { MaterialShell } from "@/components/material/MaterialShell";
-import { EXPORT_COLUMNS } from "./materialRequest/config";
+import { Plus, Download, Upload, Loader2 } from "lucide-react";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { EXPORT_COLUMNS, KEY_INK, KEY_LINE } from "./materialRequest/config";
 import { useMaterialRequest } from "./materialRequest/useMaterialRequest";
 import { MRList } from "./materialRequest/MRList";
 import { MRForm } from "./materialRequest/MRForm";
@@ -17,15 +16,15 @@ import { MRViewModal } from "./materialRequest/MRViewModal";
 
 export default function MaterialRequest() {
   const m = useMaterialRequest();
-  const { rights, importFileInputRef, importing, viewMode, setViewMode, projects, listData, loadingList, columns, handleDownloadTemplate, handleImportClick, handleImportFileChange } = m;
+  const { rights, importFileInputRef, importing, viewMode, setViewMode, listData, loadingList, handleDownloadTemplate, handleImportClick, handleImportFileChange } = m;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Material Request"]} />
-      <MaterialShell
-        title="Material Requests"
-        subtitle="Request materials for projects"
-        icon={Send}
+      <SheetShell
+        eyebrow="CivilierERP · Material"
+        title="Material requests"
+        subtitle="Materials a project asks for, from request through approval to ordering."
         action={
           viewMode === "list" ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -37,30 +36,18 @@ export default function MaterialRequest() {
                 disabled={loadingList || !listData?.data?.length || !rights.canExport}
               />
               <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
-              <button
-                onClick={handleDownloadTemplate}
-                title="Download a blank CSV template"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-              >
-                <Download size={13} />
-                <span className="hidden sm:inline">Download Template</span>
+              <button onClick={handleDownloadTemplate} title="Download a blank CSV template" className={`${KEY_LINE} h-9 px-3`}>
+                <Download size={12} />
+                <span className="hidden sm:inline">Template</span>
               </button>
-              <button
-                onClick={handleImportClick}
-                disabled={importing}
-                title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              <button onClick={handleImportClick} disabled={importing} title="Import from CSV" className={`${KEY_LINE} h-9 px-3`}>
+                {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                <span className="hidden sm:inline">{importing ? "Importing…" : "Import CSV"}</span>
               </button>
               {rights.canCreate && (
-                <Button
-                  onClick={() => setViewMode("form")}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
-                >
-                  <Plus size={13} /> New Request
-                </Button>
+                <button onClick={() => setViewMode("form")} className={`${KEY_INK} h-9 px-4`}>
+                  <Plus size={13} /> New request
+                </button>
               )}
             </div>
           ) : undefined
@@ -69,7 +56,7 @@ export default function MaterialRequest() {
         {viewMode === "list" && <MRList m={m} />}
         {viewMode === "form" && <MRForm m={m} />}
         <MRViewModal m={m} />
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 }

@@ -19,13 +19,24 @@ export const MR_TEMPLATE_COLUMNS = [
   { header: "Item Remarks", accessor: "Item Remarks" },
 ];
 
-// ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
+// ─── Sheet styles ─────────────────────────────────────────────────────────────
 
 export const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+  "w-full text-sm border border-foreground/40 px-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 export const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+  "w-full text-sm border border-foreground/40 px-3 py-2.5 pr-8 bg-card text-foreground focus:outline-none focus:border-foreground transition-colors appearance-none";
+
+export const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+export const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors disabled:opacity-40";
+export const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
+export const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -79,12 +90,12 @@ export const blankCartItem = (): CartItem => ({
 
 export const PRIORITY_OPTIONS = ["Low", "Normal", "High", "Urgent"];
 
+// Priority in ink: Urgent is the one thing in red, High solid ink, Normal outlined, Low dashed.
 export const PRIORITY_COLOR: Record<string, string> = {
-  Low: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  Normal:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-  High: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  Urgent: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  Low: "text-muted-foreground border-dashed border-foreground/50",
+  Normal: "text-foreground border-foreground/50",
+  High: "bg-foreground text-card border-foreground",
+  Urgent: "text-destructive border-destructive",
 };
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -101,7 +112,7 @@ export const Field = ({
   className?: string;
 }) => (
   <div className={className}>
-    <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+    <label className="block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
       {label}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>

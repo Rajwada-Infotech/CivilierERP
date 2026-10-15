@@ -12,7 +12,6 @@ import { toast } from "sonner";
 import { ItemPicker } from "../ItemPicker";
 import { Save, Eye, Trash2, Edit3 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import { isPrivilegedRole } from "@/contexts/auth.utils";
 import { fetchNextDocNumber, fetchDocTypes, type DocType } from "@/pages/material/ExpenseBooking/DocNumberPreview";
@@ -23,7 +22,8 @@ import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
-import { MR_TEMPLATE_COLUMNS, CartItem, FormHeader, defaultHeader, blankCartItem, PRIORITY_COLOR, fmtDate } from "./config";
+import { MR_TEMPLATE_COLUMNS, CartItem, FormHeader, defaultHeader, blankCartItem, PRIORITY_COLOR, fmtDate, TAG, ACT } from "./config";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 
 export function useMaterialRequest() {
   const rights = usePageRights("material-request");
@@ -591,7 +591,7 @@ export function useMaterialRequest() {
       header: "Doc No",
       size: 130,
       cell: ({ getValue }) => (
-        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+        <span className="font-heading font-semibold tracking-wide text-foreground text-sm">
           {String(getValue() || "—")}
         </span>
       ),
@@ -605,9 +605,7 @@ export function useMaterialRequest() {
       cell: ({ getValue }) => {
         const v = (getValue() as string) || "Normal";
         return (
-          <span
-            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[v] ?? PRIORITY_COLOR.Normal}`}
-          >
+          <span className={`${TAG} ${PRIORITY_COLOR[v] ?? PRIORITY_COLOR.Normal}`}>
             {v}
           </span>
         );
@@ -647,7 +645,7 @@ export function useMaterialRequest() {
       meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
         <span className="flex flex-wrap items-baseline gap-x-1 text-sm py-1">
-          <span className="font-semibold shrink-0">{row.original.ItemCount || 0}</span>
+          <span className="font-heading font-semibold tabular-nums shrink-0">{row.original.ItemCount || 0}</span>
           {row.original.QtyByUom && (
             <span className="text-muted-foreground whitespace-normal break-words">({row.original.QtyByUom})</span>
           )}
@@ -661,7 +659,7 @@ export function useMaterialRequest() {
       size: 110,
       meta: { className: "hidden lg:table-cell" },
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground">
+        <span className="text-sm text-muted-foreground tabular-nums">
           {fmtDate(getValue() as string)}
         </span>
       ),
@@ -677,7 +675,7 @@ export function useMaterialRequest() {
         const isUrgent = v && new Date(v) < new Date();
         return (
           <span
-            className={`text-sm ${isUrgent ? "text-destructive font-semibold" : "text-muted-foreground"}`}
+            className={`text-sm tabular-nums ${isUrgent ? "text-destructive font-semibold" : "text-muted-foreground"}`}
           >
             {fmtDate(v)}
           </span>
@@ -697,19 +695,15 @@ export function useMaterialRequest() {
             <ApprovalStatusChain
               table="MaterialRequests"
               recordId={row.original.MRId}
-              fallback={<StatusBadge status={row.original.Status} />}
+              fallback={<SheetMark text={row.original.Status || "Draft"} tone={statusTone(row.original.Status || "Draft")} />}
               preloaded={approvalTrails.get(String(row.original.MRId)) ?? null}
               preloadedLoading={approvalTrailsLoading}
             />
             {pending &&
               (pending.totalPending > 0 ? (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                  Pending &middot; {pending.totalPending} Qty
-                </span>
+                <SheetMark text={`Pending · ${pending.totalPending} qty`} tone="waiting" />
               ) : pending.totalOrdered > 0 ? (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  Completed
-                </span>
+                <SheetMark text="Completed" tone="done" />
               ) : null)}
           </div>
         );
@@ -723,15 +717,16 @@ export function useMaterialRequest() {
         const status = row.original.Status as string;
         const isDeleting = deleteMutation.isPending;
         return (
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center justify-end gap-1">
             {/* View — always visible */}
             <button data-row-view
               type="button"
               onClick={() => handleView(row.original)}
-              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className={`${ACT} hover:text-foreground hover:border-foreground`}
               title="View details"
+              aria-label="View details"
             >
-              <Eye size={15} />
+              <Eye size={14} />
             </button>
 
             {/* Update — Draft or Approved (post-approval edits get logged
@@ -741,7 +736,8 @@ export function useMaterialRequest() {
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
-                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                className={`${ACT} hover:text-foreground hover:border-foreground`}
+                aria-label="Edit"
                 title={
                   status === "Draft"
                     ? "Edit this request"
@@ -752,7 +748,7 @@ export function useMaterialRequest() {
                         : "Edit (admin override)"
                 }
               >
-                <Edit3 size={15} />
+                <Edit3 size={14} />
               </button>
             )}
 
@@ -765,10 +761,11 @@ export function useMaterialRequest() {
                   if (confirm("Delete this material request?"))
                     deleteMutation.mutate(row.original.MRId);
                 }}
-                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                className={`${ACT} hover:text-destructive hover:border-destructive`}
                 title="Delete this request"
+                aria-label="Delete this request"
               >
-                <Trash2 size={15} />
+                <Trash2 size={14} />
               </button>
             )}
           </div>

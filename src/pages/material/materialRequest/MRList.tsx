@@ -1,8 +1,6 @@
-import { Search, RefreshCw, ChevronDown, ChevronRight, Building2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Search, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { DataTable } from "@/components/ui/DataTable";
+import { HEAD, KEY_LINE, RULE, chip } from "./config";
 import type { MRState } from "./useMaterialRequest";
 
 // The request register: search, project and status filters, requests grouped by project.
@@ -31,159 +29,135 @@ export function MRList({ m }: { m: MRState }) {
   })();
 
   return (
-    <Card className="border-border shadow-sm">
-      <CardHeader className="pb-3 border-b border-border">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base font-semibold">
-                Request Register
-              </CardTitle>
-              {!loadingList && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {totalCount} project{totalCount !== 1 ? "s" : ""} · {rows.length} request{rows.length !== 1 ? "s" : ""} on this page
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-              <div className="relative w-full sm:w-64">
-                <Search
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-                <Input
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search doc no, company…"
-                  className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
-                />
-              </div>
-              <select
-                value={projectFilter}
-                onChange={(e) => {
-                  setProjectFilter(e.target.value);
-                  setPage(1);
-                }}
-                className="h-9 w-full sm:w-48 px-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
-              >
-                <option value="">All projects</option>
-                {(projects as any[]).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+    <div className="bg-card" style={{ border: RULE }}>
+      <div className="px-4 py-3 space-y-3" style={{ borderBottom: RULE }}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <span className={HEAD}>Request register</span>
+            {!loadingList && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {totalCount} project{totalCount !== 1 ? "s" : ""} · {rows.length} request{rows.length !== 1 ? "s" : ""} on this page
+              </p>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              "",
-              "Pending",
-              "Approved",
-            ].map((s) => (
-              <button
-                key={s || "all"}
-                onClick={() => {
-                  setStatusFilter(s);
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
                   setPage(1);
-                  if (s) setSearchParams({ status: s });
-                  else setSearchParams({});
                 }}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  statusFilter === s
-                    ? "btn-module text-white border-transparent shadow-sm"
-                    : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
-                }`}
-              >
-                {s || "All"}
-              </button>
-            ))}
+                placeholder="Search doc no, company…"
+                aria-label="Search requests"
+                className="w-full h-9 pl-9 pr-3 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none"
+              />
+            </div>
+            <select
+              value={projectFilter}
+              onChange={(e) => {
+                setProjectFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Project"
+              className="h-9 w-full sm:w-48 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground outline-none"
+            >
+              <option value="">All projects</option>
+              {(projects as any[]).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        {loadingList ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground text-sm gap-2">
-            <RefreshCw size={16} className="animate-spin" /> Loading…
-          </div>
-        ) : (
-          <>
-            {rows.length === 0 ? (
-              <p className="text-center text-muted-foreground text-sm py-10">
-                No material requests found. Click 'New Request' to create one.
-              </p>
-            ) : (
-              groupedByProject.map((group) => {
-                const collapsed = !!collapsedProjectGroups[group.key];
-                return (
-                  <div key={group.key} className="border-b border-border last:border-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
-                      }
-                      className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
-                    >
-                      {collapsed ? (
-                        <ChevronRight size={14} className="text-muted-foreground shrink-0" />
-                      ) : (
-                        <ChevronDown size={14} className="text-muted-foreground shrink-0" />
-                      )}
-                      <Building2 size={13} className="text-primary shrink-0" />
-                      <span className="text-sm font-heading font-semibold text-foreground">
-                        {group.projectName || "No Project"}
-                      </span>
-                      <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                        {group.rows.length} request{group.rows.length !== 1 ? "s" : ""}
-                      </span>
-                    </button>
-                    {!collapsed && (
-                      <DataTable
-                        data={group.rows}
-                        columns={columns}
-                        searchable={false}
-                        paginated={false}
-                        emptyMessage="No material requests found."
-                        getRowId={(r: any) => String(r.MRId)}
-                      />
-                    )}
-                  </div>
-                );
-              })
-            )}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
-                <span className="text-muted-foreground">
-                  Page {page} of {totalPages}
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                    disabled={page <= 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
+        <div className="flex flex-wrap items-center gap-1.5">
+          {["", "Pending", "Approved"].map((s) => (
+            <button
+              key={s || "all"}
+              aria-pressed={statusFilter === s}
+              onClick={() => {
+                setStatusFilter(s);
+                setPage(1);
+                if (s) setSearchParams({ status: s });
+                else setSearchParams({});
+              }}
+              className={chip(statusFilter === s)}
+            >
+              {s || "All"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loadingList ? (
+        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm gap-2">
+          <RefreshCw size={15} className="animate-spin" /> Loading…
+        </div>
+      ) : (
+        <>
+          {rows.length === 0 ? (
+            <p className="text-center text-muted-foreground text-sm py-10">
+              No material requests found. Use New request to raise one.
+            </p>
+          ) : (
+            groupedByProject.map((group) => {
+              const collapsed = !!collapsedProjectGroups[group.key];
+              return (
+                <div key={group.key} className="border-b border-foreground/20 last:border-0">
+                  <button
+                    type="button"
+                    aria-expanded={!collapsed}
                     onClick={() =>
-                      setPage((p) => Math.min(p + 1, totalPages))
+                      setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
                     }
-                    disabled={page >= totalPages}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-primary/5 transition-colors text-left"
+                    style={{ borderBottom: collapsed ? undefined : "1px solid hsl(var(--foreground) / 0.2)" }}
                   >
-                    Next
-                  </Button>
+                    {collapsed ? (
+                      <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                    ) : (
+                      <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                    )}
+                    <span className="font-heading text-sm font-bold tracking-tight text-foreground">
+                      {group.projectName || "No project"}
+                    </span>
+                    <span className="ml-auto font-heading text-[0.625rem] font-semibold tabular-nums text-muted-foreground border border-foreground/30 px-1.5 py-0.5">
+                      {group.rows.length} request{group.rows.length !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+                  {!collapsed && (
+                    <DataTable
+                      data={group.rows}
+                      columns={columns}
+                      searchable={false}
+                      paginated={false}
+                      emptyMessage="No material requests found."
+                      getRowId={(r: any) => String(r.MRId)}
+                    />
+                  )}
                 </div>
+              );
+            })
+          )}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 text-sm" style={{ borderTop: RULE }}>
+              <span className="text-muted-foreground tabular-nums">
+                Page {page} of {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => setPage((p) => Math.max(p - 1, 1))} disabled={page <= 1}>
+                  Previous
+                </button>
+                <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => setPage((p) => Math.min(p + 1, totalPages))} disabled={page >= totalPages}>
+                  Next
+                </button>
               </div>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
