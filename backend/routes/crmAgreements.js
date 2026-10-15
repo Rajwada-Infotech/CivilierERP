@@ -5,7 +5,7 @@ const multer = require("multer");
 const router = express.Router();
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: an agreement belongs to its booking's project.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -1904,6 +1904,7 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     // Includes the agreement-level lifecycle fields (senior/customer approval,
     // send/date state) and the Legal Executive assignment — not just the
@@ -2505,11 +2506,16 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
       const docId = parseInt(rawId);
       try {
         const cur = await pool.request().input("id", sql.Int, docId).query(`
-          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
-          FROM dbo.CrmAgreementDocument d WHERE d.Id = @id
+          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile, b.ProjectId
+          FROM dbo.CrmAgreementDocument d
+          JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          WHERE d.Id = @id
         `);
         if (!cur.recordset.length) { results.skipped.push({ docId, reason: "Document not found" }); continue; }
         const row = cur.recordset[0];
+        // Ids come from the body - the per-route project guard never sees them.
+        if (!projectAllowed(req.projectScope, row.ProjectId)) { results.skipped.push({ docId, reason: "Outside your projects" }); continue; }
 
         const lockReason = await getAgreementBookingLockReason(pool, row.AgreementId);
         if (lockReason) { results.skipped.push({ docId, reason: `Booking ${lockReason}` }); continue; }

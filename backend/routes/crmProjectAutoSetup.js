@@ -1637,6 +1637,13 @@ router.put("/naming", requirePageRight("crm-auto-project-setup", "edit"), async 
     }[level];
     if (!target || !Number.isFinite(id)) return res.status(400).json({ error: "Level (project/block/floor) and Id are required" });
     if (level === "floor" && scope === "PARKING") return res.status(400).json({ error: "Parking is named per block, not per floor" });
+    // The target comes from Level + Id, which the setup guard can't see -
+    // check its project here.
+    if (req.projectScope) {
+      const projectId = level === "project" ? id : (await pool.request().input("id", sql.Int, id)
+        .query(`SELECT ProjectId FROM ${level === "block" ? "dbo.BlockMaster" : "dbo.CrmProjectAutoSetupFloor"} WHERE Id = @id`)).recordset[0]?.ProjectId;
+      if (projectId != null && !require("../services/projectScope").assertProjectAllowed(req, res, projectId)) return;
+    }
     if (patternId != null) {
       const p = await pool.request().input("id", sql.Int, patternId).input("s", sql.NVarChar(10), scope)
         .query("SELECT Id FROM dbo.CrmNamingPattern WHERE Id = @id AND IsActive = 1 AND Scope = @s");

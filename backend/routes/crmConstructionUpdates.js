@@ -40,6 +40,8 @@ router.post("/", requirePageRight("crm-construction-updates", "create"), async (
     const pool = getPool();
     const b = req.body;
     if (!b.ProjectId) return res.status(400).json({ error: "ProjectId is required — select a project from Unit Master" });
+    // Customers see these in the portal - only for a project the user may access.
+    if (!require("../services/projectScope").assertProjectAllowed(req, res, parseInt(b.ProjectId))) return;
 
     const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
       .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
