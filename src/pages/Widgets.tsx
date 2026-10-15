@@ -1,13 +1,11 @@
 import type React from "react";
-import { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { AdminShell } from "@/components/admin/AdminShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   getWidgetCatalog,
   getWidgetsDashboard,
@@ -226,81 +224,6 @@ function MetricPicker({
         </span>
       )}
     </div>
-  );
-}
-
-// ─── WIDGET TILE — glass card matching AdminGlassCard's language, with a
-// category-colored icon badge, the catalog's own description (previously
-// unused), and a category pill for at-a-glance scanning. ────────────────────
-function WidgetTile({
-  icon: Icon,
-  label,
-  description,
-  category,
-  color,
-  onClick,
-}: {
-  icon: React.ElementType;
-  label: string;
-  description: string;
-  category: string;
-  color: string;
-  onClick: () => void;
-}) {
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
-
-  return (
-    <motion.button
-      onClick={onClick}
-      whileHover={{ y: -2, scale: 1.01 }}
-      whileTap={{ scale: 0.98 }}
-      className="group relative text-left rounded-xl overflow-hidden h-full w-full flex flex-col"
-      style={{
-        background: isDark ? "rgba(8,14,28,0.5)" : "rgba(255,255,255,0.75)",
-        border: `1px solid ${color}28`,
-        backdropFilter: "blur(16px) saturate(150%)",
-        WebkitBackdropFilter: "blur(16px) saturate(150%)",
-        boxShadow: isDark
-          ? "0 4px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-          : "0 4px 20px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-      }}
-    >
-      <div
-        className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-        style={{ background: `linear-gradient(135deg, ${color}14 0%, transparent 60%)` }}
-      />
-      <div
-        className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full"
-        style={{ background: color }}
-      />
-      <div className="relative z-10 p-4 flex flex-col gap-3 h-full">
-        <div className="flex items-start justify-between gap-2">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-            style={{ background: `${color}18`, border: `1px solid ${color}30` }}
-          >
-            <Icon size={17} style={{ color }} />
-          </div>
-          {category && (
-            <span
-              className="text-[0.5625rem] font-heading font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded-full shrink-0"
-              style={{ color, background: `${color}14` }}
-            >
-              {category}
-            </span>
-          )}
-        </div>
-        <div>
-          <p className="text-sm font-heading font-bold text-foreground">{label}</p>
-          {description && (
-            <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-              {description}
-            </p>
-          )}
-        </div>
-      </div>
-    </motion.button>
   );
 }
 
@@ -1464,21 +1387,37 @@ const widgetComponents: Record<string, React.ComponentType> = {
 };
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
+// A board on the sheet: an index of every widget on the left (search, category filter, grouped under lettered ruled
+// headings, numbered rows with a square mark in the category's colour) and the open widget at full size on the right
+// under its own title block. The open widget lives in the URL (?w=), so a link opens straight to it. On a phone the
+// index stacks above the viewer, and picking a widget scrolls down to it.
 const Widgets = () => {
   usePageRights("widgets");
-  const [searchParams] = useSearchParams();
-  const [selected, setSelected] = useState<string | null>(
-    searchParams.get("w"),
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selected, setSelectedState] = useState<string | null>(searchParams.get("w"));
+  const viewerRef = useRef<HTMLDivElement>(null);
+
+  const setSelected = useCallback(
+    (key: string | null, opts?: { scroll?: boolean }) => {
+      setSelectedState(key);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (key) next.set("w", key);
+          else next.delete("w");
+          return next;
+        },
+        { replace: true },
+      );
+      if (key && opts?.scroll && window.matchMedia("(max-width: 1023px)").matches) {
+        setTimeout(() => viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+      }
+    },
+    [setSearchParams],
   );
 
-  const {
-    catalog,
-    loading: catalogLoading,
-  } = useWidgetCatalog();
-  const {
-    allowedSet,
-    loading: rightsLoading,
-  } = useAllowedWidgets();
+  const { catalog, loading: catalogLoading } = useWidgetCatalog();
+  const { allowedSet, loading: rightsLoading } = useAllowedWidgets();
 
   // allowedSet null = still loading or rights failed → show all catalog widgets as fallback
   const visibleWidgets = catalog.filter(
@@ -1498,190 +1437,234 @@ const Widgets = () => {
     return visibleWidgets.filter((w) => {
       if (activeCategory && w.category !== activeCategory) return false;
       if (!q) return true;
-      return (
-        w.label.toLowerCase().includes(q) ||
-        w.description.toLowerCase().includes(q)
-      );
+      return w.label.toLowerCase().includes(q) || w.description.toLowerCase().includes(q);
     });
   }, [visibleWidgets, activeCategory, query]);
 
-  const safeSelected =
-    selected && (!allowedSet || allowedSet.has(selected)) ? selected : null;
+  // Index groups: one per category, in the order categories first appear.
+  const groups = useMemo(() => {
+    const m = new Map<string, WidgetCatalogItem[]>();
+    for (const w of filteredWidgets) {
+      const c = w.category || "Other";
+      if (!m.has(c)) m.set(c, []);
+      m.get(c)!.push(w);
+    }
+    return Array.from(m, ([category, items]) => ({ category, items }));
+  }, [filteredWidgets]);
+
+  const safeSelected = selected && (!allowedSet || allowedSet.has(selected)) ? selected : null;
   const ActiveWidget = safeSelected ? widgetComponents[safeSelected] : null;
-  const selectedWidget = safeSelected
-    ? catalog.find((w) => w.key === safeSelected)
-    : null;
-  const SelectedIcon = selectedWidget
-    ? widgetIcons[selectedWidget.iconKey] || Puzzle
-    : Puzzle;
+  const selectedWidget = safeSelected ? catalog.find((w) => w.key === safeSelected) : null;
+  const SelectedIcon = selectedWidget ? widgetIcons[selectedWidget.iconKey] || Puzzle : Puzzle;
+  const selectedColor = selectedWidget ? CATEGORY_COLORS[selectedWidget.category] || DEFAULT_CATEGORY_COLOR : DEFAULT_CATEGORY_COLOR;
   const loading = rightsLoading || catalogLoading;
+
+  // On a wide screen the board is never empty: open the first widget when none is chosen.
+  useEffect(() => {
+    if (loading || safeSelected || visibleWidgets.length === 0) return;
+    if (window.matchMedia("(min-width: 1024px)").matches) setSelected(visibleWidgets[0].key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, visibleWidgets.length]);
+
+  let rowNo = 0;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", safeSelected || "Widgets"]} />
+      <Breadcrumbs items={["Dashboard", selectedWidget?.label || "Widgets"]} />
+      <style>{WIDGETS_CSS}</style>
 
-      <AdminShell
-        title={selectedWidget ? selectedWidget.label : "Widgets"}
-        subtitle={selectedWidget ? "Viewing widget" : "Select a widget to view"}
-        icon={Puzzle}
+      <SheetShell
+        eyebrow="CivilierERP · Widgets"
+        title="Widgets"
+        subtitle="Pick a widget from the index to open it on the board. Charts and stat cards can be pointed at live data from any module."
       >
-      {loading ? (
-        // Skeleton while loading rights — avoid flash
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-24 rounded-lg border border-border bg-muted/20 animate-pulse"
-            />
-          ))}
-        </div>
-      ) : safeSelected ? (
-        <div className="max-w-lg mx-auto mt-4">
-          <div className="rounded-2xl border border-border bg-card shadow-lg overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-3">
-                {(() => {
-                  return <SelectedIcon size={20} className="text-primary" />;
-                })()}
-                <h1 className="text-base font-bold">
-                  {selectedWidget?.label || safeSelected}
-                </h1>
-              </div>
-              <button
-                onClick={() => setSelected(null)}
-                className="p-1.5 rounded-lg hover:bg-muted/40 transition-colors text-muted-foreground hover:text-foreground"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="p-5">
-              {ActiveWidget ? (
-                <ActiveWidget />
-              ) : (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  Widget not found.
-                </p>
-              )}
-            </div>
+        {/* Figures */}
+        <div className="statrow">
+          <div>
+            <p className="label">Widgets</p>
+            <p className="wg-figure">{loading ? "—" : visibleWidgets.length}</p>
           </div>
-          <button
-            onClick={() => setSelected(null)}
-            className="mt-4 flex items-center gap-1.5 text-sm text-primary hover:underline font-heading mx-auto"
-          >
-            <X size={14} /> Back to all widgets
-          </button>
-        </div>
-      ) : visibleWidgets.length === 0 ? (
-        <div className="text-center py-16 space-y-3">
-          <Puzzle size={32} className="text-muted-foreground/40 mx-auto" />
-          <p className="text-sm text-muted-foreground">
-            No widgets are enabled for your account.
-          </p>
-          <p className="text-xs text-muted-foreground/60">
-            Contact your administrator to enable widget access.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-5">
-          {/* ── Search + category filter ─────────────────────────────────── */}
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-            <div className="relative flex-1 sm:max-w-xs">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search widgets…"
-                className="w-full h-9 pl-9 pr-8 rounded-lg border border-border bg-card/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
-              />
-              {query && (
-                <button
-                  onClick={() => setQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-            {categories.length > 1 && (
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  onClick={() => setActiveCategory(null)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ${
-                    activeCategory === null
-                      ? "btn-module text-white border-primary"
-                      : "text-muted-foreground border-border hover:bg-muted/40"
-                  }`}
-                >
-                  All
-                </button>
-                {categories.map((cat) => {
-                  const color = CATEGORY_COLORS[cat] || DEFAULT_CATEGORY_COLOR;
-                  const active = activeCategory === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => setActiveCategory(active ? null : cat)}
-                      className="px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all"
-                      style={
-                        active
-                          ? { background: color, borderColor: color, color: "#fff" }
-                          : { color, borderColor: `${color}40`, background: `${color}0d` }
-                      }
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+          <div>
+            <p className="label">Categories</p>
+            <p className="wg-figure">{loading ? "—" : categories.length}</p>
           </div>
+          <div>
+            <p className="label">Open</p>
+            <p className="wg-figure wg-figure-text">{selectedWidget?.label ?? "—"}</p>
+          </div>
+        </div>
 
-          {/* ── Widget grid ───────────────────────────────────────────────── */}
-          {filteredWidgets.length === 0 ? (
-            <div className="text-center py-16 space-y-3">
-              <Search size={32} className="text-muted-foreground/40 mx-auto" />
-              <p className="text-sm text-muted-foreground">
-                No widgets match {query ? `"${query}"` : "this category"}.
-              </p>
+        {loading ? (
+          <div className="wg-board">
+            <div className="wg-index">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="skel" style={{ height: 40, margin: "10px 14px" }} />
+              ))}
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <AnimatePresence mode="popLayout">
-                {filteredWidgets.map(({ iconKey, key, label, description, category }) => {
-                  const Icon = widgetIcons[iconKey] || Puzzle;
-                  const color = CATEGORY_COLORS[category] || DEFAULT_CATEGORY_COLOR;
-                  return (
-                    <motion.div
-                      key={key}
-                      layout
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.15 }}
-                      className="h-full"
-                    >
-                      <WidgetTile
-                        icon={Icon}
-                        label={label}
-                        description={description}
-                        category={category}
-                        color={color}
-                        onClick={() => setSelected(key)}
-                      />
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
+            <div className="wg-view">
+              <div className="skel" style={{ height: 260, margin: 18 }} />
             </div>
-          )}
-        </div>
-      )}
-      </AdminShell>
+          </div>
+        ) : visibleWidgets.length === 0 ? (
+          <div className="wg-empty">
+            <p className="label" style={{ color: "var(--ink)" }}>No widgets enabled</p>
+            <p>No widgets are enabled for your account. Contact your administrator to enable widget access.</p>
+          </div>
+        ) : (
+          <div className="wg-board">
+            {/* ── Index ── */}
+            <aside className="wg-index" aria-label="Widget index">
+              <div className="wg-tools">
+                <div className="wg-search">
+                  <Search size={14} />
+                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search widgets…" aria-label="Search widgets" />
+                  {query && (
+                    <button type="button" onClick={() => setQuery("")} aria-label="Clear search">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                {categories.length > 1 && (
+                  <div className="seg wg-cats">
+                    <button type="button" className={activeCategory === null ? "on" : ""} onClick={() => setActiveCategory(null)}>All</button>
+                    {categories.map((cat) => (
+                      <button key={cat} type="button" className={activeCategory === cat ? "on" : ""} onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}>
+                        <i className="wg-dot" style={{ background: CATEGORY_COLORS[cat] || DEFAULT_CATEGORY_COLOR }} />
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {groups.length === 0 ? (
+                <p className="wg-empty small">No widgets match {query ? `“${query}”` : "this category"}.</p>
+              ) : (
+                <div className="wg-list">
+                  {groups.map((g, gi) => {
+                    const color = CATEGORY_COLORS[g.category] || DEFAULT_CATEGORY_COLOR;
+                    return (
+                      <section key={g.category}>
+                        <header className="wg-group">
+                          <span className="tag">{String.fromCharCode(65 + (gi % 26))}</span>
+                          <span className="label" style={{ color: "var(--ink)" }}>{g.category}</span>
+                          <span className="wg-rule" />
+                          <span className="label">{g.items.length}</span>
+                        </header>
+                        {g.items.map((w) => {
+                          const Icon = widgetIcons[w.iconKey] || Puzzle;
+                          const on = safeSelected === w.key;
+                          rowNo += 1;
+                          return (
+                            <button
+                              key={w.key}
+                              type="button"
+                              onClick={() => setSelected(w.key, { scroll: true })}
+                              aria-current={on ? "true" : undefined}
+                              className={`wg-row ${on ? "on" : ""}`}
+                            >
+                              <span className="wg-num">{String(rowNo).padStart(2, "0")}</span>
+                              <span className="wg-mark" style={{ color }}>
+                                <Icon size={15} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="wg-name">{w.label}</span>
+                                {w.description && <span className="wg-desc">{w.description}</span>}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
+            </aside>
+
+            {/* ── Viewer ── */}
+            <section className="wg-view" ref={viewerRef} aria-label="Open widget">
+              {selectedWidget && ActiveWidget ? (
+                <>
+                  <header className="wg-view-head" style={{ ["--wg-c" as string]: selectedColor } as React.CSSProperties}>
+                    <span className="wg-mark lg" style={{ color: selectedColor }}>
+                      <SelectedIcon size={20} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="label">{selectedWidget.category || "Widget"}</p>
+                      <h2 className="wg-view-title">{selectedWidget.label}</h2>
+                      {selectedWidget.description && <p className="wg-view-desc">{selectedWidget.description}</p>}
+                    </div>
+                    <button type="button" className="wg-key" onClick={() => setSelected(null)} aria-label="Close widget" title="Close">
+                      <X size={14} />
+                    </button>
+                  </header>
+                  <div className="wg-view-body">
+                    <ActiveWidget key={selectedWidget.key} />
+                  </div>
+                </>
+              ) : (
+                <div className="wg-empty">
+                  <p className="label" style={{ color: "var(--ink)" }}>Nothing open</p>
+                  <p>Pick a widget from the index to open it here.</p>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </SheetShell>
     </>
   );
 };
+
+// The board's own parts; the sheet frame (SheetShell) supplies --ink, --rule, --graphite and squares off whatever the
+// widgets draw inside it.
+const WIDGETS_CSS = `
+.sheet-frame .wg-figure { font-family: "Sora", sans-serif; font-weight: 600; font-size: 24px; letter-spacing: -0.02em; line-height: 1; margin-top: 6px; color: var(--ink); }
+.sheet-frame .wg-figure-text { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-frame .wg-board { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); border: 1px solid var(--ink); min-height: 480px; }
+.sheet-frame .wg-index { border-right: 1px solid var(--ink); display: flex; flex-direction: column; min-width: 0; background: hsl(var(--card)); }
+.sheet-frame .wg-tools { padding: 12px 14px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 10px; }
+.sheet-frame .wg-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 36px; border: 1px solid var(--ink); background: hsl(var(--card)); color: var(--graphite); }
+.sheet-frame .wg-search input { flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: none; font-size: 13px; color: var(--ink); }
+.sheet-frame .wg-cats { display: flex; flex-wrap: wrap; max-width: 100%; }
+.sheet-frame .wg-cats button { display: inline-flex; align-items: center; gap: 6px; }
+.sheet-frame .wg-dot { width: 7px; height: 7px; flex-shrink: 0; }
+.sheet-frame .wg-list { overflow-y: auto; max-height: 640px; padding-bottom: 6px; }
+.sheet-frame .wg-group { display: flex; align-items: center; gap: 10px; padding: 14px 14px 6px; }
+.sheet-frame .wg-rule { flex: 1; height: 1px; background: var(--rule); }
+.sheet-frame .wg-row { display: grid; grid-template-columns: 20px 30px minmax(0, 1fr); align-items: center; gap: 10px; width: 100%;
+  padding: 9px 14px; text-align: left; border-bottom: 1px solid var(--rule-soft); transition: background-color .12s; }
+.sheet-frame .wg-row:hover { background: var(--blue-wash); }
+.sheet-frame .wg-row.on { background: var(--blue-wash); box-shadow: inset 3px 0 0 var(--ink); }
+.sheet-frame .wg-num { font-family: "Sora", sans-serif; font-size: 10px; font-weight: 600; color: var(--graphite); }
+.sheet-frame .wg-mark { width: 30px; height: 30px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--rule); background: hsl(var(--card)); }
+.sheet-frame .wg-row.on .wg-mark { border-color: var(--ink); }
+.sheet-frame .wg-mark.lg { width: 44px; height: 44px; border: 1.5px solid var(--ink); }
+.sheet-frame .wg-name { display: block; font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-frame .wg-desc { display: block; font-size: 11px; color: var(--graphite); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-frame .wg-view { min-width: 0; display: flex; flex-direction: column; }
+.sheet-frame .wg-view-head { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--ink); box-shadow: inset 0 3px 0 var(--wg-c); }
+.sheet-frame .wg-view-title { font-family: "Sora", sans-serif; font-weight: 700; font-size: 22px; letter-spacing: -0.02em; line-height: 1.1; margin: 4px 0 0; color: var(--ink); }
+.sheet-frame .wg-view-desc { font-size: 12.5px; color: var(--ink-2); margin-top: 5px; max-width: 70ch; }
+.sheet-frame .wg-key { width: 30px; height: 30px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--ink); color: var(--ink); background: hsl(var(--card)); transition: background-color .15s, color .15s; }
+.sheet-frame .wg-key:hover { background: var(--ink); color: hsl(var(--card)); }
+.sheet-frame .wg-view-body { padding: 18px; flex: 1; min-width: 0; }
+.sheet-frame .wg-empty { margin: 18px; padding: 28px 20px; text-align: center; border: 1px dashed var(--rule); font-size: 13px; color: var(--graphite); }
+.sheet-frame .wg-empty p + p { margin-top: 5px; }
+.sheet-frame .wg-empty.small { margin: 14px; padding: 18px 14px; }
+@media (max-width: 1023px) {
+  .sheet-frame .wg-board { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .sheet-frame .wg-index { border-right: 0; border-bottom: 1px solid var(--ink); }
+  .sheet-frame .wg-list { max-height: 360px; }
+  .sheet-frame .wg-view { scroll-margin-top: 72px; }
+}
+@media (max-width: 640px) {
+  .sheet-frame .wg-view-head { padding: 14px; gap: 10px; }
+  .sheet-frame .wg-view-title { font-size: 19px; }
+  .sheet-frame .wg-view-body { padding: 12px; }
+}
+`;
 
 export default Widgets;
