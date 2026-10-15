@@ -1208,7 +1208,18 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
           VALUES (@hid, @fc, @tb, @tc, @amt, 0, 'Draft', @cb, SYSDATETIME())
         `);
       const rtId = rtIns.recordset[0].Id;
-      const outcome = await applyRebookingTransferToBooking(pool, rtId, userEmail);
+      let outcome;
+      try {
+        outcome = await applyRebookingTransferToBooking(pool, rtId, userEmail);
+        if (outcome && outcome.ok === false) throw Object.assign(new Error(`The credit couldn't be moved: ${outcome.reason}`), { status: 409 });
+      } catch (applyErr) {
+        // Left Draft, it reserved the held credit for good (a live claim) with
+        // no way to retry or cancel - release it, as the cross-company path does.
+        await pool.request().input("id", sql.Int, rtId).input("n", sql.NVarChar(500), `Could not be applied: ${String(applyErr.message).slice(0, 400)}`)
+          .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = 'Draft'");
+        if (applyErr.status === 409) return res.status(409).json({ error: applyErr.message });
+        throw applyErr;
+      }
       await bumpCacheVersion("crm-refunds");
       return res.status(201).json({ success: true, id: rtId, crossCompany: false, ...outcome });
     }
