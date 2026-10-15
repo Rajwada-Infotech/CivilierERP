@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { SHEET_FRAME_CSS } from "@/components/sheet/Sheet";
 import { EXP_COLS, GRN_COLS, ISSUE_COLS, ITEM_COLS, PO_COLS, REQUEST_COLS, TRANSFER_COLS, isOpenPO } from "./shared";
 
 export type DrillKey = "items" | "grns" | "pos" | "expenses" | "stock" | "issues" | "requests";
@@ -22,6 +23,10 @@ const DRILLS: Record<DrillKey, { title: string; url: string; cols: ColumnDef<any
 
 const RULE = "1px solid hsl(var(--foreground))";
 
+// The table's search bar stays pinned while the rows scroll under it; the frame clears its background, so it needs
+// the paper back here or the rows show through.
+const DRILL_CSS = ".md-drill .dt-toolbar { background: hsl(var(--card)) !important; z-index: 2; }";
+
 export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose: () => void }) {
   const d = open ? DRILLS[open] : null;
   const { data, isLoading, isError } = useQuery<any[]>({
@@ -38,7 +43,10 @@ export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose:
 
   return (
     <Dialog open={open !== null} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sheet-frame max-w-4xl w-full p-0 gap-0" style={{ margin: 0 }}>
+      <DialogContent className="sheet-frame md-drill max-w-4xl w-full p-0 gap-0" style={{ margin: 0 }}>
+        {/* The dashboard loads only its own sheet styles and this dialog opens outside it, so it brings the frame's
+            styles itself: squared search box, ruled schedule table and pager, like every other sheet table. */}
+        <style>{SHEET_FRAME_CSS + DRILL_CSS}</style>
         <DialogHeader className="px-6 pt-5 pb-4" style={{ borderBottom: RULE }}>
           <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Material overview</p>
           <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">
