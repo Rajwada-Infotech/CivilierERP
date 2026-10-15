@@ -1425,7 +1425,8 @@ router.get("/activity", async (req, res) => {
         SELECT sd.DeedNo, sd.SentToCustomerAt, sd.CustomerApprovalStatus, sd.CustomerApprovedAt, sd.CustomerRecheckRemarks, sd.UpdatedAt
         FROM dbo.CrmSalesDeed sd
         JOIN dbo.CrmBooking b ON b.Id = sd.BookingId
-        WHERE b.ApplicationId = @aid
+        WHERE b.ApplicationId = @aid AND ISNULL(sd.Status, '') <> 'Cancelled'
+        ORDER BY sd.Id DESC
       `),
       pool.request().input("aid", sql.Int, appId).query(`
         SELECT qp.Id, qp.QPNo, qp.InfoSentAt, qp.ConfirmedAt, qp.ConfirmedAmount
@@ -1445,8 +1446,8 @@ router.get("/activity", async (req, res) => {
         SELECT reg.RegNo, reg.Status, reg.ScheduledDate, reg.CompletedDate, reg.UpdatedAt
         FROM dbo.CrmRegistry reg
         JOIN dbo.CrmBooking b ON b.Id = reg.BookingId
-        WHERE b.ApplicationId = @aid
-        ORDER BY CASE WHEN reg.Status = 'Cancelled' THEN 1 ELSE 0 END, reg.Id DESC
+        WHERE b.ApplicationId = @aid AND ISNULL(reg.Status, '') <> 'Cancelled'
+        ORDER BY reg.Id DESC
       `),
       pool.request().input("aid", sql.Int, appId).query(`
         SELECT n.NocType, n.NocNo, n.IssuedDate
