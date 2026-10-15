@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Plus, ArrowLeft, AlertCircle, Search,
   Building2, Package, Calendar, FileText, Hash, Tag as TagIcon, X, Boxes,
-  Download, Upload, Loader2, Check, Pencil, Trash2,
+  Download, Upload, Loader2, Check, Pencil, Trash2, FileSpreadsheet,
 } from "lucide-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -17,6 +17,7 @@ import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { parseSheetDate } from "@/lib/xlsxBook";
+import { exportToXlsx } from "@/lib/export";
 import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
 import { getActiveDepreciationSetups } from "@/api/depreciationApi";
 import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
@@ -331,6 +332,69 @@ export default function FixedAssetTagging() {
   const resetForm = () => setForm(emptyForm());
   const goToCreate = () => { resetForm(); setViewMode("form"); };
 
+  // Exports every item, whatever the filters and search show: all untagged stock first, then every tagging entry.
+  const handleExport = async () => {
+    const pendingRows = ensureArray<PendingBatch>(pendingBatches).map((b) => ({
+      docNo: b.SourceDocNo || "",
+      source: b.SourceType === "GRN" ? "GRN" : "Imported Stock / Without GRN",
+      date: b.DocDate ? fmtDate(b.DocDate) : "",
+      item: b.AssetName || "",
+      itemCode: "",
+      category: "",
+      faItemCode: "",
+      transfer: "",
+      company: b.CompanyName || "",
+      project: b.ProjectName || "",
+      godown: b.GodownName || "",
+      qty: b.Quantity ?? "",
+      status: "Untagged",
+      record: "",
+      remarks: b.Reason === "NO_TEMPLATE" ? "No Project Alias - add one in ID Template Master" : "Ready to tag",
+    }));
+    const tagRows = ensureArray<TaggingListItem>(taggings).map((t) => ({
+      docNo: t.DocNo || "",
+      source: t.StockSource === "IMPORT" ? "Imported Stock / Without GRN" : t.StockSource || "",
+      date: t.DocDate ? fmtDate(t.DocDate) : "",
+      item: t.AssetName || "",
+      itemCode: t.AssetCode || "",
+      category: t.AssetCategory || "",
+      faItemCode: t.FAItemCode || "",
+      transfer: t.TransferredToCode ? `Moved to ${t.TransferredToCode}` : t.TransferredFromCode ? `Came from ${t.TransferredFromCode}` : "",
+      company: t.CompanyName || "",
+      project: t.ProjectName || "",
+      godown: t.GodownName || "",
+      qty: t.TaggedQty ?? "",
+      status: t.Status === "Transferred" ? "Transferred - Not Available" : t.Status,
+      record: t.RecordStatus || "",
+      remarks: t.Remarks || "",
+    }));
+    const rows = [...pendingRows, ...tagRows];
+    if (rows.length === 0) return toast.error("Nothing to export");
+    await exportToXlsx(
+      rows,
+      [
+        { header: "Doc No", accessor: "docNo" },
+        { header: "Stock Source", accessor: "source" },
+        { header: "Date", accessor: "date" },
+        { header: "Item", accessor: "item" },
+        { header: "Item Code", accessor: "itemCode" },
+        { header: "Asset Category", accessor: "category" },
+        { header: "FA Item Code", accessor: "faItemCode" },
+        { header: "Transfer", accessor: "transfer" },
+        { header: "Company", accessor: "company" },
+        { header: "Project", accessor: "project" },
+        { header: "Godown", accessor: "godown" },
+        { header: "Quantity", accessor: "qty" },
+        { header: "Status", accessor: "status" },
+        { header: "Record", accessor: "record" },
+        { header: "Remarks", accessor: "remarks" },
+      ],
+      `FA_Inventory_${new Date().toISOString().slice(0, 10)}`,
+      "FA Inventory",
+    );
+    toast.success(`Exported ${rows.length} row${rows.length === 1 ? "" : "s"}`);
+  };
+
   // ── bulk import (Excel/CSV) ────────────────────────────────────────────────
   const handleImportClick = () => importFileInputRef.current?.click();
 
@@ -617,8 +681,16 @@ export default function FixedAssetTagging() {
       icon={TagIcon}
       accentColor="#eab308"
       action={
-        rights.canCreate ? (
+        rights.canCreate || rights.canExport ? (
           <div className="flex items-center gap-2">
+            {rights.canExport && (
+              <button onClick={handleExport}
+                title="Export every FA Inventory item to Excel"
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                <FileSpreadsheet size={13} /> <span className="hidden sm:inline">Export</span>
+              </button>
+            )}
+            {rights.canCreate && (<>
             <input ref={importFileInputRef} type="file" accept=".xlsx,.csv"
               onChange={handleImportFileChange} className="hidden" />
             <div className="inline-flex rounded-lg border border-border p-0.5 text-xs font-heading font-semibold" role="group" aria-label="Import mode">
@@ -644,6 +716,7 @@ export default function FixedAssetTagging() {
               {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
               {importValidating ? "Validating…" : "Import from Excel"}
             </button>
+            </>)}
           </div>
         ) : undefined
       }
