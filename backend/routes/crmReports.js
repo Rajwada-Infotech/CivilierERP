@@ -302,7 +302,7 @@ router.get("/application-funnel", requirePageRight("crm-applications", "view"), 
   try {
     const pool = getPool();
     const dr = dateRangeParams(req, "CAST(a.CreatedAt AS DATE)");
-    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "b.BlockId" });
+    const cpb = cpbParams(req, { companyCol: "a.CompanyId", projectCol: "a.ProjectId", blockCol: "um.BlockId" }); // no alias b here — the block comes from the picked unit
     const conds = ["a.IsActive = 1", ...dr.clauses, ...cpb.clauses];
     const r = pool.request();
     dr.bind(r); cpb.bind(r);

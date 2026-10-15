@@ -355,7 +355,9 @@ router.get("/timeline", async (req, res) => {
       // so the portal's own "Total Paid" (PortalPayments.tsx) can reflect
       // real money received instead of only what's been swept, the same fix
       // already applied to the staff-side Dashboard/Customer 360.
-      pool.request().input("bid", sql.Int, bk.Id).query("SELECT ISNULL(SUM(Amount), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
+      pool.request().input("bid", sql.Int, bk.Id).// only the part not yet applied to a milestone — applied money is already in
+      // the milestones' AmountPaid, so the full Amount counted it twice
+      query("SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
     ]);
 
     res.json({
@@ -940,6 +942,8 @@ router.get("/sales-deed", async (req, res) => {
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
+        AND ISNULL(d.Status, '') <> 'Cancelled'   -- the live deed, never a cancelled one (redo)
+      ORDER BY d.Id DESC
     `);
     if (!deed.recordset.length) return res.json({ deed: null, documents: [] });
 
@@ -1011,6 +1015,8 @@ router.post("/sales-deed/respond", async (req, res) => {
       JOIN dbo.CrmBooking b ON b.Id = d.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE b.ApplicationId = @aid AND d.SentToCustomerAt IS NOT NULL
+        AND ISNULL(d.Status, '') <> 'Cancelled'   -- the live deed, never a cancelled one (redo)
+      ORDER BY d.Id DESC
     `);
     if (!deed.recordset.length) return res.status(404).json({ error: "No sales deed pending your response" });
     if (deed.recordset[0].CustomerApprovalStatus === CrmStatus.APPROVED) {
@@ -1239,6 +1245,13 @@ router.post("/query-payment/proof", async (req, res) => {
     if (buffer.length > QP_MAX_FILE_BYTES) {
       return res.status(400).json({ error: `File is too large (max ${(QP_MAX_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)` });
     }
+    // A customer upload is opened later by staff: only real PDFs / images,
+    // whose content matches the declared type (it was stored and served back
+    // with whatever type the browser claimed, e.g. a web page).
+    const PROOF_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+    if (!PROOF_TYPES.includes(mimeType)) return res.status(400).json({ error: "Upload the proof as a PDF or an image (JPG, PNG, WebP)" });
+    const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+    if (sigErr) return res.status(400).json({ error: sigErr });
 
     const qp = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT qp.Id, qp.QPNo, qp.Status, qp.BookingId, qp.InfoSentAt, b.AssignedTo, b.BookingNo, a.ApplicantName
@@ -1588,6 +1601,9 @@ const deedAction = (fn, where) => async (req, res) => {
 const deedUpload = (fn, where) => (req, res) => portalDocUpload.single("file")(req, res, (err) => {
   if (err) return res.status(400).json({ error: err.message });
   if (!req.file) return res.status(400).json({ error: "Choose a file" });
+  // same content check as the agreement upload: the file must really be what it claims
+  const sigErr = verifyFileMatchesDeclaredType(req.file);
+  if (sigErr) return res.status(400).json({ error: sigErr });
   return deedAction(fn, where)(req, res);
 });
 
