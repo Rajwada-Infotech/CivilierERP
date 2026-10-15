@@ -833,23 +833,13 @@ export const MobileNav: React.FC = () => {
     setSheet(null);
   };
 
+  // Square avatar on the sheet: the photo, or initials in ink on paper.
   const Avatar = ({ size }: { size: number }) => (
-    <span
-      className="relative inline-flex shrink-0 overflow-hidden rounded-full"
-      style={{
-        width: size,
-        height: size,
-        background: currentUser?.avatarUrl
-          ? "hsl(var(--muted))"
-          : `linear-gradient(135deg, ${modColor()}, hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 15, 20)}%))`,
-      }}
-    >
+    <span className="mn-avatar" style={{ width: size, height: size, fontSize: size * 0.36 }}>
       {currentUser?.avatarUrl ? (
-        <img src={currentUser.avatarUrl} alt={currentUser.name} className="h-full w-full object-cover" />
+        <img src={currentUser.avatarUrl} alt={currentUser.name} />
       ) : (
-        <span className="flex h-full w-full items-center justify-center font-heading font-bold text-white" style={{ fontSize: size * 0.38 }}>
-          {currentUser?.initials || "?"}
-        </span>
+        currentUser?.initials || "?"
       )}
     </span>
   );
@@ -862,15 +852,13 @@ export const MobileNav: React.FC = () => {
     { id: "me", label: "Me", icon: UserRound, active: sheet === "me", onClick: () => setSheet(sheet === "me" ? null : "me") },
   ];
 
-  const rowBase = "w-full flex items-center gap-3 px-3 min-h-[46px] rounded-xl text-left transition-colors active:scale-[0.99]";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let rowNo = 0;
 
   return (
     <>
       {logoutOverlay}
-      <style>{`
-        @keyframes mnFade { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes mnSheet { from { transform: translateY(100%) } to { transform: translateY(0) } }
-      `}</style>
+      <style>{MOBILE_NAV_CSS}</style>
 
       {/* ── Sheet (above the bar) ────────────────────────────────────────────── */}
       {open && (
@@ -879,220 +867,206 @@ export const MobileNav: React.FC = () => {
           <div
             role="dialog"
             aria-label={sheet === "menu" ? `${activeMod.label} menu` : "Account"}
-            className="absolute inset-x-0 flex flex-col overflow-hidden rounded-t-[1.75rem] border-t border-border shadow-2xl"
-            style={{
-              bottom: "calc(64px + env(safe-area-inset-bottom, 0px))",
-              maxHeight: "calc(100svh - 64px - env(safe-area-inset-bottom, 0px) - 24px)",
-              background: "hsl(var(--card))",
-              animation: "mnSheet 280ms cubic-bezier(0.32, 0.72, 0, 1) both",
-            }}
+            className="mn-sheet"
+            style={{ ["--mn-mod" as string]: modColor(), ["--mn-mod-wash" as string]: modColor(0.1) } as React.CSSProperties}
           >
-            <div className="flex justify-center pt-2.5 pb-1 shrink-0">
-              <div className="h-1 w-10 rounded-full bg-muted-foreground/25" />
-            </div>
+            <div className="mn-grab"><span /></div>
 
             {sheet === "menu" && (
               <>
-                {/* Header: current module, switch, close */}
-                <div className="flex items-center gap-3 px-4 pt-1 pb-3 shrink-0">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white shadow-sm" style={{ background: modColor() }}>
+                {/* Title block: the module you're in, and close */}
+                <div className="mn-head">
+                  <span className="mn-mark lg" style={{ color: modColor() }}>
                     <ActiveModIcon size={20} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[0.625rem] uppercase tracking-[0.18em] text-muted-foreground">{activeModKey === "__none__" ? "Menu" : "You are in"}</p>
-                    <p className="truncate font-heading text-base font-bold text-foreground">{activeModKey === "__none__" ? "Choose a module" : activeMod.label}</p>
+                    <p className="mn-label">CivilierERP · {activeModKey === "__none__" ? "Menu" : "You are in"}</p>
+                    <p className="mn-title truncate">{activeModKey === "__none__" ? "Choose a module" : activeMod.label}</p>
                   </div>
-                  <button onClick={() => setSheet(null)} aria-label="Close menu" className="flex h-9 w-9 items-center justify-center rounded-full border border-border">
-                    <X size={16} className="text-muted-foreground" />
+                  <button onClick={() => setSheet(null)} aria-label="Close menu" className="mn-key">
+                    <X size={15} />
                   </button>
                 </div>
 
                 {/* Search */}
-                <div className="px-4 pb-3 shrink-0">
-                  <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3">
-                    <Search size={15} className="text-muted-foreground" />
-                    <input
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder={activeModKey === "__none__" ? "Find a page…" : `Find a page in ${activeMod.label}…`}
-                      className="h-11 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
-                    />
-                    {query && (
-                      <button onClick={() => setQuery("")} aria-label="Clear search"><X size={14} className="text-muted-foreground" /></button>
-                    )}
-                  </div>
+                <div className="mn-search">
+                  <Search size={15} />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder={activeModKey === "__none__" ? "Find a page…" : `Find a page in ${activeMod.label}…`}
+                  />
+                  {query && (
+                    <button onClick={() => setQuery("")} aria-label="Clear search"><X size={14} /></button>
+                  )}
                 </div>
 
-                <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pb-5 space-y-4">
+                <div className="mn-body">
                   {/* Modules: always shown - swipe for more */}
                   {!query.trim() && (
-                    <div>
-                      <div className="mb-2 flex items-center justify-between px-1">
-                        <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-[0.18em] text-muted-foreground">All modules</p>
-                        <p className="text-[0.625rem] text-muted-foreground">{moduleModules.length} · swipe →</p>
+                    <section>
+                      <header className="mn-sec">
+                        <span className="mn-label ink">All modules</span>
+                        <span className="mn-rule" />
+                        <span className="mn-label">{moduleModules.length} · swipe</span>
+                      </header>
+                      <div className="mn-rail">
+                        {moduleModules.map(([id, meta]) => {
+                          const isActive = isAdminPage ? id === "admin" : activeModule === id;
+                          const Icon = meta.icon;
+                          const c = `hsl(${meta.h} ${meta.s}% ${meta.l}%)`;
+                          return (
+                            <button
+                              key={id}
+                              onClick={() => switchModule(id, meta)}
+                              ref={isActive ? (el) => el?.scrollIntoView({ block: "nearest", inline: "center" }) : undefined}
+                              className={`mn-tile ${isActive ? "on" : ""}`}
+                              style={{ ["--tile" as string]: c } as React.CSSProperties}
+                              aria-current={isActive ? "true" : undefined}
+                            >
+                              <span className="mn-mark" style={{ color: c }}>
+                                <Icon size={17} />
+                              </span>
+                              <span className="mn-tile-name">{meta.label}</span>
+                            </button>
+                          );
+                        })}
                       </div>
-                    <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 snap-x" style={{ scrollbarWidth: "none" }}>
-                      {moduleModules.map(([id, meta]) => {
-                        const isActive = isAdminPage ? id === "admin" : activeModule === id;
-                        const Icon = meta.icon;
-                        const c = `hsl(${meta.h} ${meta.s}% ${meta.l}%)`;
-                        return (
-                          <button
-                            key={id}
-                            onClick={() => switchModule(id, meta)}
-                            ref={isActive ? (el) => el?.scrollIntoView({ block: "nearest", inline: "center" }) : undefined}
-                            className="flex w-[4.5rem] shrink-0 snap-start flex-col items-center gap-1.5 rounded-2xl border px-1 py-2.5 transition-colors"
-                            style={{
-                              borderColor: isActive ? c : "hsl(var(--border))",
-                              background: isActive ? `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.10)` : "transparent",
-                            }}
-                          >
-                            <span className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.14)`, color: c }}>
-                              <Icon size={17} />
-                            </span>
-                            <span className="w-full truncate text-center text-[0.625rem] font-heading font-medium text-foreground">{meta.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    </div>
+                    </section>
                   )}
 
                   {query.trim() ? (
                     /* Search results */
-                    <div className="space-y-1">
+                    <section>
+                      <header className="mn-sec">
+                        <span className="mn-label ink">Pages found</span>
+                        <span className="mn-rule" />
+                        <span className="mn-label">{searchResults.length}</span>
+                      </header>
                       {searchResults.length === 0 ? (
-                        <p className="py-8 text-center text-sm text-muted-foreground">No page matches “{query}”.</p>
+                        <p className="mn-empty">No page matches “{query}”.</p>
                       ) : (
-                        searchResults.map((r) => {
-                          const Icon = r.icon;
-                          const active = location.pathname === r.path;
-                          return (
-                            <button key={r.path + r.where} onClick={() => go(r.path)} className={rowBase} style={{ background: active ? modColor(0.1) : undefined }}>
-                              {Icon && <Icon size={16} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} />}
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-heading text-foreground">{r.label}</span>
-                                <span className="block truncate text-[0.6875rem] text-muted-foreground">{r.where}</span>
-                              </span>
-                              <ChevronRight size={14} className="text-muted-foreground" />
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {/* Pages */}
-                      {navItems.length > 0 && (
-                        <p className="-mb-2 px-1 text-[0.625rem] font-heading font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                          {activeMod.label} pages
-                        </p>
-                      )}
-                      {navItems.length === 0 ? null : (
-                        <div className="rounded-2xl border border-border p-1.5 space-y-0.5">
-                          {navItems.map((item) => {
-                            const active = isItemActive(item);
-                            if (item.children) {
-                              const isExpanded = expandedGroup === item.label;
-                              return (
-                                <div key={item.label}>
-                                  <button
-                                    onClick={() => setExpandedGroup(isExpanded ? null : item.label)}
-                                    className={rowBase}
-                                    style={{ background: isExpanded ? "hsl(var(--muted) / 0.5)" : undefined }}
-                                    aria-expanded={isExpanded}
-                                  >
-                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: active ? modColor(0.15) : "hsl(var(--muted))" }}>
-                                      <item.icon size={16} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} />
-                                    </span>
-                                    <span className="flex-1 text-sm font-heading" style={{ color: active ? modColor() : "hsl(var(--foreground))", fontWeight: active ? 600 : 500 }}>
-                                      {item.label}
-                                    </span>
-                                    <span className="text-[0.625rem] tabular-nums text-muted-foreground">{item.children.length}</span>
-                                    <ChevronDown size={15} className="text-muted-foreground transition-transform duration-200" style={{ transform: isExpanded ? "rotate(180deg)" : undefined }} />
-                                  </button>
-                                  {isExpanded && (
-                                    <div className="ml-7 mt-0.5 mb-1 border-l pl-2 space-y-0.5" style={{ borderColor: modColor(0.3) }}>
-                                      {item.children.map((child) => {
-                                        const childActive = location.pathname === child.path;
-                                        return (
-                                          <button
-                                            key={child.path}
-                                            onClick={() => go(child.path)}
-                                            className="w-full flex items-center gap-2 rounded-lg px-3 min-h-[42px] text-left text-sm font-heading transition-colors"
-                                            style={{ background: childActive ? modColor(0.12) : undefined, color: childActive ? modColor() : "hsl(var(--muted-foreground))", fontWeight: childActive ? 600 : 400 }}
-                                          >
-                                            <span className="flex-1">{child.label}</span>
-                                            {!!child.count && (
-                                              <span className="rounded-full bg-destructive px-1.5 py-0.5 text-[0.625rem] font-medium text-destructive-foreground">{child.count}</span>
-                                            )}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            }
+                        <div className="mn-box">
+                          {searchResults.map((r) => {
+                            const Icon = r.icon;
+                            const active = location.pathname === r.path;
                             return (
-                              <button key={item.path} onClick={() => go(item.path!)} className={rowBase} style={{ background: active ? modColor(0.1) : undefined }}>
-                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: active ? modColor(0.18) : "hsl(var(--muted))" }}>
-                                  <item.icon size={16} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} />
+                              <button key={r.path + r.where} onClick={() => go(r.path)} className={`mn-row ${active ? "on" : ""}`}>
+                                <span className="mn-num">{pad(++rowNo)}</span>
+                                <span className="mn-mark">{Icon && <Icon size={15} />}</span>
+                                <span className="mn-text">
+                                  <span className="mn-name">{r.label}</span>
+                                  <span className="mn-sub">{r.where}</span>
                                 </span>
-                                <span className="flex-1 text-sm font-heading" style={{ color: active ? modColor() : "hsl(var(--foreground))", fontWeight: active ? 600 : 500 }}>
-                                  {item.label}
-                                </span>
-                                {active && <span className="h-2 w-2 rounded-full" style={{ background: modColor() }} />}
+                                <ChevronRight size={14} className="mn-chev" />
                               </button>
                             );
                           })}
                         </div>
                       )}
+                    </section>
+                  ) : (
+                    <>
+                      {/* Pages */}
+                      {navItems.length > 0 && (
+                        <section>
+                          <header className="mn-sec">
+                            <span className="mn-label ink">{activeMod.label} pages</span>
+                            <span className="mn-rule" />
+                            <span className="mn-label">{navItems.length}</span>
+                          </header>
+                          <div className="mn-box">
+                            {navItems.map((item) => {
+                              const active = isItemActive(item);
+                              if (item.children) {
+                                const isExpanded = expandedGroup === item.label;
+                                return (
+                                  <div key={item.label}>
+                                    <button
+                                      onClick={() => setExpandedGroup(isExpanded ? null : item.label)}
+                                      className={`mn-row ${active ? "on" : ""} ${isExpanded ? "open" : ""}`}
+                                      aria-expanded={isExpanded}
+                                    >
+                                      <span className="mn-num">{pad(++rowNo)}</span>
+                                      <span className="mn-mark"><item.icon size={15} /></span>
+                                      <span className="mn-text"><span className="mn-name">{item.label}</span></span>
+                                      <span className="mn-count">{item.children.length}</span>
+                                      <ChevronDown size={15} className="mn-chev" style={{ transform: isExpanded ? "rotate(180deg)" : undefined }} />
+                                    </button>
+                                    {isExpanded && (
+                                      <div className="mn-children">
+                                        {item.children.map((child) => {
+                                          const childActive = location.pathname === child.path;
+                                          return (
+                                            <button
+                                              key={child.path}
+                                              onClick={() => go(child.path)}
+                                              className={`mn-child ${childActive ? "on" : ""}`}
+                                              aria-current={childActive ? "page" : undefined}
+                                            >
+                                              <span className="flex-1 min-w-0 truncate">{child.label}</span>
+                                              {!!child.count && <span className="mn-badge">{child.count}</span>}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return (
+                                <button
+                                  key={item.path}
+                                  onClick={() => go(item.path!)}
+                                  className={`mn-row ${active ? "on" : ""}`}
+                                  aria-current={active ? "page" : undefined}
+                                >
+                                  <span className="mn-num">{pad(++rowNo)}</span>
+                                  <span className="mn-mark"><item.icon size={15} /></span>
+                                  <span className="mn-text"><span className="mn-name">{item.label}</span></span>
+                                  {active ? <i className="mn-here" /> : <ChevronRight size={14} className="mn-chev" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      )}
 
                       {/* Setup */}
                       {setupConfig.available && visibleSetupItems.length > 0 && (
-                        <div className="rounded-2xl border border-border">
-                          <button onClick={() => setShowSetup((v) => !v)} className={`${rowBase} rounded-2xl`} aria-expanded={showSetup}>
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                              <Settings size={16} className="text-muted-foreground" />
-                            </span>
-                            <span className="flex-1 text-sm font-heading font-medium text-foreground">{setupConfig.label} Setup</span>
-                            <span className="text-[0.625rem] tabular-nums text-muted-foreground">{visibleSetupItems.length}</span>
-                            <ChevronDown size={15} className="text-muted-foreground transition-transform duration-200" style={{ transform: showSetup ? "rotate(180deg)" : undefined }} />
+                        <section>
+                          <button onClick={() => setShowSetup((v) => !v)} className="mn-sec mn-sec-btn" aria-expanded={showSetup}>
+                            <Settings size={12} />
+                            <span className="mn-label ink">{setupConfig.label} Setup</span>
+                            <span className="mn-rule" />
+                            <span className="mn-label">{visibleSetupItems.length}</span>
+                            <ChevronDown size={14} className="mn-chev" style={{ transform: showSetup ? "rotate(180deg)" : undefined }} />
                           </button>
                           {showSetup && (
-                            <div className="grid gap-1.5 p-1.5 pt-0" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                            <div className="mn-grid">
                               {visibleSetupItems.map(({ icon: Icon, label, path, color }) => {
                                 const active = location.pathname === path;
                                 return (
-                                  <button
-                                    key={path}
-                                    onClick={() => go(path)}
-                                    className="flex flex-col items-center gap-1.5 rounded-xl border p-2 transition-colors active:scale-95"
-                                    style={{ borderColor: active ? modColor(0.45) : "hsl(var(--border))", background: active ? modColor(0.1) : "transparent" }}
-                                  >
-                                    <span className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: active ? modColor(0.18) : "hsl(var(--muted))" }}>
-                                      <Icon size={15} className={color} />
-                                    </span>
-                                    <span className="line-clamp-2 w-full text-center text-[0.625rem] font-heading leading-tight text-muted-foreground">
-                                      {label.replace(/ Master$/, "")}
-                                    </span>
+                                  <button key={path} onClick={() => go(path)} className={`mn-cell ${active ? "on" : ""}`} aria-current={active ? "page" : undefined}>
+                                    <span className="mn-mark"><Icon size={15} className={color} /></span>
+                                    <span className="mn-cell-name">{label.replace(/ Master$/, "")}</span>
                                   </button>
                                 );
                               })}
                             </div>
                           )}
-                        </div>
+                        </section>
                       )}
 
                       {/* Widgets (the one quick link not in the bottom bar) */}
-                      <button onClick={() => go("/widgets")} className={`${rowBase} border border-border rounded-2xl`}>
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-                          <Puzzle size={16} className="text-muted-foreground" />
-                        </span>
-                        <span className="flex-1 text-sm font-heading font-medium text-foreground">Widgets</span>
-                        <ChevronRight size={14} className="text-muted-foreground" />
-                      </button>
+                      <div className="mn-box">
+                        <button onClick={() => go("/widgets")} className="mn-row">
+                          <span className="mn-num">{pad(++rowNo)}</span>
+                          <span className="mn-mark"><Puzzle size={15} /></span>
+                          <span className="mn-text"><span className="mn-name">Widgets</span></span>
+                          <ChevronRight size={14} className="mn-chev" />
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -1100,61 +1074,67 @@ export const MobileNav: React.FC = () => {
             )}
 
             {sheet === "me" && (
-              <div className="overflow-y-auto overscroll-contain px-4 pb-6">
-                {/* Profile card */}
-                <div className="flex items-center gap-3 rounded-2xl border border-border p-3">
-                  <Avatar size={48} />
+              <div className="mn-body">
+                {/* Title block: who is signed in */}
+                <div className="mn-head mn-head-flush">
+                  <Avatar size={52} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-heading text-sm font-bold text-foreground">{currentUser?.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">{currentUser?.email}</p>
-                    <span className="mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-semibold" style={{ background: modColor(0.12), color: modColor() }}>
+                    <p className="mn-label">CivilierERP · Signed in</p>
+                    <p className="mn-title truncate">{currentUser?.name}</p>
+                    <p className="mn-sub truncate">{currentUser?.email}</p>
+                    <span className="mn-role">
                       {isSuperAdmin ? <Crown size={10} /> : isDba ? <Data size={10} /> : isAdmin ? <ShieldTick size={10} /> : null}
                       {roleLabel}
                     </span>
                   </div>
-                  <button onClick={() => setSheet(null)} aria-label="Close" className="flex h-9 w-9 items-center justify-center self-start rounded-full border border-border">
-                    <X size={16} className="text-muted-foreground" />
+                  <button onClick={() => setSheet(null)} aria-label="Close" className="mn-key self-start">
+                    <X size={15} />
                   </button>
                 </div>
 
-                <button onClick={() => go(profilePath)} className={`${rowBase} mt-3 border border-border rounded-2xl`}>
-                  <Profile size={17} className="text-muted-foreground" />
-                  <span className="flex-1 text-sm font-heading font-medium text-foreground">My profile</span>
-                  <ChevronRight size={14} className="text-muted-foreground" />
-                </button>
-
-                {/* Theme */}
-                <p className="mt-5 mb-2 px-1 text-[0.625rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Appearance</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => {
-                    const isSelected = theme === t;
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => setTheme(t)}
-                        className="flex items-center gap-2.5 rounded-xl border px-3 min-h-[48px] text-left transition-colors"
-                        style={{ borderColor: isSelected ? bg : "hsl(var(--border))", background: isSelected ? `${bg}18` : "transparent" }}
-                        aria-pressed={isSelected}
-                      >
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg shadow-sm" style={{ background: bg }}>
-                          {isSelected && (
-                            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                              <path d="M3 8l3.5 3.5L13 5" stroke={themeCheck[t]} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                        </span>
-                        <span className="text-sm font-heading font-medium text-foreground">{label}</span>
-                      </button>
-                    );
-                  })}
+                <div className="mn-box">
+                  <button onClick={() => go(profilePath)} className="mn-row">
+                    <span className="mn-num">01</span>
+                    <span className="mn-mark"><Profile size={15} /></span>
+                    <span className="mn-text"><span className="mn-name">My profile</span></span>
+                    <ChevronRight size={14} className="mn-chev" />
+                  </button>
                 </div>
 
-                <button
-                  onClick={handleLogout}
-                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-destructive/30 min-h-[48px] text-sm font-heading font-semibold text-destructive active:bg-destructive/10"
-                >
-                  <Logout size={17} /> Sign out
-                </button>
+                {/* Theme */}
+                <section>
+                  <header className="mn-sec">
+                    <span className="mn-label ink">Appearance</span>
+                    <span className="mn-rule" />
+                    <span className="mn-label">{Object.keys(THEME_DOTS).length}</span>
+                  </header>
+                  <div className="mn-themes">
+                    {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => {
+                      const isSelected = theme === t;
+                      return (
+                        <button key={t} onClick={() => setTheme(t)} className={`mn-theme ${isSelected ? "on" : ""}`} aria-pressed={isSelected}>
+                          <span className="mn-swatch" style={{ background: bg }}>
+                            {isSelected && (
+                              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                <path d="M3 8l3.5 3.5L13 5" stroke={themeCheck[t]} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                          </span>
+                          <span className="mn-name">{label}</span>
+                          {isSelected && <span className="mn-tag">In use</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <div className="mn-box">
+                  <button onClick={handleLogout} className="mn-row danger">
+                    <span className="mn-num">02</span>
+                    <span className="mn-mark"><Logout size={15} /></span>
+                    <span className="mn-text"><span className="mn-name">Sign out</span></span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1164,15 +1144,10 @@ export const MobileNav: React.FC = () => {
       {/* ── Bottom tab bar ───────────────────────────────────────────────────── */}
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-[61] md:hidden border-t border-border"
-        style={{
-          background: "hsl(var(--card) / 0.92)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        }}
+        className="mn-bar md:hidden"
+        style={{ ["--mn-mod" as string]: modColor() } as React.CSSProperties}
       >
-        <div className="grid h-16" style={{ gridTemplateColumns: `repeat(${barItems.length}, minmax(0, 1fr))` }}>
+        <div className="mn-bar-row" style={{ gridTemplateColumns: `repeat(${barItems.length}, minmax(0, 1fr))` }}>
           {barItems.map(({ id, label, icon: Icon, active, onClick }) => {
             const isMenu = id === "menu";
             return (
@@ -1181,35 +1156,27 @@ export const MobileNav: React.FC = () => {
                 onClick={onClick}
                 aria-label={isMenu ? `${label} menu` : label}
                 aria-current={active && !isMenu && id !== "me" ? "page" : undefined}
-                className="relative flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform"
+                className={`mn-tab ${active ? "on" : ""}`}
               >
-                {active && !isMenu && <span className="absolute top-0 h-0.5 w-8 rounded-full" style={{ background: modColor() }} />}
+                {active && !isMenu && <span className="mn-tab-mark" />}
                 {isMenu ? (
-                  <span
-                    className="relative flex h-9 w-12 items-center justify-center rounded-2xl text-white shadow-md"
-                    style={{ background: modColor(), boxShadow: `0 6px 16px -6px ${modColor(0.7)}` }}
-                  >
+                  <span className={`mn-menu-key ${sheet === "menu" ? "open" : ""}`}>
                     {sheet === "menu" ? <X size={18} /> : <Icon size={18} />}
                     {/* The open module, so "Menu" plainly means "this module's pages and every other module". */}
                     {sheet !== "menu" && activeModKey !== "__none__" && (
-                      <span className="absolute -top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 bg-card" style={{ borderColor: "hsl(var(--card))", color: modColor() }}>
-                        <ActiveModIcon size={11} />
+                      <span className="mn-menu-mod">
+                        <ActiveModIcon size={10} />
                       </span>
                     )}
                   </span>
                 ) : id === "me" ? (
-                  <span className="rounded-full" style={{ boxShadow: active ? `0 0 0 2px ${modColor()}` : undefined }}>
+                  <span className={`mn-me ${active ? "on" : ""}`}>
                     <Avatar size={24} />
                   </span>
                 ) : (
-                  <Icon size={21} style={{ color: active ? modColor() : "hsl(var(--muted-foreground))" }} strokeWidth={active ? 2.3 : 1.8} />
+                  <Icon size={20} strokeWidth={active ? 2.2 : 1.7} />
                 )}
-                <span
-                  className="max-w-full truncate px-1 text-[0.625rem] font-heading leading-none"
-                  style={{ color: active || isMenu ? modColor() : "hsl(var(--muted-foreground))", fontWeight: active || isMenu ? 600 : 500 }}
-                >
-                  {label}
-                </span>
+                <span className="mn-tab-label">{label}</span>
               </button>
             );
           })}
@@ -1218,5 +1185,143 @@ export const MobileNav: React.FC = () => {
     </>
   );
 };
+
+// The mobile navigation drawn on the sheet, like the rest of the app: a square bottom bar with an ink rule and
+// capital labels, and pull-up sheets with the faint grid, a title block, ruled sections, numbered rows with square
+// marks and square keys. The open module's colour (--mn-mod) marks where you are. Colours otherwise come from the
+// theme's variables, so every theme matches.
+//
+// Responsive: on a phone the sheet runs edge to edge; from 560px up (a phone in landscape, a small tablet) it becomes
+// a centred panel, so rows don't stretch across the whole screen. The module rail swipes; the Setup and theme grids
+// re-flow to as many columns as fit.
+const MOBILE_NAV_CSS = `
+@keyframes mnFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes mnSheet { from { transform: translateY(100%) } to { transform: translateY(0) } }
+.mn-sheet, .mn-bar {
+  --mn-ink: hsl(var(--foreground));
+  --mn-graphite: hsl(var(--muted-foreground));
+  --mn-rule: hsl(var(--border));
+  --mn-rule-soft: hsl(var(--border) / 0.55);
+  --mn-paper: hsl(var(--card));
+  font-family: "DM Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.mn-sheet {
+  position: absolute; left: 0; right: 0; display: flex; flex-direction: column; overflow: hidden;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100svh - 64px - env(safe-area-inset-bottom, 0px) - 24px);
+  background-color: var(--mn-paper);
+  background-image:
+    linear-gradient(hsl(var(--foreground) / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--mn-ink);
+  border-top: 3px solid var(--mn-mod);
+  box-shadow: 0 -1.5px 0 var(--mn-ink), 0 -10px 30px hsl(0 0% 0% / 0.18);
+  animation: mnSheet 280ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@media (min-width: 560px) {
+  .mn-sheet { left: 50%; right: auto; width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
+    border: 1.5px solid var(--mn-ink); border-top: 3px solid var(--mn-mod); box-shadow: 6px 6px 0 hsl(var(--foreground) / 0.14);
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px)); animation: mnFade 200ms ease-out both; }
+}
+.mn-sheet .mn-grab { display: flex; justify-content: center; padding: 8px 0 2px; flex-shrink: 0; }
+.mn-sheet .mn-grab span { width: 36px; height: 3px; background: var(--mn-rule); }
+.mn-sheet .mn-label { font-family: "Sora", sans-serif; font-weight: 600; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mn-graphite); white-space: nowrap; }
+.mn-sheet .mn-label.ink { color: var(--mn-ink); }
+.mn-sheet .mn-title { font-family: "Sora", sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -0.02em; line-height: 1.15; margin-top: 3px; color: var(--mn-ink); }
+.mn-sheet .mn-head { display: flex; align-items: center; gap: 12px; padding: 6px 16px 12px; border-bottom: 1.5px solid var(--mn-ink); flex-shrink: 0; }
+.mn-sheet .mn-head-flush { padding: 6px 0 14px; margin: 0 0 4px; }
+.mn-sheet .mn-key { width: 34px; height: 34px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--mn-ink); color: var(--mn-ink); background: var(--mn-paper); }
+.mn-sheet .mn-key:active { background: var(--mn-ink); color: var(--mn-paper); }
+.mn-sheet .mn-mark { width: 30px; height: 30px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--mn-rule); background: var(--mn-paper); color: var(--mn-ink); }
+.mn-sheet .mn-mark.lg { width: 44px; height: 44px; border: 1.5px solid var(--mn-ink); }
+.mn-sheet .mn-search { display: flex; align-items: center; gap: 8px; margin: 12px 16px 4px; padding: 0 12px; flex-shrink: 0;
+  border: 1px solid var(--mn-ink); background: var(--mn-paper); color: var(--mn-graphite); }
+.mn-sheet .mn-search input { flex: 1; min-width: 0; height: 42px; background: transparent; border: 0; outline: none; color: var(--mn-ink); font-size: 14px; }
+.mn-sheet .mn-search input::placeholder { color: var(--mn-graphite); opacity: 0.8; }
+.mn-sheet .mn-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 20px; display: flex; flex-direction: column; gap: 6px; }
+.mn-sheet .mn-sec { display: flex; align-items: center; gap: 10px; padding: 14px 0 8px; width: 100%; color: var(--mn-ink); text-align: left; }
+.mn-sheet .mn-rule { flex: 1; height: 1px; background: var(--mn-rule); }
+.mn-sheet .mn-chev { color: var(--mn-graphite); flex-shrink: 0; transition: transform .2s; }
+.mn-sheet .mn-rail { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 4px; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; scrollbar-width: none; }
+.mn-sheet .mn-rail::-webkit-scrollbar { display: none; }
+.mn-sheet .mn-tile { width: 76px; flex-shrink: 0; scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 4px 8px; border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-tile.on { border: 1.5px solid var(--mn-ink); box-shadow: inset 0 -3px 0 var(--tile); }
+.mn-sheet .mn-tile-name { width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mn-ink); }
+.mn-sheet .mn-box { border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-row { display: grid; grid-template-columns: 20px 30px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; width: 100%;
+  min-height: 48px; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--mn-rule-soft); transition: background-color .12s; }
+.mn-sheet .mn-box > .mn-row:last-child, .mn-sheet .mn-box > div:last-child > .mn-row { border-bottom: 0; }
+.mn-sheet .mn-row:active, .mn-sheet .mn-row.open { background: hsl(var(--primary) / 0.08); }
+.mn-sheet .mn-row.on { background: var(--mn-mod-wash); box-shadow: inset 3px 0 0 var(--mn-mod); }
+.mn-sheet .mn-row.on .mn-name, .mn-sheet .mn-row.on .mn-mark { color: var(--mn-mod); }
+.mn-sheet .mn-row.on .mn-mark { border-color: var(--mn-mod); }
+.mn-sheet .mn-row.danger .mn-name, .mn-sheet .mn-row.danger .mn-mark { color: hsl(var(--destructive)); }
+.mn-sheet .mn-row.danger:active { background: hsl(var(--destructive) / 0.08); }
+.mn-sheet .mn-num { font-family: "Sora", sans-serif; font-size: 10px; font-weight: 600; color: var(--mn-graphite); }
+.mn-sheet .mn-text { display: flex; flex-direction: column; min-width: 0; }
+.mn-sheet .mn-name { font-size: 14px; font-weight: 600; color: var(--mn-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mn-sheet .mn-sub { font-size: 11.5px; color: var(--mn-graphite); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.mn-sheet .mn-count { font-family: "Sora", sans-serif; font-size: 10px; font-weight: 600; color: var(--mn-graphite); }
+.mn-sheet .mn-here { width: 8px; height: 8px; background: var(--mn-mod); }
+.mn-sheet .mn-children { margin: 0 0 6px 42px; border-left: 1px solid var(--mn-ink); }
+.mn-sheet .mn-child { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 6px 12px; text-align: left;
+  font-size: 13.5px; color: var(--mn-graphite); border-bottom: 1px solid var(--mn-rule-soft); }
+.mn-sheet .mn-child:last-child { border-bottom: 0; }
+.mn-sheet .mn-child.on { color: var(--mn-mod); font-weight: 600; background: var(--mn-mod-wash); box-shadow: inset 2px 0 0 var(--mn-mod); }
+.mn-sheet .mn-badge { min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;
+  background: hsl(var(--destructive)); color: hsl(var(--destructive-foreground)); font-family: "Sora", sans-serif; font-size: 9.5px; font-weight: 600; }
+.mn-sheet .mn-sec-btn { cursor: pointer; }
+.mn-sheet .mn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.mn-sheet .mn-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-cell.on { border: 1.5px solid var(--mn-mod); background: var(--mn-mod-wash); }
+.mn-sheet .mn-cell-name { width: 100%; text-align: center; font-size: 11px; line-height: 1.25; color: var(--mn-ink);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mn-sheet .mn-empty { margin: 4px 0; padding: 22px; text-align: center; border: 1px dashed var(--mn-rule); font-size: 13px; color: var(--mn-graphite); }
+.mn-sheet .mn-role { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; margin-top: 7px; border: 1px solid var(--mn-mod); color: var(--mn-mod);
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.mn-sheet .mn-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.mn-sheet .mn-theme { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 10px; text-align: left; border: 1px solid var(--mn-rule); background: var(--mn-paper); }
+.mn-sheet .mn-theme.on { border: 1.5px solid var(--mn-ink); }
+.mn-sheet .mn-swatch { width: 26px; height: 26px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--mn-ink); }
+.mn-sheet .mn-tag { margin-left: auto; height: 18px; padding: 0 6px; display: inline-flex; align-items: center; background: var(--mn-ink); color: var(--mn-paper);
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+.mn-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;
+  border: 1.5px solid hsl(var(--foreground)); background: hsl(var(--card)); color: hsl(var(--foreground));
+  font-family: "Sora", sans-serif; font-weight: 700; letter-spacing: -0.02em; }
+.mn-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Bottom bar */
+.mn-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--mn-paper); border-top: 1.5px solid var(--mn-ink); }
+.mn-bar .mn-bar-row { display: grid; height: 64px; }
+.mn-bar .mn-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--mn-graphite); transition: transform .12s; }
+.mn-bar .mn-tab:active { transform: scale(0.95); }
+.mn-bar .mn-tab + .mn-tab { border-left: 1px solid var(--mn-rule-soft); }
+.mn-bar .mn-tab.on { color: var(--mn-mod); }
+.mn-bar .mn-tab-mark { position: absolute; top: -1.5px; left: 22%; right: 22%; height: 3px; background: var(--mn-mod); }
+.mn-bar .mn-tab-label { max-width: 100%; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1;
+  font-family: "Sora", sans-serif; font-weight: 600; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; }
+.mn-bar .mn-tab.on .mn-tab-label { color: var(--mn-mod); }
+.mn-bar .mn-menu-key { position: relative; width: 46px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--mn-ink); color: var(--mn-paper); box-shadow: 3px 3px 0 var(--mn-mod); }
+.mn-bar .mn-menu-key.open { background: var(--mn-mod); box-shadow: 3px 3px 0 var(--mn-ink); }
+.mn-bar .mn-menu-mod { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--mn-paper); color: var(--mn-mod); border: 1.5px solid var(--mn-ink); }
+.mn-bar .mn-me { display: inline-flex; }
+.mn-bar .mn-me.on { box-shadow: 0 0 0 2px var(--mn-mod); }
+.mn-bar .mn-tab:nth-child(2) .mn-tab-label { color: var(--mn-ink); }
+@media (max-width: 340px) {
+  .mn-bar .mn-tab-label { font-size: 8px; letter-spacing: 0.06em; }
+  .mn-sheet .mn-row { grid-template-columns: 16px 28px minmax(0, 1fr) auto auto; gap: 8px; padding: 8px 10px; }
+  .mn-sheet .mn-themes { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .mn-sheet { animation: none; } }
+`;
 
 export default MobileNav;
