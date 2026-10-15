@@ -56,6 +56,30 @@ router.put("/:id/release", requirePageRight("crm-bookings", "edit"), async (req,
   }
 });
 
+// PUT /:id/extend — add days to an active hold. The Unit Matrix and Parking
+// Matrix have offered "Extend hold" (1-90 days) all along, but this route
+// never existed, so the button always failed. Extends from the later of now
+// and the current end date; only an Active hold can be extended.
+router.put("/:id/extend", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const days = parseInt(req.body?.AdditionalDays, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: "Invalid id" });
+    if (!Number.isInteger(days) || days < 1 || days > 90) return res.status(400).json({ error: "Enter 1 to 90 days" });
+    const r = await getPool().request().input("id", sql.Int, id).input("d", sql.Int, days)
+      .query(`UPDATE dbo.CrmInventoryHold
+                 SET HoldUntil = DATEADD(DAY, @d, CASE WHEN HoldUntil > SYSDATETIME() THEN HoldUntil ELSE SYSDATETIME() END),
+                     HoldDays = ISNULL(HoldDays, 0) + @d
+              OUTPUT INSERTED.HoldUntil
+               WHERE Id = @id AND Status = N'Active'`);
+    if (!r.recordset.length) return res.status(409).json({ error: "This hold is no longer active — place a new hold instead" });
+    res.json({ success: true, holdUntil: r.recordset[0].HoldUntil });
+  } catch (e) {
+    console.error("[crm-holds] extend error:", e.message);
+    res.status(500).json({ error: "Could not extend the hold" });
+  }
+});
+
 // GET /application/:applicationId — every hold (active + past) for one customer
 router.get("/application/:applicationId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
