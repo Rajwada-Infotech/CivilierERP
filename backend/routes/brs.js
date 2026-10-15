@@ -98,7 +98,7 @@ const findAHMCol = (meta, names, fallback = null) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /brs/filters  —  companies + banks for dropdown filters
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/filters", cache("brs-filters", 300), async (req, res) => {
+router.get("/filters", cache("brs-filters", 300, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
 

@@ -90,13 +90,19 @@ async function getActiveFinYearName(pool) {
 }
 
 // ── GET / ─────────────────────────────────────────────────────────────────────
-router.get("/", cache("received-payment", 300), async (req, res) => {
+// Sale payments (Sales → Payment): the ones raised against a sale order - tagged "[SalePayment]" in the remarks or
+// received from an "SO-" document. Same test the Sales Payment page applied on the client.
+const SALE_PAYMENT_SQL = "(RPRemarks LIKE '%[[]SalePayment]%' OR RPReceivedFrom LIKE 'SO-%')";
+
+// dropOnAnyWrite: approvals from the Approval Inbox change RPStatus without bumping "received-payment".
+router.get("/", cache("received-payment", 300, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const statusFilter = req.query.status || null;
+    const salePaymentsOnly = req.query.salePayment === "1";
     const pool = getPool();
 
     const req2 = pool.request()
@@ -125,7 +131,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           SUM(CASE WHEN RPStatus = 'Rejected' THEN 1 ELSE 0 END) OVER() AS _rejectedCount
         FROM dbo.ReceivedPayment
         WHERE (@companyId IS NULL OR RPCompanyId = @companyId)${projectPredicate(req.projectScope, "RPProjectId")}
-          AND (@status IS NULL OR RPStatus = @status)
+          AND (@status IS NULL OR RPStatus = @status)${salePaymentsOnly ? ` AND ${SALE_PAYMENT_SQL}` : ""}
         ORDER BY RPCreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -151,6 +157,25 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
   } catch (err) {
     console.error("GET /received-payment error:", err);
     res.status(500).json({ error: "Failed to fetch received payments" });
+  }
+});
+
+// ── GET /sale-order-paid ──────────────────────────────────────────────────────
+// Doc numbers of sale orders that already have an active (not Rejected) sale payment - the Sales Payment form
+// hides those from its order picker. Replaces downloading every received payment to work this out on the client.
+router.get("/sale-order-paid", cache("received-payment", 300, { dropOnAnyWrite: true }), async (req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT DISTINCT RPReceivedFrom
+      FROM dbo.ReceivedPayment
+      WHERE ${SALE_PAYMENT_SQL}
+        AND ISNULL(RPStatus, '') <> 'Rejected'
+        AND ISNULL(RPReceivedFrom, '') <> ''${projectPredicate(req.projectScope, "RPProjectId")}
+    `);
+    res.json({ docNos: r.recordset.map((x) => x.RPReceivedFrom) });
+  } catch (err) {
+    console.error("GET /received-payment/sale-order-paid error:", err);
+    res.status(500).json({ error: "Failed to fetch paid sale orders" });
   }
 });
 

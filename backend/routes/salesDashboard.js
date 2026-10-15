@@ -17,7 +17,7 @@ const { cache } = require("../middleware/cache");
  *   - Recent sale orders           : last 8 rows
  *   - Recent sale invoices         : last 8 rows
  */
-router.get("/", cache("sales-dashboard", 60), async (req, res) => {
+router.get("/", cache("sales-dashboard", 60, { dropOnAnyWrite: true }), async (req, res) => {
   // companyId is optional — omitting it (the dashboard's own default, no
   // company picker on the page anymore) aggregates across every company
   // instead of requiring one to be chosen before anything loads.

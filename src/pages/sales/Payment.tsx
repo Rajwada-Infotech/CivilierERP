@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchAllPages } from "@/lib/fetchAllPages";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { ServerPager } from "@/components/ServerPager";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { SalesShell } from "@/components/sales/SalesShell";
@@ -29,6 +31,7 @@ import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import {
   createReceivedPayment,
   getReceivedPayments,
+  getPaidSaleOrderDocNos,
   type ReceivedPaymentRecord,
 } from "@/api/receivedPaymentApi";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -526,31 +529,34 @@ export default function Payment() {
   // ── Queries ──────────────────────────────────────────────────────────────
   const { data: soData, isLoading: soLoading } = useQuery({
     queryKey: ["sale-orders"],
-    queryFn: () => getSaleOrders({ limit: 500 }),
+    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleOrders({ page, limit }), { limit: 500 }) }),
     staleTime: 60_000,
   });
   const orders: SaleOrder[] = soData?.data ?? [];
-  const { data: paymentsData, isLoading: paymentsLoading } = useQuery({
-    queryKey: ["received-payments"],
-    queryFn: () => getReceivedPayments(1, 100),
+  // Payment History: server-paged, sale payments only (the server applies the same "[SalePayment]" / "SO-" test).
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(20);
+  const { data: paymentsData, isLoading: paymentsLoading, isFetching: paymentsFetching } = useQuery({
+    queryKey: ["received-payments", "sale-history", historyPage, historyPageSize],
+    queryFn: () => getReceivedPayments(historyPage, historyPageSize, { salePayment: true }),
     staleTime: 30_000,
+    placeholderData: keepPreviousData, // keep the current rows on screen while the next page loads
   });
   const paymentHistory: ReceivedPaymentRecord[] = paymentsData?.data ?? [];
+  const paymentTotal = Number(paymentsData?.total ?? 0);
+  // A page past the end (rows removed since it was opened) comes back empty - go back to the first page.
+  useEffect(() => {
+    if (!paymentsFetching && historyPage > 1 && paymentsData && paymentHistory.length === 0) setHistoryPage(1);
+  }, [paymentsFetching, historyPage, paymentsData, paymentHistory.length]);
 
-  // Doc numbers of sale orders that already have an active (non-Rejected) payment
-  const paidSaleOrderDocNos = useMemo(() => {
-    const s = new Set<string>();
-    paymentHistory.forEach((r) => {
-      if (
-        (r.RPRemarks?.includes("[SalePayment]") ||
-          r.RPReceivedFrom?.startsWith("SO-")) &&
-        r.RPStatus !== "Rejected"
-      ) {
-        if (r.RPReceivedFrom) s.add(r.RPReceivedFrom);
-      }
-    });
-    return s;
-  }, [paymentHistory]);
+  // Doc numbers of sale orders that already have an active (non-Rejected) payment - worked out on the server
+  // across every payment, not just the history page on screen.
+  const { data: paidDocNos } = useQuery({
+    queryKey: ["received-payments", "sale-order-paid"],
+    queryFn: getPaidSaleOrderDocNos,
+    staleTime: 30_000,
+  });
+  const paidSaleOrderDocNos = useMemo(() => new Set<string>(paidDocNos ?? []), [paidDocNos]);
 
   // Only approved orders that don't already have an active payment
   const eligibleOrders = useMemo(
@@ -1000,6 +1006,13 @@ export default function Payment() {
           )}
         </div>
         <PaymentHistoryTable records={paymentHistory} />
+        <ServerPager
+          page={historyPage}
+          pageSize={historyPageSize}
+          total={paymentTotal}
+          onPageChange={setHistoryPage}
+          onPageSizeChange={setHistoryPageSize}
+        />
       </div>
       </SalesShell>
     </>

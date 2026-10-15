@@ -99,7 +99,7 @@ router.get(
 router.get(
   "/platforms",
   requirePageRight("sa-campaigns", "view"),
-  cache("sa-campaigns-platforms", 600),
+  cache("sa-campaigns-platforms", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -121,7 +121,7 @@ router.get(
 router.get(
   "/dropdown",
   requirePageRight("sa-campaigns", "view"),
-  cache("sa-campaigns-dropdown", 600),
+  cache("sa-campaigns-dropdown", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

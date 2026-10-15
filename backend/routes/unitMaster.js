@@ -129,7 +129,7 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
 });
 
 // GET projects dropdown (enterprise where business_type = P)
-router.get("/projects", cache("unit-master-projects", 600), async (req, res) => {
+router.get("/projects", cache("unit-master-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`

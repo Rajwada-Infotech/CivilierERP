@@ -107,7 +107,9 @@ const SI_SELECT = `
 router.get(
   "/",
   requirePageRight("sale-invoice", "view"),
-  cache("sale-invoices", 300, { shared: true }),
+  // dropOnAnyWrite: collecting a payment (POST /api/received-payment) changes an invoice's Received / status
+  // without bumping "sale-invoices", so the list showed the old status for up to 5 minutes.
+  cache("sale-invoices", 300, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();

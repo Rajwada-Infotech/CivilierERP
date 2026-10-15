@@ -25,16 +25,16 @@ import {
   BookOpen,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
+import { ServerPager } from "@/components/ServerPager";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
 import {
   createStockTransfer,
-  getStockTransfers,
+  getTransferHistory,
   type StockTransfer,
 } from "@/api/stockTransferApi";
 import {
   createInterCompanyTransfer,
   previewInterCompanyTransfer,
-  getInterCompanyTransfers,
   getInterCompanyTransfer,
   deleteInterCompanyTransfer,
   getInterCompanyTransferPosting,
@@ -1152,12 +1152,27 @@ function ICTPreviewModal({
 // ─── Transfer History ─────────────────────────────────────────────────────────
 function TransferHistory() {
   const rights = usePageRights("stock-transfers");
+  // Server-paged: both kinds of transfer come back together, already in date order, one page per request.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["stock-transfers"],
-    queryFn: () => getStockTransfers({ limit: 50, page: 1 }),
+    queryKey: ["stock-transfers", "history", page, pageSize],
+    queryFn: () => getTransferHistory({ page, limit: pageSize }),
     staleTime: 60_000,
+    placeholderData: keepPreviousData, // keep the current rows on screen while the next page loads
   });
-  const transfers: StockTransfer[] = data?.data ?? [];
+  const historyRows = useMemo(() => data?.data ?? [], [data]);
+  const historyTotal = Number(data?.total ?? 0);
+  // Any inter-company transfer at all (not just on this page) - shows the GST toggle and the Amount heading.
+  const hasIct = Number(data?.ictTotal ?? 0) > 0;
+  const transfers: StockTransfer[] = useMemo(
+    () => historyRows.flatMap((r) => (r.kind === "plain" ? [r.data] : [])),
+    [historyRows],
+  );
+  // A page past the end (rows removed since it was opened) comes back empty - go back to the first page.
+  useEffect(() => {
+    if (!isFetching && page > 1 && data && historyRows.length === 0) setPage(1);
+  }, [isFetching, page, data, historyRows.length]);
 
   // One request for every visible row's approval trail instead of one per
   // row — see useApprovalTrailsBulk's own comment.
@@ -1166,19 +1181,10 @@ function TransferHistory() {
     transfers.map((t) => t.TransferID),
   );
 
-  // Inter-company transfers (direct GL voucher between the two companies'
-  // Inter-Company A/c heads, no bank/cash involved) live in a separate
-  // table — merge them into the same history view so a completed
-  // inter-company transfer is
-  // actually visible here instead of only appearing in the plain
-  // StockTransfers list (which never contained it), so completed transfers
-  // don't look like nothing happened.
-  const { data: ictData, isFetching: isFetchingIct, refetch: refetchIct } = useQuery({
-    queryKey: ["inter-company-transfer-list"],
-    queryFn: () => getInterCompanyTransfers({}),
-    staleTime: 60_000,
-  });
-  const ictTransfers: InterCompanyTransferSummary[] = ictData?.data ?? [];
+  // Inter-company transfers (direct GL voucher between the two companies' Inter-Company A/c heads) live in their
+  // own table; GET /history merges them into this list so a completed one is visible here too.
+  const refetchIct = refetch;
+  const isFetchingIct = false;
 
   const [grnModalTransfer, setGrnModalTransfer] =
     useState<StockTransfer | null>(null);
@@ -1241,10 +1247,12 @@ function TransferHistory() {
     | { kind: "plain"; date: string; data: StockTransfer }
     | { kind: "ict"; date: string; data: InterCompanyTransferSummary };
 
-  const unifiedRows: UnifiedRow[] = [
-    ...transfers.map((t): UnifiedRow => ({ kind: "plain", date: t.TransferDate, data: t })),
-    ...ictTransfers.map((t): UnifiedRow => ({ kind: "ict", date: t.TransferDate, data: t })),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  // Already in the tab's order (transfer date, newest first) from the server.
+  const unifiedRows: UnifiedRow[] = historyRows.map((r): UnifiedRow =>
+    r.kind === "plain"
+      ? { kind: "plain", date: r.data.TransferDate, data: r.data }
+      : { kind: "ict", date: r.data.TransferDate, data: r.data },
+  );
 
   return (
     <>
@@ -1306,7 +1314,7 @@ function TransferHistory() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {ictTransfers.length > 0 && (
+            {hasIct && (
               <div className="flex items-center rounded-lg border border-border p-0.5 text-[0.625rem] font-medium">
                 <button
                   onClick={() => setIctGstMode("excl")}
@@ -1354,7 +1362,7 @@ function TransferHistory() {
                   { label: "Date", cls: "hidden sm:table-cell" },
                   { label: "Route", cls: "hidden sm:table-cell" },
                   {
-                    label: ictTransfers.length > 0 ? `Items / Amount (${ictGstMode === "incl" ? "Incl." : "Excl."} GST)` : "Items",
+                    label: hasIct ? `Items / Amount (${ictGstMode === "incl" ? "Incl." : "Excl."} GST)` : "Items",
                     cls: "hidden md:table-cell",
                   },
                   { label: "Status", cls: "" },
@@ -1556,6 +1564,7 @@ function TransferHistory() {
             </tbody>
           </table>
         </div>
+        <ServerPager page={page} pageSize={pageSize} total={historyTotal} onPageChange={setPage} onPageSizeChange={setPageSize} />
       </div>
     </>
   );

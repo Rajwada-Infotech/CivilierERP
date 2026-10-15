@@ -76,3 +76,21 @@ export const createStockTransfer = async (
   }
   return res.json().catch(() => ({}));
 };
+
+// Transfer History tab: stock transfers and inter-company transfers together, newest first, one page at a time
+// (GET /api/stock-transfers/history). `ictTotal` is across all pages.
+export type TransferHistoryRow =
+  | { kind: "plain"; data: StockTransfer }
+  | { kind: "ict"; data: import("./interCompanyTransferApi").InterCompanyTransferSummary };
+
+export const getTransferHistory = async (params: { page: number; limit: number }): Promise<{
+  data: TransferHistoryRow[];
+  total: number;
+  plainTotal: number;
+  ictTotal: number;
+}> => {
+  const qs = new URLSearchParams({ page: String(params.page), limit: String(params.limit) });
+  const res = await fetchWithAuth(`${BASE}/history?${qs}`);
+  if (!res.ok) throw new Error(`Failed to fetch transfer history: ${res.status}`);
+  return res.json();
+};

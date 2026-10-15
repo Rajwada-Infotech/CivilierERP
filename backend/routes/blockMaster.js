@@ -106,7 +106,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
 // GET projects for dropdown (enterprise where business_type = P)
 router.get(
   "/projects",
-  cache("block-master-projects", 600),
+  cache("block-master-projects", 600, { dropOnAnyWrite: true }),
   async (req, res) => {
     try {
       const pool = getPool();
