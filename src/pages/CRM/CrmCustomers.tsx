@@ -633,6 +633,28 @@ const CrmCustomers: React.FC = () => {
           {(i.getValue() as string) || "—"}
         </div>
       ) },
+    { id: "projects", header: "Projects", size: 170, enableSorting: false,
+      cell: (i) => {
+        const names = String(i.row.original.ProjectNames || "").split("|").filter(Boolean);
+        if (!names.length) return <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">—</div>;
+        // Two shown; the rest behind a "+N" chip, all of them on hover.
+        const shown = names.slice(0, 2);
+        const more = names.length - shown.length;
+        return (
+          <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer flex flex-wrap gap-1" title={names.join(", ")}>
+            {shown.map((n) => (
+              <span key={n} className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-800 max-w-[150px] truncate">
+                {n}
+              </span>
+            ))}
+            {more > 0 && (
+              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted border-border">
+                +{more} more
+              </span>
+            )}
+          </div>
+        );
+      } },
     { accessorKey: "ApplicationCount", header: "Applications", size: 120,
       cell: (i) => (
         <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
@@ -693,6 +715,7 @@ const CrmCustomers: React.FC = () => {
     { header: "PAN (Permanent Account Number)", accessor: "PanNo" },
     { header: "Address", accessor: (r) => [r.PermanentCity, r.PermanentState].filter(Boolean).join(", ") },
     { header: "Co-Applicant", accessor: "CoApplicantName" },
+    { header: "Projects", accessor: (r) => String(r.ProjectNames || "").split("|").filter(Boolean).join(", ") },
     { header: "Applications", accessor: "ApplicationCount" },
     { header: "Registered", accessor: (r) => (r.CreatedAt ? String(r.CreatedAt).slice(0, 10) : "") },
   ];
