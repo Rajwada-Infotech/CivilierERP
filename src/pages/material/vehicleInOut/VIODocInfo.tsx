@@ -137,7 +137,7 @@ export function VIODocInfo({ m }: { m: VIOState }) {
                 readOnly
                 disabled
                 title="Doc date is always today's date"
-                className={`${inp} pl-9 bg-muted/30 cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
+                className={`${inp} pl-9 bg-card cursor-not-allowed opacity-70 [&::-webkit-calendar-picker-indicator]:hidden`}
               />
             </div>
           </div>
@@ -171,17 +171,17 @@ export function VIODocInfo({ m }: { m: VIOState }) {
           {/* Doc Number preview */}
           <div>
             <FieldLabel>Doc Number</FieldLabel>
-            <div className="flex items-center gap-2 px-3 h-[38px] rounded-lg bg-muted/40 border border-dashed border-border">
+            <div className="flex items-center gap-2 px-3 h-[38px] bg-card border border-dashed border-foreground/30">
               <Hash
                 size={13}
                 className="text-muted-foreground shrink-0"
               />
               {editingId ? (
-                <span className="font-mono text-sm text-primary font-semibold">
+                <span className="font-heading text-sm text-primary font-semibold">
                   {form.docNo || "—"}
                 </span>
               ) : docNoPreview?.nextDocNo ? (
-                <span className="font-mono text-sm text-primary font-semibold">
+                <span className="font-heading text-sm text-primary font-semibold">
                   {docNoPreview.nextDocNo}
                 </span>
               ) : loadingPreview ? (

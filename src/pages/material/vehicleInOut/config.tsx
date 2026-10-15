@@ -34,11 +34,20 @@ export const VEH_TEMPLATE_COLUMNS = [
   { header: "Remarks", accessor: "Remarks" },
 ];
 
-// ── Design tokens (match GRN.tsx) ─────────────────────────────────────────────
+// ── Field styles (sheet: squared, ruled, ink on focus) ────────────────────────
 export const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+  "w-full px-3 py-2 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground placeholder:text-muted-foreground/60 disabled:opacity-60";
 export const inpSel =
-  "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground appearance-none";
+  "w-full px-3 py-2 pr-8 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground appearance-none disabled:opacity-60";
+
+export const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+export const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 export function FieldLabel({
@@ -49,7 +58,7 @@ export function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -65,7 +74,7 @@ export function SectionCard({
 }) {
   return (
     <div
-      className={`rounded-xl border border-border bg-card/50 p-5 space-y-4 ${className}`}
+      className={`border border-foreground/30 bg-card/50 p-5 space-y-4 ${className}`}
     >
       {children}
     </div>
@@ -83,7 +92,7 @@ export function SectionTitle({
 }) {
   return (
     <div className="flex items-center gap-2.5 mb-1">
-      <div className="p-1.5 rounded-lg bg-primary/10 shrink-0">
+      <div className="p-1.5 bg-primary/10 shrink-0">
         <Icon size={13} className="text-primary" />
       </div>
       <div>
@@ -107,12 +116,12 @@ export function InfoPill({
 }) {
   if (!value) return null;
   return (
-    <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
-      <span className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+    <div className="flex flex-col gap-0.5 px-3 py-2 bg-card border border-foreground/30 min-w-0">
+      <span className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
         {label}
       </span>
       <span
-        className={`text-xs font-semibold text-foreground truncate ${mono ? "font-mono" : ""}`}
+        className={`text-xs font-semibold text-foreground truncate ${mono ? "font-heading" : ""}`}
       >
         {value}
       </span>
@@ -193,13 +202,13 @@ export function AttachmentThumb({
   };
 
   return (
-    <div className="relative inline-flex items-center gap-2 pl-2 pr-7 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-700 dark:text-emerald-400">
+    <div className="relative inline-flex items-center gap-2 pl-2 pr-7 py-1.5 bg-card border border-foreground/40 text-xs text-foreground">
       {isImage && blobUrl && !failed ? (
         <button type="button" onClick={openFile}>
           <img
             src={blobUrl}
             alt={attachment.filename}
-            className="h-8 w-8 rounded object-cover border border-emerald-500/30"
+            className="h-8 w-8 object-cover border border-foreground/40"
           />
         </button>
       ) : (
@@ -250,11 +259,11 @@ export function VehicleCard({
   approvalTrailLoading?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+    <div className="border border-foreground/30 bg-card p-4 space-y-3">
       {/* Top row: Doc No + Status */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-mono text-sm font-bold text-foreground truncate">
+          <p className="font-heading text-sm font-bold text-foreground truncate">
             {rec.DocNo || "—"}
           </p>
           <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
@@ -283,9 +292,9 @@ export function VehicleCard({
       )}
 
       {/* Vehicle No */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/15">
+      <div className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/15">
         <Truck size={13} className="text-primary shrink-0" />
-        <span className="font-mono text-sm font-semibold text-primary truncate">
+        <span className="font-heading text-sm font-semibold text-primary truncate">
           {rec.VehicleNo || "—"}
         </span>
       </div>
@@ -293,19 +302,19 @@ export function VehicleCard({
       {/* Supplier / PO / Entry / Challan grid */}
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="min-w-0">
-          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
             Supplier
           </p>
           <p className="truncate">{rec.SupplierName || "—"}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
             PO No
           </p>
-          <p className="font-mono truncate">{rec.PONumber || "—"}</p>
+          <p className="font-heading truncate">{rec.PONumber || "—"}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
             Entry Time
           </p>
           <p className="truncate">
@@ -315,7 +324,7 @@ export function VehicleCard({
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
             Challan No
           </p>
           <p className="truncate">{rec.ChallanNo || "—"}</p>
@@ -323,17 +332,17 @@ export function VehicleCard({
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-end gap-1 pt-2 border-t border-border/60">
+      <div className="flex items-center justify-end gap-1 pt-2 border-t border-foreground/30">
         <button data-row-view
           onClick={() => onView(rec)}
-          className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
+          className="text-muted-foreground hover:bg-primary/5 p-2 transition-colors"
           title="View"
         >
           <Eye size={15} />
         </button>
         <button
           onClick={() => onGeneratePdf(rec)}
-          className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-lg transition-colors"
+          className="text-foreground hover:bg-primary/5 p-2 transition-colors"
           title="Generate PDF"
         >
           <FileDown size={15} />
@@ -341,7 +350,7 @@ export function VehicleCard({
         {canEdit && (
           <button
             onClick={() => onEdit(rec)}
-            className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
+            className="text-muted-foreground hover:bg-primary/5 p-2 transition-colors"
             title="Edit"
           >
             <Edit3 size={15} />
@@ -350,7 +359,7 @@ export function VehicleCard({
         {canDelete && (
           <button
             onClick={() => onDelete(rec.VehicleInOutID)}
-            className="text-destructive hover:bg-destructive/10 p-2 rounded-lg transition-colors"
+            className="text-destructive hover:bg-destructive/10 p-2 transition-colors"
             title="Delete"
           >
             <Trash2 size={15} />
@@ -436,7 +445,7 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
     size: 130,
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
-        <span className="font-mono text-xs font-bold">{row.original.DocNo || "—"}</span>
+        <span className="font-heading text-xs font-bold">{row.original.DocNo || "—"}</span>
         <span className="text-[0.625rem] text-muted-foreground whitespace-nowrap">
           {row.original.DocDate ? new Date(row.original.DocDate).toLocaleDateString("en-IN") : ""}
         </span>
@@ -449,7 +458,7 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
     size: 110,
     meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
-      <span className="font-mono text-xs font-semibold text-primary">
+      <span className="font-heading text-xs font-semibold text-primary">
         {(getValue() as string) || "—"}
       </span>
     ),
@@ -469,7 +478,7 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
     size: 110,
     meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
-      <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
+      <span className="font-heading text-xs">{(getValue() as string) || "—"}</span>
     ),
   },
   {
@@ -506,7 +515,7 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
     size: 130,
     meta: { className: "hidden sm:table-cell" },
     cell: ({ getValue }) => (
-      <span className="text-xs font-mono">{(getValue() as string) || "—"}</span>
+      <span className="text-xs font-heading">{(getValue() as string) || "—"}</span>
     ),
   },
   {
@@ -538,14 +547,14 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
           <div className="flex items-center gap-2">
             <button data-row-view
               onClick={() => bridge.onView(rec)}
-              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className="p-1 text-foreground hover:bg-primary/5 transition-colors"
               title="View details"
             >
               <Eye size={15} />
             </button>
             <button
               onClick={() => bridge.onGeneratePdf(rec)}
-              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              className="p-1 text-foreground hover:bg-primary/5 transition-colors"
               title="Generate PDF"
             >
               <FileDown size={15} />
@@ -553,7 +562,7 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
             {bridge.canEdit && (
               <button
                 onClick={() => bridge.onEdit(rec)}
-                className="p-1 rounded text-blue-400 hover:bg-blue-400/10 transition-colors"
+                className="p-1 text-foreground hover:bg-primary/5 transition-colors"
                 title="Edit this entry"
               >
                 <Edit3 size={15} />
@@ -562,7 +571,7 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
             {bridge.canDelete && (
               <button
                 onClick={() => bridge.onDelete(rec.VehicleInOutID)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                className="p-1 text-destructive hover:bg-destructive/10 transition-colors"
                 title="Delete this entry"
               >
                 <Trash2 size={15} />

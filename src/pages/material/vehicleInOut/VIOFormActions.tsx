@@ -8,7 +8,7 @@ export function VIOFormActions({ m }: { m: VIOState }) {
   return (
     <>
       {/* ── Actions ── */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-4 -mx-5 -mb-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-foreground/30 bg-card overflow-hidden mt-4 -mx-5 -mb-5">
         <p className="hidden sm:block text-[0.6875rem] text-muted-foreground">
           Ready to save
         </p>
@@ -24,7 +24,7 @@ export function VIOFormActions({ m }: { m: VIOState }) {
               setErrors({});
             }}
             disabled={createMut.isPending || updateMut.isPending}
-            className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+            className="flex-1 sm:flex-none px-4 py-1.5 text-xs font-heading border border-foreground/30 text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
           >
             <RotateCcw size={12} /> Reset
           </button>
@@ -33,7 +33,7 @@ export function VIOFormActions({ m }: { m: VIOState }) {
             disabled={
               createMut.isPending || updateMut.isPending || uploading
             }
-            className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+            className="flex-1 sm:flex-none px-5 py-2 text-sm font-heading font-semibold bg-foreground text-card border border-foreground disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
           >
             {createMut.isPending || updateMut.isPending ? (
               <RefreshCw size={14} className="animate-spin" />

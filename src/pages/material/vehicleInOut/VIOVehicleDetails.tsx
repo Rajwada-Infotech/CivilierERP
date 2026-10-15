@@ -27,7 +27,7 @@ export function VIOVehicleDetails({ m }: { m: VIOState }) {
               onChange={(e) =>
                 pf({ vehicleNo: e.target.value.toUpperCase() })
               }
-              className={`${inp} font-mono uppercase ${errors.vehicleNo ? "border-destructive ring-1 ring-destructive" : ""}`}
+              className={`${inp} font-heading uppercase ${errors.vehicleNo ? "border-destructive" : ""}`}
               placeholder="e.g. WB-01-AB-1234"
             />
             {errors.vehicleNo && (
@@ -49,7 +49,7 @@ export function VIOVehicleDetails({ m }: { m: VIOState }) {
               <DateTimeInput
                 value={form.entryTime}
                 onChange={(e) => pf({ entryTime: e.target.value })}
-                className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.entryTime ? "border-destructive ring-1 ring-destructive" : ""}`}
+                className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.entryTime ? "border-destructive" : ""}`}
               />
             </div>
             {errors.entryTime && (
@@ -98,7 +98,7 @@ export function VIOVehicleDetails({ m }: { m: VIOState }) {
                 pf({ challanNo: e.target.value });
                 if (errors.challanNo) setErrors((p) => ({ ...p, challanNo: "" }));
               }}
-              className={`${inp} ${errors.challanNo ? "border-destructive focus:ring-destructive" : ""}`}
+              className={`${inp} ${errors.challanNo ? "border-destructive" : ""}`}
               placeholder="e.g. CH-20240601-001"
             />
             {errors.challanNo && (
@@ -127,7 +127,7 @@ export function VIOVehicleDetails({ m }: { m: VIOState }) {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={uploading}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-2 border border-foreground/30 text-xs font-medium hover:bg-primary/5 transition-colors disabled:opacity-50"
               >
                 <Paperclip size={12} />
                 {uploading ? "Uploading…" : "Attach Files"}
@@ -142,7 +142,7 @@ export function VIOVehicleDetails({ m }: { m: VIOState }) {
                   setShowCamera(true);
                 }}
                 disabled={uploading}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-2 border border-foreground/30 text-xs font-medium hover:bg-primary/5 transition-colors disabled:opacity-50"
               >
                 <Camera size={12} /> Camera
               </button>

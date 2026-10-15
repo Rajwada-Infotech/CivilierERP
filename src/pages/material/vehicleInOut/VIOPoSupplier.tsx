@@ -105,7 +105,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                 }}
                 disabled={!!form.poId}
                 title={form.poId ? "Supplier is set by the selected PO" : undefined}
-                className={`appearance-none ${inpSel} ${form.poId ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`}
+                className={`appearance-none ${inpSel} ${form.poId ? "opacity-70 cursor-not-allowed bg-card" : ""}`}
               >
                 <option value="">Select Supplier…</option>
                 {(suppliers as any[]).map((s: any) => (
@@ -143,10 +143,10 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
             received across other Vehicle In/Out entries for the
             same PO) — this is the "10 + 20 + 70 of 100" flow. */}
         {form.poId && (
-          <div className="rounded-xl border border-border overflow-hidden">
-            <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
+          <div className="border border-foreground/30 overflow-hidden">
+            <div className="px-4 py-2.5 bg-card border-b border-foreground/30 flex items-center gap-2">
               <Package size={13} className="text-muted-foreground" />
-              <span className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+              <span className="text-[0.6875rem] font-heading font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 PO Items — Qty Received (This Lot)
               </span>
               <span className="ml-auto text-[0.625rem] text-muted-foreground">
@@ -163,7 +163,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="border-b border-border bg-muted/10">
+                    <tr className="border-b border-foreground/30 bg-card">
                       <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">#</th>
                       <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
                       <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Ordered</th>
@@ -176,18 +176,18 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                       <th className="px-4 py-2 text-center text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-foreground/10">
                     {poItemsRemaining.map((it, i) => {
                       const raw = receivedQtyByItem[it.poItemId] ?? "";
                       const entered = parseFloat(raw) || 0;
                       const overLimit = entered > it.remainingQty + 1e-6;
                       return (
-                        <tr key={it.poItemId} className="hover:bg-muted/10 transition-colors">
+                        <tr key={it.poItemId} className="hover:bg-primary/5 transition-colors">
                           <td className="px-4 py-2.5 text-muted-foreground">{i + 1}</td>
                           <td className="px-4 py-2.5 font-medium text-foreground">{it.itemName || "—"}</td>
-                          <td className="px-4 py-2.5 text-right font-mono">{it.orderedQty}</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">{it.receivedSoFar}</td>
-                          <td className="px-4 py-2.5 text-right font-mono font-semibold">
+                          <td className="px-4 py-2.5 text-right font-heading">{it.orderedQty}</td>
+                          <td className="px-4 py-2.5 text-right font-heading text-muted-foreground">{it.receivedSoFar}</td>
+                          <td className="px-4 py-2.5 text-right font-heading font-semibold">
                             {entered > 0 ? (
                               <span className="inline-flex items-baseline gap-1.5">
                                 <span className="text-muted-foreground line-through">
@@ -242,8 +242,8 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                                 }));
                               }}
                               placeholder="0"
-                              className={`w-24 px-2 py-1.5 rounded-lg border bg-background text-right font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary ${
-                                overLimit ? "border-destructive text-destructive" : "border-border"
+                              className={`w-24 px-2 py-1.5 border bg-card text-right font-heading text-xs focus:outline-none ${
+                                overLimit ? "border-destructive text-destructive" : "border-foreground/30"
                               } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
                             />
                           </td>
@@ -259,7 +259,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                               }
                               placeholder="Optional"
                               maxLength={100}
-                              className="w-28 px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                              className="w-28 px-2 py-1.5 border border-foreground/30 bg-card text-xs focus:outline-none"
                             />
                           </td>
                           <td className="px-4 py-2.5">
@@ -273,16 +273,16 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                                 }))
                               }
                               disabled={entered <= 0}
-                              className={`px-2 py-1.5 rounded-lg border bg-background text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary ${
+                              className={`px-2 py-1.5 border bg-card text-xs font-medium focus:outline-none ${
                                 entered <= 0 ? "opacity-50 cursor-not-allowed" : ""
                               } ${
                                 qualityByItem[it.poItemId] === "Excellent"
-                                  ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+                                  ? "border-foreground/40 text-foreground"
                                   : qualityByItem[it.poItemId] === "Good"
-                                    ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                                    ? "border-foreground/40 text-foreground"
                                     : qualityByItem[it.poItemId] === "Bad"
-                                      ? "border-rose-500/40 text-rose-600 dark:text-rose-400"
-                                      : "border-border text-muted-foreground"
+                                      ? "border-foreground/40 text-foreground"
+                                      : "border-foreground/30 text-muted-foreground"
                               }`}
                             >
                               <option value="">—</option>
@@ -298,7 +298,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                                   <img
                                     src={photoByItem[it.poItemId]}
                                     alt={`${it.itemName || "Item"} capture`}
-                                    className="w-9 h-9 rounded-lg object-cover border border-border cursor-pointer"
+                                    className="w-9 h-9 object-cover border border-foreground/30 cursor-pointer"
                                     onClick={() => {
                                       setCameraError(null);
                                       setCapturingPoItemId(it.poItemId);
@@ -316,7 +316,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                                       })
                                     }
                                     title="Remove photo"
-                                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                                   >
                                     <XCircle size={12} />
                                   </button>
@@ -330,7 +330,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                                     setShowCamera(true);
                                   }}
                                   title="Capture a real-time photo of this item"
-                                  className="w-9 h-9 rounded-lg border border-dashed border-border flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+                                  className="w-9 h-9 border border-dashed border-foreground/30 flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-colors"
                                 >
                                   <Camera size={14} />
                                 </button>

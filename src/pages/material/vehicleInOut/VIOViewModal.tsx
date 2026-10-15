@@ -17,21 +17,21 @@ export function VIOViewModal({ m }: { m: VIOState }) {
       {/* VIEW MODAL                                                          */}
       {/* ═══════════════════════════════════════════════════════════════════ */}
       {viewingRec && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4">
+          <div className="bg-card border border-foreground/30 w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
             {/* Modal header */}
-            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-foreground/30">
               <div>
                 <h2 className="font-heading font-bold text-base">
                   {viewingRec.DocNo || "Vehicle In/Out"}
                 </h2>
-                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-[0.12em] mt-0.5">
                   Vehicle In/Out Entry
                 </p>
               </div>
               <button
                 onClick={() => { setViewingRec(null); setShowPODetails(false); }}
-                className="p-2 hover:bg-muted rounded-lg transition-colors"
+                className="p-2 hover:bg-primary/5 transition-colors"
               >
                 <X size={18} />
               </button>
@@ -41,7 +41,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                 to a PO (chat is scoped to the PO, same conversation the
                 supplier sees on their own "Received by Customer" card). */}
             {viewingRec.POID && (
-              <div className="sticky top-[57px] bg-card z-10 flex border-b border-border px-6 gap-1">
+              <div className="sticky top-[57px] bg-card z-10 flex border-b border-foreground/30 px-6 gap-1">
                 {[
                   { id: "details" as const, label: "Details" },
                   { id: "supplier" as const, label: "Supplier", icon: MessageCircle },
@@ -51,7 +51,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                     onClick={() => setViewTab(t.id)}
                     className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
                       viewTab === t.id
-                        ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                        ? "border-foreground/40 text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >
@@ -108,13 +108,13 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                 ].map(({ label, value, mono }: any) => (
                   <div
                     key={label}
-                    className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                    className="px-3 py-2.5 bg-card border border-foreground/30"
                   >
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                       {label}
                     </p>
                     <p
-                      className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}
+                      className={`text-xs font-semibold ${mono ? "font-heading" : ""} text-foreground`}
                     >
                       {value}
                     </p>
@@ -125,19 +125,19 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                 {viewingRec.PONumber ? (
                   <button
                     onClick={() => setShowPODetails(true)}
-                    className="px-3 py-2.5 rounded-xl bg-blue-500/5 border border-blue-500/20 text-left hover:bg-blue-500/10 transition-colors"
+                    className="px-3 py-2.5 bg-card border border-foreground/40 text-left hover:bg-primary/5 transition-colors"
                   >
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                       PO Reference
                     </p>
-                    <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                    <p className="text-xs font-semibold font-heading text-foreground flex items-center gap-1.5">
                       {viewingRec.PONumber}
 
                     </p>
                   </button>
                 ) : (
-                  <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">PO Reference</p>
+                  <div className="px-3 py-2.5 bg-card border border-foreground/30">
+                    <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">PO Reference</p>
                     <p className="text-xs text-muted-foreground">—</p>
                   </div>
                 )}
@@ -149,21 +149,21 @@ export function VIOViewModal({ m }: { m: VIOState }) {
 
               {/* Times */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="px-3 py-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                <div className="px-3 py-2.5 bg-card border border-foreground/40">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                     Entry Time
                   </p>
-                  <p className="text-xs font-semibold font-mono text-emerald-600 dark:text-emerald-400">
+                  <p className="text-xs font-semibold font-heading text-foreground">
                     {viewingRec.EntryTime
                       ? fmtServerDateTime(viewingRec.EntryTime)
                       : "—"}
                   </p>
                 </div>
-                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                <div className="px-3 py-2.5 bg-card border border-foreground/30">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                     Exit Time
                   </p>
-                  <p className="text-xs font-semibold font-mono text-foreground">
+                  <p className="text-xs font-semibold font-heading text-foreground">
                     {viewingRec.ExitTime
                       ? fmtServerDateTime(viewingRec.ExitTime)
                       : "Not yet exited"}
@@ -177,19 +177,19 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                   turn out inferior on inspection). */}
               {Array.isArray(viewingRec.Items) && viewingRec.Items.length > 0 && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                  <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">
                     Received Items
                   </p>
-                  <div className="rounded-xl border border-border/50 overflow-hidden">
+                  <div className="border border-foreground/30 overflow-hidden">
                     <table className="w-full text-xs">
-                      <thead className="bg-muted/40">
+                      <thead className="bg-card">
                         <tr>
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Item</th>
                           <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Received</th>
                           <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide"></th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border/50">
+                      <tbody className="divide-y divide-foreground/10">
                         {viewingRec.Items.map((it: any) => (
                           <tr key={it.VehicleInOutItemID}>
                             <td className="px-3 py-2 font-medium text-foreground">
@@ -202,12 +202,12 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                                 )}
                                 {it.Quality && (
                                   <span
-                                    className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold uppercase tracking-wide border ${
+                                    className={`inline-flex items-center px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide border ${
                                       it.Quality === "Excellent"
-                                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+                                        ? "bg-card text-foreground border-foreground/40"
                                         : it.Quality === "Good"
-                                          ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25"
-                                          : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25"
+                                          ? "bg-card text-foreground border-foreground/40"
+                                          : "bg-card text-foreground border-foreground/40"
                                     }`}
                                   >
                                     {it.Quality}
@@ -215,7 +215,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                                 )}
                               </span>
                             </td>
-                            <td className="px-3 py-2 text-right font-mono text-foreground">
+                            <td className="px-3 py-2 text-right font-heading text-foreground">
                               {it.ReceivedQty} {it.UomName || ""}
                             </td>
                             <td className="px-3 py-2 text-right">
@@ -227,7 +227,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                                     setDebitNoteReason("");
                                   }}
                                   title="Raise a debit note if part of this line was found below the ordered grade"
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-foreground/40 text-foreground text-[0.6875rem] font-semibold hover:bg-primary/5 hover:border-foreground transition-colors"
                                 >
                                   <FileWarning size={12} /> Debit Note
                                 </button>
@@ -248,7 +248,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
               {Array.isArray(viewingRec.Attachments) &&
               viewingRec.Attachments.length > 0 ? (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                  <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">
                     Attachments ({viewingRec.Attachments.length})
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -274,7 +274,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                   if (legacyPaths.length === 0) return null;
                   return (
                     <div>
-                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                      <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">
                         Attachments ({legacyPaths.length})
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -287,13 +287,13 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                               href={p}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/5 border border-primary/20 text-sm text-primary font-medium hover:bg-primary/10 transition-colors"
+                              className="inline-flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 text-sm text-primary font-medium hover:bg-primary/10 transition-colors"
                             >
                               {isImage ? (
                                 <img
                                   src={p}
                                   alt="attachment"
-                                  className="h-7 w-7 rounded object-cover"
+                                  className="h-7 w-7 object-cover"
                                 />
                               ) : (
                                 <Paperclip size={13} />
@@ -313,26 +313,26 @@ export function VIOViewModal({ m }: { m: VIOState }) {
               {/* Remarks */}
               {viewingRec.Remarks && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                  <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">
                     Remarks
                   </p>
-                  <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                  <p className="text-sm text-foreground bg-card px-4 py-3 border border-foreground/30">
                     {viewingRec.Remarks}
                   </p>
                 </div>
               )}
 
               {/* Print / Edit buttons */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <div className="flex justify-end gap-2 pt-2 border-t border-foreground/30">
                 <button
                   onClick={() => handlePrintVehicleRec(viewingRec)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-card border border-foreground/30 text-sm font-medium hover:bg-primary/5 transition-colors"
                 >
                   <Printer size={13} /> Print
                 </button>
                 <button
                   onClick={() => handleGeneratePdfVehicleRec(viewingRec)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-card border border-foreground/30 text-sm font-medium hover:bg-primary/5 transition-colors"
                 >
                   <FileDown size={13} /> Generate PDF
                 </button>
@@ -342,7 +342,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                       setViewingRec(null);
                       bridge.onEdit(viewingRec);
                     }}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-card border border-foreground/30 text-sm font-medium hover:bg-primary/5 transition-colors"
                   >
                     <Edit3 size={13} /> Edit
                   </button>
