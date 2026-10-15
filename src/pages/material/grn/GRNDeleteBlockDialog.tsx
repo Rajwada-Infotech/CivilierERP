@@ -15,7 +15,7 @@ export function GRNDeleteBlockDialog({ m }: { m: GRNState }) {
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <DialogTitle className="flex items-center gap-2 text-foreground">
               <AlertTriangle size={18} className="shrink-0" />
               Cannot Delete GRN
             </DialogTitle>
@@ -44,7 +44,7 @@ export function GRNDeleteBlockDialog({ m }: { m: GRNState }) {
                 </ol>
                 {deleteBlockInfo.clearedPayments &&
                   deleteBlockInfo.clearedPayments.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                    <div className="border bg-card p-2 space-y-1 text-xs">
                       <p className="font-semibold">
                         Cleared payments blocking deletion:
                       </p>
@@ -65,7 +65,7 @@ export function GRNDeleteBlockDialog({ m }: { m: GRNState }) {
             )}
             {deleteBlockInfo?.reason === "has_payments" && (
               <div className="space-y-2">
-                <p className="font-medium text-amber-700">
+                <p className="font-medium text-foreground">
                   This GRN has expense bookings with linked payment records.
                 </p>
                 <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
@@ -83,13 +83,13 @@ export function GRNDeleteBlockDialog({ m }: { m: GRNState }) {
             )}
             {deleteBlockInfo?.reason === "has_expense" && (
               <div className="space-y-2">
-                <p className="font-medium text-amber-700">
+                <p className="font-medium text-foreground">
                   This GRN has linked expense booking(s). Delete them first,
                   then delete this GRN.
                 </p>
                 {deleteBlockInfo.expenseBookings &&
                   deleteBlockInfo.expenseBookings.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                    <div className="border bg-card p-2 space-y-1 text-xs">
                       <p className="font-semibold">
                         Expense bookings to delete first:
                       </p>

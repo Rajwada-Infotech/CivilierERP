@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { type ColumnDef } from "@/components/ui/DataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { StatusBadge } from "@/components/StatusBadge";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { type GRNItemLine as GRNItemLineBase, type UOM } from "@/api/grnApi";
 
 
@@ -85,7 +85,7 @@ export function RemainingItemsPanel({
   if (loading)
     return (
       <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
-        <div className="w-3 h-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+        <div className="w-3 h-3 border-2 border-foreground/40 border-t-transparent animate-spin" />
         Checking remaining items…
       </div>
     );
@@ -93,10 +93,10 @@ export function RemainingItemsPanel({
   if (!data || !data.hasPending) return null;
 
   return (
-    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-amber-500/20 bg-amber-500/8">
-        <AlertTriangle size={12} className="text-amber-500 shrink-0" />
-        <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+    <div className="border border-foreground/40 bg-card overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-foreground/40 bg-card">
+        <AlertTriangle size={12} className="text-foreground shrink-0" />
+        <span className="text-xs font-semibold text-foreground">
           Remaining Items — Not Yet Expense Booked
         </span>
         <span className="ml-auto text-[0.625rem] text-muted-foreground">
@@ -107,17 +107,17 @@ export function RemainingItemsPanel({
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="bg-muted/10 border-b border-amber-500/15">
+            <tr className="bg-card border-b border-foreground/40">
               <th className="px-3 py-2 text-left text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 Item
               </th>
               <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 Ordered
               </th>
-              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-foreground">
                 Received
               </th>
-              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-foreground">
                 Remaining
               </th>
               <th className="px-3 py-2 text-left text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
@@ -126,37 +126,37 @@ export function RemainingItemsPanel({
               <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                 Rate (₹)
               </th>
-              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400">
+              <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-foreground">
                 Pending Amt (₹)
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#ffe2021a]">
             {data.pendingItems.map((item, idx) => (
-              <tr key={idx} className="hover:bg-amber-500/5 transition-colors">
+              <tr key={idx} className="hover:bg-primary/5 transition-colors">
                 <td className="px-3 py-2 font-medium text-foreground max-w-[160px] truncate">
                   {item.itemName || `Item ${idx + 1}`}
                 </td>
-                <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                <td className="px-3 py-2 text-right font-heading text-muted-foreground">
                   {item.orderedQty}
                 </td>
-                <td className="px-3 py-2 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                <td className="px-3 py-2 text-right font-heading font-semibold text-foreground">
                   {item.receivedQty}
                 </td>
-                <td className="px-3 py-2 text-right font-mono font-bold text-amber-600 dark:text-amber-400">
+                <td className="px-3 py-2 text-right font-heading font-bold text-foreground">
                   {fmtQty(item.remainingQty)}
                 </td>
                 <td className="px-3 py-2 text-muted-foreground">
                   {item.uom || "—"}
                 </td>
-                <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                <td className="px-3 py-2 text-right font-heading text-muted-foreground">
                   {item.rate > 0
                     ? item.rate.toLocaleString("en-IN", {
                         maximumFractionDigits: 2,
                       })
                     : "—"}
                 </td>
-                <td className="px-3 py-2 text-right font-mono font-semibold text-amber-600 dark:text-amber-400">
+                <td className="px-3 py-2 text-right font-heading font-semibold text-foreground">
                   {item.pendingAmount > 0
                     ? item.pendingAmount.toLocaleString("en-IN", {
                         maximumFractionDigits: 2,
@@ -166,7 +166,7 @@ export function RemainingItemsPanel({
               </tr>
             ))}
           </tbody>
-          <tfoot className="border-t-2 border-amber-500/30 bg-muted/10">
+          <tfoot className="border-t-2 border-foreground/40 bg-card">
             <tr>
               <td
                 colSpan={6}
@@ -174,7 +174,7 @@ export function RemainingItemsPanel({
               >
                 Total Pending Value
               </td>
-              <td className="px-3 py-2.5 text-right font-mono text-sm font-bold text-amber-600 dark:text-amber-400">
+              <td className="px-3 py-2.5 text-right font-heading text-sm font-bold text-foreground">
                 {data.totalPendingAmount.toLocaleString("en-IN", {
                   maximumFractionDigits: 2,
                 })}
@@ -184,24 +184,24 @@ export function RemainingItemsPanel({
         </table>
       </div>
       {data.partialGRNs?.length > 0 && (
-        <div className="border-t border-amber-500/15">
-          <div className="px-4 py-2 bg-muted/20 flex items-center gap-2">
+        <div className="border-t border-foreground/40">
+          <div className="px-4 py-2 bg-card flex items-center gap-2">
             <FileText size={11} className="text-muted-foreground shrink-0" />
             <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
               Other GRN receipts for this PO
             </span>
           </div>
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-foreground/10">
             {data.partialGRNs.map((g) => (
               <div key={g.grnId} className="flex items-center gap-3 px-4 py-2.5 text-xs">
-                <span className="font-mono font-semibold text-foreground">{g.grnNo}</span>
+                <span className="font-heading font-semibold text-foreground">{g.grnNo}</span>
                 <span className="text-muted-foreground">{new Date(g.grnDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
-                <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
-                  g.status === "Approved" ? "bg-emerald-500/10 text-emerald-600" :
-                  g.status === "Pending" ? "bg-[#ffe2021a] text-amber-600" :
-                  "bg-muted text-muted-foreground"
+                <span className={`ml-1 px-1.5 py-0.5 text-[0.625rem] font-medium ${
+                  g.status === "Approved" ? "bg-card text-foreground" :
+                  g.status === "Pending" ? "bg-card text-foreground" :
+                  "bg-card text-muted-foreground"
                 }`}>{g.status}</span>
-                <span className="ml-auto font-mono text-muted-foreground">
+                <span className="ml-auto font-heading text-muted-foreground">
                   ₹{g.totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
                 </span>
                 <span className="text-muted-foreground/60 text-[0.625rem]">{g.itemCount} item{g.itemCount !== 1 ? "s" : ""}</span>
@@ -210,15 +210,15 @@ export function RemainingItemsPanel({
           </div>
         </div>
       )}
-      <div className="px-4 py-2.5 border-t border-amber-500/15 bg-amber-500/5 flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-[0.625rem] text-amber-600 dark:text-amber-500">
+      <div className="px-4 py-2.5 border-t border-foreground/40 bg-card flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[0.625rem] text-foreground">
           These items have been received but not yet booked as expenses. Create
           an Expense Booking from the Finance → Invoice page to book them.
         </p>
         {onCreateNewGRN && data && (
           <button
             onClick={() => onCreateNewGRN(data)}
-            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-foreground text-card transition-colors border border-foreground"
           >
             <CopyPlus size={12} />
             New GRN for Remaining
@@ -283,12 +283,18 @@ export const deriveFYFromDate = (dateStr?: string | null): string | null => {
   return `${startYear}-${startYear + 1}`;
 };
 
-// Input classes — matches existing app design tokens
+// Field styles (sheet: squared, ruled, ink on focus)
 export const inp =
-  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground placeholder:text-muted-foreground/50";
+  "w-full px-3 py-2 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground placeholder:text-muted-foreground/60 disabled:opacity-60";
 
 export const inpSel =
-  "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground appearance-none";
+  "w-full px-3 py-2 pr-8 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground appearance-none disabled:opacity-60";
+
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
 
 
 // ─── Linked Expense Bookings ──────────────────────────────────────────────────
@@ -352,7 +358,7 @@ export function LinkedExpenseBookings({ grnId }: { grnId: number }) {
   if (loading)
     return (
       <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
-        <div className="w-3 h-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+        <div className="w-3 h-3 border-2 border-foreground/40 border-t-transparent animate-spin" />
         Loading…
       </div>
     );
@@ -368,32 +374,32 @@ export function LinkedExpenseBookings({ grnId }: { grnId: number }) {
       {bookings.map((b) => (
         <div
           key={b.Eid}
-          className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isAutoSplit(b) ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-muted/20"}`}
+          className={`flex items-center gap-3 px-4 py-3 border ${isAutoSplit(b) ? "border-foreground/40 bg-card" : "border-foreground/30 bg-card"}`}
         >
           <div
-            className={`shrink-0 p-1.5 rounded-lg ${isAutoSplit(b) ? "bg-[#ffe2021a]" : "bg-emerald-500/10"}`}
+            className={`shrink-0 p-1.5 ${isAutoSplit(b) ? "bg-card" : "bg-card"}`}
           >
             <Receipt
               size={13}
               className={
                 isAutoSplit(b)
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-emerald-600 dark:text-emerald-400"
+                  ? "text-foreground"
+                  : "text-foreground"
               }
             />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-xs font-bold">
+              <span className="font-heading text-xs font-bold">
                 {b.EDocNo ?? `Draft #${b.Eid}`}
               </span>
               {isAutoSplit(b) && (
-                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/20 font-medium">
+                <span className="text-[0.625rem] px-1.5 py-0.5 bg-card text-foreground border border-foreground/40 font-medium">
                   Pending split
                 </span>
               )}
               <span
-                className={`inline-flex items-center gap-1 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-semibold ${statusColor(b.EStatus)}`}
+                className={`inline-flex items-center gap-1 text-[0.625rem] px-1.5 py-0.5 border font-semibold ${statusColor(b.EStatus)}`}
               >
                 {StatusIcon(b.EStatus)}
                 {b.EStatus}
@@ -405,14 +411,14 @@ export function LinkedExpenseBookings({ grnId }: { grnId: number }) {
               </p>
             )}
             {isAutoSplit(b) && (
-              <p className="text-[0.625rem] text-amber-600 dark:text-amber-500 mt-0.5">
+              <p className="text-[0.625rem] text-foreground mt-0.5">
                 Remaining items — review in Expense Booking
               </p>
             )}
           </div>
           <div className="shrink-0 text-right">
             {b.ENetAmount > 0 && (
-              <p className="font-mono text-xs font-semibold">
+              <p className="font-heading text-xs font-semibold">
                 ₹{fmt(Number(b.ENetAmount))}
               </p>
             )}
@@ -459,11 +465,11 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       const isTRF = isTransferGRN(grn);
       return (
         <div className="flex flex-col gap-1">
-          <span className="font-mono text-xs font-bold text-foreground">
+          <span className="font-heading text-xs font-bold text-foreground">
             {docNo || "—"}
           </span>
           {isTRF ? (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-400/20 w-fit">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[0.5625rem] font-semibold bg-card text-foreground border border-foreground/40 w-fit">
               <ArrowLeftRight size={8} /> Transfer GRN
             </span>
           ) : grn.POType && grn.POType !== "Direct" ? (
@@ -472,12 +478,12 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             // has no Vehicle In/Out (the common case), and the two badges
             // read as the same thing side by side.
             <span
-              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold border w-fit ${
+              className={`inline-flex items-center px-1.5 py-0.5 text-[0.5625rem] font-semibold border w-fit ${
                 grn.POType === "Normal"
-                  ? "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+                  ? "bg-card text-foreground border-foreground/40"
                   : grn.POType === "WO_PO"
-                    ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
-                    : "bg-muted text-muted-foreground border-border"
+                    ? "bg-card text-foreground border-foreground/40"
+                    : "bg-card text-muted-foreground border-foreground/30"
               }`}
             >
               {grn.POType}
@@ -491,7 +497,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           {!isTRF && !grn.VehicleInOutID && (
             <span
               title={grn.DirectEntryReason || undefined}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border border-amber-400/20 w-fit"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[0.5625rem] font-semibold bg-card text-foreground border border-foreground/40 w-fit"
             >
               Direct Entry
             </span>
@@ -516,7 +522,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
               Transfer
             </span>
-            <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400">
+            <span className="font-heading text-xs font-semibold text-foreground">
               {grn.SourceTransferDocNo || "—"}
             </span>
           </div>
@@ -529,7 +535,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
               <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
                 PO
               </span>
-              <span className="font-mono text-xs">{grn.PONumber}</span>
+              <span className="font-heading text-xs">{grn.PONumber}</span>
             </>
           ) : (
             <span className="text-xs text-muted-foreground">—</span>
@@ -563,7 +569,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <span className="text-xs text-muted-foreground">—</span>
           )}
           {grn.SourceMRDocNo && (
-            <span className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400">
+            <span className="font-heading text-[0.625rem] font-semibold text-foreground">
               {grn.SourceMRDocNo}
             </span>
           )}
@@ -627,7 +633,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
         table="GoodsReceiptNotes"
         recordId={row.original.GRNID}
         compact
-        fallback={<StatusBadge status={row.original.Status} />}
+        fallback={<SheetMark text={printStatusLabel(row.original.Status || "Draft")} tone={statusTone(row.original.Status || "Draft")} />}
         preloaded={bridge.grnApprovalTrails.get(String(row.original.GRNID)) ?? null}
         preloadedLoading={bridge.grnApprovalTrailsLoading}
       />
@@ -644,7 +650,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
         <div className="flex items-center justify-end gap-2">
           <button data-row-view="hide"
             onClick={(e) => { e.stopPropagation(); bridge.onView(grn); }}
-            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+            className="p-1 text-foreground hover:bg-primary/5 transition-colors"
             title="View details"
           >
             <Eye size={15} />
@@ -652,7 +658,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           {bridge.canEdit && !isTransferGRN(grn) && (
             <button
               onClick={(e) => { e.stopPropagation(); bridge.onEdit(grn); }}
-              className="p-1 rounded text-primary hover:bg-primary/10 transition-colors"
+              className="p-1 text-primary hover:bg-primary/10 transition-colors"
               title="Edit this GRN"
             >
               <Pencil size={15} />
@@ -661,7 +667,7 @@ export const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
           {bridge.canDelete && (
             <button
               onClick={(e) => { e.stopPropagation(); bridge.handleDeleteGrn(String(grn.GRNID)); }}
-              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+              className="p-1 text-destructive hover:bg-destructive/10 transition-colors"
               title="Delete this GRN"
             >
               <Trash2 size={15} />
@@ -682,7 +688,7 @@ export function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -698,7 +704,7 @@ export function SectionCard({
 }) {
   return (
     <div
-      className={`rounded-xl border border-border bg-card/50 p-5 space-y-4 ${className}`}
+      className={`border border-foreground/30 bg-card/50 p-5 space-y-4 ${className}`}
     >
       {children}
     </div>
@@ -716,8 +722,8 @@ export function SectionTitle({
 }) {
   return (
     <div className="flex items-center gap-2.5 mb-1">
-      <div className="p-1.5 rounded-lg bg-emerald-500/10 shrink-0">
-        <Icon size={13} className="text-emerald-600 dark:text-emerald-400" />
+      <div className="p-1.5 bg-card shrink-0">
+        <Icon size={13} className="text-foreground" />
       </div>
       <div>
         <p className="text-xs font-semibold text-foreground tracking-wide">
@@ -753,12 +759,12 @@ export function InfoPill({
         null);
   if (!safeValue) return null;
   return (
-    <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
-      <span className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+    <div className="flex flex-col gap-0.5 px-3 py-2 bg-card border border-foreground/30 min-w-0">
+      <span className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
         {label}
       </span>
       <span
-        className={`text-xs font-semibold text-foreground truncate ${mono ? "font-mono" : ""}`}
+        className={`text-xs font-semibold text-foreground truncate ${mono ? "font-heading" : ""}`}
       >
         {safeValue}
       </span>

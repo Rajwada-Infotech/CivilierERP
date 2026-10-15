@@ -52,17 +52,17 @@ export function GRNDates({ m }: { m: GRNState }) {
 
         <div>
           <FieldLabel>GRN Number</FieldLabel>
-          <div className="flex items-center gap-2 px-3 h-[38px] rounded-lg bg-muted/40 border border-dashed border-border">
+          <div className="flex items-center gap-2 px-3 h-[38px] bg-card border border-dashed border-foreground/30">
             <Hash
               size={13}
               className="text-muted-foreground shrink-0"
             />
             {editingId && formData.grnNo ? (
-              <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+              <span className="font-heading text-sm text-foreground font-semibold">
                 {formData.grnNo}
               </span>
             ) : grnNumberPreview?.nextDocNo ? (
-              <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+              <span className="font-heading text-sm text-foreground font-semibold">
                 {grnNumberPreview.nextDocNo}
               </span>
             ) : loadingPreview ? (

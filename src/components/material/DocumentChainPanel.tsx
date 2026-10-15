@@ -61,8 +61,8 @@ export const DocumentChainPanel: React.FC<{
         type="button"
         onClick={() => !current && goTo(node)}
         disabled={current}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.6875rem] font-semibold transition-opacity ${DOC_COLOR[node.docType]} ${
-          current ? "opacity-100 cursor-default ring-1 ring-inset ring-current" : "hover:opacity-75 cursor-pointer"
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 border text-[0.6875rem] font-semibold transition-opacity ${DOC_COLOR[node.docType]} ${
+          current ? "opacity-100 cursor-default" : "hover:opacity-75 cursor-pointer"
         }`}
         title={current ? undefined : `Open ${node.label} ${node.docNo ?? ""}`}
       >
@@ -73,9 +73,9 @@ export const DocumentChainPanel: React.FC<{
   };
 
   return (
-    <div className="border-t border-border/60 pt-4">
-      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-        <ArrowRight size={10} className="text-emerald-600 dark:text-emerald-400" /> Linked Documents
+    <div className="border-t border-foreground/30 pt-4">
+      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-3 flex items-center gap-1.5">
+        <ArrowRight size={10} className="text-foreground" /> Linked Documents
       </p>
       {isLoading ? (
         <p className="text-[0.6875rem] text-muted-foreground">Loading chain...</p>

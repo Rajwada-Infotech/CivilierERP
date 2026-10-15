@@ -136,7 +136,7 @@ export function GRNPoSection({ m }: { m: GRNState }) {
             <div className="relative">
               {formData.projectId ? (
                 <div
-                  className={`${inpSel} flex items-center gap-1.5 bg-muted/30 cursor-not-allowed`}
+                  className={`${inpSel} flex items-center gap-1.5 bg-card cursor-not-allowed`}
                   title="Locked to this project's linked godown"
                 >
                   <Lock size={11} className="text-muted-foreground shrink-0" />
@@ -214,7 +214,7 @@ export function GRNPoSection({ m }: { m: GRNState }) {
             )}
             {loadingPO && (
               <p className="text-[0.6875rem] text-muted-foreground mt-1 flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin inline-block" />
+                <span className="w-2.5 h-2.5 border-2 border-foreground/40 border-t-transparent animate-spin inline-block" />
                 Loading PO details…
               </p>
             )}
@@ -289,11 +289,11 @@ export function GRNPoSection({ m }: { m: GRNState }) {
         {formData.poId &&
           !editingId &&
           poRemainingItems.length > 0 && (
-            <div className="rounded-xl border border-border bg-muted/10 overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-muted/20">
+            <div className="border border-foreground/30 bg-card overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-foreground/30 bg-card">
                 <RotateCcw
                   size={12}
-                  className="text-emerald-600/80 dark:text-emerald-400/80 shrink-0"
+                  className="text-foreground shrink-0"
                 />
                 <span className="text-xs font-semibold text-foreground">
                   Remaining Items on this PO
@@ -309,7 +309,7 @@ export function GRNPoSection({ m }: { m: GRNState }) {
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="bg-muted/10 border-b border-border">
+                        <tr className="bg-card border-b border-foreground/30">
                           <th className="px-3 py-2 text-left text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                             Item
                           </th>
@@ -319,12 +319,12 @@ export function GRNPoSection({ m }: { m: GRNState }) {
                           <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                             Received
                           </th>
-                          <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          <th className="px-3 py-2 text-right text-[0.625rem] font-heading uppercase tracking-wider text-foreground">
                             Remaining
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border">
+                      <tbody className="divide-y divide-foreground/10">
                         {poRemainingItems
                           .filter((it) => it.remainingQty > 1e-6)
                           .map((it, idx) => (
@@ -332,13 +332,13 @@ export function GRNPoSection({ m }: { m: GRNState }) {
                               <td className="px-3 py-1.5 font-medium text-foreground max-w-[200px] truncate">
                                 {it.itemName || `Item ${idx + 1}`}
                               </td>
-                              <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                              <td className="px-3 py-1.5 text-right font-heading text-muted-foreground">
                                 {it.orderedQty}
                               </td>
-                              <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                              <td className="px-3 py-1.5 text-right font-heading text-muted-foreground">
                                 {it.receivedQty}
                               </td>
-                              <td className="px-3 py-1.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                              <td className="px-3 py-1.5 text-right font-heading font-semibold text-foreground">
                                 {it.remainingQty}
                               </td>
                             </tr>
@@ -346,7 +346,7 @@ export function GRNPoSection({ m }: { m: GRNState }) {
                       </tbody>
                     </table>
                   </div>
-                  <div className="px-4 py-2.5 border-t border-border">
+                  <div className="px-4 py-2.5 border-t border-foreground/30">
                     <button
                       type="button"
                       onClick={handleUseRemainingItems}
@@ -354,12 +354,12 @@ export function GRNPoSection({ m }: { m: GRNState }) {
                         loadingPO ||
                         formData.grnSourceMode === "vehicleInOut"
                       }
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 border transition-colors ${
                         formData.grnSourceMode === "remaining"
-                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 cursor-default"
+                          ? "border-foreground/40 bg-card text-foreground cursor-default"
                           : formData.grnSourceMode === "vehicleInOut"
-                            ? "border-border text-muted-foreground opacity-50 cursor-not-allowed"
-                            : "border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                            ? "border-foreground/30 text-muted-foreground opacity-50 cursor-not-allowed"
+                            : "border-foreground/40 text-foreground hover:bg-primary/5"
                       }`}
                     >
                       {formData.grnSourceMode === "remaining" ? (

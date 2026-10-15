@@ -1,8 +1,8 @@
 import { X, Search, FileText, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/DataTable";
 import { bridge, GRN_LIST_COLUMNS } from "./config";
+import { HEAD, RULE } from "./config";
 import type { GRNState } from "./useGRN";
 
 // The GRN register: search, filters, entries grouped by purchase order.
@@ -10,14 +10,14 @@ export function GRNHistory({ m }: { m: GRNState }) {
   const { search, setSearch, page, setPage, grnStatusFilter, setGrnStatusFilter, totalPages, totalRecords, filteredGrns, groupedGrns, collapsedGrnGroups, toggleGrnGroup, fetchingGrns } = m;
   return (
     <>
-      <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border">
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="px-4 py-3" style={{ borderBottom: RULE }}>
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-base font-semibold">
+                <span className={HEAD}>
                   GRN Register
-                </CardTitle>
+                </span>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {totalRecords} record{totalRecords !== 1 ? "s" : ""}
                 </p>
@@ -31,7 +31,7 @@ export function GRNHistory({ m }: { m: GRNState }) {
                   placeholder="Search GRN, PO, Supplier…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                  className="pl-9 h-9 text-sm"
                 />
                 {search && (
                   <button
@@ -50,7 +50,7 @@ export function GRNHistory({ m }: { m: GRNState }) {
                     key={s}
                     type="button"
                     onClick={() => setGrnStatusFilter(s)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${grnStatusFilter === s ? "btn-module text-white border-transparent shadow-sm" : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"}`}
+                    className={`px-3 py-1 text-xs font-medium border transition-colors ${grnStatusFilter === s ? "bg-foreground text-card border border-foreground border-transparent" : "bg-card text-muted-foreground border-foreground/30 hover:border-foreground/40"}`}
                   >
                     {s}
                   </button>
@@ -58,8 +58,8 @@ export function GRNHistory({ m }: { m: GRNState }) {
               )}
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
+        </div>
+        <div>
           {filteredGrns.length === 0 ? (
             <p className="text-center text-muted-foreground text-sm py-10">
               No GRNs found. Click 'New GRN' to create one.
@@ -70,13 +70,13 @@ export function GRNHistory({ m }: { m: GRNState }) {
               return (
                 <div
                   key={group.key}
-                  className="border-b border-border last:border-0"
+                  className="border-b border-foreground/30 last:border-0"
                 >
                   {/* Group header — one PO's GRNs grouped together */}
                   <button
                     type="button"
                     onClick={() => toggleGrnGroup(group.key)}
-                    className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                    className="w-full flex items-center gap-2.5 px-4 py-3 bg-card hover:bg-primary/5 transition-colors text-left"
                   >
                     {collapsed ? (
                       <ChevronRight
@@ -98,7 +98,7 @@ export function GRNHistory({ m }: { m: GRNState }) {
                         · {group.supplierName}
                       </span>
                     )}
-                    <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                    <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-card px-2 py-0.5">
                       {group.rows.length} GRN
                       {group.rows.length !== 1 ? "s" : ""}
                     </span>
@@ -124,7 +124,7 @@ export function GRNHistory({ m }: { m: GRNState }) {
             })
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-foreground/30 px-4 py-3 text-xs text-muted-foreground">
             <span>
               Page {page} of {totalPages} · {totalRecords} record
               {totalRecords !== 1 ? "s" : ""}
@@ -133,21 +133,21 @@ export function GRNHistory({ m }: { m: GRNState }) {
               <button
                 onClick={() => setPage((p) => Math.max(p - 1, 1))}
                 disabled={page <= 1}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40 transition-colors"
+                className="inline-flex items-center gap-1 border border-foreground/30 px-3 py-1.5 text-xs hover:bg-primary/5 disabled:opacity-40 transition-colors"
               >
                 <ChevronLeft size={12} /> Prev
               </button>
               <button
                 onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
                 disabled={page >= totalPages}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-muted disabled:opacity-40 transition-colors"
+                className="inline-flex items-center gap-1 border border-foreground/30 px-3 py-1.5 text-xs hover:bg-primary/5 disabled:opacity-40 transition-colors"
               >
                 Next <ChevronRight size={12} />
               </button>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </>
   );
 }

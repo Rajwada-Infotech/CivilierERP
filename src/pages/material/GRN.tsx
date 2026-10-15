@@ -4,10 +4,10 @@
 //   form:  GRNFormHeader, GRNPoSection, GRNDates, GRNItems, GRNRemarks, GRNFormActions
 //   list:  GRNHistory, GRNViewModal, GRNDebitNote, GRNDeleteBlockDialog, GRNDeleteConfirmDialog
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
-import { Truck, Receipt, Plus, Download, Upload, Loader2 } from "lucide-react";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { Plus, Download, Upload, Loader2 } from "lucide-react";
 import { ExportMenu } from "@/components/ExportMenu";
-import { GRN_EXPORT_COLUMNS } from "./grn/config";
+import { GRN_EXPORT_COLUMNS, KEY_INK, KEY_LINE, RULE } from "./grn/config";
 import { useGRN } from "./grn/useGRN";
 import { GRNFormHeader } from "./grn/GRNFormHeader";
 import { GRNPoSection } from "./grn/GRNPoSection";
@@ -28,7 +28,7 @@ export default function GRN() {
   if (m.loadingGrns) {
     return (
       <div className="flex items-center gap-2.5 mt-8 text-muted-foreground text-sm">
-        <div className="w-4 h-4 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+        <div className="w-4 h-4 border-2 border-foreground/40 border-t-transparent animate-spin" />
         Loading GRNs…
       </div>
     );
@@ -37,10 +37,10 @@ export default function GRN() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "GRN"]} />
-      <MaterialShell
-        title="Goods Receipt Note"
-        subtitle="Record goods received against purchase orders"
-        icon={Truck}
+      <SheetShell
+        eyebrow="CivilierERP · Material"
+        title="Goods receipt notes"
+        subtitle="Goods received against purchase orders: what arrived, its quality, and what is still to come."
         action={
           !showForm ? (
             <div className="flex flex-wrap items-center gap-2">
@@ -61,16 +61,16 @@ export default function GRN() {
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className={`${KEY_LINE} h-9 px-3`}
               >
                 <Download size={13} />
-                <span className="hidden sm:inline">Download Template</span>
+                <span className="hidden sm:inline">Template</span>
               </button>
               <button
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${KEY_LINE} h-9 px-3`}
               >
                 {importing ? (
                   <Loader2 size={13} className="animate-spin" />
@@ -89,7 +89,7 @@ export default function GRN() {
                     setFormData(buildEmptyForm());
                     setErrors({});
                   }}
-                  className="btn-module inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+                  className={`${KEY_INK} h-9 px-4`}
                 >
                   <Plus size={13} /> New GRN
                 </button>
@@ -102,7 +102,7 @@ export default function GRN() {
         {/*  FORM                                                              */}
         {/* ══════════════════════════════════════════════════════════════════ */}
         {showForm && (
-          <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+          <div className="bg-card overflow-hidden" style={{ border: RULE }}>
             <GRNFormHeader m={m} />
 
             <div className="p-5 space-y-5">
@@ -125,7 +125,7 @@ export default function GRN() {
         {!showForm && (
           <GRNHistory m={m} />
         )}
-      </MaterialShell>
+      </SheetShell>
 
       {/* ══════════════════════════════════════════════════════════════════ */}
       {/*  VIEW MODAL                                                        */}

@@ -21,7 +21,7 @@ export function GRNItems({ m }: { m: GRNState }) {
         />
 
         {errors.items && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">
+          <div className="flex items-center gap-2 px-3 py-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs">
             <AlertCircle size={12} />
             {errors.items}
           </div>
@@ -30,20 +30,20 @@ export function GRNItems({ m }: { m: GRNState }) {
         {/* Mobile cards */}
         <div className="md:hidden space-y-3">
           {!formData.poId ? (
-            <div className="border-2 border-dashed border-border rounded-xl py-10 text-center text-muted-foreground/40 text-sm italic">
+            <div className="border-2 border-dashed border-foreground/30 py-10 text-center text-muted-foreground/40 text-sm italic">
               Select a Purchase Order above
             </div>
           ) : (
             formData.items.map((item, idx) => (
               <div
                 key={idx}
-                className="border border-border rounded-xl p-4 space-y-3 bg-muted/20"
+                className="border border-foreground/30 p-4 space-y-3 bg-card"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-sm truncate">
                     {item.itemName || "—"}
                   </span>
-                  <span className="shrink-0 text-[0.625rem] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                  <span className="shrink-0 text-[0.625rem] px-2 py-0.5 bg-card text-muted-foreground">
                     {item.uom || "—"}
                   </span>
                 </div>
@@ -66,7 +66,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                     ],
                   ].map(([l, v, c]) => (
                     <div key={l}>
-                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                         {l}
                       </p>
                       <p className={`font-semibold ${c}`}>{v}</p>
@@ -77,7 +77,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                   {(["receivedQty", "rate", "quantity"] as const).map(
                     (field) => (
                       <div key={field}>
-                        <label className="block text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">
+                        <label className="block text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-1">
                           {field === "receivedQty"
                             ? "Received"
                             : field === "rate"
@@ -89,7 +89,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                         </label>
                         {formData.grnSourceMode === "vehicleInOut" ? (
                           <div
-                            className={`${inp} text-right text-xs flex items-center justify-end gap-1 bg-muted/30`}
+                            className={`${inp} text-right text-xs flex items-center justify-end gap-1 bg-card`}
                             title="Locked to the quantity recorded on the selected Vehicle In/Out"
                           >
                             <Lock size={10} className="text-muted-foreground shrink-0" />
@@ -132,11 +132,11 @@ export function GRNItems({ m }: { m: GRNState }) {
           )}
           {formData.poId && grnTotalWithGST > 0 && (
             <div className="space-y-1.5">
-              <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-emerald-500/[0.05] border border-emerald-500/20">
-                <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <div className="flex justify-between items-center px-4 py-3 bg-card border border-foreground/40">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   GRN Total (this receipt)
                 </span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                <span className="font-bold text-foreground">
                   ₹{fmt(grnTotalWithGST)}
                 </span>
               </div>
@@ -148,8 +148,8 @@ export function GRNItems({ m }: { m: GRNState }) {
                     grnTotalWithGST;
                   return (
                     <div className="grid grid-cols-2 gap-1.5">
-                      <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
-                        <span className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <div className="flex flex-col px-3 py-2.5 bg-card border border-foreground/30">
+                        <span className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                           PO Value (incl. GST)
                         </span>
                         <span className="text-xs font-semibold text-foreground">
@@ -157,8 +157,8 @@ export function GRNItems({ m }: { m: GRNState }) {
                         </span>
                       </div>
                       {formData.poReceivedAmount > 0 && (
-                        <div className="flex flex-col px-3 py-2.5 rounded-xl bg-muted/40 border border-border">
-                          <span className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                        <div className="flex flex-col px-3 py-2.5 bg-card border border-foreground/30">
+                          <span className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                             Already Received
                           </span>
                           <span className="text-xs font-semibold text-foreground">
@@ -167,13 +167,13 @@ export function GRNItems({ m }: { m: GRNState }) {
                         </div>
                       )}
                       <div
-                        className={`flex flex-col px-3 py-2.5 rounded-xl border ${diff > 0.005 ? "bg-[#ffe2021a] border-amber-500/30" : "bg-green-500/10 border-green-500/30"}`}
+                        className={`flex flex-col px-3 py-2.5 border ${diff > 0.005 ? "bg-card border-foreground/40" : "bg-card border-foreground/40"}`}
                       >
-                        <span className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                        <span className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                           Balance on PO
                         </span>
                         <span
-                          className={`text-xs font-semibold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                          className={`text-xs font-semibold ${diff > 0.005 ? "text-foreground" : "text-foreground"}`}
                         >
                           {diff > 0.005
                             ? `₹${fmt(diff)}`
@@ -188,7 +188,7 @@ export function GRNItems({ m }: { m: GRNState }) {
         </div>
 
         {/* Desktop table */}
-        <div className="hidden md:block border border-border rounded-xl overflow-hidden">
+        <div className="hidden md:block border border-foreground/30 overflow-hidden">
           <table className="w-full text-sm table-fixed">
             <colgroup>
               <col style={{ width: "20%" }} />
@@ -201,7 +201,7 @@ export function GRNItems({ m }: { m: GRNState }) {
               <col style={{ width: "16%" }} />
             </colgroup>
             <thead>
-              <tr className="bg-muted/50 border-b border-border">
+              <tr className="bg-card border-b border-foreground/30">
                 {[
                   { h: "Item", align: "text-left" },
                   { h: "Ordered", align: "text-right" },
@@ -214,7 +214,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                 ].map(({ h, align }) => (
                   <th
                     key={h}
-                    className={`px-3 py-2.5 ${align} text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap`}
+                    className={`px-3 py-2.5 ${align} text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground whitespace-nowrap`}
                   >
                     {h.replace(" *", "")}
                     {h.includes("*") && (
@@ -224,7 +224,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/60">
+            <tbody className="divide-y divide-foreground/10">
               {!formData.poId ? (
                 <tr>
                   <td
@@ -239,7 +239,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                 formData.items.map((item, idx) => (
                   <tr
                     key={idx}
-                    className="hover:bg-muted/20 transition-colors"
+                    className="hover:bg-primary/5 transition-colors"
                   >
                     <td className="px-3 py-2.5">
                       <span className="text-xs font-medium text-foreground">
@@ -273,7 +273,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                       )}
                     </td>
                     <td
-                      className={`px-2 py-2 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                      className={`px-2 py-2 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-foreground" : "text-foreground"}`}
                     >
                       {fmtQty(item.remainingQty)}
                     </td>
@@ -334,7 +334,7 @@ export function GRNItems({ m }: { m: GRNState }) {
                         />
                       )}
                     </td>
-                    <td className="px-2 py-2 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <td className="px-2 py-2 text-right text-xs font-semibold text-foreground">
                       {item.totalAmount > 0
                         ? `₹${fmt(item.totalAmount)}`
                         : "—"}
@@ -345,14 +345,14 @@ export function GRNItems({ m }: { m: GRNState }) {
             </tbody>
             {formData.poId && grnTotalWithGST > 0 && (
               <tfoot>
-                <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                <tr className="bg-card border-t-2 border-foreground/40">
                   <td
                     colSpan={7}
-                    className="px-4 py-3 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                    className="px-4 py-3 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                   >
                     GRN Total (this receipt)
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                  <td className="px-4 py-3 text-right font-bold text-foreground text-sm">
                     ₹{fmt(grnTotalWithGST)}
                   </td>
                 </tr>
@@ -364,10 +364,10 @@ export function GRNItems({ m }: { m: GRNState }) {
                       grnTotalWithGST;
                     return (
                       <>
-                        <tr className="bg-muted/30 border-t border-border/50">
+                        <tr className="bg-card border-t border-foreground/30">
                           <td
                             colSpan={7}
-                            className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                            className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                           >
                             PO Value (incl. GST)
                           </td>
@@ -376,10 +376,10 @@ export function GRNItems({ m }: { m: GRNState }) {
                           </td>
                         </tr>
                         {formData.poReceivedAmount > 0 && (
-                          <tr className="bg-muted/20 border-t border-border/50">
+                          <tr className="bg-card border-t border-foreground/30">
                             <td
                               colSpan={7}
-                              className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                              className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                             >
                               Already Received
                             </td>
@@ -391,18 +391,18 @@ export function GRNItems({ m }: { m: GRNState }) {
                         <tr
                           className={
                             diff > 0.005
-                              ? "bg-[#ffe2021a] border-t border-amber-500/20"
-                              : "bg-green-500/10 border-t border-green-500/20"
+                              ? "bg-card border-t border-foreground/40"
+                              : "bg-card border-t border-foreground/40"
                           }
                         >
                           <td
                             colSpan={7}
-                            className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                            className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                           >
                             Balance on PO
                           </td>
                           <td
-                            className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                            className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-foreground" : "text-foreground"}`}
                           >
                             {diff > 0.005
                               ? `₹${fmt(diff)}`

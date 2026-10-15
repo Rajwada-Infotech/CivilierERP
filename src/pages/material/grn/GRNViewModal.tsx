@@ -29,10 +29,10 @@ export function GRNViewModal({ m }: { m: GRNState }) {
           );
           const subtotalInclGST = subtotal + gstTotal;
           return (
-            <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost">
-              <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+            <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 bw-modal-topmost">
+              <div className="bg-card border border-foreground/30 w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
                 {/* Modal header */}
-                <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
+                <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-foreground/30">
                   <div>
                     <h2 className="font-heading font-bold text-base">
                       {viewingGrn.GRNNo
@@ -41,7 +41,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                           : `GRN-${viewingGrn.GRNNo}`
                         : "—"}
                     </h2>
-                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-[0.12em] mt-0.5">
                       Goods Receipt Note
                     </p>
                   </div>
@@ -50,7 +50,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                       <button
                         onClick={() => handlePrintGRN(viewingGrn)}
                         title="Print GRN"
-                        className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                        className="p-2 hover:bg-primary/5 transition-colors text-muted-foreground hover:text-foreground print:hidden"
                       >
                         <Printer size={18} />
                       </button>
@@ -59,7 +59,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                       <button
                         onClick={() => handleGeneratePdfGRN(viewingGrn)}
                         title="Generate PDF"
-                        className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground print:hidden"
+                        className="p-2 hover:bg-primary/5 transition-colors text-muted-foreground hover:text-foreground print:hidden"
                       >
                         <FileDown size={18} />
                       </button>
@@ -69,23 +69,22 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                         setViewingGrn(null);
                         setViewModalTab("details");
                       }}
-                      className="p-2 hover:bg-muted rounded-lg transition-colors print:hidden"
+                      className="p-2 hover:bg-primary/5 transition-colors print:hidden"
                     >
                       <X size={18} />
                     </button>
                   </div>
                 </div>
                 {/* ── Tab bar ─────────────────────────────────────────── */}
-                <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border bg-card print:hidden">
+                <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-foreground/30 bg-card print:hidden">
                   {(["details", "posting"] as const).map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setViewModalTab(tab)}
-                      className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors capitalize
-                          ${
+                      className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold border-b-2 transition-colors capitalize ${
                             viewModalTab === tab
                               ? "border-primary text-primary bg-primary/5"
-                              : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                              : "border-transparent text-muted-foreground hover:text-foreground hover:bg-primary/5"
                           }`}
                     >
                       {tab === "details" ? (
@@ -192,13 +191,13 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                       ].map(({ label, value, mono, color }: any) => (
                         <div
                           key={label}
-                          className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                          className="px-3 py-2.5 bg-card border border-foreground/30"
                         >
-                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                          <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                             {label}
                           </p>
                           <p
-                            className={`text-xs font-semibold ${mono ? "font-mono" : ""} ${color || "text-foreground"}`}
+                            className={`text-xs font-semibold ${mono ? "font-heading" : ""} ${color || "text-foreground"}`}
                           >
                             {value}
                           </p>
@@ -210,7 +209,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
 
                     {/* Items */}
                     <div>
-                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                      <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-3">
                         Received Items
                       </p>
 
@@ -220,13 +219,13 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                           items.map((item, i) => (
                             <div
                               key={i}
-                              className="border border-border rounded-xl p-4 space-y-2 bg-muted/20"
+                              className="border border-foreground/30 p-4 space-y-2 bg-card"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-sm">
                                   {item.itemName || "—"}
                                 </span>
-                                <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                <span className="text-[0.625rem] px-2 py-0.5 bg-card text-muted-foreground">
                                   {item.uom || "—"}
                                 </span>
                               </div>
@@ -247,16 +246,16 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                   ],
                                 ].map(([l, v, c]) => (
                                   <div key={l}>
-                                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                    <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                                       {l}
                                     </p>
                                     <p className={c}>{v}</p>
                                   </div>
                                 ))}
                               </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1 border-t border-border">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs pt-1 border-t border-foreground/30">
                                 <div>
-                                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                                     Rate
                                   </p>
                                   <p>
@@ -266,16 +265,16 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                   </p>
                                 </div>
                                 <div>
-                                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                                     Qty Bill
                                   </p>
                                   <p>{item.quantity ?? "—"}</p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                                     Total
                                   </p>
-                                  <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                                  <p className="font-bold text-foreground">
                                     {item.totalAmount
                                       ? `₹${fmt(Number(item.totalAmount))}`
                                       : "—"}
@@ -290,7 +289,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                     setDebitNoteReason("");
                                   }}
                                   title="Raise a debit note if part of this line was found below the ordered grade"
-                                  className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                  className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 border border-foreground/40 text-foreground text-[0.6875rem] font-semibold hover:bg-primary/5 hover:text-foreground hover:border-foreground/40 transition-colors"
                                 >
                                   <FileWarning size={12} /> Raise Debit Note
                                 </button>
@@ -305,10 +304,10 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                       </div>
 
                       {/* Desktop */}
-                      <div className="hidden md:block border border-border rounded-xl overflow-x-auto">
+                      <div className="hidden md:block border border-foreground/30 overflow-x-auto">
                         <table className="w-full text-sm min-w-[680px]">
                           <thead>
-                            <tr className="bg-muted/50 border-b border-border">
+                            <tr className="bg-card border-b border-foreground/30">
                               {[
                                 "Item",
                                 "UOM",
@@ -322,19 +321,19 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                               ].map((h) => (
                                 <th
                                   key={h}
-                                  className={`px-3 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground ${h === "Item" || h === "UOM" || h === "" ? "text-left" : "text-right"}`}
+                                  className={`px-3 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground ${h === "Item" || h === "UOM" || h === "" ? "text-left" : "text-right"}`}
                                 >
                                   {h}
                                 </th>
                               ))}
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-border/60">
+                          <tbody className="divide-y divide-foreground/10">
                             {items.length ? (
                               items.map((item, i) => (
                                 <tr
                                   key={i}
-                                  className="hover:bg-muted/20 transition-colors"
+                                  className="hover:bg-primary/5 transition-colors"
                                 >
                                   <td className="px-3 py-2.5 font-medium text-xs">
                                     {item.itemName || "—"}
@@ -349,7 +348,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                     {item.receivedQty}
                                   </td>
                                   <td
-                                    className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                    className={`px-3 py-2.5 text-right text-xs font-semibold ${item.remainingQty > 0 ? "text-foreground" : "text-foreground"}`}
                                   >
                                     {fmtQty(item.remainingQty)}
                                   </td>
@@ -361,7 +360,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                   <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
                                     {item.quantity ?? "—"}
                                   </td>
-                                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-foreground">
                                     {item.totalAmount
                                       ? `₹${fmt(Number(item.totalAmount))}`
                                       : "—"}
@@ -375,7 +374,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                           setDebitNoteReason("");
                                         }}
                                         title="Raise a debit note if part of this line was found below the ordered grade"
-                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors whitespace-nowrap"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-foreground/40 text-foreground text-[0.6875rem] font-semibold hover:bg-primary/5 hover:text-foreground hover:border-foreground/40 transition-colors whitespace-nowrap"
                                       >
                                         <FileWarning size={12} /> Debit Note
                                       </button>
@@ -396,14 +395,14 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                           </tbody>
                           {subtotalInclGST > 0 && (
                             <tfoot>
-                              <tr className="bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
+                              <tr className="bg-card border-t-2 border-foreground/40">
                                 <td
                                   colSpan={8}
-                                  className="px-4 py-3 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                                  className="px-4 py-3 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                                 >
                                   GRN Total (received)
                                 </td>
-                                <td className="px-4 py-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                                <td className="px-4 py-3 text-right font-bold text-foreground">
                                   ₹{fmt(subtotalInclGST)}
                                 </td>
                               </tr>
@@ -415,10 +414,10 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                   const diff = poTotal - subtotalInclGST;
                                   return (
                                     <>
-                                      <tr className="bg-muted/30 border-t border-border/50">
+                                      <tr className="bg-card border-t border-foreground/30">
                                         <td
                                           colSpan={8}
-                                          className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                                          className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                                         >
                                           PO Value (incl. GST)
                                         </td>
@@ -429,18 +428,18 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                       <tr
                                         className={
                                           diff > 0.005
-                                            ? "bg-[#ffe2021a] border-t border-amber-500/20"
-                                            : "bg-green-500/10 border-t border-green-500/20"
+                                            ? "bg-card border-t border-foreground/40"
+                                            : "bg-card border-t border-foreground/40"
                                         }
                                       >
                                         <td
                                           colSpan={8}
-                                          className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
+                                          className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                                         >
                                           Balance on PO
                                         </td>
                                         <td
-                                          className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}
+                                          className={`px-4 py-2 text-right text-xs font-bold ${diff > 0.005 ? "text-foreground" : "text-foreground"}`}
                                         >
                                           {diff > 0.005
                                             ? `₹${fmt(diff)}`
@@ -473,11 +472,11 @@ export function GRNViewModal({ m }: { m: GRNState }) {
 
                       return (
                         <div>
-                          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                          <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-3">
                             GST Breakdown
                           </p>
-                          <div className="border border-border rounded-xl overflow-hidden text-sm">
-                            <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border">
+                          <div className="border border-foreground/30 overflow-hidden text-sm">
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-card border-b border-foreground/30">
                               <span className="text-xs text-muted-foreground">
                                 Subtotal (before GST)
                               </span>
@@ -489,25 +488,25 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                               ([rate, amount], idx) => (
                                 <div
                                   key={idx}
-                                  className="flex items-center justify-between px-4 py-2.5 border-b border-border"
+                                  className="flex items-center justify-between px-4 py-2.5 border-b border-foreground/30"
                                 >
                                   <span className="text-xs text-muted-foreground">
                                     GST{" "}
-                                    <span className="font-mono text-[0.625rem] bg-muted px-1 rounded">
+                                    <span className="font-heading text-[0.625rem] bg-card px-1">
                                       {rate}%
                                     </span>
                                   </span>
-                                  <span className="font-medium text-amber-600 dark:text-amber-400">
+                                  <span className="font-medium text-foreground">
                                     +₹{fmt(amount)}
                                   </span>
                                 </div>
                               ),
                             )}
-                            <div className="flex items-center justify-between px-4 py-3 bg-emerald-500/[0.05] border-t-2 border-emerald-500/20">
-                              <span className="text-xs font-semibold uppercase tracking-widest">
+                            <div className="flex items-center justify-between px-4 py-3 bg-card border-t-2 border-foreground/40">
+                              <span className="text-xs font-semibold uppercase tracking-[0.12em]">
                                 Grand Total (incl. GST)
                               </span>
-                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                              <span className="font-bold text-foreground">
                                 ₹{fmt(subtotalInclGST)}
                               </span>
                             </div>
@@ -518,10 +517,10 @@ export function GRNViewModal({ m }: { m: GRNState }) {
 
                     {/* Linked Expense Bookings */}
                     <div>
-                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                      <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                         <Receipt
                           size={10}
-                          className="text-emerald-600 dark:text-emerald-400"
+                          className="text-foreground"
                         />{" "}
                         Linked Expense Bookings
                       </p>
@@ -530,8 +529,8 @@ export function GRNViewModal({ m }: { m: GRNState }) {
 
                     {/* Remaining Items — not yet expense-booked */}
                     <div>
-                      <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <AlertTriangle size={10} className="text-amber-500" />{" "}
+                      <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <AlertTriangle size={10} className="text-foreground" />{" "}
                         Remaining Items
                       </p>
                       <RemainingItemsPanel
@@ -543,10 +542,10 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                     {/* Remarks */}
                     {viewingGrn.Remarks && (
                       <div>
-                        <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                        <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">
                           Remarks
                         </p>
-                        <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                        <p className="text-sm text-foreground bg-card px-4 py-3 border border-foreground/30">
                           {viewingGrn.Remarks}
                         </p>
                       </div>
@@ -561,14 +560,14 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <BookOpen size={14} className="text-primary" />
-                        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                           Journal Entry — GRN Posting
                         </span>
                       </div>
                       {grnPostingLoading ? (
                         <span className="text-[0.625rem] text-muted-foreground">Loading…</span>
                       ) : grnPostingData?.isPosted ? (
-                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                        <span className="text-[0.625rem] px-2 py-0.5 bg-card text-foreground border border-foreground/40 font-medium">
                           Posted · {grnPostingData.jvNo}
                         </span>
                       ) : null}
@@ -576,11 +575,11 @@ export function GRNViewModal({ m }: { m: GRNState }) {
 
                     {/* Debit / Credit table */}
                     {grnPostingLoading ? (
-                      <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">
+                      <div className="border border-foreground/30 py-10 text-center text-xs text-muted-foreground">
                         Loading posting details…
                       </div>
                     ) : !grnPostingData ? (
-                      <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">
+                      <div className="border border-dashed border-foreground/30 py-10 text-center text-xs text-muted-foreground">
                         Could not load posting data.
                       </div>
                     ) : (() => {
@@ -661,22 +660,22 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                       return (
                         <div className="space-y-3">
                         {ccBreakdown.length > 1 && (
-                          <div className="rounded-xl border border-border overflow-hidden">
-                            <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold">
+                          <div className="border border-foreground/30 overflow-hidden">
+                            <div className="px-3 sm:px-4 py-2 bg-card border-b border-foreground/30 text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold">
                               Cost Centre — Money Breakdown
                             </div>
-                            <div className="divide-y divide-border/50">
+                            <div className="divide-y divide-foreground/10">
                               {ccBreakdown.map((b, i) => (
                                 <div key={b.costCentre?.id ?? `unassigned-${i}`} className="flex items-center justify-between px-3 sm:px-4 py-2.5 text-xs">
                                   <span className="text-foreground font-medium">{b.costCentre?.name || "Unassigned"}</span>
-                                  <span className="font-mono text-muted-foreground">₹{fmt(b.totalAmount)}</span>
+                                  <span className="font-heading text-muted-foreground">₹{fmt(b.totalAmount)}</span>
                                 </div>
                               ))}
                             </div>
                           </div>
                         )}
-                        <div className="rounded-xl border border-border overflow-hidden">
-                          <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
+                        <div className="border border-foreground/30 overflow-hidden">
+                          <div className={`grid ${gridCols} bg-card border-b border-foreground/30 px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                             <span>Account</span>
                             <span className="text-center">Cost Centre</span>
                             <span className="text-right">Debit (₹)</span>
@@ -685,7 +684,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                           {itemGroups.map((group) => (
                             <div key={group.key}>
                               {group.itemName && (
-                                <div className="px-2 sm:px-4 pt-3 pb-1.5 bg-muted/10 flex items-baseline justify-between gap-2 border-b border-border/30">
+                                <div className="px-2 sm:px-4 pt-3 pb-1.5 bg-card flex items-baseline justify-between gap-2 border-b border-foreground/30">
                                   <span className="text-[0.6875rem] sm:text-xs font-semibold text-foreground truncate">{group.itemName}</span>
                                   {(group.qty != null || group.rate != null) && (
                                     <span className="text-[0.625rem] text-muted-foreground flex-shrink-0">
@@ -699,30 +698,30 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                               {group.rows.map((row) => (
                                 <div
                                   key={row.key}
-                                  className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}
+                                  className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-foreground/30 items-center gap-1 sm:gap-2`}
                                 >
                                   <div className="flex items-center gap-2 min-w-0 pl-1">
-                                    <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                    <span className={`inline-block w-1.5 h-1.5 flex-shrink-0 ${row.side === "debit" ? "bg-card" : "bg-card"}`} />
                                     <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
                                       {row.label}{row.code ? ` (${row.code})` : ""}
                                     </span>
                                   </div>
                                   <span className="text-[0.6875rem] text-muted-foreground text-center truncate">{group.costCentre?.name || "Unassigned"}</span>
-                                  <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                                  <span className="text-xs text-right font-heading text-foreground">
                                     {row.side === "debit" ? fmt(row.amount) : ""}
                                   </span>
-                                  <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                                  <span className="text-xs text-right font-heading text-foreground">
                                     {row.side === "credit" ? fmt(row.amount) : ""}
                                   </span>
                                 </div>
                               ))}
                             </div>
                           ))}
-                          <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2`}>
-                            <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
+                          <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-card border-t-2 border-foreground/30 text-xs font-bold gap-1 sm:gap-2`}>
+                            <span className="uppercase tracking-[0.12em] text-muted-foreground text-[0.625rem]">Total</span>
                             <span />
-                            <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totalDebit)}</span>
-                            <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(totalCredit)}</span>
+                            <span className="text-right text-foreground font-heading">{fmt(totalDebit)}</span>
+                            <span className="text-right text-foreground font-heading">{fmt(totalCredit)}</span>
                           </div>
                         </div>
                         </div>
@@ -734,22 +733,22 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                         manual "Post to GL" click required. */}
                     {!grnPostingLoading && grnPostingData && (
                       grnPostingData.isPosted ? (
-                        <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-                          <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
-                          <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                        <div className="flex items-center gap-2.5 border border-foreground/40 bg-card px-4 py-3">
+                          <CheckCircle2 size={13} className="text-foreground flex-shrink-0" />
+                          <p className="text-xs text-foreground">
                             Posted to General Ledger as <span className="font-semibold">{grnPostingData.jvNo}</span>. Entries are visible in the Trial Balance.
                           </p>
                         </div>
                       ) : grnPostingError ? (
-                        <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3">
+                        <div className="flex items-center gap-2.5 border border-destructive/20 bg-destructive/5 px-4 py-3">
                           <AlertCircle size={13} className="text-destructive flex-shrink-0" />
                           <p className="text-xs text-destructive">
                             Auto-posting failed: {grnPostingError}
                           </p>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-4 py-3">
-                          <span className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        <div className="flex items-center gap-2.5 border border-foreground/30 bg-card px-4 py-3">
+                          <span className="w-3 h-3 border-2 border-primary border-t-transparent animate-spin flex-shrink-0" />
                           <p className="text-xs text-muted-foreground">
                             Posting to General Ledger…
                           </p>
