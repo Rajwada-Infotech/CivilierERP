@@ -5,7 +5,7 @@ const multer = require("multer");
 const router = express.Router();
 // Project access (dbo.UserProjectAccess / RoleProjectAccess): a restricted user
 // gets 403 on any booking outside their projects. Lists filter the same way.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
@@ -574,11 +574,16 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
         .input("ppid",  sql.Int,           hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("blkSet", sql.Bit, "BlockName" in b ? 1 : 0)
+        .input("flrSet", sql.Bit, "FloorName" in b ? 1 : 0)
+        .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("ub",    sql.Int,           actorId(req))
         .query(`
           UPDATE dbo.CrmBooking SET
             ProjectId = ISNULL(@pid, ProjectId), ProjectName = ISNULL(@pname, ProjectName),
-            UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
+            UnitNo = ISNULL(@unit, UnitNo), -- Only overwrite what the save sent (a partial save kept wiping these).
+            BlockName = CASE WHEN @blkSet = 1 THEN @blk ELSE BlockName END,
+            FloorName = CASE WHEN @flrSet = 1 THEN @flr ELSE FloorName END,
             RatePerSqFt = ISNULL(@rate, RatePerSqFt),
             TotalValue = ISNULL(@tot, TotalValue),
             BookingAmount = ISNULL(@bamt, BookingAmount),
@@ -591,7 +596,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
             -- GrandTotal tracks TotalValue changes without disturbing the
             -- already-rolled-up Parking/ExtraCharges totals.
             GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
-            Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id AND IsActive = 1
         `);
 
@@ -868,6 +873,10 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
           WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
         `);
         await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+      } else {
+        // Same plan, new price: the unpaid %-steps follow the new total
+        // (paid / part-paid steps and the booking amount are never moved).
+        await recalculateRemainingMilestones(tx, id);
       }
 
       await tx.request()
@@ -2184,6 +2193,14 @@ router.post("/invoices/bulk-generate", requirePageRight("crm-bookings", "edit"),
       if (!bookingId || !milestoneId) {
         results.skipped.push({ bookingId: item?.bookingId, milestoneId: item?.milestoneId, reason: "Invalid bookingId/milestoneId" });
         continue;
+      }
+      // Ids come from the body, so the per-route project guard never sees them.
+      if (req.projectScope) {
+        const pr = await pool.request().input("bid", sql.Int, bookingId).query("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
+        if (!projectAllowed(req.projectScope, pr.recordset[0]?.ProjectId)) {
+          results.skipped.push({ bookingId, milestoneId, reason: "Booking is outside your projects" });
+          continue;
+        }
       }
       try {
         const outcome = await generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actor);

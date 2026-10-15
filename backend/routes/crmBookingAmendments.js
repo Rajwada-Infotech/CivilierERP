@@ -244,15 +244,17 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     if (!row.recordset.length) return res.status(404).json({ error: "Amendment request not found" });
     if (row.recordset[0].Status !== CrmStatus.PENDING) return res.status(400).json({ error: `This request is already ${row.recordset[0].Status}` });
 
-    await pool.request()
+    const upd = await pool.request()
       .input("id", sql.Int, id)
       .input("rb", sql.Int, actorId(req))
       .input("notes", sql.NVarChar(500), notes)
       .query(`
         UPDATE dbo.CrmBookingAmendmentRequest SET
           Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
-        WHERE Id = @id
+        WHERE Id = @id AND Status = '${CrmStatus.PENDING}'
       `);
+    // Approved a moment ago by someone else: never mark an applied change Rejected.
+    if (!upd.rowsAffected[0]) return res.status(409).json({ error: "This request was just reviewed by someone else — refresh" });
     // Single write — reject applies nothing, so there's no compound-write
     // atomicity risk here the way approve above has.
 

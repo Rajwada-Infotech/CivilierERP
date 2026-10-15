@@ -994,9 +994,12 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
     if (row.recordset[0].BookingId != null) {
       return res.status(400).json({ error: "This parking sale is linked to a booking — record payment through the booking's payment schedule instead" });
     }
+    if (row.recordset[0].PaymentStatus === CrmStatus.PAID) {
+      return res.status(409).json({ error: "This parking sale is already marked paid" });
+    }
 
     const receiptNo = await getNextDocNumber(pool, "PARK", "PARK");
-    await pool.request()
+    const upd = await pool.request()
       .input("id", sql.Int, id)
       .input("no", sql.NVarChar(30), receiptNo)
       .input("mode", sql.NVarChar(50), b.PaymentMode || null)
@@ -1005,8 +1008,10 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
         UPDATE dbo.CrmParkingAllotment SET
           PaymentStatus = '${CrmStatus.PAID}', ReceiptNo = @no, PaymentMode = @mode,
           PaymentReceivedDate = ISNULL(@dt, CAST(SYSDATETIME() AS DATE))
-        WHERE Id = @id
+        WHERE Id = @id AND ISNULL(PaymentStatus, '') <> '${CrmStatus.PAID}'
       `);
+    // A second click racing the first: keep the first receipt.
+    if (!upd.rowsAffected[0]) return res.status(409).json({ error: "This parking sale is already marked paid" });
 
     const actorEmail = req.user?.name || req.user?.email || "system";
     try {
