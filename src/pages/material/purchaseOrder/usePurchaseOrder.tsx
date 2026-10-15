@@ -1197,16 +1197,16 @@ export function usePurchaseOrder() {
         const item = row.original;
         return (
           <div className="flex items-center gap-1.5">
-            <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+            <span className="font-heading text-xs font-semibold text-foreground">
               {item.poNumber || item.docNo || "—"}
             </span>
             {item.poType === "WO_PO" && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-bold bg-card text-foreground border border-foreground/40">
                 WO-PO
               </span>
             )}
             {item.poType === "Direct" && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-bold bg-card text-foreground border border-foreground/40">
                 Direct
               </span>
             )}
@@ -1263,7 +1263,7 @@ export function usePurchaseOrder() {
       cell: ({ getValue }: any) => {
         const v = getValue() as string | null;
         return v ? (
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+          <span className="inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-heading font-semibold bg-card text-foreground border border-foreground/40">
             {v}
           </span>
         ) : (
@@ -1324,14 +1324,14 @@ export function usePurchaseOrder() {
                   setViewingPO(item);
                 }
               }}
-              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              className="p-1 text-foreground hover:bg-primary/5 transition-colors"
               title="View details"
             >
               <Eye size={15} />
             </button>
             <button
               onClick={() => handleGeneratePdf(item)}
-              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              className="p-1 text-foreground hover:bg-primary/5 transition-colors"
               title="Generate PDF"
             >
               <FileDown size={15} />
@@ -1339,7 +1339,7 @@ export function usePurchaseOrder() {
             {rights.canDelete && (
               <button
                 onClick={() => handleDelete(item._id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                className="p-1 text-destructive hover:bg-destructive/10 transition-colors"
                 title="Delete this order"
               >
                 <Trash2 size={15} />

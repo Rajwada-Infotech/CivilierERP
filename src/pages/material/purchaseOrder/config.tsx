@@ -1,4 +1,5 @@
 // Constants, types and small helpers shared by the Purchase Order page and its parts.
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { generateUUID } from "../../../utils/cryptoPolyfill";
 import { useEffect, useState } from "react";
 import { printStatusLabel } from "@/utils/printStatus";
@@ -205,19 +206,19 @@ export const EMPTY_FORM = (): POForm => ({
   paymentTermId: "",
 });
 
-// ─── Shared styles (matching WorkOrderMaster) ─────────────────────────────────
+// ─── Field styles (sheet: squared, ruled, ink on focus) ────────────────────────
 
 export const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+  "w-full text-sm border border-foreground/40 px-3 py-2.5 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors disabled:opacity-60 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 export const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+  "w-full text-sm border border-foreground/40 px-3 py-2.5 pr-8 bg-card text-foreground focus:outline-none focus:border-foreground transition-colors appearance-none disabled:opacity-60";
 
 export const cellInput =
-  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition";
+  "w-full text-sm border border-foreground/40 px-2.5 py-1.5 bg-card text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors disabled:opacity-60";
 
 export const cellSelect =
-  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+  "w-full text-sm border border-foreground/40 px-2.5 py-1.5 pr-8 bg-card text-foreground focus:outline-none focus:border-foreground transition-colors appearance-none disabled:opacity-60";
 
 export const FieldLabel: React.FC<{
   children: React.ReactNode;
@@ -264,17 +265,10 @@ export const getStatusConfig = (status: string) => {
   };
 };
 
-export const StatusChip: React.FC<{ status: string }> = ({ status }) => {
-  const cfg = getStatusConfig(status);
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold border ${cfg.cls}`}
-    >
-      {cfg.icon}
-      {status}
-    </span>
-  );
-};
+// A PO's status as a sheet mark: settled ink, in-progress hatched, stopped red.
+export const StatusChip: React.FC<{ status: string }> = ({ status }) => (
+  <SheetMark text={status || "Draft"} tone={statusTone(status || "Draft")} />
+);
 
 // Items are tagged with CGST, SGST, and IGST rates all at once in Item
 // Master — which one actually applies depends on whether the supplier and
@@ -322,3 +316,16 @@ export function resolveLineGstSplit(
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export type ViewMode = "list" | "create" | "edit" | "view";
+
+// ─── Sheet styles ──────────────────────────────────────────────────────────────
+export const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+export const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors disabled:opacity-40";
+export const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
+export const FIELD = "w-full h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
+export const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;

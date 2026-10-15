@@ -16,14 +16,14 @@ export function PODocSource({ m }: { m: POState }) {
         !sourceWD &&
         !sourceWO &&
         !isReadOnly && (
-          <div className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
+          <div className="border border-foreground/30 bg-card p-3.5">
             <h3
-              className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-2"
+              className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 mb-2"
               title="Filter by company and project, then select an approved Material Request to auto-fill items and details."
             >
               <ClipboardList
                 size={11}
-                className="text-emerald-600 dark:text-emerald-400"
+                className="text-foreground"
               />
               Load from Material Request
             </h3>
@@ -80,7 +80,7 @@ export function PODocSource({ m }: { m: POState }) {
                     void handleMRDropdownSelect(e.target.value)
                   }
                   disabled={approvedMRsLoading || mrDropdownLoading}
-                  className={`${inputCls} pr-8 appearance-none ${mrDropdownError ? "border-red-400" : ""}`}
+                  className={`${inputCls} pr-8 appearance-none ${mrDropdownError ? "border-destructive" : ""}`}
                 >
                   <option value="">
                     {approvedMRsLoading
@@ -111,7 +111,7 @@ export function PODocSource({ m }: { m: POState }) {
               </div>
             </div>
             {mrDropdownError && (
-              <p className="text-xs text-red-500 mt-1.5 flex items-center gap-1">
+              <p className="text-xs text-destructive mt-1.5 flex items-center gap-1">
                 <AlertCircle size={11} />
                 {mrDropdownError}
               </p>
@@ -124,12 +124,12 @@ export function PODocSource({ m }: { m: POState }) {
         !sourceWD &&
         !sourceWO &&
         !isReadOnly && (
-          <div className="rounded-xl border border-border bg-card px-3.5 py-2.5 shadow-sm flex flex-wrap items-center gap-2">
+          <div className="border border-foreground/30 bg-card px-3.5 py-2.5 flex flex-wrap items-center gap-2">
             <span
-              className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 shrink-0"
+              className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 shrink-0"
               title="Enter a paid Sale Invoice doc number to link this PO to a Sale Invoice. The backend will validate that the invoice is fully paid before saving."
             >
-              <Receipt size={11} className="text-blue-500" />
+              <Receipt size={11} className="text-foreground" />
               Link Sale Invoice
             </span>
             <input
@@ -150,7 +150,7 @@ export function PODocSource({ m }: { m: POState }) {
                   setSourceSaleInvoice({ id, docNo: `SI-${id}` });
                 }}
                 disabled={!saleInvoiceInput.trim()}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors shrink-0"
+                className="px-3 py-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground disabled:opacity-40 transition-colors shrink-0"
               >
                 Link
               </button>
@@ -161,7 +161,7 @@ export function PODocSource({ m }: { m: POState }) {
                   setSourceSaleInvoice(null);
                   setSaleInvoiceInput("");
                 }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-muted-foreground hover:bg-muted transition-colors shrink-0"
+                className="px-3 py-1.5 text-xs font-semibold border border-foreground/30 text-muted-foreground hover:bg-primary/5 transition-colors shrink-0"
               >
                 Clear
               </button>
@@ -170,14 +170,14 @@ export function PODocSource({ m }: { m: POState }) {
         )}
 
       {sourceSaleInvoice && !isReadOnly && (
-        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+        <div className="border border-foreground/40 bg-card px-4 py-3 flex items-center gap-3 text-sm">
           <Receipt
             size={15}
-            className="text-blue-600 dark:text-blue-400 shrink-0"
+            className="text-foreground shrink-0"
           />
-          <span className="text-blue-700 dark:text-blue-300 flex-1">
+          <span className="text-foreground flex-1">
             Linked to Sale Invoice{" "}
-            <span className="font-mono font-bold">
+            <span className="font-heading font-bold">
               {sourceSaleInvoice.docNo}
             </span>
             . The backend will validate that this invoice is fully paid
@@ -189,7 +189,7 @@ export function PODocSource({ m }: { m: POState }) {
               setSourceSaleInvoice(null);
               setSaleInvoiceInput("");
             }}
-            className="text-blue-400 hover:text-blue-600 transition-colors"
+            className="text-foreground hover:text-foreground transition-colors"
             title="Remove link"
           >
             <X size={14} />
@@ -198,56 +198,56 @@ export function PODocSource({ m }: { m: POState }) {
       )}
 
       {sourceMR && !isReadOnly && (
-        <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+        <div className="border border-foreground/40 bg-card px-4 py-3 flex items-center gap-3 text-sm">
           <ClipboardList
             size={15}
-            className="text-emerald-600 dark:text-emerald-400 shrink-0"
+            className="text-foreground shrink-0"
           />
-          <span className="text-emerald-700 dark:text-emerald-300">
+          <span className="text-foreground">
             Creating <span className="font-semibold">Normal PO</span> from
             Material Request{" "}
-            <span className="font-mono font-bold">{sourceMR.docNo}</span>.
+            <span className="font-heading font-bold">{sourceMR.docNo}</span>.
             Items, company and project have been pre-filled.
           </span>
         </div>
       )}
 
       {sourceWD && !isReadOnly && (
-        <div className="rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+        <div className="border border-foreground/40 bg-card px-4 py-3 flex items-center gap-3 text-sm">
           <ClipboardList
             size={15}
-            className="text-orange-600 dark:text-orange-400 shrink-0"
+            className="text-foreground shrink-0"
           />
-          <span className="text-orange-700 dark:text-orange-300">
+          <span className="text-foreground">
             Creating <span className="font-semibold">Material PO</span> from
             Work Done{" "}
-            <span className="font-mono font-bold">{sourceWD.docNo}</span>.
+            <span className="font-heading font-bold">{sourceWD.docNo}</span>.
             Company, project and line items have been pre-filled.
           </span>
         </div>
       )}
 
       {sourceWO && !isReadOnly && (
-        <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+        <div className="border border-foreground/40 bg-card px-4 py-3 flex items-center gap-3 text-sm">
           <ClipboardList
             size={15}
-            className="text-emerald-600 dark:text-emerald-400 shrink-0"
+            className="text-foreground shrink-0"
           />
-          <span className="text-emerald-700 dark:text-emerald-300">
+          <span className="text-foreground">
             Creating <span className="font-semibold">Material PO</span> from
             Work Order{" "}
-            <span className="font-mono font-bold">{sourceWO.docNo}</span>.
+            <span className="font-heading font-bold">{sourceWO.docNo}</span>.
             Company, project and material line items have been pre-filled.
           </span>
         </div>
       )}
 
       {!isReadOnly && (
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
+        <div className="border border-foreground bg-card p-5">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 mb-4">
             <Hash
               size={11}
-              className="text-emerald-600 dark:text-emerald-400"
+              className="text-foreground"
             />
             Document Configuration
           </h3>
@@ -283,12 +283,12 @@ export function PODocSource({ m }: { m: POState }) {
               {sourceWO ? (
                 // Locked to WO_PO type — no dropdown
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-muted/30 text-foreground">
+                  <div className="flex items-center gap-2 w-full text-sm border border-foreground/30 px-3 py-2.5 bg-card text-foreground">
                     <Hash
                       size={13}
                       className="text-muted-foreground shrink-0"
                     />
-                    <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    <span className="font-heading text-xs font-semibold text-foreground">
                       WO_PO
                     </span>
                     <span className="text-xs opacity-40">·</span>
@@ -298,11 +298,11 @@ export function PODocSource({ m }: { m: POState }) {
                   </div>
                   {poDocNo && (
                     <div className="flex items-center gap-2 px-1">
-                      <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
+                      <span className="font-heading text-sm font-bold text-foreground tracking-wider">
                         {poDocNo}
                       </span>
                       {selectedFinYear && (
-                        <span className="text-[0.625rem] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                        <span className="text-[0.625rem] text-muted-foreground bg-card px-1.5 py-0.5 font-heading">
                           FY {selectedFinYear}
                         </span>
                       )}
@@ -361,11 +361,11 @@ export function PODocSource({ m }: { m: POState }) {
                   </div>
                   {poDocNo && (
                     <div className="flex items-center gap-2 px-1">
-                      <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
+                      <span className="font-heading text-sm font-bold text-foreground tracking-wider">
                         {poDocNo}
                       </span>
                       {selectedFinYear && (
-                        <span className="text-[0.625rem] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-heading">
+                        <span className="text-[0.625rem] text-muted-foreground bg-card px-1.5 py-0.5 font-heading">
                           FY {selectedFinYear}
                         </span>
                       )}

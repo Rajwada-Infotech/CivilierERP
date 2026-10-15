@@ -15,7 +15,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <DialogTitle className="flex items-center gap-2 text-foreground">
               <AlertTriangle size={18} className="shrink-0" />
               Cannot Delete Purchase Order
             </DialogTitle>
@@ -48,7 +48,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
                 </ol>
                 {deleteBlockInfo.clearedPayments &&
                   deleteBlockInfo.clearedPayments.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                    <div className="border bg-card p-2 space-y-1 text-xs">
                       <p className="font-semibold">
                         Cleared payments blocking deletion:
                       </p>
@@ -72,7 +72,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
             )}
             {deleteBlockInfo?.reason === "grn_expense_has_payments" && (
               <div className="space-y-2">
-                <p className="font-medium text-amber-700">
+                <p className="font-medium text-foreground">
                   This PO has GRNs with expense bookings that have linked
                   payment records.
                 </p>
@@ -93,7 +93,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
                 </ol>
                 {deleteBlockInfo.linkedPayments &&
                   deleteBlockInfo.linkedPayments.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                    <div className="border bg-card p-2 space-y-1 text-xs">
                       <p className="font-semibold">Linked payments:</p>
                       {deleteBlockInfo.linkedPayments.map((p) => (
                         <div
@@ -115,7 +115,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
             )}
             {deleteBlockInfo?.reason === "grn_has_expense" && (
               <div className="space-y-2">
-                <p className="font-medium text-amber-700">
+                <p className="font-medium text-foreground">
                   This PO has GRNs with linked expense bookings.
                 </p>
                 <ol className="list-decimal ml-5 space-y-1 text-muted-foreground">
@@ -131,7 +131,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
                 </ol>
                 {deleteBlockInfo.expenseBookings &&
                   deleteBlockInfo.expenseBookings.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                    <div className="border bg-card p-2 space-y-1 text-xs">
                       {deleteBlockInfo.expenseBookings.map((e) => (
                         <div key={e.id} className="flex justify-between">
                           <span>{e.docNo || "Expense #" + e.id}</span>
@@ -146,7 +146,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
             )}
             {deleteBlockInfo?.reason === "has_grns" && (
               <div className="space-y-2">
-                <p className="font-medium text-amber-700">
+                <p className="font-medium text-foreground">
                   This PO has linked GRN(s). Delete the GRN(s) first, then
                   delete the PO.
                 </p>
@@ -159,7 +159,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
                 </ol>
                 {deleteBlockInfo.grns &&
                   deleteBlockInfo.grns.length > 0 && (
-                    <div className="rounded border bg-muted/40 p-2 space-y-1 text-xs">
+                    <div className="border bg-card p-2 space-y-1 text-xs">
                       {deleteBlockInfo.grns.map((g) => (
                         <div key={g.grnId} className="flex justify-between">
                           <span>{g.grnNo || "GRN #" + g.grnId}</span>
@@ -174,7 +174,7 @@ export function PODeleteBlockDialog({ m }: { m: POState }) {
             )}
             {deleteBlockInfo?.reason === "has_expense" && (
               <div className="space-y-2">
-                <p className="font-medium text-amber-700">
+                <p className="font-medium text-foreground">
                   This PO has linked expense bookings. Delete them first.
                 </p>
               </div>

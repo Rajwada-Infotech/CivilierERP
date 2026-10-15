@@ -11,11 +11,11 @@ export function POHeaderDetails({ m }: { m: POState }) {
   return (
     <>
       {/* ── Header Details Card ───────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
+      <div className="border border-foreground bg-card p-5">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 mb-4">
           <FileText
             size={11}
-            className="text-emerald-600 dark:text-emerald-400"
+            className="text-foreground"
           />
           Order Details
         </h3>
@@ -24,7 +24,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
           <div>
             <FieldLabel>Company Name</FieldLabel>
             {isReadOnly ? (
-              <div className={`${inputCls} bg-muted/30`}>
+              <div className={`${inputCls} bg-card`}>
                 {companies.find((c) => c.id === form.companyId)?.name ||
                   "—"}
               </div>
@@ -36,7 +36,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
                     setField("companyId", e.target.value);
                     setField("projectId", "");
                   }}
-                  className={`appearance-none ${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
+                  className={`appearance-none ${selectCls} ${errors.companyId ? "border-destructive" : ""}`}
                 >
                   <option value="">— Select Company —</option>
                   {companies.map((c) => (
@@ -62,7 +62,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
           <div>
             <FieldLabel required>Project / Site</FieldLabel>
             {isReadOnly ? (
-              <div className={`${inputCls} bg-muted/30`}>
+              <div className={`${inputCls} bg-card`}>
                 {allProjects.find((p) => p.id === form.projectId)?.name ||
                   "—"}
               </div>
@@ -71,7 +71,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
                 <select
                   value={form.projectId}
                   onChange={(e) => setField("projectId", e.target.value)}
-                  className={`appearance-none ${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
+                  className={`appearance-none ${selectCls} ${errors.projectId ? "border-destructive" : ""}`}
                 >
                   <option value="">— Select Project —</option>
                   {filteredFormProjects.map((p) => (
@@ -97,7 +97,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
           <div>
             <FieldLabel required>Supplier</FieldLabel>
             {isReadOnly ? (
-              <div className={`${inputCls} bg-muted/30`}>
+              <div className={`${inputCls} bg-card`}>
                 {suppliers.find((s) => s.id === form.supplierId)?.name ||
                   "—"}
               </div>
@@ -106,7 +106,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
                 <SearchableNativeSelect
                   value={form.supplierId}
                   onChange={(e) => setField("supplierId", e.target.value)}
-                  className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
+                  className={`${selectCls} ${errors.supplierId ? "border-destructive" : ""}`}
                 >
                   <option value="">— Select Supplier —</option>
                   {suppliers.map((s) => (
@@ -131,10 +131,10 @@ export function POHeaderDetails({ m }: { m: POState }) {
                 isReadOnly ||
                 (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
               }
-              className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${
+              className={`${inputCls} font-heading ${errors.poNumber ? "border-destructive" : ""} ${
                 isReadOnly ||
                 (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
-                  ? "bg-muted/30 cursor-not-allowed"
+                  ? "bg-card cursor-not-allowed"
                   : ""
               }`}
               placeholder="Auto-generated"
@@ -153,7 +153,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
                 value={form.poDate}
                 onChange={(e) => setField("poDate", e.target.value)}
                 readOnly={isReadOnly}
-                className={`${inputCls} pl-8 ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                className={`${inputCls} pl-8 ${errors.poDate ? "border-destructive" : ""} ${isReadOnly ? "bg-card cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
               />
             </div>
           </div>
@@ -171,7 +171,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
                 min={minExpectedDate || undefined}
                 onChange={(e) => setField("expectedDate", e.target.value)}
                 readOnly={isReadOnly}
-                className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+                className={`${inputCls} pl-8 ${isReadOnly ? "bg-card cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
               />
             </div>
             {maxDaysOfSupply > 0 && (
@@ -189,7 +189,7 @@ export function POHeaderDetails({ m }: { m: POState }) {
               value={form.paymentTermId}
               onChange={(e) => setField("paymentTermId", e.target.value)}
               disabled={isReadOnly}
-              className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              className={`${inputCls} ${isReadOnly ? "bg-card cursor-not-allowed" : ""}`}
             >
               <option value="">— Select Payment Term —</option>
               {paymentTerms.map((pt) => (

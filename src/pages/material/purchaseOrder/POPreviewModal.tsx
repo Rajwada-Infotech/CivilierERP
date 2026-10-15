@@ -12,37 +12,37 @@ export function POPreviewModal({ m }: { m: POState }) {
     <>
       {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
       {viewingPO && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost">
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 bw-modal-topmost">
+          <div className="bg-card border border-foreground/30 w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
             {/* Modal header */}
-            <div className="sticky top-0 bg-card z-10 border-b border-border">
+            <div className="sticky top-0 bg-card z-10 border-b border-foreground/30">
               <div className="flex items-start justify-between px-4 sm:px-6 py-4 gap-2">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 border border-emerald-500/20 shrink-0">
-                    <ShoppingCart size={13} className="text-emerald-500" />
+                  <div className="w-7 h-7 flex items-center justify-center bg-card border border-foreground/40 shrink-0">
+                    <ShoppingCart size={13} className="text-foreground" />
                   </div>
-                  <h2 className="font-heading font-bold text-sm sm:text-base font-mono truncate max-w-[150px] sm:max-w-none">
+                  <h2 className="font-heading font-bold text-sm sm:text-base truncate max-w-[150px] sm:max-w-none">
                     {viewingPO.PurchaseOrderNo ?? viewingPO.poNumber ?? "—"}
                   </h2>
                   {viewingPO.Status && (
                     <StatusChip status={viewingPO.Status} />
                   )}
                 </div>
-                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-[0.12em] mt-0.5 ml-9">
                   Purchase Order
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   onClick={handlePrintFromPreview}
-                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 border border-foreground/30 text-xs font-semibold text-foreground hover:bg-primary/5 transition-colors"
                 >
                   <Printer size={13} /><span className="hidden sm:inline">Print</span>
                 </button>
                 <button
                   onClick={() => handleGeneratePdf(viewingPO)}
-                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 border border-foreground/30 text-xs font-semibold text-foreground hover:bg-primary/5 transition-colors"
                 >
                   <FileDown size={13} /><span className="hidden sm:inline">Generate PDF</span>
                 </button>
@@ -57,14 +57,14 @@ export function POPreviewModal({ m }: { m: POState }) {
                       setViewingPO(null);
                       if (item) goToEdit(item);
                     }}
-                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold btn-module shadow-sm transition"
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold bg-foreground text-card border border-foreground transition"
                   >
                     <FilePenLine size={13} /><span className="hidden sm:inline">Edit</span>
                   </button>
                 )}
                 <button
                   onClick={() => setViewingPO(null)}
-                  className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+                  className="p-2 hover:bg-primary/5 transition-colors text-muted-foreground"
                 >
                   <X size={16} />
                 </button>
@@ -73,16 +73,15 @@ export function POPreviewModal({ m }: { m: POState }) {
             </div>
 
             {/* Tab strip */}
-            <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-border bg-card">
+            <div className="flex items-center gap-1 px-6 pt-3 pb-0 border-b border-foreground/30 bg-card">
               {(["details", "supplier"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setViewingTab(tab)}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors
-                      ${
+                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${
                         viewingTab === tab
                           ? "border-primary text-primary bg-primary/5"
-                          : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                          : "border-transparent text-muted-foreground hover:text-foreground hover:bg-primary/5"
                       }`}
                 >
                   {tab === "details" ? <FileText size={12} /> : <MessageCircle size={12} />}
@@ -95,8 +94,8 @@ export function POPreviewModal({ m }: { m: POState }) {
             <div className="p-5 space-y-5">
               {/* Order details grid */}
               <div>
-                <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <FileText size={10} className="text-emerald-500" /> Order
+                <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                  <FileText size={10} className="text-foreground" /> Order
                   Details
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -167,13 +166,13 @@ export function POPreviewModal({ m }: { m: POState }) {
                   ).map(({ label, value, mono }) => (
                     <div
                       key={label}
-                      className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
+                      className="px-3 py-2.5 bg-card border border-foreground/30"
                     >
-                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                         {label}
                       </p>
                       <p
-                        className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}
+                        className={`text-xs font-semibold truncate ${mono ? "font-heading text-foreground" : "text-foreground"}`}
                       >
                         {value || "—"}
                       </p>
@@ -187,7 +186,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                   viewingPO.SourceWDDocNo) && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {(viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo) && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[0.625rem] font-semibold text-blue-600 dark:text-blue-400">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-card border border-foreground/40 text-[0.625rem] font-semibold text-foreground">
                         <Link2 size={9} /> MR: {viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo}
                         {!viewingPO.SourceMRDocNo && viewingPO.EffectiveMRDocNo && (
                           <span className="opacity-60 font-normal">(via Quotation)</span>
@@ -195,12 +194,12 @@ export function POPreviewModal({ m }: { m: POState }) {
                       </span>
                     )}
                     {viewingPO.SourceWODocNo && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/20 text-[0.625rem] font-semibold text-purple-600 dark:text-purple-400">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-card border border-foreground/40 text-[0.625rem] font-semibold text-foreground">
                         <Link2 size={9} /> WO: {viewingPO.SourceWODocNo}
                       </span>
                     )}
                     {viewingPO.SourceWDDocNo && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-[0.625rem] font-semibold text-amber-600 dark:text-amber-400">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-card border border-foreground/40 text-[0.625rem] font-semibold text-foreground">
                         <Link2 size={9} /> WD: {viewingPO.SourceWDDocNo}
                       </span>
                     )}
@@ -208,8 +207,8 @@ export function POPreviewModal({ m }: { m: POState }) {
                 )}
                 {/* Payment Terms */}
                 {(viewingPO.PaymentTerms ?? viewingPO.paymentTerms) && (
-                  <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">
+                  <div className="mt-3 px-3 py-2.5 bg-card border border-foreground/30">
+                    <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-1">
                       Payment Terms / T&C
                     </p>
                     <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
@@ -230,9 +229,9 @@ export function POPreviewModal({ m }: { m: POState }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {/* Supplier Details */}
                   {viewingPOSupplier && (
-                    <div className="rounded-xl border border-border bg-muted/20 p-4">
-                      <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
-                        <Building2 size={11} className="text-emerald-500" />{" "}
+                    <div className="border border-foreground/30 bg-card p-4">
+                      <p className="text-xs uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                        <Building2 size={11} className="text-foreground" />{" "}
                         Supplier Details
                       </p>
                       <dl className="space-y-1.5 text-xs">
@@ -289,7 +288,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                             <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                               GSTIN
                             </dt>
-                            <dd className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                            <dd className="font-heading text-[0.625rem] font-semibold text-foreground mt-0.5">
                               {viewingPOSupplier.LGST}
                             </dd>
                           </div>
@@ -299,9 +298,9 @@ export function POPreviewModal({ m }: { m: POState }) {
                   )}
                   {/* Billing Details */}
                   {viewingPOCompany && (
-                    <div className="rounded-xl border border-border bg-muted/20 p-4">
-                      <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
-                        <Building2 size={11} className="text-emerald-500" />{" "}
+                    <div className="border border-foreground/30 bg-card p-4">
+                      <p className="text-xs uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                        <Building2 size={11} className="text-foreground" />{" "}
                         Billing Details
                       </p>
                       <dl className="space-y-1.5 text-xs">
@@ -356,7 +355,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                             <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                               GSTIN
                             </dt>
-                            <dd className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                            <dd className="font-heading text-[0.625rem] font-semibold text-foreground mt-0.5">
                               {viewingPOCompany.gst_no}
                             </dd>
                           </div>
@@ -366,9 +365,9 @@ export function POPreviewModal({ m }: { m: POState }) {
                   )}
                   {/* Project / Delivery Address */}
                   {viewingPOProject && (
-                    <div className="rounded-xl border border-border bg-muted/20 p-4">
-                      <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
-                        <MapPin size={11} className="text-emerald-500" />{" "}
+                    <div className="border border-foreground/30 bg-card p-4">
+                      <p className="text-xs uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2.5 flex items-center gap-1.5">
+                        <MapPin size={11} className="text-foreground" />{" "}
                         Project Details
                       </p>
                       <dl className="space-y-1.5 text-xs">
@@ -410,7 +409,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                             <dt className="text-[0.5625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                               GSTIN
                             </dt>
-                            <dd className="font-mono text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                            <dd className="font-heading text-[0.625rem] font-semibold text-foreground mt-0.5">
                               {viewingPOProject.gst_no}
                             </dd>
                           </div>
@@ -431,27 +430,27 @@ export function POPreviewModal({ m }: { m: POState }) {
                 if (!lineItems.length) return null;
                 return (
                   <div>
-                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <Package size={10} className="text-emerald-500" /> Order
+                    <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <Package size={10} className="text-foreground" /> Order
                       Items ({lineItems.length})
                     </p>
-                    <div className="rounded-xl border border-border overflow-x-auto">
+                    <div className="border border-foreground/30 overflow-x-auto">
                       <table
                         className="w-full text-xs"
                         style={{ tableLayout: "auto" }}
                       >
-                        <thead className="bg-muted/40 border-b border-border">
+                        <thead className="bg-card border-b border-foreground/30">
                           <tr>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left">Item / Description</th>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">GST%</th>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
-                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground text-right hidden sm:table-cell">Received</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-left">Item / Description</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">Qty</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-left hidden sm:table-cell">Unit</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-right hidden sm:table-cell">Rate</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-right hidden sm:table-cell">GST%</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-right">Amount</th>
+                            <th className="px-3 py-2 text-[0.5625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground text-right hidden sm:table-cell">Received</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-border/50">
+                        <tbody className="divide-y divide-foreground/10">
                           {lineItems.map((li: any, i: number) => {
                             const name =
                               li.ItemName ??
@@ -476,7 +475,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                             return (
                               <tr
                                 key={i}
-                                className="hover:bg-muted/20 transition-colors"
+                                className="hover:bg-primary/5 transition-colors"
                               >
                                 <td className="px-3 py-2 font-medium">{name}</td>
                                 <td className="px-3 py-2 text-right">{qty}</td>
@@ -486,7 +485,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                                 <td className="px-3 py-2 text-right font-semibold">
                                   ₹{amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
                                 </td>
-                                <td className={`px-3 py-2 text-right hidden sm:table-cell ${received != null && received >= qty ? "text-emerald-500" : "text-muted-foreground"}`}>
+                                <td className={`px-3 py-2 text-right hidden sm:table-cell ${received != null && received >= qty ? "text-foreground" : "text-muted-foreground"}`}>
                                   {received != null ? received : "—"}
                                 </td>
                               </tr>
@@ -501,8 +500,8 @@ export function POPreviewModal({ m }: { m: POState }) {
 
               {/* Remarks */}
               {(viewingPO.Remarks ?? viewingPO.remarks) && (
-                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
+                <div className="px-3 py-2.5 bg-card border border-foreground/30">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">
                     Remarks
                   </p>
                   <p className="text-xs text-foreground">
@@ -517,14 +516,14 @@ export function POPreviewModal({ m }: { m: POState }) {
               <div className="p-5 space-y-5">
                 {/* Dispatch status */}
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                    <Truck size={10} className="text-emerald-500" /> Dispatch Status
+                  <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <Truck size={10} className="text-foreground" /> Dispatch Status
                   </p>
                   {viewingPO.SupplierAcknowledged ? (
-                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-2">
+                    <div className="border border-foreground/40 bg-card p-4 space-y-2">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 size={15} className="text-emerald-500" />
-                        <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Supplier marked this as supplied</span>
+                        <CheckCircle2 size={15} className="text-foreground" />
+                        <span className="text-sm font-semibold text-foreground">Supplier marked this as supplied</span>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
                         <div>
@@ -535,7 +534,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                         </div>
                         <div>
                           <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Challan Number</p>
-                          <p className="text-sm font-medium text-foreground mt-0.5 font-mono">
+                          <p className="text-sm font-medium text-foreground mt-0.5 font-heading">
                             {viewingPO.ChallanNumber || <span className="text-muted-foreground/60 font-sans italic">Not provided</span>}
                           </p>
                         </div>
@@ -546,7 +545,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                           return (
                             <div>
                               <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Vs. Expected</p>
-                              <p className={`text-sm font-medium mt-0.5 ${delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                              <p className={`text-sm font-medium mt-0.5 ${delta >= 0 ? "text-foreground" : "text-foreground"}`}>
                                 {delta === 0 ? "On time" : delta > 0 ? `${delta}d early` : `${Math.abs(delta)}d late`}
                               </p>
                             </div>
@@ -555,7 +554,7 @@ export function POPreviewModal({ m }: { m: POState }) {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-xl border border-dashed border-border bg-muted/20 p-4 text-center">
+                    <div className="border border-dashed border-foreground/30 bg-card p-4 text-center">
                       <p className="text-xs text-muted-foreground">Not yet marked as supplied by the supplier.</p>
                     </div>
                   )}
@@ -563,16 +562,16 @@ export function POPreviewModal({ m }: { m: POState }) {
 
                 {/* Chat log */}
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-                    <MessageCircle size={10} className="text-emerald-500" /> Conversation
+                  <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                    <MessageCircle size={10} className="text-foreground" /> Conversation
                   </p>
-                  <div className="rounded-xl border border-border overflow-hidden h-[420px] flex flex-col">
+                  <div className="border border-foreground/30 overflow-hidden h-[420px] flex flex-col">
                     {currentUser && (
                       <OrderChat
                         poId={viewingPO.PurchaseOrderID ?? Number(viewingPO._id)}
                         apiBase="/api/purchase-orders"
                         currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
-                        className="flex-1 rounded-none border-0"
+                        className="flex-1 border-0"
                       />
                     )}
                   </div>

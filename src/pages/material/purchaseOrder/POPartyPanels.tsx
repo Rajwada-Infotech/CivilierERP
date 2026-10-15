@@ -11,11 +11,11 @@ export function POPartyPanels({ m }: { m: POState }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Supplier info */}
           {supplierDetails && (
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+            <div className="border border-foreground bg-card p-5">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 mb-3">
                 <Truck
                   size={11}
-                  className="text-emerald-600 dark:text-emerald-400"
+                  className="text-foreground"
                 />
                 Supplier Details
               </h3>
@@ -68,7 +68,7 @@ export function POPartyPanels({ m }: { m: POState }) {
                     <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       GSTIN
                     </dt>
-                    <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                    <dd className="font-heading text-xs font-semibold text-foreground mt-0.5 bg-card px-2 py-1 inline-block">
                       {supplierDetails.LGST}
                     </dd>
                   </div>
@@ -79,11 +79,11 @@ export function POPartyPanels({ m }: { m: POState }) {
 
           {/* Billing details */}
           {companyDetails && (
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+            <div className="border border-foreground bg-card p-5">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 mb-3">
                 <CircleDollarSign
                   size={11}
-                  className="text-emerald-600 dark:text-emerald-400"
+                  className="text-foreground"
                 />
                 Billing Details
               </h3>
@@ -133,7 +133,7 @@ export function POPartyPanels({ m }: { m: POState }) {
                     <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       GSTIN
                     </dt>
-                    <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                    <dd className="font-heading text-xs font-semibold text-foreground mt-0.5 bg-card px-2 py-1 inline-block">
                       {companyDetails.gst_no}
                     </dd>
                   </div>
@@ -144,11 +144,11 @@ export function POPartyPanels({ m }: { m: POState }) {
 
           {/* Project info — delivery address */}
           {projectDetails && (
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-3">
+            <div className="border border-foreground bg-card p-5">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5 mb-3">
                 <MapPin
                   size={11}
-                  className="text-emerald-600 dark:text-emerald-400"
+                  className="text-foreground"
                 />
                 Project Details
               </h3>
@@ -198,7 +198,7 @@ export function POPartyPanels({ m }: { m: POState }) {
                     <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       GSTIN
                     </dt>
-                    <dd className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5 bg-emerald-500/[0.05] px-2 py-1 rounded-md inline-block">
+                    <dd className="font-heading text-xs font-semibold text-foreground mt-0.5 bg-card px-2 py-1 inline-block">
                       {projectDetails.gst_no}
                     </dd>
                   </div>

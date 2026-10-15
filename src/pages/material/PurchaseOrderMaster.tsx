@@ -6,10 +6,10 @@
 //          POTerms, POFlowStatus, POActionBar
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
-import { Plus, ShoppingCart, Download, Upload, Loader2 as Loader2Icon } from "lucide-react";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { Plus, Download, Upload, Loader2 as Loader2Icon } from "lucide-react";
 import { ExportMenu } from "@/components/ExportMenu";
-import { PO_EXPORT_COLUMNS } from "./purchaseOrder/config";
+import { PO_EXPORT_COLUMNS, KEY_INK, KEY_LINE } from "./purchaseOrder/config";
 import { usePurchaseOrder } from "./purchaseOrder/usePurchaseOrder";
 import { PORegister } from "./purchaseOrder/PORegister";
 import { PODeleteBlockDialog } from "./purchaseOrder/PODeleteBlockDialog";
@@ -34,10 +34,10 @@ const PurchaseOrderMaster: React.FC = () => {
         <Breadcrumbs
           items={["Dashboard", "Material", "Purchase Order Master"]}
         />
-        <MaterialShell
-          title="Purchase Orders"
-          subtitle="Create and manage purchase orders"
-          icon={ShoppingCart}
+        <SheetShell
+          eyebrow="CivilierERP · Material"
+          title="Purchase orders"
+          subtitle="Orders placed with suppliers — from a material request, a quotation, a work order or direct."
           action={
             <div className="flex flex-wrap items-center gap-2">
               <ExportMenu
@@ -57,21 +57,21 @@ const PurchaseOrderMaster: React.FC = () => {
               <button
                 onClick={handleDownloadTemplate}
                 title="Download a blank CSV template"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+                className={`${KEY_LINE} h-9 px-3`}
               >
-                <Download size={13} />
-                <span className="hidden sm:inline">Download Template</span>
+                <Download size={12} />
+                <span className="hidden sm:inline">Template</span>
               </button>
               <button
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className={`${KEY_LINE} h-9 px-3`}
               >
                 {importing ? (
-                  <Loader2Icon size={13} className="animate-spin" />
+                  <Loader2Icon size={12} className="animate-spin" />
                 ) : (
-                  <Upload size={13} />
+                  <Upload size={12} />
                 )}
                 <span className="hidden sm:inline">
                   {importing ? "Importing..." : "Import CSV"}
@@ -80,10 +80,10 @@ const PurchaseOrderMaster: React.FC = () => {
               {rights.canCreate && (
                 <button
                   onClick={goToCreate}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
+                  className={`${KEY_INK} h-9 px-4 shrink-0`}
                 >
                   <Plus size={13} />
-                  New Purchase Order
+                  New purchase order
                 </button>
               )}
             </div>
@@ -92,7 +92,7 @@ const PurchaseOrderMaster: React.FC = () => {
           <PORegister m={m} />
           <PODeleteBlockDialog m={m} />
           <PODeleteConfirmDialog m={m} />
-        </MaterialShell>
+        </SheetShell>
 
         <POPreviewModal m={m} />
       </>
@@ -114,10 +114,10 @@ const PurchaseOrderMaster: React.FC = () => {
           viewMode === "create" ? "New" : viewMode === "edit" ? "Edit" : "View",
         ]}
       />
-      <MaterialShell
-        title="Purchase Orders"
-        subtitle="Create and manage purchase orders"
-        icon={ShoppingCart}
+      <SheetShell
+        eyebrow="CivilierERP · Material"
+        title="Purchase orders"
+        subtitle="Orders placed with suppliers — from a material request, a quotation, a work order or direct."
       >
         <POFormHeader m={m} />
 
@@ -130,7 +130,7 @@ const PurchaseOrderMaster: React.FC = () => {
           <POFlowStatus m={m} />
           <POActionBar m={m} />
         </div>
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 };

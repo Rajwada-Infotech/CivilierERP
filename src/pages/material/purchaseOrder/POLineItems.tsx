@@ -13,15 +13,15 @@ export function POLineItems({ m }: { m: POState }) {
   return (
     <>
       {/* ── Line Items Card ───────────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm min-w-0">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/20">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+      <div className="border border-foreground/30 bg-card overflow-hidden min-w-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-foreground/30 bg-card">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em] flex items-center gap-1.5">
             <Boxes
               size={11}
-              className="text-emerald-600 dark:text-emerald-400"
+              className="text-foreground"
             />
             Item Cart
-            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-bold px-1.5 py-0.5 min-w-[18px]">
+            <span className="ml-1 inline-flex items-center justify-center bg-card text-foreground text-[0.625rem] font-bold px-1.5 py-0.5 min-w-[18px]">
               {lineItems.length}
             </span>
           </h3>
@@ -45,7 +45,7 @@ export function POLineItems({ m }: { m: POState }) {
         )}
 
         {hasMixedItemTypes && (
-          <div className="flex items-start gap-2 mx-5 mb-3 px-3 py-2.5 rounded-lg bg-[#ffe2021a] border border-amber-500/25 text-xs text-amber-700 dark:text-amber-400">
+          <div className="flex items-start gap-2 mx-5 mb-3 px-3 py-2.5 bg-card border border-foreground/40 text-xs text-foreground">
             <AlertTriangle size={13} className="shrink-0 mt-0.5" />
             <span>
               This cart mixes <strong>Goods</strong> and <strong>Service</strong> items — a PO can only be one or the other.
@@ -55,18 +55,18 @@ export function POLineItems({ m }: { m: POState }) {
         )}
 
         {availableSupplyDays !== null && (
-          <p className="mx-5 mb-3 text-[0.6875rem] text-amber-600 dark:text-amber-400">
+          <p className="mx-5 mb-3 text-[0.6875rem] text-foreground">
             Only items deliverable within {availableSupplyDays} day{availableSupplyDays === 1 ? "" : "s"} are listed in the item picker.
           </p>
         )}
 
         {/* Table header */}
         <div
-          className={`overflow-x-auto ${errors.lineItems ? "border-t border-red-400" : ""}`}
+          className={`overflow-x-auto ${errors.lineItems ? "border-t border-destructive" : ""}`}
         >
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border bg-muted/10">
+              <tr className="border-b border-foreground/30 bg-card">
                 <th className="px-3 py-2.5 text-left text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider w-8">
                   #
                 </th>
@@ -94,14 +94,14 @@ export function POLineItems({ m }: { m: POState }) {
                 {!isReadOnly && <th className="px-3 py-2.5 w-10" />}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-foreground/10">
               {lineItems.map((li, idx) => (
                 <tr
                   key={li.id}
-                  className="group hover:bg-muted/10 transition-colors align-top"
+                  className="group hover:bg-primary/5 transition-colors align-top"
                 >
                   {/* Row number */}
-                  <td className="px-3 py-2 text-center text-xs text-muted-foreground font-mono">
+                  <td className="px-3 py-2 text-center text-xs text-muted-foreground font-heading">
                     {idx + 1}
                   </td>
 
@@ -168,11 +168,11 @@ export function POLineItems({ m }: { m: POState }) {
                               ? `Pending on MR: ${li.mrPendingQty}`
                               : undefined
                           }
-                          className={`${cellInput} text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-red-400" : ""}`}
+                          className={`${cellInput} text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${li.mrPendingQty != null && li.quantity - li.mrPendingQty > 0.0001 ? "border-destructive" : ""}`}
                         />
                         {li.mrPendingQty != null && (
                           <p
-                            className={`mt-1 pb-0.5 text-[0.625rem] leading-normal whitespace-nowrap overflow-hidden text-ellipsis ${li.quantity - li.mrPendingQty > 0.0001 ? "text-red-500" : "text-muted-foreground"}`}
+                            className={`mt-1 pb-0.5 text-[0.625rem] leading-normal whitespace-nowrap overflow-hidden text-ellipsis ${li.quantity - li.mrPendingQty > 0.0001 ? "text-destructive" : "text-muted-foreground"}`}
                           >
                             {Math.max(0, li.mrPendingQty - li.quantity)} remaining MR
                           </p>
@@ -362,7 +362,7 @@ export function POLineItems({ m }: { m: POState }) {
                   {/* Rate */}
                   <td className="px-3 py-2">
                     {isReadOnly ? (
-                      <span className="text-sm text-right block font-mono">
+                      <span className="text-sm text-right block font-heading">
                         ₹
                         {Number.isFinite(li.rate)
                           ? li.rate.toLocaleString("en-IN", {
@@ -382,7 +382,7 @@ export function POLineItems({ m }: { m: POState }) {
                             rate: parseFloat(e.target.value) || 0,
                           })
                         }
-                        className={`${cellInput} text-right font-mono`}
+                        className={`${cellInput} text-right font-heading`}
                       />
                     )}
                   </td>
@@ -391,7 +391,7 @@ export function POLineItems({ m }: { m: POState }) {
                   <td className="px-3 py-2 text-center">
                     {li.gstRate > 0 ? (
                       <div className="flex flex-col items-center gap-0.5">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-semibold">
+                        <span className="inline-flex items-center px-2 py-0.5 bg-card text-foreground text-[0.6875rem] font-semibold">
                           {li.gstRate}%
                         </span>
                         {li.igstRate > 0 ? (
@@ -418,7 +418,7 @@ export function POLineItems({ m }: { m: POState }) {
 
                   {/* Amount (base + GST) */}
                   <td className="px-3 py-2 text-right">
-                    <span className="text-sm font-semibold font-mono text-foreground">
+                    <span className="text-sm font-semibold font-heading text-foreground">
                       ₹
                       {(Number.isFinite(li.amount)
                         ? li.amount
@@ -446,7 +446,7 @@ export function POLineItems({ m }: { m: POState }) {
                       <button
                         onClick={() => removeLine(idx)}
                         disabled={lineItems.length === 1}
-                        className="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition disabled:opacity-30"
+                        className="p-1 hover:bg-destructive/10 dark:hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition disabled:opacity-30"
                       >
                         <X size={14} />
                       </button>
@@ -459,42 +459,42 @@ export function POLineItems({ m }: { m: POState }) {
         </div>
 
         {/* Totals footer */}
-        <div className="border-t border-border bg-muted/10 px-5 py-5 space-y-4">
+        <div className="border-t border-foreground/30 bg-card px-5 py-5 space-y-4">
           {/* Amount summary */}
           <div className="flex justify-end">
             <div className="w-full max-w-xs space-y-2">
               <div className="flex justify-between text-sm text-muted-foreground">
                 <span>Subtotal (excl. GST)</span>
-                <span className="font-mono">{fmt(subtotal)}</span>
+                <span className="font-heading">{fmt(subtotal)}</span>
               </div>
               {totalCgst > 0 && (
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>CGST</span>
-                  <span className="font-mono">{fmt(totalCgst)}</span>
+                  <span className="font-heading">{fmt(totalCgst)}</span>
                 </div>
               )}
               {totalSgst > 0 && (
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>SGST</span>
-                  <span className="font-mono">{fmt(totalSgst)}</span>
+                  <span className="font-heading">{fmt(totalSgst)}</span>
                 </div>
               )}
               {totalIgst > 0 && (
                 <div className="flex justify-between text-sm text-muted-foreground">
                   <span>IGST</span>
-                  <span className="font-mono">{fmt(totalIgst)}</span>
+                  <span className="font-heading">{fmt(totalIgst)}</span>
                 </div>
               )}
               {/* Combined total tax row when both CGST/SGST and IGST exist */}
               {totalTax > 0 && totalCgst > 0 && totalIgst > 0 && (
-                <div className="flex justify-between text-sm text-muted-foreground border-t border-dashed border-border pt-1">
+                <div className="flex justify-between text-sm text-muted-foreground border-t border-dashed border-foreground/30 pt-1">
                   <span>Total GST</span>
-                  <span className="font-mono">{fmt(totalTax)}</span>
+                  <span className="font-heading">{fmt(totalTax)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-base font-bold text-foreground border-t border-border pt-2">
+              <div className="flex justify-between text-base font-bold text-foreground border-t border-foreground/30 pt-2">
                 <span>Grand Total</span>
-                <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                <span className="font-heading text-foreground">
                   {fmt(grandTotal)}
                 </span>
               </div>

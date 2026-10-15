@@ -31,18 +31,18 @@ export function POActionBar({ m }: { m: POState }) {
             lineItems.some((li) => li.itemName || li.rate > 0)
           );
           return (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-foreground/30 bg-card overflow-hidden">
               <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                 {saved ? (
-                  <span className="text-emerald-500 font-medium">
+                  <span className="text-foreground font-medium">
                     Saved!
                   </span>
                 ) : poCanSave ? (
-                  <span className="text-emerald-500 font-medium">
+                  <span className="text-foreground font-medium">
                     Ready to save
                   </span>
                 ) : poOverMrCap ? (
-                  <span className="text-red-500 font-medium">
+                  <span className="text-destructive font-medium">
                     A line exceeds the remaining Material Request quantity
                   </span>
                 ) : (
@@ -53,19 +53,19 @@ export function POActionBar({ m }: { m: POState }) {
                 <button
                   onClick={goToCreate}
                   disabled={saving || saved || !poIsDirty}
-                  className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  className="flex-1 sm:flex-none px-4 py-1.5 text-xs font-heading border border-foreground/30 text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
                   <RotateCcw size={12} /> Reset
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving || saved || !poCanSave}
-                  className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                  className="flex-1 sm:flex-none px-5 py-2 text-sm font-heading font-semibold bg-foreground text-card border border-foreground disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                 >
                   {saved ? (
                     <Check size={14} />
                   ) : saving ? (
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
                   ) : (
                     <Save size={14} />
                   )}
