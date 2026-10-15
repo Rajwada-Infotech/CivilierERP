@@ -5,7 +5,7 @@ const multer = require("multer");
 const router = express.Router();
 // Project access (dbo.UserProjectAccess / RoleProjectAccess): a restricted user
 // gets 403 on any booking outside their projects. Lists filter the same way.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
@@ -574,11 +574,16 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
         .input("ppid",  sql.Int,           hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("blkSet", sql.Bit, "BlockName" in b ? 1 : 0)
+        .input("flrSet", sql.Bit, "FloorName" in b ? 1 : 0)
+        .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("ub",    sql.Int,           actorId(req))
         .query(`
           UPDATE dbo.CrmBooking SET
             ProjectId = ISNULL(@pid, ProjectId), ProjectName = ISNULL(@pname, ProjectName),
-            UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
+            UnitNo = ISNULL(@unit, UnitNo), -- Only overwrite what the save sent (a partial save kept wiping these).
+            BlockName = CASE WHEN @blkSet = 1 THEN @blk ELSE BlockName END,
+            FloorName = CASE WHEN @flrSet = 1 THEN @flr ELSE FloorName END,
             RatePerSqFt = ISNULL(@rate, RatePerSqFt),
             TotalValue = ISNULL(@tot, TotalValue),
             BookingAmount = ISNULL(@bamt, BookingAmount),
@@ -591,7 +596,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
             -- GrandTotal tracks TotalValue changes without disturbing the
             -- already-rolled-up Parking/ExtraCharges totals.
             GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
-            Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id AND IsActive = 1
         `);
 
@@ -868,6 +873,10 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
           WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
         `);
         await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+      } else {
+        // Same plan, new price: the unpaid %-steps follow the new total
+        // (paid / part-paid steps and the booking amount are never moved).
+        await recalculateRemainingMilestones(tx, id);
       }
 
       await tx.request()
@@ -1651,6 +1660,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
         .input("rm",    sql.NVarChar(200), b.RmName || null)
         .input("rmc",   sql.NVarChar(20),  b.RmContact || null)
         .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("notesSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("ub",    sql.Int,           actor)
         .query(`
           UPDATE dbo.CrmLoanDetail SET
@@ -1658,7 +1668,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
             LoanAmount = ISNULL(@amt, LoanAmount), SanctionStatus = ISNULL(@st, SanctionStatus),
             SanctionDate = ISNULL(@sdate, SanctionDate),
             LoanAccountNo = ISNULL(@acc, LoanAccountNo), RmName = ISNULL(@rm, RmName), RmContact = ISNULL(@rmc, RmContact),
-            Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            Notes = CASE WHEN @notesSet = 1 THEN @notes ELSE Notes END, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE BookingId = @bid
         `);
     } else {
@@ -2186,6 +2196,14 @@ router.post("/invoices/bulk-generate", requirePageRight("crm-bookings", "edit"),
         results.skipped.push({ bookingId: item?.bookingId, milestoneId: item?.milestoneId, reason: "Invalid bookingId/milestoneId" });
         continue;
       }
+      // Ids come from the body, so the per-route project guard never sees them.
+      if (req.projectScope) {
+        const pr = await pool.request().input("bid", sql.Int, bookingId).query("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
+        if (!projectAllowed(req.projectScope, pr.recordset[0]?.ProjectId)) {
+          results.skipped.push({ bookingId, milestoneId, reason: "Booking is outside your projects" });
+          continue;
+        }
+      }
       try {
         const outcome = await generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actor);
         results.succeeded.push({ bookingId, milestoneId, ...outcome });
@@ -2267,15 +2285,29 @@ router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "ed
       WHERE InvoiceId = @iid AND Status IN (N'Issued', N'TimeBarred', N'Draft', N'Pending', N'Rejected')`)).recordset[0];
     if (cn) return res.status(409).json({ error: `"${row.InvoiceNo}" has ${cn.No} against it — cancel that first (Finance → Credit Notes)` });
 
-    await pool.request()
-      .input("iid", sql.Int, invoiceId)
-      .input("by", sql.Int, actorId(req))
-      .input("reason", sql.NVarChar(500), reason)
-      .query(`
-        UPDATE dbo.CrmInvoice SET
-          Status = 'Void', VoidedBy = @by, VoidedAt = SYSDATETIME(), VoidReason = @reason
-        WHERE Id = @iid
-      `);
+    // The void, its ledger reversal and the cached PDF go together: the
+    // invoice's posting (advance released to income) used to stay live, so a
+    // void + re-issue booked the income twice; the cached PDF kept saying
+    // GENERATED.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const upd = await tx.request()
+        .input("iid", sql.Int, invoiceId)
+        .input("by", sql.Int, actorId(req))
+        .input("reason", sql.NVarChar(500), reason)
+        .query(`
+          UPDATE dbo.CrmInvoice SET
+            Status = 'Void', VoidedBy = @by, VoidedAt = SYSDATETIME(), VoidReason = @reason, PdfBase64 = NULL
+          WHERE Id = @iid AND Status <> 'Void'
+        `);
+      if (!upd.rowsAffected[0]) { await tx.rollback(); return res.status(400).json({ error: `"${row.InvoiceNo}" is already void` }); }
+      await require("../services/generalLedger").reversePostingBySource(tx, "CrmInvoice", invoiceId);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
     await logCrmAudit(pool, "CrmInvoice", invoiceId, actorId(req), [
       { field: "Status", oldVal: row.Status, newVal: "Void" },
       { field: "VoidReason", oldVal: null, newVal: reason },

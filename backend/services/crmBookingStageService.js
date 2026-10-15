@@ -167,7 +167,7 @@ async function requireActiveStage(pool, bookingId, stage) {
     e.status = 404;
     throw e;
   }
-  if (row.Status === "Cancelled" || row.Status === "Rejected" || row.IsActive === 0) {
+  if (row.Status === "Cancelled" || row.Status === "Rejected" || row.IsActive === false || row.IsActive === 0) {
     const e = new Error(`This booking has been ${row.Status} — no further workflow actions are allowed`);
     e.status = 400;
     throw e;

@@ -23,6 +23,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     // CrmBooking has ProjectId; we join through BookingId in child tables.
     // A project-restricted user's dashboard covers only their projects.
     const scopeCond = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "AND") : "";
+    const appScopeCond = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "a.ProjectId", "AND") : "";
     const projBookingCond   = (projectId ? "AND b.ProjectId = @pid" : "") + scopeCond;
     const projBookingAlone  = projBookingCond ? `WHERE 1 = 1 ${projBookingCond}` : "";
 
@@ -222,23 +223,23 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT
         (SELECT COUNT(*) FROM dbo.CrmApplication a
           WHERE a.IsActive = 1
-          ${projectId ? "AND EXISTS (SELECT 1 FROM dbo.CrmBooking bx WHERE bx.ApplicationId = a.Id AND bx.ProjectId = @pid)" : ""}
+          ${projectId ? "AND EXISTS (SELECT 1 FROM dbo.CrmBooking bx WHERE bx.ApplicationId = a.Id AND bx.ProjectId = @pid)" : ""} ${appScopeCond}
         ) AS Applications,
         (SELECT COUNT(*) FROM dbo.CrmBooking b
           WHERE b.IsActive = 1
             AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred')
-            ${projectId ? "AND b.ProjectId = @pid" : ""}
+            ${projectId ? "AND b.ProjectId = @pid" : ""} ${scopeCond}
         ) AS Bookings,
         (SELECT COUNT(*) FROM dbo.CrmAgreement ag
           JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
           WHERE ag.Status IN ('${CrmStatus.EXECUTED}','${CrmStatus.REGISTERED}')
             AND b.IsActive = 1
-            ${projectId ? "AND b.ProjectId = @pid" : ""}
+            ${projectId ? "AND b.ProjectId = @pid" : ""} ${scopeCond}
         ) AS Agreements,
         (SELECT COUNT(*) FROM dbo.CrmHandover h
           JOIN dbo.CrmBooking b ON b.Id = h.BookingId
           WHERE h.Status = 'Completed'
-            ${projectId ? "AND b.ProjectId = @pid" : ""}
+            ${projectId ? "AND b.ProjectId = @pid" : ""} ${scopeCond}
         ) AS Possessions
     `);
 
@@ -247,7 +248,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT a.Status, COUNT(*) AS Count
       FROM dbo.CrmApplication a
       WHERE a.IsActive = 1
-        ${projectId ? "AND EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.ApplicationId = a.Id AND b.ProjectId = @pid)" : ""}
+        ${projectId ? "AND EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.ApplicationId = a.Id AND b.ProjectId = @pid)" : ""} ${appScopeCond}
       GROUP BY a.Status
     `);
 
@@ -315,7 +316,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmApplication a
           WHERE a.IsActive = 1
             AND a.CreatedAt >= mo.MonthStart AND a.CreatedAt < DATEADD(MONTH,1,mo.MonthStart)
-            ${projectId ? "AND EXISTS(SELECT 1 FROM dbo.CrmBooking bx WHERE bx.ApplicationId=a.Id AND bx.ProjectId=@pid)" : ""}
+            ${projectId ? "AND EXISTS(SELECT 1 FROM dbo.CrmBooking bx WHERE bx.ApplicationId=a.Id AND bx.ProjectId=@pid)" : ""} ${appScopeCond}
         ) AS Applications,
         (SELECT COUNT(*) FROM dbo.CrmBooking b
           WHERE b.IsActive = 1 ${projBookingCond}
@@ -332,7 +333,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         (SELECT ISNULL(SUM(oa.Amount),0)
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
-          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart)
+          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart) ${scopeCond}
         ) AS Collected
       FROM Months mo ORDER BY mo.MonthStart
     `);

@@ -51,7 +51,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
-  { header: "Date", accessor: (r) => r.IssueDate ? new Date(r.IssueDate as string).toLocaleDateString("en-IN") : "" },
+  // The issues list sends the date as "Date" (the page's own table reads that too); "IssueDate" is kept as a fallback.
+  { header: "Date", accessor: (r) => {
+    const d = (r.Date ?? r.IssueDate) as string | null | undefined;
+    return d ? new Date(d).toLocaleDateString("en-IN") : "";
+  } },
   { header: "Company", accessor: "CompanyName" },
   { header: "Project", accessor: "ProjectName" },
   { header: "Godown", accessor: "GodownName" },

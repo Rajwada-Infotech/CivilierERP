@@ -5,7 +5,7 @@ const multer = require("multer");
 const router = express.Router();
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: an agreement belongs to its booking's project.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -1243,6 +1243,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
         .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
         .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
         .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
         .input("leg",   sql.Int,           newLegalExecutiveId)
         .input("ub",    sql.Int,           actor)
@@ -1252,7 +1253,7 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
             LegalAddress = ISNULL(@laddr, LegalAddress),
             PanNo = ISNULL(@pan, PanNo),
             AadhaarNo = ISNULL(@aadh, AadhaarNo),
-            Notes = @note, VersionNo = VersionNo + @bump,
+            Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END, VersionNo = VersionNo + @bump,
             LegalExecutiveId = @leg,
             UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
@@ -1617,7 +1618,9 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
         .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
         .input("fname", sql.NVarChar(300),  b.FileName     || null)
         .input("iby",   sql.NVarChar(200),  b.IssuedBy     || null)
-        .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
+        // A new upload always starts Uploaded - Verified / Rejected only come
+        // from the review route (the screen never sends a status here).
+        .input("st",    sql.NVarChar(30),   "Uploaded")
         .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
         .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
         .input("ver",   sql.Int,            nextVersion)
@@ -1901,6 +1904,7 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     // Includes the agreement-level lifecycle fields (senior/customer approval,
     // send/date state) and the Legal Executive assignment — not just the
@@ -2502,11 +2506,16 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
       const docId = parseInt(rawId);
       try {
         const cur = await pool.request().input("id", sql.Int, docId).query(`
-          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
-          FROM dbo.CrmAgreementDocument d WHERE d.Id = @id
+          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile, b.ProjectId
+          FROM dbo.CrmAgreementDocument d
+          JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          WHERE d.Id = @id
         `);
         if (!cur.recordset.length) { results.skipped.push({ docId, reason: "Document not found" }); continue; }
         const row = cur.recordset[0];
+        // Ids come from the body - the per-route project guard never sees them.
+        if (!projectAllowed(req.projectScope, row.ProjectId)) { results.skipped.push({ docId, reason: "Outside your projects" }); continue; }
 
         const lockReason = await getAgreementBookingLockReason(pool, row.AgreementId);
         if (lockReason) { results.skipped.push({ docId, reason: `Booking ${lockReason}` }); continue; }

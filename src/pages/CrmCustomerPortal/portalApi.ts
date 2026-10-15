@@ -98,7 +98,7 @@ export async function acceptAgreementDate(applicationId: number) {
 
 export async function respondAgreement(
   applicationId: number,
-  decision: "Approve" | "Reject",
+  decision: "Approve" | "Recheck",
   remarks: string,
   proposedDate?: string
 ) {
@@ -111,7 +111,7 @@ export async function respondAgreement(
   return res.json();
 }
 
-export async function respondSalesDeed(applicationId: number, decision: "Approve" | "Reject", remarks: string) {
+export async function respondSalesDeed(applicationId: number, decision: "Approve" | "Recheck", remarks: string) {
   const res = await fetch(`${API}/sales-deed/respond?applicationId=${applicationId}`, {
     method: "POST",
     headers: authHeaders(),

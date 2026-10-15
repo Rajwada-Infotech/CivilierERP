@@ -350,9 +350,8 @@ const SWEEP_CONCURRENCY = 5;
 router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    if (!isMoneyReceiptApprover(req.user?.roleName)) {
-      return res.status(403).json({ error: "Accounts Head or Admin access required" });
-    }
+    // Same check as approve (req.user has role, never roleName - this always refused).
+    if (!requireMoneyReceiptApprover(req, res)) return;
     const stuckMrs = await pool.request().query(`
       SELECT mr.Id
       FROM dbo.CrmMoneyReceipt mr

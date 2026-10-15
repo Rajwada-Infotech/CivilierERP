@@ -87,7 +87,8 @@ export const EXP_COLS = docCols("EDocNo", "Eid", "EProjectName", "Project", "EDo
 export const ISSUE_COLS: ColumnDef<any, unknown>[] = [
   { accessorKey: "DocNo", header: "Doc No", cell: ({ row }: any) => docCell(row.original.DocNo || `#${row.original.IssueId}`) },
   { accessorKey: "ProjectName", header: "Project", cell: ({ getValue }: any) => mutedCell(getValue() as string) },
-  { accessorKey: "IssueDate", header: "Date", cell: ({ getValue }: any) => <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(getValue() as string)}</span> },
+  // The issues list sends the date as "Date"; "IssueDate" is kept for any caller that still sends it.
+  { id: "IssueDate", accessorFn: (r: any) => r.IssueDate ?? r.Date ?? null, header: "Date", cell: ({ getValue }: any) => <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(getValue() as string)}</span> },
   { accessorKey: "ItemCount", header: "Items", cell: ({ getValue }: any) => <span className="font-heading text-xs font-semibold tabular-nums">{getValue() as number}</span> },
   { accessorKey: "Status", header: "Status", cell: ({ getValue }: any) => mark(getValue() as string) },
 ];

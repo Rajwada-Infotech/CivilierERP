@@ -2091,7 +2091,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
                                   <Eye size={12} /> View
                                 </button>
-                                <button onClick={() => downloadPdf(`/api/crm/invoices/${inv.Id}/pdf`, `${inv.InvoiceNo}.pdf`)}
+                                <button onClick={() => downloadPdf(`${API}/${bookingId}/invoices/${inv.Id}/pdf`, `${inv.InvoiceNo}.pdf`)}
                                   className="flex items-center gap-1 text-xs text-sky-600 dark:text-sky-400 hover:underline">
                                   <Download size={12} /> Download
                                 </button>

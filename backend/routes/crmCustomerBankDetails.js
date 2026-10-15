@@ -58,6 +58,7 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,

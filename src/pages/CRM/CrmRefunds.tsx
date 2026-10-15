@@ -534,6 +534,10 @@ const CrmRefunds: React.FC = () => {
           {["Draft", "Pending", "Rejected"].includes(r.Status) && (
             <ApprovalActions status={r.Status} recordId={r.Id} endpoint={API} onSuccess={invalidate} extraSubmitStatuses={["Draft"]} submitOnly />
           )}
+          {r.Status === "Approved" && r.FinanceNewPaymentId == null && rights.canEdit && (
+            <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); setFinanceMode(r.PreferredPaymentMode || ""); }}
+              className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200" title="Approved, but its payout voucher was never raised - raises it now">Send to Finance</button>
+          )}
           {r.Status === "FinancePending" && rights.canEdit && (
             <>
               <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); setFinanceMode(r.PreferredPaymentMode || ""); }}
