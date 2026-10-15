@@ -90,6 +90,12 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
         .query(`UPDATE dbo.CrmOnAccountPayment SET Status = 'Bounced', AppliedAmount = Amount,
                   Notes = ISNULL(Notes, '') + CHAR(10) + @n WHERE Id = @id`);
     }
+    // Finance's on-account figure follows: other deposits got their share back,
+    // the bounced one is worth nothing.
+    const touched = new Set([...allocs.map((x) => x.OnAccountPaymentId), ...live.map((d) => d.Id)]);
+    for (const oaId of touched) {
+      await require("./crmLedger").syncCrmOnAccountLedger(tx, oaId, "system", note, { onlyDown: false });
+    }
     await tx.request().input("rp", sql.Int, receivedPaymentId).input("r", sql.NVarChar(500), (reason || "Payment bounced").slice(0, 500))
       .input("by", sql.Int, actorUserId)
       .query(`UPDATE dbo.CrmMoneyReceipt SET Status = 'Bounced', BouncedReason = @r, BouncedBy = @by, BouncedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()

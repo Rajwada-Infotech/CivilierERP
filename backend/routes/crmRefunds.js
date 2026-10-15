@@ -1001,6 +1001,8 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
             Notes = ISNULL(Notes,'') + char(10) + 'Refunded via CrmRefund #' + CAST(@rid AS NVARCHAR(20))
           WHERE Id = @oid
         `);
+      // The refunded part leaves the customer's on-account figure in Finance too.
+      await require("../services/crmLedger").syncCrmOnAccountLedger(tx, rf.SourceOnAccountId, userEmail, `Refunded via CrmRefund #${refundId}`);
     }
     await tx.commit();
   } catch (txErr) {
@@ -1106,6 +1108,7 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
           Notes = ISNULL(Notes,'') + char(10) + 'Transferred to a re-booking.'
         WHERE Id = @hid
       `);
+    await require("../services/crmLedger").syncCrmOnAccountLedger(tx, rt.HeldOnAccountId, userEmail, "Transferred to a re-booking");
 
     await tx.request().input("id", sql.Int, rebookingTransferId).input("noa", sql.Int, newOaId)
       .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Applied', NewOnAccountId = @noa, UpdatedAt = SYSDATETIME() WHERE Id = @id");
