@@ -2,6 +2,7 @@
 // The workbook is validated up front by woExcel.ts; Import then creates each Work Order exactly the
 // way the Work Order form does (POST the header → POST save-full with activities & materials),
 // and removes the header again if its save-full fails, so no half-filled Work Order is left behind.
+import { fetchAllPages } from "@/lib/fetchAllPages";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, Loader2, Upload, X, XCircle } from "lucide-react";
@@ -24,7 +25,7 @@ async function loadMasters(finYears: FinYears): Promise<WoImportMasters> {
   const [companies, projects, contractors, suppliers, groups, activities, uomRows, items, hsn, types, existing] = await Promise.all([
     fetchCompanies(), fetchProjects(), fetchContractors(), fetchSuppliers(), fetchActivityGroups(), fetchActivities(),
     fetchWithAuth("/api/uom-master").then((r) => (r.ok ? r.json() : [])),
-    fetchItems(), getHsn().catch(() => []), fetchDocTypes("WO"), getWorkOrders().catch(() => []),
+    fetchItems(), getHsn().catch(() => []), fetchDocTypes("WO"), fetchAllPages((page, limit) => getWorkOrders({ page, limit })).catch(() => []),
   ]);
   return {
     companies,

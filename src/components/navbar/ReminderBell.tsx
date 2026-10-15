@@ -268,8 +268,10 @@ export const ReminderBell = () => {
 
           <div
             ref={panelRef}
-            style={accentVars}
-            className="rb-sheet fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 w-[min(92vw,440px)] flex flex-col animate-in fade-in duration-200"
+            // Width inline: the small-screen rule in index.css caps w-[…] boxes inside the fixed top bar to their
+            // parent's width, which squeezed this panel to the 32px bell on tablets.
+            style={{ ...accentVars, width: "min(calc(100vw - 1.5rem), 440px)" }}
+            className="rb-sheet fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 flex flex-col animate-in fade-in duration-200"
           >
             {/* Title block: what this is, how many are waiting, and refresh */}
             <div className="rb-head">

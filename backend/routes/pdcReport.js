@@ -131,7 +131,7 @@ const STATUS_CASE = `
 `;
 
 // ─── GET /filters — party/bank dropdown sources for the report's filter bar ──
-router.get("/filters", cache("pdc-report-filters", 300), async (req, res) => {
+router.get("/filters", cache("pdc-report-filters", 300, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const banks = await pool.request().query(`

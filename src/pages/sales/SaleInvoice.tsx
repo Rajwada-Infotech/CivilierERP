@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
+import { fetchAllPages } from "@/lib/fetchAllPages";
 import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SalesShell } from "@/components/sales/SalesShell";
@@ -34,6 +35,7 @@ import { createReceivedPayment } from "@/api/receivedPaymentApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { DateInput } from "@/components/ui/date-input";
+import { ServerPager } from "@/components/ServerPager";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -422,14 +424,14 @@ function GenerateInvoiceTab() {
 
   const { data: soData, isLoading: soLoading } = useQuery({
     queryKey: ["sale-orders"],
-    queryFn: () => getSaleOrders({ limit: 500 }),
+    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleOrders({ page, limit }), { limit: 500 }) }),
     staleTime: 60_000,
   });
   const orders: SaleOrder[] = soData?.data ?? [];
 
   const { data: siData, isLoading: siLoading } = useQuery({
     queryKey: ["sale-invoices"],
-    queryFn: () => getSaleInvoices({ limit: 500 }),
+    queryFn: async () => ({ data: await fetchAllPages((page, limit) => getSaleInvoices({ page, limit }), { limit: 500 }) }),
     staleTime: 30_000,
   });
   const invoicedSoIds = useMemo(
@@ -595,12 +597,21 @@ function GenerateInvoiceTab() {
 
 function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
   const rights = usePageRights("sale-invoice");
+  // Server-paged: one page of invoices per request (newest first), however many exist.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["sale-invoices"],
-    queryFn: () => getSaleInvoices({ limit: 100 }),
+    queryKey: ["sale-invoices", "history", page, pageSize],
+    queryFn: () => getSaleInvoices({ page, limit: pageSize }),
     staleTime: 30_000,
+    placeholderData: keepPreviousData, // keep the current rows on screen while the next page loads
   });
   const invoices: SaleInvoiceDoc[] = data?.data ?? [];
+  const total = Number(data?.total ?? 0);
+  // A page past the end (rows removed since it was opened) comes back empty - go back to the first page.
+  React.useEffect(() => {
+    if (!isFetching && page > 1 && data && invoices.length === 0) setPage(1);
+  }, [isFetching, page, data, invoices.length]);
   const [viewingInvoice, setViewingInvoice] = useState<SaleInvoiceDoc | null>(
     null,
   );
@@ -738,6 +749,8 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
           </tbody>
         </table>
       </div>
+
+      <ServerPager page={page} pageSize={pageSize} total={total} onPageChange={setPage} onPageSizeChange={setPageSize} />
 
       {/* ── View modal ────────────────────────────────────────────────────── */}
       {viewingInvoice && createPortal(

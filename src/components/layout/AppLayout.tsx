@@ -273,7 +273,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
             {isMobile && <MobileNav />}
 
             <main
-              className={`pt-14 min-h-screen ${isMobile ? "pb-16" : ""}`}
+              className={`pt-14 min-h-screen ${isMobile ? "pb-[calc(5rem+env(safe-area-inset-bottom))]" : ""}`}
               style={{
                 marginLeft: mainML,
                 transition: "margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1)",

@@ -64,7 +64,7 @@ router.get("/module-ranking", async (req, res) => {
 // ── Lightweight sales summary for Home dashboard ─────────────────────────────
 // Returns only SQL-aggregated scalars — no row transfer — so the home page
 // doesn't have to pull 500+ sale order rows just to count/sum them.
-router.get("/sales-summary", cache("home-sales-summary", 120), async (req, res) => {
+router.get("/sales-summary", cache("home-sales-summary", 120, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const now = new Date();
@@ -429,7 +429,7 @@ const USER_ACTOR_SQL =
 const sourceSql = (s, hasCreatedBy) =>
   s.sql.replace("/*USER_ACTOR*/NULL", hasCreatedBy ? USER_ACTOR_SQL : "NULL");
 
-router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) => {
+router.get("/activity-feed", cache("home-activity-feed", 45, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -479,7 +479,7 @@ router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) =
 const WEEK_PER_SOURCE = 3000;
 const IST_MINUTES = 330;
 
-router.get("/activity-week", cache("home-activity-week", 60), async (req, res) => {
+router.get("/activity-week", cache("home-activity-week", 60, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = getPool();
     const requested = String(req.query.modules || "")

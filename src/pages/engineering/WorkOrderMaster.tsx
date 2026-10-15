@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import {
   Popover,
   PopoverContent,
@@ -2594,56 +2594,49 @@ const WorkOrderDetailPanel: React.FC<{
 const WorkOrdersList: React.FC<{
   onViewDetail: (id: number) => void;
 }> = ({ onViewDetail }) => {
+  // Server-paged: the route filters by status and search and sends one page of LIMIT rows plus the
+  // summary figures, so the list no longer depends on how many work orders exist.
   const [workOrders, setWorkOrders] = useState<WorkOrderListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
-  const [, setTotalPages] = useState(1);
-  const [, setTotal] = useState(0);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const [stats, setStats] = useState({ total: 0, approved: 0, pending: 0, count: 0 });
   const LIMIT = 10;
 
+  // Typing still filters as you type; the request waits for a short pause.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const reqId = useRef(0);
   const load = useCallback(async () => {
+    const id = ++reqId.current;
     setLoading(true);
     setError(null);
     try {
-      const data = await getWorkOrders();
-      const arr = ensureArray<WorkOrderListItem>(data);
-      setWorkOrders(arr);
-      setTotal(arr.length);
-      setTotalPages(Math.ceil(arr.length / LIMIT));
+      const res = await getWorkOrders({ page, limit: LIMIT, search: debouncedSearch, status: statusFilter });
+      if (id !== reqId.current) return; // a newer request superseded this one
+      setWorkOrders(ensureArray<WorkOrderListItem>(res));
+      setFilteredTotal(Number(res?.total ?? 0));
+      const st = res?.stats;
+      if (st) setStats({ total: st.totalAmount, approved: st.approved, pending: st.pending, count: st.count });
     } catch {
-      setError("Failed to load work orders.");
+      if (id === reqId.current) setError("Failed to load work orders.");
     } finally {
-      setLoading(false);
+      if (id === reqId.current) setLoading(false);
     }
-  }, []);
+  }, [page, debouncedSearch, statusFilter]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const filtered = useMemo(() => {
-    let list = workOrders;
-    if (statusFilter !== "all")
-      list = list.filter(
-        (w) =>
-          (w.Status || "Draft").toLowerCase() === statusFilter.toLowerCase(),
-      );
-    if (search.trim())
-      list = list.filter(
-        (w) =>
-          w.DocumentNumber?.toLowerCase().includes(search.toLowerCase()) ||
-          w.CompanyName?.toLowerCase().includes(search.toLowerCase()) ||
-          w.ProjectName?.toLowerCase().includes(search.toLowerCase()) ||
-          w.ContractorName?.toLowerCase().includes(search.toLowerCase()),
-      );
-    return list;
-  }, [workOrders, statusFilter, search]);
-
-  const paginated = filtered.slice((page - 1) * LIMIT, page * LIMIT);
-  const filteredTotal = filtered.length;
+  const paginated = workOrders;
   const filteredPages = Math.ceil(filteredTotal / LIMIT);
 
   // One request for every visible row's approval trail instead of one per
@@ -2652,18 +2645,6 @@ const WorkOrdersList: React.FC<{
     "WorkOrderHeader",
     paginated.map((wo) => wo.Id),
   );
-
-  // Summary stats
-  const stats = useMemo(() => {
-    const total = workOrders.reduce((s, w) => s + (w.TotalAmount || 0), 0);
-    const approved = workOrders.filter(
-      (w) => (w.Status || "").toLowerCase() === "approved",
-    ).length;
-    const pending = workOrders.filter(
-      (w) => (w.Status || "").toLowerCase() === "pending",
-    ).length;
-    return { total, approved, pending, count: workOrders.length };
-  }, [workOrders]);
 
   return (
     <div className="space-y-5">
@@ -2809,6 +2790,7 @@ const WorkOrdersList: React.FC<{
                 onClick={() => {
                   setSearch("");
                   setStatusFilter("all");
+                  setPage(1);
                 }}
                 className="mt-2 text-xs text-primary underline"
               >

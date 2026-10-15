@@ -216,6 +216,8 @@ export const getInterCompanyTransfers = async (params: {
   dateFrom?: string;
   dateTo?: string;
   status?: string;
+  page?: number;
+  limit?: number;
 } = {}): Promise<{ data: InterCompanyTransferSummary[]; total: number }> => {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {

@@ -423,8 +423,9 @@ async function createApp() {
 
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-  // Any successful write anywhere (staff or customer portal) drops the cached CRM lists — see middleware/crmListCache.js.
-  app.use("/api", require("./middleware/crmListCache").crmListCacheInvalidator);
+  // Any successful write anywhere (staff or customer portal) drops every { dropOnAnyWrite } cache — see
+  // middleware/writeInvalidator.js.
+  app.use("/api", require("./middleware/writeInvalidator").writeInvalidator);
 
   app.use(helmet());
   app.use(

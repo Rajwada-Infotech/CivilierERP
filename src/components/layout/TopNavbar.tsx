@@ -790,46 +790,7 @@ export const TopNavbar = () => {
         <div className="flex md:hidden items-center gap-1.5 ml-auto">
           <SaNotificationBell />
           <ReminderBell />
-          <Dropdown
-            open={userOpen}
-            onClose={closeUser}
-            className="right-0 w-[17rem] p-0 np-sheet"
-            trigger={
-              <div className="relative">
-                <button
-                  onClick={toggleUser}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-heading text-primary-foreground font-bold overflow-hidden ring-2 ring-border ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
-                >
-                  {currentUser?.avatarUrl ? (
-                    <img
-                      src={currentUser.avatarUrl}
-                      alt={currentUser.name}
-                      className="w-full h-full object-cover rounded-full"
-                    />
-                  ) : (
-                    currentUser?.initials || "?"
-                  )}
-                </button>
-                {RoleIcon && (
-                  <span
-                    className={`pointer-events-none absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
-                  >
-                    <RoleIcon size={9} className="text-white" />
-                  </span>
-                )}
-              </div>
-            }
-          >
-            <UserMenuContent
-              currentUser={currentUser}
-              isSuperAdmin={isSuperAdmin}
-              isDba={isDba}
-              open={userOpen}
-              onClose={closeUser}
-              navigate={navigate}
-              handleLogout={handleLogout}
-            />
-          </Dropdown>
+          {/* No avatar here: the bottom bar's "Me" (MobileNav) has the profile and sign-out on phones. */}
         </div>
       </header>
     </>

@@ -92,7 +92,7 @@ function buildLastSixMonths(paymentRows, expenseRows) {
   });
 }
 
-router.get("/", cache("reports", 60), async (req, res) => {
+router.get("/", cache("reports", 60, { dropOnAnyWrite: true }), async (req, res) => {
   try {
     const {
       companyId,
