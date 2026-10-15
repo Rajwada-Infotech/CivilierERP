@@ -554,7 +554,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // taken; the old hold is only released afterward, once the new one is
     // confirmed in place.
     const newUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null;
-    const unitIsChanging = newUnitId !== existingUnitId;
+    // Only a save that actually sends a unit (or switches to plots) changes it:
+    // the wizard's step saves send just { CurrentStep }, and treating that as
+    // "unit -> none" released the application's hold after step 1.
+    const unitSent = b.PreferredUnitId !== undefined || preferredPlotIds.length > 0;
+    const unitIsChanging = unitSent && newUnitId !== existingUnitId;
     if (unitIsChanging && newUnitId !== null) {
       try {
         await placeHoldIfNeeded(pool, {
@@ -642,7 +646,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       .input("dbid", sql.Int,           b.DepositBankId !== undefined && b.DepositBankId !== null && b.DepositBankId !== "" ? parseInt(b.DepositBankId) : null)
-      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null).input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          brokerId)
       .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
@@ -660,7 +664,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           ProjectId = ISNULL(@pid, ProjectId), PreferredUnitId = CASE WHEN @plotselected = 1 THEN NULL WHEN @uid IS NOT NULL THEN @uid ELSE PreferredUnitId END,
           CompanyId = ISNULL(@cid, CompanyId),
           InterestedProject = ISNULL(@proj, InterestedProject), InterestedUnit = ISNULL(@unit, InterestedUnit),
-          PropertyType = @pt, BhkPreference = @bhk,
+          PropertyType = ISNULL(@pt, PropertyType), BhkPreference = ISNULL(@bhk, BhkPreference),
           Source = ISNULL(@src, Source),
           PlatformId = ISNULL(@platid, PlatformId), CampaignId = ISNULL(@campid, CampaignId),
           AdId = ISNULL(@adid, AdId), ChannelPartnerId = ISNULL(@cpid, ChannelPartnerId),
@@ -675,7 +679,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           -- AssignedTo/AssignedBy are intentionally never accepted here — set
           -- once at creation (the filer becomes the assignee) and locked;
           -- reassignment goes through the existing lead-transfer flow instead.
-          Notes = @note,
+          Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END,
           CurrentStep = CASE WHEN @cstep IS NOT NULL AND @cstep > CurrentStep THEN @cstep ELSE CurrentStep END,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1

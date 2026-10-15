@@ -947,6 +947,15 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Lock the refund and re-read it: the voucher-approval hook and the
+    // Refunds list's self-repair can both get here for the same refund; the
+    // second must stop, or it would use up the source credit twice.
+    const live = (await tx.request().input("id", sql.Int, refundId)
+      .query("SELECT Status FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id")).recordset[0];
+    if (!live || live.Status === "Paid" || !["FinanceApproved", "FinancePending"].includes(live.Status)) {
+      await tx.rollback();
+      return live?.Status === "Paid" ? { ok: true, reason: "already paid (idempotent)" } : { ok: false, reason: `refund not in a payable state (${live?.Status})` };
+    }
     // Re-check under lock: by the time the payout voucher is actually
     // approved (funds already moved to the customer's bank), a Rebooking
     // Transfer may have consumed the same source credit. This can no longer
