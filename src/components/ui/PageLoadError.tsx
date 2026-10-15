@@ -421,7 +421,7 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
               ? "The server returned an error: "
               : "There was a problem reaching the server. Check your connection and try again."}
             {message && (
-              <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded text-primary">
+              <code className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded text-primary break-all !whitespace-normal">
                 {message}
               </code>
             )}
