@@ -452,7 +452,8 @@ router.get("/registry/booking/:bookingId", requirePageRight("crm-registry", "vie
     const bookingId = parseId(req.params.bookingId);
     if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
-      .query(`${REG_SELECT} WHERE r.BookingId = @bid`);
+      .query(`${REG_SELECT} WHERE r.BookingId = @bid ORDER BY CASE WHEN r.Status = 'Cancelled' THEN 1 ELSE 0 END, r.Id DESC`);
+    // the current registry: a live / completed one before a cancelled one (migration 573)
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-sales-deed/registry] GET /booking/:id error:", e.message);
@@ -796,6 +797,21 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
       throw txErr;
     }
 
+    // The deed is Registered now: post its stamp duty / registration fee to
+    // the ledger. This used to run only from the deed's own edit route, which
+    // never fires once the registry has set the registration number — so
+    // deeds registered here got no statutory posting. Idempotent; never fatal.
+    if (cur.recordset[0].SalesDeedId != null) {
+      const who = req.user?.name || req.user?.email || "system";
+      try {
+        const outcome = await postCrmSalesDeedStatutoryToGL(pool, cur.recordset[0].SalesDeedId, who);
+        await recordGLPosting("crm-sales-deed", cur.recordset[0].SalesDeedId, outcome, who);
+      } catch (glErr) {
+        console.error("[crm-sales-deed/registry] statutory GL posting failed:", glErr.message);
+        await recordGLPosting("crm-sales-deed", cur.recordset[0].SalesDeedId, { failed: true, reason: glErr.message }, who).catch(() => {});
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-sales-deed/registry] PUT /:id/complete error:", e.message);
@@ -869,7 +885,7 @@ router.post("/registry/:id/documents/upload", requirePageRight("crm-registry", "
       const reqCheck = await pool.request()
         .input("rid", sql.Int, id)
         .input("dt", sql.NVarChar(50), DocumentType)
-        .query("SELECT TOP 1 Id FROM dbo.CrmRegistryDocument WHERE RegistryId = @rid AND DocumentType = @dt AND Status = 'Requested' AND IsMandatory = 1 ORDER BY CreatedAt ASC");
+        .query("SELECT TOP 1 Id FROM dbo.CrmRegistryDocument WHERE RegistryId = @rid AND DocumentType = @dt AND Status IN ('Requested', 'Rejected') AND IsMandatory = 1 ORDER BY CreatedAt ASC");
 
       if (reqCheck.recordset.length > 0) {
         await pool.request()
@@ -1963,6 +1979,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
       .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
       .input("st",    sql.NVarChar(30), newStatus)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("noteSet", sql.Bit, "Notes" in b ? 1 : 0)
       .input("dval",    sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
       .input("stamp",   sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
       .input("regfee",  sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
@@ -2001,7 +2018,7 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
           InternalApprovalDate  = CASE WHEN @iadone IS NOT NULL THEN @iadate  ELSE InternalApprovalDate  END,
           InternalApprovalNotes = CASE WHEN @iadone IS NOT NULL THEN @ianotes ELSE InternalApprovalNotes END,
           Index2ReceivedDate = CASE WHEN @idx2dt IS NOT NULL THEN @idx2dt ELSE Index2ReceivedDate END,
-          Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          Status = @st, Notes = CASE WHEN @noteSet = 1 THEN @note ELSE Notes END, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
@@ -2093,7 +2110,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"),
         const reqCheck = await tx.request()
           .input("did", sql.Int, id)
           .input("dt", sql.NVarChar(50), DocumentType)
-          .query("SELECT TOP 1 Id FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND DocumentType = @dt AND Status = 'Requested' AND IsMandatory = 1 ORDER BY CreatedAt ASC");
+          .query("SELECT TOP 1 Id FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND DocumentType = @dt AND Status IN ('Requested', 'Rejected') AND IsMandatory = 1 ORDER BY CreatedAt ASC");
 
         // Fulfilling any pending mandatory request for this DocumentType, not
         // just a hardcoded 'DeedDraft' — the old check meant a mandatory
@@ -2292,6 +2309,11 @@ router.put("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), 
     if (Status !== undefined && ["Executed", "Registered"].includes(deed.recordset[0].Status)) {
       return res.status(400).json({ error: "Documents can no longer be reviewed once the deed has been Executed" });
     }
+    // The document must belong to this deed — otherwise another deed's
+    // document could be reviewed past its own deed's locks and project.
+    const own = await pool.request().input("docid", sql.Int, docId).input("id", sql.Int, id)
+      .query("SELECT 1 AS x FROM dbo.CrmSalesDeedDocument WHERE Id = @docid AND SalesDeedId = @id");
+    if (!own.recordset.length) return res.status(404).json({ error: "Document not found on this deed" });
 
     if (Status === "Verified") {
       // Same rule as Agreement documents: nothing is verified without a file.
@@ -2329,8 +2351,9 @@ router.delete("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"
       return res.status(400).json({ error: "Cannot delete documents after senior approval" });
     }
 
-    const doc = await pool.request().input("docid", sql.Int, docId).query("SELECT IsMandatory, Status FROM dbo.CrmSalesDeedDocument WHERE Id = @docid");
-    if (!doc.recordset.length) return res.status(404).json({ error: "Document not found" });
+    const doc = await pool.request().input("docid", sql.Int, docId).input("id", sql.Int, id)
+      .query("SELECT IsMandatory, Status FROM dbo.CrmSalesDeedDocument WHERE Id = @docid AND SalesDeedId = @id");
+    if (!doc.recordset.length) return res.status(404).json({ error: "Document not found on this deed" });
     
     if (doc.recordset[0].IsMandatory && doc.recordset[0].Status === 'Requested') {
       return res.status(400).json({ error: "Cannot delete a mandatory document request" });

@@ -29,6 +29,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
@@ -140,7 +141,7 @@ async function fetchAmendmentsList(filters: AmendmentListFilters, page: number):
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
-  const r = await fetch(`${BASE}?${params}`, { credentials: "include" });
+  const r = await fetchWithAuth(`${BASE}?${params}`);
   if (!r.ok) throw new Error(await r.text());
   const data = await r.json();
   return { rows: data.rows || [], total: data.total || 0 };
@@ -151,10 +152,9 @@ async function reviewAmendment(
   action: "approve" | "reject",
   notes: string
 ) {
-  const r = await fetch(`${BASE}/${id}/${action}`, {
+  const r = await fetchWithAuth(`${BASE}/${id}/${action}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({ Notes: notes || null }),
   });
   if (!r.ok) throw new Error(await r.text());
