@@ -9,6 +9,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
@@ -4057,10 +4058,11 @@ const AttachmentsStep: React.FC<{
                       <Eye size={12} />
                     </button>
                   )}
-                  <a href={fileUrl} download={d.FileName}
+                  <button type="button" title="Download"
+                    onClick={async () => { if (!(await downloadAuthFile(fileUrl, d.FileName))) toast.error("Couldn't download the file — try again."); }}
                     className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
                     <Download size={12} />
-                  </a>
+                  </button>
                   <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
                 </div>
               </div>

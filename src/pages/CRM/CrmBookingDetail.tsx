@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye,
@@ -2834,10 +2835,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                       <Eye size={11} /> Preview
                                     </button>
                                   )}
-                                  <a href={fileUrl} target="_blank" rel="noopener noreferrer" download={a.FileName}
+                                  <button type="button"
+                                    onClick={async () => { if (!(await downloadAuthFile(fileUrl, a.FileName))) toast.error("Couldn't download the file — try again."); }}
                                     className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-border rounded hover:bg-muted">
                                     <Download size={11} /> Download
-                                  </a>
+                                  </button>
                                   {canEdit && booking.Status !== CrmStatus.APPROVED && a.Source !== "application" && (
                                     <button onClick={() => handleDeleteAttachment(a.Id)}
                                       className="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded ml-1">
@@ -3090,10 +3092,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <span className="truncate">{previewAttachment.FileName}</span>
             </span>
             <div className="flex items-center gap-2 shrink-0">
-              <a href={previewAttachmentBlobUrl || previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
+              <button type="button"
+                onClick={async () => { if (!(await downloadAuthFile(previewAttachment.fileUrl, previewAttachment.FileName))) toast.error("Couldn't download the file — try again."); }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
                 <Download size={13} /> Download
-              </a>
+              </button>
               <button onClick={() => setPreviewAttachment(null)} className="text-muted-foreground hover:text-foreground p-1"><X size={16} /></button>
             </div>
           </div>
@@ -3103,10 +3106,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             ) : previewAttachmentError ? (
               <div className="text-center space-y-2 px-4">
                 <p className="text-sm text-neutral-100">{previewAttachmentError}</p>
-                <a href={previewAttachment.fileUrl} target="_blank" rel="noopener noreferrer" download={previewAttachment.FileName}
+                <button type="button"
+                  onClick={async () => { if (!(await downloadAuthFile(previewAttachment.fileUrl, previewAttachment.FileName))) toast.error("Couldn't download the file — try again."); }}
                   className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
                   <Download size={13} /> Download file
-                </a>
+                </button>
               </div>
             ) : !previewAttachmentBlobUrl ? null : /\.pdf$/i.test(previewAttachment.FileName || "") ? (
               <iframe src={previewAttachmentBlobUrl} title={previewAttachment.FileName} className="w-full h-full border-0 bg-white" style={{ minHeight: "70vh" }} />

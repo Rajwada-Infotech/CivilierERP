@@ -83,3 +83,22 @@ export function FilePreviewCard({ url, fileName, mimeType, meta, onClose }: {
     </div>
   );
 }
+
+/** Download an API file with the sign-in (a plain <a href download> to the API gets 401). */
+export async function downloadAuthFile(url: string, fileName: string): Promise<boolean> {
+  try {
+    const r = await fetchWithAuth(url);
+    if (!r.ok) return false;
+    const blobUrl = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = fileName || "download";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+    return true;
+  } catch {
+    return false;
+  }
+}
