@@ -7,6 +7,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { AuthThumb, FilePreviewCard } from "@/components/crm/AuthFilePreview";
 import { translateError } from "@/lib/translateError";
 import { promptNextStep } from "@/lib/workflowNav";
 import { cn } from "@/lib/utils";
@@ -300,36 +301,42 @@ function fmtSize(bytes: number) {
 
 function AttachmentList({ attachments, apiBase }: { attachments: any[]; apiBase: string }) {
   const isImage = (mime: string) => mime?.startsWith("image/");
+  // Click a file to preview it right here (a plain link carried no sign-in
+  // and opened an error tab); click again or close to hide it.
+  const [openId, setOpenId] = useState<number | null>(null);
   return (
     <ul className="space-y-2">
       {attachments.map((a) => {
         const url = `${apiBase}/attachment/${a.AttachmentId}`;
+        const open = openId === a.AttachmentId;
         return (
-          <li key={a.AttachmentId} className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2 hover:bg-sky-500/5 hover:border-sky-300/50 transition-colors group">
-            {isImage(a.MimeType) ? (
-              <div className="w-9 h-9 rounded-md shrink-0 overflow-hidden border border-border bg-muted">
-                <img src={url} alt={a.FileName} className="w-full h-full object-cover" />
+          <li key={a.AttachmentId} className="space-y-2">
+            <button type="button" onClick={() => setOpenId(open ? null : a.AttachmentId)}
+              className={`w-full text-left flex items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors group ${open ? "border-sky-300/70 bg-sky-500/5" : "border-border bg-muted/20 hover:bg-sky-500/5 hover:border-sky-300/50"}`}>
+              {isImage(a.MimeType) ? (
+                <div className="w-9 h-9 rounded-md shrink-0 overflow-hidden border border-border bg-muted">
+                  <AuthThumb url={url} alt={a.FileName} className="w-full h-full object-cover" />
+                </div>
+              ) : (
+                <div className="w-9 h-9 rounded-md shrink-0 bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+                  <FileText size={15} className="text-sky-600 dark:text-sky-400" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">{a.FileName}</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+                  {a.FileSize ? fmtSize(a.FileSize) : ""}
+                  {a.UploadedAt ? ` · ${String(a.UploadedAt).slice(0, 10)}` : ""}
+                </p>
               </div>
-            ) : (
-              <div className="w-9 h-9 rounded-md shrink-0 bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
-                <FileText size={15} className="text-sky-600 dark:text-sky-400" />
-              </div>
+              <span className="shrink-0 flex items-center gap-1 text-[0.6875rem] font-medium text-sky-600 dark:text-sky-400">
+                {open ? "Hide" : "Preview"} <ChevronRight size={11} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+              </span>
+            </button>
+            {open && (
+              <FilePreviewCard url={url} fileName={a.FileName} mimeType={a.MimeType}
+                meta={a.FileSize ? fmtSize(a.FileSize) : undefined} onClose={() => setOpenId(null)} />
             )}
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-foreground truncate">{a.FileName}</p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-                {a.FileSize ? fmtSize(a.FileSize) : ""}
-                {a.UploadedAt ? ` · ${String(a.UploadedAt).slice(0, 10)}` : ""}
-              </p>
-            </div>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 flex items-center gap-1 text-[0.6875rem] font-medium text-sky-600 dark:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
-            >
-              Open <ChevronRight size={11} />
-            </a>
           </li>
         );
       })}

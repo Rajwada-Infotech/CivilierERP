@@ -204,8 +204,12 @@ async function fetchDocAudit(docId: number): Promise<any[]> {
   } catch { return []; }
 }
 
-const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
+// A paper's review - preview, history, verify / reject, upload - shown as a
+// card on the Documents tab (it used to be a pop-up over the page).
+const DocumentReviewCard: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
   ({ agreementId, doc, onClose, onReviewed }) => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [doc.Id]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [tab, setTab] = useState<"preview" | "history">("preview");
   const [audit, setAudit] = useState<any[] | null>(null);
@@ -298,14 +302,14 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
-            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
-          </DialogTitle>
-        </DialogHeader>
+    <div ref={cardRef} className="rounded-xl border border-primary/30 bg-card p-4 space-y-3 scroll-mt-4">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold flex items-center gap-2 min-w-0">
+            {mimeIcon(doc.MimeType)} <span className="truncate">{doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}</span>
+            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
+          </h3>
+          <button onClick={onClose} aria-label="Close" className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground shrink-0"><X size={15} /></button>
+        </div>
 
         <div className="flex items-center gap-1 border-b border-border -mt-1">
           <button onClick={() => setTab("preview")}
@@ -345,9 +349,9 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
               ) : !blobUrl ? (
                 <span className="text-sm text-muted-foreground">Loading preview…</span>
               ) : doc.MimeType?.startsWith("image/") ? (
-                <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[50vh] object-contain" />
+                <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[60vh] object-contain" />
               ) : doc.MimeType === "application/pdf" ? (
-                <iframe src={blobUrl} title={doc.FileName} className="w-full h-[50vh] border-0" />
+                <iframe src={blobUrl} title={doc.FileName} className="w-full h-[60vh] border-0" />
               ) : (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">{mimeIcon(doc.MimeType)} Preview not available.</div>
               )}
@@ -466,8 +470,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
           )}
           <button onClick={onClose} className="px-3 py-1.5 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
         </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 };
 
@@ -573,6 +576,7 @@ const CrmAgreement: React.FC = () => {
   useEffect(() => {
     setAgrTabRaw(TAB_SLUGS[(sp.get("tab") || "").toLowerCase()] || "Progress");
     setEditingLegalExec(false);
+    setPreviewDoc(null); // a paper preview belongs to the agreement it was opened on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
@@ -1905,6 +1909,15 @@ const CrmAgreement: React.FC = () => {
                 const fp = followupProgress(detail.documents);
                 const allVerified = (detail.documents || []).filter((d: any) => d.IsMandatory).every((d: any) => d.Status === "Verified");
                 return (
+              <div className="space-y-3">
+                  {previewDoc && (
+                    <DocumentReviewCard key={previewDoc.Id}
+                      agreementId={previewDoc.AgreementId || selectedId!}
+                      doc={previewDoc}
+                      onClose={() => setPreviewDoc(null)}
+                      onReviewed={() => { setPreviewDoc(null); qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); }}
+                    />
+                  )}
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className="px-4 py-3 bg-muted/30 border-b border-border space-y-2">
                   <div className="flex items-center justify-between">
@@ -2011,6 +2024,7 @@ const CrmAgreement: React.FC = () => {
                     </div>
                   );
                 })}
+              </div>
               </div>
                 );
               })()}
@@ -2402,14 +2416,6 @@ const CrmAgreement: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {previewDoc && (
-        <DocumentReviewDialog
-          agreementId={previewDoc.AgreementId || selectedId!}
-          doc={previewDoc}
-          onClose={() => setPreviewDoc(null)}
-          onReviewed={() => { setPreviewDoc(null); qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); }}
-        />
-      )}
 
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
         <DialogContent accent="crm" className="max-w-lg">
