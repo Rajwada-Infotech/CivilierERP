@@ -91,7 +91,12 @@ type AgrStage = { label: string; detail: string; hint: string; state: StepState;
 // them — hover a stage to see which.
 function agreementStages(a: any, documents: any[] | undefined): AgrStage[] {
   const legalAssigned = a?.LegalExecutiveId != null;
-  const followup = followupProgress(documents);
+  // The list has no document rows - it carries the mandatory-paper counts.
+  const followup = documents ? followupProgress(documents) : (() => {
+    const required = Number(a?.MandatoryDocCount || 0);
+    const uploaded = Number(a?.MandatoryUploadedCount || 0);
+    return { required, uploaded, percent: required > 0 ? Math.round((uploaded / required) * 100) : 0 };
+  })();
   const followupDone = followup.required > 0 && followup.percent === 100;
   const seniorStatus = a?.SeniorApprovalStatus;
   const senior = seniorStatus === CrmStatus.APPROVED;
@@ -1116,11 +1121,25 @@ const CrmAgreement: React.FC = () => {
                     {isBookingCancelled(a) && (
                       <div className="text-[0.625rem] font-semibold text-red-600">⚠ Booking {a.BookingStatus || "inactive"} — locked</div>
                     )}
-                    <div className="text-[0.6875rem] font-mono text-muted-foreground">{a.AgreementNo}</div>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-[0.6875rem] text-muted-foreground truncate">{a.BookingNo} · {a.UnitNo}</div>
+                      <div className="text-[0.6875rem] text-muted-foreground truncate"><span className="font-mono">{a.AgreementNo}</span> · {a.BookingNo} · {a.UnitNo}</div>
                       <div className="shrink-0 text-[0.625rem] text-muted-foreground">{a.DocumentCount || 0} doc{a.DocumentCount !== 1 ? "s" : ""}</div>
                     </div>
+                    {a.Status !== CrmStatus.CANCELLED && (() => {
+                      const st = agreementStages(a, undefined);
+                      const cur = st.find((x) => x.state === "current");
+                      return (
+                        <div className="space-y-1">
+                          <div className="grid grid-cols-5 gap-0.5">
+                            {st.map((x) => <div key={x.label} className={`h-1 rounded-full ${x.state === "done" ? "bg-green-500" : x.state === "current" ? "bg-primary" : "bg-muted"}`} />)}
+                          </div>
+                          <div className="text-[0.6875rem] truncate">
+                            {cur ? <><span className="font-medium text-foreground">{cur.label}</span><span className="text-muted-foreground"> · {cur.detail}</span></>
+                              : <span className="text-green-700 dark:text-green-400 font-medium">Complete</span>}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="text-[0.6875rem] flex items-center gap-1">
                       <UserCircle2 size={10} className="text-muted-foreground shrink-0" />
                       {a.LegalExecutiveName
@@ -1146,37 +1165,23 @@ const CrmAgreement: React.FC = () => {
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
           ) : (
             <>
-              <div className="rounded-xl border border-border overflow-hidden">
-                <div className={`px-4 py-3 flex items-center justify-between gap-3 flex-wrap ${
-                  detail.agreement?.Status === "Registered" ? "bg-gradient-to-r from-green-500/10 to-green-500/5 border-b border-green-200/60 dark:border-green-900/40"
-                  : detail.agreement?.Status === "Executed" ? "bg-gradient-to-r from-blue-500/10 to-blue-500/5 border-b border-blue-200/60 dark:border-blue-900/40"
-                  : detail.agreement?.Status === "Cancelled" ? "bg-gradient-to-r from-red-500/10 to-red-500/5 border-b border-red-200/60 dark:border-red-900/40"
-                  : "bg-muted/20 border-b border-border"
-                }`}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`p-2 rounded-xl shrink-0 ${
-                      detail.agreement?.Status === "Registered" ? "bg-green-100 dark:bg-green-900/40"
-                      : detail.agreement?.Status === "Executed" ? "bg-blue-100 dark:bg-blue-900/40"
-                      : detail.agreement?.Status === "Cancelled" ? "bg-red-100 dark:bg-red-900/40"
-                      : "bg-primary/10"}`}>
-                      <Building2 size={16} className={
-                        detail.agreement?.Status === "Registered" ? "text-green-600"
-                        : detail.agreement?.Status === "Executed" ? "text-blue-600"
-                        : detail.agreement?.Status === "Cancelled" ? "text-red-600"
-                        : "text-primary"} />
+              <div className="rounded-xl border border-border bg-card">
+                <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="font-bold text-base text-foreground leading-tight truncate"><ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} /></h2>
+                      <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${agrStatusColor[detail.agreement?.Status] || ""}`}>
+                        {detail.agreement?.Status}
+                      </span>
                     </div>
-                    <div className="min-w-0">
-                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate"><ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} /></h2>
-                      <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
-                        {detail.agreement?.AgreementNo}
-                        {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}
-                      </p>
-                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      <span className="font-mono">{detail.agreement?.AgreementNo}</span>
+                      {detail.agreement?.VersionNo > 1 && <span className="ml-1 text-violet-600">v{detail.agreement.VersionNo}</span>}
+                      {" · "}{detail.agreement?.BookingNo} · {detail.agreement?.UnitNo}
+                      {detail.agreement?.ProjectName ? ` · ${detail.agreement.ProjectName}` : ""}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-xs px-2.5 py-1 rounded-lg border font-semibold ${agrStatusColor[detail.agreement?.Status] || ""}`}>
-                      {detail.agreement?.Status}
-                    </span>
                     {detail.agreement && isBookingCancelled(detail.agreement) && (
                       <span title={`Booking ${detail.agreement.BookingStatus || "inactive"} — Edit/Send/Mark actions are locked. Cancel the agreement instead.`}
                         className="text-xs px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-600 font-medium cursor-help">
@@ -1284,10 +1289,33 @@ const CrmAgreement: React.FC = () => {
                     )}
                   </div>
                 </div>
-              </div>
+
+                {(() => {
+                  const a = detail.agreement;
+                  const fp = followupProgress(detail.documents);
+                  const pending = unverifiedMandatoryDocs(detail.documents).length;
+                  const facts: [string, React.ReactNode][] = [
+                    ["Legal executive", a?.LegalExecutiveName || <span className="text-sky-600">Unassigned</span>],
+                    ["Signing date", a?.AgreementDate ? String(a.AgreementDate).slice(0, 10)
+                      : a?.ProposedDate ? <span>{String(a.ProposedDate).slice(0, 10)} <span className="text-muted-foreground">(proposed)</span></span>
+                      : <span className="text-muted-foreground">Not set</span>],
+                    ["Mandatory papers", fp.required ? `${fp.required - pending} of ${fp.required} verified` : <span className="text-muted-foreground">None requested</span>],
+                    ["Value", a?.GrandTotal ? `₹${Number(a.GrandTotal).toLocaleString("en-IN")}` : "—"],
+                  ];
+                  return (
+                    <div className="px-4 py-2.5 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                      {facts.map(([k, v]) => (
+                        <div key={k} className="min-w-0">
+                          <div className="text-[0.6875rem] text-muted-foreground">{k}</div>
+                          <div className="text-xs font-medium truncate">{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
 
               {detail.agreement?.Status !== CrmStatus.CANCELLED && (
-                <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+                <div className="px-4 pt-3 pb-4 border-t border-border space-y-3">
                   <AgreementStageBar stages={agreementStages(detail.agreement, detail.documents)} onStageClick={setAgrTab} />
                   {(() => {
                     const a = detail.agreement;
@@ -1298,6 +1326,9 @@ const CrmAgreement: React.FC = () => {
                     let text = "";
                     let subtext = "";
                     let cta: { label: string; onClick: () => void } | null = null;
+                    // Other actions for the step it is on (the same buttons the
+                    // Progress tab has), so nothing needs hunting for.
+                    let extra: React.ReactNode = null;
                     if (cancelled) {
                       variant = "error";
                       text = `Booking is ${a?.BookingStatus || "inactive"} — this agreement is locked.`;
@@ -1308,15 +1339,24 @@ const CrmAgreement: React.FC = () => {
                     } else if (a?.Status === CrmStatus.EXECUTED) {
                       variant = "info";
                       text = "Agreement executed.";
-                      subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
+                      subtext = a?.AfsRegistryStatus === "Completed"
+                        ? "Registry visit done — use Mark Registered above with the Sub-Registrar Doc No."
+                        : "Next: AFS fees, then the Sub-Registrar visit, then Mark Registered.";
+                      if (a?.AfsRegistryStatus !== "Completed" && tabAllowed("AFS fees & registry"))
+                        cta = { label: "Open AFS fees & registry", onClick: () => setAgrTab("AFS fees & registry") };
                     } else if (a?.LegalExecutiveId == null) {
                       variant = "warning";
                       text = "No Legal Executive assigned.";
-                      subtext = "Assign someone responsible for preparing the paperwork — required before execution (server-enforced).";
+                      subtext = "Assign someone responsible for preparing the paperwork — required before execution.";
+                      cta = { label: "Assign legal executive", onClick: () => setAgrTab("Progress") };
                     } else if (a?.SeniorApprovalStatus !== CrmStatus.APPROVED) {
                       variant = "warning";
                       text = "Awaiting senior approval.";
-                      subtext = "Submit it from the Progress tab below — an admin then approves it from the Approval Inbox.";
+                      subtext = a?.SeniorApprovalStatus === CrmStatus.PENDING ? "Submitted — an admin approves it from the Approval Inbox." : "Submit it for senior review — an admin then approves it from the Approval Inbox.";
+                      extra = (
+                        <ApprovalActions status={a?.SeniorApprovalStatus} recordId={a?.Id} endpoint={API} submitOnly
+                          onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); qc.invalidateQueries({ queryKey: ["crm-agreements"] }); }} />
+                      );
                     } else if (!a?.SentToCustomerAt) {
                       variant = "action";
                       text = "Senior-approved — ready to share with the customer.";
@@ -1329,7 +1369,13 @@ const CrmAgreement: React.FC = () => {
                     } else if (a?.CustomerApprovalStatus !== CrmStatus.APPROVED) {
                       variant = "info";
                       text = "Sent to customer — awaiting their review and approval.";
-                      subtext = a?.SentToCustomerAt ? `Sent ${String(a.SentToCustomerAt).slice(0, 10)}` : "";
+                      subtext = a?.SentToCustomerAt ? `Sent ${String(a.SentToCustomerAt).slice(0, 10)} · customer not on the portal? Record their answer here.` : "";
+                      extra = (
+                        <>
+                          <button onClick={() => setProxyRecheckDialog(true)} className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium bg-background hover:bg-muted whitespace-nowrap">Record recheck for them</button>
+                          <button onClick={() => setProxyApproveDialog(true)} className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium bg-background hover:bg-muted whitespace-nowrap">Record approval for them</button>
+                        </>
+                      );
                     } else if (!a?.AgreementDate) {
                       if (a?.DateApprovalStatus === CrmStatus.PENDING) {
                         variant = "warning";
@@ -1337,10 +1383,12 @@ const CrmAgreement: React.FC = () => {
                       } else if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) {
                         variant = "info";
                         text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — waiting for customer's response.`;
+                        extra = <button onClick={() => setProxyDateDialog(true)} className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium bg-background hover:bg-muted whitespace-nowrap">Accept date for them</button>;
                       } else if (a?.ProposedDateStatus === "PendingCompanyReview") {
                         variant = "action";
                         text = `Customer proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — your turn to accept or counter.`;
                         cta = { label: "Accept Date", onClick: handleAcceptDate };
+                        extra = <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setProposeDateDialog(true); }} className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium bg-background hover:bg-muted whitespace-nowrap">Propose different date</button>;
                       } else {
                         variant = "action";
                         text = "Customer approved — now propose an agreement signing date.";
@@ -1350,6 +1398,7 @@ const CrmAgreement: React.FC = () => {
                       variant = "warning";
                       text = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still need verification.`;
                       subtext = pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ");
+                      cta = { label: "Open documents", onClick: () => setAgrTab("Documents") };
                     } else {
                       variant = "action";
                       text = "All checks passed — ready to mark this agreement executed.";
@@ -1373,17 +1422,23 @@ const CrmAgreement: React.FC = () => {
                             {subtext && <p className={`text-xs mt-0.5 ${vd.sub}`}>{subtext}</p>}
                           </div>
                         </div>
-                        {cta && (
-                          <button onClick={cta.onClick}
-                            className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
-                            {cta.label}
-                          </button>
+                        {(extra || cta) && (
+                          <div className="flex items-center gap-2 flex-wrap shrink-0">
+                            {extra}
+                            {cta && (
+                              <button onClick={cta.onClick}
+                                className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
+                                {cta.label}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
                   })()}
                 </div>
               )}
+              </div>
 
               <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1 overflow-x-auto thin-scroll">
                 {AGR_TABS.filter(tabAllowed).map((t, i) => (
@@ -1549,18 +1604,19 @@ const CrmAgreement: React.FC = () => {
                   "bg-muted text-muted-foreground";
 
                 return (
-                  <div className="space-y-4">
-                    <div className="rounded-xl border border-border overflow-hidden">
-                      <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5" title="The person responsible for preparing this agreement's paperwork. Required before execution.">
-                          <UserCircle2 size={15} className="text-primary" /> Legal Executive <Info size={12} className="text-muted-foreground/70 shrink-0" />
-                        </h3>
-                        {legalAssigned
-                          ? <span className="text-[0.6875rem] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
-                          : <span className="text-[0.6875rem] text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
-                        }
+                  <div className="rounded-xl border border-border overflow-hidden bg-card">
+                    <div className="px-4 py-4 border-b border-border flex items-start gap-3">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(legalAssigned ? "done" : "active")}`}>
+                        {legalAssigned ? <Check size={12} /> : <UserCircle2 size={12} />}
                       </div>
-                      <div className="px-4 py-3 space-y-2">
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="text-sm font-semibold flex items-center gap-1" title="The person responsible for preparing this agreement's paperwork. Required before execution.">Legal Executive <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
+                          {legalAssigned
+                            ? <span className="text-[0.6875rem] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
+                            : <span className="text-[0.6875rem] text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
+                          }
+                        </div>
                         {a?.LegalExecutiveId != null && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border rounded-lg px-3 py-1.5">
@@ -1604,16 +1660,9 @@ const CrmAgreement: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-border overflow-hidden">
-                      <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <ShieldAlert size={15} className="text-primary" /> Approval steps
-                        </h3>
-                      </div>
-
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-green-500/[0.04]" : seniorRejected ? "bg-red-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
-                          {seniorApproved ? <Check size={14} /> : seniorRejected ? <AlertCircle size={13} /> : 1}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "" : seniorRejected ? "" : ""}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
+                          {seniorApproved ? <Check size={12} /> : seniorRejected ? <AlertCircle size={13} /> : 1}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1653,9 +1702,9 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "bg-blue-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
-                          {sent ? <Check size={14} /> : 2}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "" : ""}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
+                          {sent ? <Check size={12} /> : 2}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1689,9 +1738,9 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "bg-green-500/[0.04]" : custRecheck ? "bg-red-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
-                          {custApproved ? <Check size={14} /> : custRecheck ? <AlertCircle size={13} /> : 3}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "" : custRecheck ? "" : ""}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
+                          {custApproved ? <Check size={12} /> : custRecheck ? <AlertCircle size={13} /> : 3}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1734,9 +1783,9 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "bg-green-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
-                          {dated ? <Check size={14} /> : <CalendarDays size={13} />}
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "" : ""}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
+                          {dated ? <Check size={12} /> : <CalendarDays size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1823,9 +1872,9 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "bg-green-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
-                          {a?.Status === CrmStatus.REGISTERED ? <Check size={14} /> : <BarChart3 size={13} />}
+                      <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "" : ""}`}>
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
+                          {a?.Status === CrmStatus.REGISTERED ? <Check size={12} /> : <BarChart3 size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1848,7 +1897,6 @@ const CrmAgreement: React.FC = () => {
                           )}
                         </div>
                       </div>
-                    </div>
                   </div>
                 );
               })()}

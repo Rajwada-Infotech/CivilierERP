@@ -93,7 +93,12 @@ const AGR_SELECT = `
     -- These are surfaced as live fallbacks (not written into the agreement's
     -- own, deliberately version-stamped fields) so the Overview never shows
     -- an outright "—" for data the customer's already on file with.
-    bd.PanNo AS CustomerPanNo, bd.AadhaarNo AS CustomerAadhaarNo
+    bd.PanNo AS CustomerPanNo, bd.AadhaarNo AS CustomerAadhaarNo,
+    -- Paper counts for the list (it showed "0 docs" on every row: nothing
+    -- sent a count) and for each row's stage: mandatory papers / uploaded.
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id) AS DocumentCount,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1) AS MandatoryDocCount,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1 AND dc.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
