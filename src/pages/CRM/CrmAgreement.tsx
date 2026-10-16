@@ -67,70 +67,83 @@ function followupProgress(documents: any[] | undefined): { required: number; upl
   return { required, uploaded, percent };
 }
 
-const AGR_TABS = ["Timeline", "Overview", "Legal & Approval", "Documents", "AFS Payment", "AFS Registry"] as const;
+// Four tabs: the agreement's progress (legal executive + every approval
+// step and its actions), its papers, the AFS fee and registry trackers, and
+// its details. Old tab links (?tab=legal, ?tab=overview, ?tab=afs-payment …)
+// still land on the right one.
+const AGR_TABS = ["Progress", "Documents", "AFS fees & registry", "Details"] as const;
 type AgrTab = typeof AGR_TABS[number];
 
 const TAB_SLUGS: Record<string, AgrTab> = {
-  timeline: "Timeline", overview: "Overview", legal: "Legal & Approval",
-  "legal-approval": "Legal & Approval", documents: "Documents", papers: "Documents",
-  "afs-payment": "AFS Payment", "afs-query-payment": "AFS Payment",
-  "afs-registry": "AFS Registry",
+  progress: "Progress", timeline: "Progress", legal: "Progress", "legal-approval": "Progress",
+  documents: "Documents", papers: "Documents",
+  afs: "AFS fees & registry", "afs-payment": "AFS fees & registry", "afs-query-payment": "AFS fees & registry", "afs-registry": "AFS fees & registry",
+  details: "Details", overview: "Details",
 };
 const SLUG_FOR_TAB: Record<AgrTab, string> = {
-  Timeline: "timeline", Overview: "overview", "Legal & Approval": "legal",
-  Documents: "documents", "AFS Payment": "afs-payment", "AFS Registry": "afs-registry",
+  Progress: "progress", Documents: "documents", "AFS fees & registry": "afs", Details: "details",
 };
 
 type StepState = "done" | "current" | "upcoming";
-function agreementStepStates(a: any, documents: any[] | undefined): { label: string; state: StepState; tab: AgrTab }[] {
+type AgrStage = { label: string; detail: string; hint: string; state: StepState; tab: AgrTab };
+// The agreement's whole journey in five stages (it used to be a 9-step
+// scroller plus two more step lists). Every earlier step is inside one of
+// them — hover a stage to see which.
+function agreementStages(a: any, documents: any[] | undefined): AgrStage[] {
   const legalAssigned = a?.LegalExecutiveId != null;
   const followup = followupProgress(documents);
   const followupDone = followup.required > 0 && followup.percent === 100;
-  const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
+  const seniorStatus = a?.SeniorApprovalStatus;
+  const senior = seniorStatus === CrmStatus.APPROVED;
   const sent = !!a?.SentToCustomerAt;
   const custApproved = a?.CustomerApprovalStatus === CrmStatus.APPROVED;
   const dated = !!a?.AgreementDate;
   const executed = a?.Status === CrmStatus.EXECUTED || a?.Status === CrmStatus.REGISTERED;
   const registered = a?.Status === CrmStatus.REGISTERED;
+  const feesConfirmed = a?.AfsQpConfirmedAmount != null;
+  const regDone = a?.AfsRegistryStatus === "Completed";
+  const own = [legalAssigned && followupDone, senior, dated, executed, registered];
+  // A stage counts as done once it, or anything after it, is done.
+  const done = own.map((_, i) => own.slice(i).some(Boolean));
+  const first = done.findIndex((d) => !d);
+  const state = (i: number): StepState => (done[i] ? "done" : i === first ? "current" : "upcoming");
   return [
-    { label: "Initialisation",       state: "done" as StepState,                                                    tab: "Overview" as AgrTab },
-    { label: "Legal Exec. Assigned", state: (legalAssigned ? "done" : "current") as StepState,                      tab: "Legal & Approval" as AgrTab },
-    { label: `Agreement Followup${followup.required > 0 ? ` (${followup.percent}%)` : ""}`,
-      state: (followupDone ? "done" : legalAssigned ? "current" : "upcoming") as StepState,                         tab: "Documents" as AgrTab },
-    { label: "Senior Approval",      state: (senior ? "done" : followupDone ? "current" : "upcoming") as StepState,       tab: "Legal & Approval" as AgrTab },
-    { label: "Sent to Customer",     state: (sent ? "done" : senior ? "current" : "upcoming") as StepState,               tab: "Legal & Approval" as AgrTab },
-    { label: "Customer Approval",    state: (custApproved ? "done" : sent ? "current" : "upcoming") as StepState,         tab: "Legal & Approval" as AgrTab },
-    { label: "Date Agreed",          state: (dated ? "done" : custApproved ? "current" : "upcoming") as StepState,        tab: "Legal & Approval" as AgrTab },
-    { label: "Execution Follow-ups", state: (executed ? "done" : dated ? "current" : "upcoming") as StepState,            tab: "Documents" as AgrTab },
-    { label: "Registered",           state: (registered ? "done" : executed ? "current" : "upcoming") as StepState,       tab: "Overview" as AgrTab },
+    { label: "Prepare", state: state(0), tab: legalAssigned ? "Documents" : "Progress",
+      hint: "Legal executive assigned · agreement papers requested and uploaded",
+      detail: !legalAssigned ? "No legal executive" : followup.required > 0 ? `Papers ${followup.percent}%` : "Legal executive assigned" },
+    { label: "Senior approval", state: state(1), tab: "Progress",
+      hint: "Submitted for senior review · approved from the Approval Inbox",
+      detail: senior ? "Approved" : seniorStatus === CrmStatus.PENDING ? "In review" : seniorStatus === CrmStatus.REJECTED ? "Sent back" : "Not submitted" },
+    { label: "Customer", state: state(2), tab: "Progress",
+      hint: "Sent to the customer portal · customer approves · signing date agreed and confirmed",
+      detail: dated ? `Date ${String(a.AgreementDate).slice(0, 10)}`
+        : !sent ? "Not sent yet"
+        : a?.CustomerApprovalStatus === "RecheckRequested" ? "Recheck asked"
+        : !custApproved ? "Reviewing"
+        : a?.DateApprovalStatus === CrmStatus.PENDING ? "Date awaiting sign-off"
+        : "Agreeing the date" },
+    { label: "Sign", state: state(3), tab: executed ? "Progress" : "Documents",
+      hint: "Mandatory papers verified · agreement signed and marked executed",
+      detail: executed ? "Executed" : "Not signed yet" },
+    { label: "AFS and registration", state: state(4), tab: "AFS fees & registry",
+      hint: "AFS query payment confirmed · Sub-Registrar visit completed · marked registered with the Doc No.",
+      detail: registered ? "Registered" : regDone ? "Registry done — mark registered" : feesConfirmed ? "Fees paid · registry next" : executed ? "Fees pending" : "After signing" },
   ];
 }
-function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: AgrTab }[]; activeTab: AgrTab; onStepClick: (t: AgrTab) => void }) {
+function AgreementStageBar({ stages, onStageClick }: { stages: AgrStage[]; onStageClick: (t: AgrTab) => void }) {
   return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={`flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors group ${activeTab === s.tab ? "bg-muted/50" : ""}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2 ${
-              s.state === "done"
-                ? "bg-green-500 text-white ring-green-200 dark:ring-green-900"
-                : s.state === "current"
-                ? "bg-primary text-primary-foreground ring-primary/25"
-                : "bg-muted text-muted-foreground ring-transparent"}`}>
-              {s.state === "done" ? <Check size={11} /> : i + 1}
-            </span>
-            <span className={`text-[0.6875rem] font-semibold whitespace-nowrap leading-tight ${
-              s.state === "done" ? "text-green-600 dark:text-green-400"
-              : s.state === "current" ? "text-foreground"
-              : "text-muted-foreground/60"}`}>
-              {s.label}
-            </span>
-          </button>
-          {i < steps.length - 1 && (
-            <div className={`w-4 h-px mx-0.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-green-400" : "bg-border"}`} />
-          )}
-        </React.Fragment>
+    <div className="grid grid-cols-5 gap-2">
+      {stages.map((s) => (
+        <button key={s.label} onClick={() => onStageClick(s.tab)} title={s.hint}
+          className="min-w-0 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-muted/50 transition-colors">
+          <div className={`h-1.5 rounded-full ${s.state === "done" ? "bg-green-500" : s.state === "current" ? "bg-primary" : "bg-muted"}`} />
+          <div className={`mt-1.5 flex items-center gap-1 text-xs font-semibold ${
+            s.state === "done" ? "text-green-700 dark:text-green-400" : s.state === "current" ? "text-foreground" : "text-muted-foreground"}`}>
+            {s.state === "done" && <Check size={11} className="shrink-0" />}
+            <span className="truncate">{s.label}</span>
+          </div>
+          <div className={`text-[0.6875rem] truncate ${s.state === "upcoming" ? "text-muted-foreground/60" : "text-muted-foreground"}`}>{s.detail}</div>
+        </button>
       ))}
     </div>
   );
@@ -143,119 +156,6 @@ const docStatusColor: Record<string, string> = {
   Verified:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
 };
-
-type TlState = "done" | "current" | "upcoming" | "blocked";
-function TlRow({ n, title, detailText, state, badge, onJump, last }: {
-  n: number; title: string; detailText?: string; state: TlState; badge?: string;
-  onJump: () => void; last?: boolean;
-}) {
-  const ring =
-    state === "done" ? "bg-green-500 text-white" :
-    state === "current" ? "bg-primary text-primary-foreground" :
-    state === "blocked" ? "bg-muted text-muted-foreground" :
-    "bg-muted text-muted-foreground";
-  return (
-    <button onClick={onJump} className="w-full text-left flex gap-3 group">
-      <div className="flex flex-col items-center">
-        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 ${ring}`}>
-          {state === "done" ? <Check size={13} /> : n}
-        </span>
-        {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-green-400" : "bg-border"}`} />}
-      </div>
-      <div className={`flex-1 min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-sm font-semibold ${
-            state === "done" ? "text-green-700 dark:text-green-400"
-            : state === "current" ? "text-foreground"
-            : "text-muted-foreground"}`}>{title}</span>
-          {badge && (
-            <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-border bg-muted/50 text-muted-foreground">{badge}</span>
-          )}
-          <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-        {detailText && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detailText}</p>}
-      </div>
-    </button>
-  );
-}
-function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay = true, canViewAfsReg = true }: { agreement: any; bookingId: number; onJump: (t: AgrTab) => void; canViewAfsPay?: boolean; canViewAfsReg?: boolean }) {
-  const { data: afsQp } = useQuery({
-    queryKey: ["crm-afs-query-payment-booking", bookingId],
-    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-query-payment/booking/${bookingId}`); return r.ok ? r.json() : null; },
-    staleTime: 15_000,
-    enabled: canViewAfsPay && bookingId != null,
-  });
-  const { data: afsReg } = useQuery({
-    queryKey: ["crm-afs-registry-booking", bookingId],
-    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-registry/booking/${bookingId}`); return r.ok ? r.json() : null; },
-    staleTime: 15_000,
-    enabled: canViewAfsReg && bookingId != null,
-  });
-
-  const executed = agreement?.Status === CrmStatus.EXECUTED || agreement?.Status === CrmStatus.REGISTERED;
-  const registered = agreement?.Status === CrmStatus.REGISTERED;
-  const qpConfirmed = afsQp?.Status === "Confirmed";
-  const regDone = afsReg?.Status === "Completed";
-
-  const agrStageText = registered ? "Registered at Sub-Registrar"
-    : executed ? "Executed — awaiting AFS registration"
-    : agreement?.SentToCustomerAt ? "Sent to customer for approval"
-    : agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "Senior-approved — ready to send"
-    : agreement?.LegalExecutiveId != null ? "Drafting / legal review"
-    : "Not started — assign a Legal Executive";
-
-  const allRows: { n: number; title: string; detailText: string; state: TlState; badge?: string; tab: AgrTab }[] = [
-    {
-      n: 1, title: "Agreement for Sale",
-      detailText: agrStageText, state: registered ? "done" : executed ? "done" : "current",
-      badge: agreement?.Status, tab: "Overview",
-    },
-    {
-      n: 2, title: "Agreement Papers",
-      detailText: "Supporting documents — request, upload and verify",
-      state: executed ? "done" : agreement?.LegalExecutiveId != null ? "current" : "upcoming",
-      tab: "Documents",
-    },
-    {
-      n: 3, title: "AFS Query Payment",
-      detailText: !executed ? "Unlocks once the Agreement is Executed"
-        : qpConfirmed ? "Government fees confirmed paid"
-        : afsQp ? `In progress — ${afsQp.Status === "InfoSent" ? "info sent, awaiting payment" : "started"}`
-        : "Not started",
-      state: !executed ? "blocked" : qpConfirmed ? "done" : afsQp ? "current" : "current",
-      badge: afsQp?.Status, tab: "AFS Payment",
-    },
-    {
-      n: 4, title: "AFS Registry (Sub-Registrar Visit 1)",
-      detailText: !qpConfirmed ? "Unlocks once AFS Query Payment is Confirmed"
-        : regDone ? (afsReg?.AfsRegistrationNo ? "Completed & registration no. recorded" : "Visit complete — record the AFS Reg No on the Agreement tab")
-        : afsReg ? `In progress — ${afsReg.Status}`
-        : "Not started",
-      state: !qpConfirmed ? "blocked" : regDone ? "done" : afsReg ? "current" : "current",
-      badge: afsReg?.Status, tab: "AFS Registry",
-    },
-  ];
-  const rows = allRows
-    .filter((r) =>
-      r.tab === "AFS Payment" ? canViewAfsPay :
-      r.tab === "AFS Registry" ? canViewAfsReg : true,
-    )
-    .map((r, i) => ({ ...r, n: i + 1 }));
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
-        <BarChart3 size={15} className="text-primary" /> Workflow Timeline
-      </h3>
-      <div>
-        {rows.map((r, i) => (
-          <TlRow key={r.n} n={r.n} title={r.title} detailText={r.detailText}
-            state={r.state} badge={r.badge} onJump={() => onJump(r.tab)} last={i === rows.length - 1} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 const EMPTY_AGR_FORM = {
   BookingId: "", LegalName: "", LegalAddress: "",
@@ -660,13 +560,13 @@ const CrmAgreement: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const urlTab = TAB_SLUGS[(sp.get("tab") || "").toLowerCase()];
-  const [agrTab, setAgrTabRaw] = useState<AgrTab>(urlTab || "Timeline");
+  const [agrTab, setAgrTabRaw] = useState<AgrTab>(urlTab || "Progress");
   const setAgrTab = (t: AgrTab) => {
     setAgrTabRaw(t);
     setSp((p) => { p.set("tab", SLUG_FOR_TAB[t]); return p; }, { replace: true });
   };
   useEffect(() => {
-    setAgrTabRaw(TAB_SLUGS[(sp.get("tab") || "").toLowerCase()] || "Timeline");
+    setAgrTabRaw(TAB_SLUGS[(sp.get("tab") || "").toLowerCase()] || "Progress");
     setEditingLegalExec(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
@@ -1167,8 +1067,7 @@ const CrmAgreement: React.FC = () => {
   const afsPayRights = usePageRights("crm-afs-query-payment");
   const afsRegRights = usePageRights("crm-afs-registry");
   const tabAllowed = (t: AgrTab): boolean =>
-    t === "AFS Payment" ? afsPayRights.canView :
-    t === "AFS Registry" ? afsRegRights.canView : true;
+    t === "AFS fees & registry" ? (afsPayRights.canView || afsRegRights.canView) : true;
 
   return (
     <>
@@ -1247,105 +1146,6 @@ const CrmAgreement: React.FC = () => {
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
           ) : (
             <>
-              {detail.agreement?.Status !== CrmStatus.CANCELLED && (
-                <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-                  <AgreementStepper steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
-                  {(() => {
-                    const a = detail.agreement;
-                    const pendingDocs = unverifiedMandatoryDocs(detail.documents);
-                    const cancelled = isBookingCancelled(a);
-                    type BannerVariant = "error" | "warning" | "info" | "success" | "action";
-                    let variant: BannerVariant = "info";
-                    let text = "";
-                    let subtext = "";
-                    let cta: { label: string; onClick: () => void } | null = null;
-                    if (cancelled) {
-                      variant = "error";
-                      text = `Booking is ${a?.BookingStatus || "inactive"} — this agreement is locked.`;
-                      subtext = "Cancel the agreement to formally close it out.";
-                    } else if (a?.Status === CrmStatus.REGISTERED) {
-                      variant = "success";
-                      text = "Agreement fully complete — Registered at Sub-Registrar.";
-                    } else if (a?.Status === CrmStatus.EXECUTED) {
-                      variant = "info";
-                      text = "Agreement executed.";
-                      subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
-                    } else if (a?.LegalExecutiveId == null) {
-                      variant = "warning";
-                      text = "No Legal Executive assigned.";
-                      subtext = "Assign someone responsible for preparing the paperwork — required before execution (server-enforced).";
-                    } else if (a?.SeniorApprovalStatus !== CrmStatus.APPROVED) {
-                      variant = "warning";
-                      text = "Awaiting senior approval.";
-                      subtext = "Submit via the Legal & Approval tab, then an admin approves from the Admin Approval Inbox.";
-                    } else if (!a?.SentToCustomerAt) {
-                      variant = "action";
-                      text = "Senior-approved — ready to share with the customer.";
-                      cta = { label: "Send to Customer Portal", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
-                    } else if (a?.CustomerApprovalStatus === "RecheckRequested") {
-                      variant = "error";
-                      text = "Customer requested a recheck.";
-                      subtext = a?.LastRecheckRemarks ? `"${a.LastRecheckRemarks}"` : "Address the issue and resend.";
-                      cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
-                    } else if (a?.CustomerApprovalStatus !== CrmStatus.APPROVED) {
-                      variant = "info";
-                      text = "Sent to customer — awaiting their review and approval.";
-                      subtext = a?.SentToCustomerAt ? `Sent ${String(a.SentToCustomerAt).slice(0, 10)}` : "";
-                    } else if (!a?.AgreementDate) {
-                      if (a?.DateApprovalStatus === CrmStatus.PENDING) {
-                        variant = "warning";
-                        text = "Date agreed by both sides — awaiting super admin confirmation.";
-                      } else if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) {
-                        variant = "info";
-                        text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — waiting for customer's response.`;
-                      } else if (a?.ProposedDateStatus === "PendingCompanyReview") {
-                        variant = "action";
-                        text = `Customer proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — your turn to accept or counter.`;
-                        cta = { label: "Accept Date", onClick: handleAcceptDate };
-                      } else {
-                        variant = "action";
-                        text = "Customer approved — now propose an agreement signing date.";
-                        cta = { label: "Propose Agreement Date", onClick: () => { setSendDate(preferredAgrDate); setProposeDateDialog(true); } };
-                      }
-                    } else if (pendingDocs.length) {
-                      variant = "warning";
-                      text = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still need verification.`;
-                      subtext = pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ");
-                    } else {
-                      variant = "action";
-                      text = "All checks passed — ready to mark this agreement executed.";
-                      cta = { label: "Mark Executed", onClick: () => handleAgreementAction("mark-executed") };
-                    }
-                    type VariantDef = { card: string; text: string; sub: string; icon: React.ReactNode };
-                    const variantDef: Record<BannerVariant, VariantDef> = {
-                      error:   { card: "border-red-300 bg-red-500/10 dark:border-red-800 dark:bg-red-950/50",     text: "text-red-700 dark:text-red-300",   sub: "text-red-600/80 dark:text-red-400/80",   icon: <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" /> },
-                      warning: { card: "border-amber-300 bg-[#ffe2021a] dark:border-amber-800 dark:bg-amber-950/50", text: "text-amber-800 dark:text-amber-200", sub: "text-amber-700/80 dark:text-amber-400/80", icon: <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" /> },
-                      info:    { card: "border-blue-300 bg-blue-500/10 dark:border-blue-800 dark:bg-blue-950/50",   text: "text-blue-800 dark:text-blue-200",   sub: "text-blue-700/80 dark:text-blue-400/80",   icon: <Info size={16} className="text-blue-500 shrink-0 mt-0.5" /> },
-                      success: { card: "border-green-300 bg-green-500/10 dark:border-green-800 dark:bg-green-950/50", text: "text-green-800 dark:text-green-200", sub: "text-green-700/80 dark:text-green-400/80", icon: <CheckCircle2 size={16} className="text-green-500 shrink-0 mt-0.5" /> },
-                      action:  { card: "border-primary/40 bg-primary/10",                                            text: "text-foreground",                   sub: "text-muted-foreground",                   icon: <ArrowRight size={16} className="text-primary shrink-0 mt-0.5" /> },
-                    };
-                    const vd = variantDef[variant];
-                    return (
-                      <div className={`flex items-start justify-between gap-3 flex-wrap rounded-xl border px-4 py-3 ${vd.card}`}>
-                        <div className="flex items-start gap-2.5">
-                          {vd.icon}
-                          <div>
-                            <p className={`text-sm font-semibold leading-snug ${vd.text}`}>{text}</p>
-                            {subtext && <p className={`text-xs mt-0.5 ${vd.sub}`}>{subtext}</p>}
-                          </div>
-                        </div>
-                        {cta && (
-                          <button onClick={cta.onClick}
-                            className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
-                            {cta.label}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-
               <div className="rounded-xl border border-border overflow-hidden">
                 <div className={`px-4 py-3 flex items-center justify-between gap-3 flex-wrap ${
                   detail.agreement?.Status === "Registered" ? "bg-gradient-to-r from-green-500/10 to-green-500/5 border-b border-green-200/60 dark:border-green-900/40"
@@ -1486,20 +1286,117 @@ const CrmAgreement: React.FC = () => {
                 </div>
               </div>
 
+              {detail.agreement?.Status !== CrmStatus.CANCELLED && (
+                <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+                  <AgreementStageBar stages={agreementStages(detail.agreement, detail.documents)} onStageClick={setAgrTab} />
+                  {(() => {
+                    const a = detail.agreement;
+                    const pendingDocs = unverifiedMandatoryDocs(detail.documents);
+                    const cancelled = isBookingCancelled(a);
+                    type BannerVariant = "error" | "warning" | "info" | "success" | "action";
+                    let variant: BannerVariant = "info";
+                    let text = "";
+                    let subtext = "";
+                    let cta: { label: string; onClick: () => void } | null = null;
+                    if (cancelled) {
+                      variant = "error";
+                      text = `Booking is ${a?.BookingStatus || "inactive"} — this agreement is locked.`;
+                      subtext = "Cancel the agreement to formally close it out.";
+                    } else if (a?.Status === CrmStatus.REGISTERED) {
+                      variant = "success";
+                      text = "Agreement fully complete — Registered at Sub-Registrar.";
+                    } else if (a?.Status === CrmStatus.EXECUTED) {
+                      variant = "info";
+                      text = "Agreement executed.";
+                      subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
+                    } else if (a?.LegalExecutiveId == null) {
+                      variant = "warning";
+                      text = "No Legal Executive assigned.";
+                      subtext = "Assign someone responsible for preparing the paperwork — required before execution (server-enforced).";
+                    } else if (a?.SeniorApprovalStatus !== CrmStatus.APPROVED) {
+                      variant = "warning";
+                      text = "Awaiting senior approval.";
+                      subtext = "Submit it from the Progress tab below — an admin then approves it from the Approval Inbox.";
+                    } else if (!a?.SentToCustomerAt) {
+                      variant = "action";
+                      text = "Senior-approved — ready to share with the customer.";
+                      cta = { label: "Send to Customer Portal", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
+                    } else if (a?.CustomerApprovalStatus === "RecheckRequested") {
+                      variant = "error";
+                      text = "Customer requested a recheck.";
+                      subtext = a?.LastRecheckRemarks ? `"${a.LastRecheckRemarks}"` : "Address the issue and resend.";
+                      cta = { label: "Resend After Recheck", onClick: () => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : ""); setSendDialog(true); } };
+                    } else if (a?.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+                      variant = "info";
+                      text = "Sent to customer — awaiting their review and approval.";
+                      subtext = a?.SentToCustomerAt ? `Sent ${String(a.SentToCustomerAt).slice(0, 10)}` : "";
+                    } else if (!a?.AgreementDate) {
+                      if (a?.DateApprovalStatus === CrmStatus.PENDING) {
+                        variant = "warning";
+                        text = "Date agreed by both sides — awaiting super admin confirmation.";
+                      } else if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) {
+                        variant = "info";
+                        text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — waiting for customer's response.`;
+                      } else if (a?.ProposedDateStatus === "PendingCompanyReview") {
+                        variant = "action";
+                        text = `Customer proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — your turn to accept or counter.`;
+                        cta = { label: "Accept Date", onClick: handleAcceptDate };
+                      } else {
+                        variant = "action";
+                        text = "Customer approved — now propose an agreement signing date.";
+                        cta = { label: "Propose Agreement Date", onClick: () => { setSendDate(preferredAgrDate); setProposeDateDialog(true); } };
+                      }
+                    } else if (pendingDocs.length) {
+                      variant = "warning";
+                      text = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still need verification.`;
+                      subtext = pendingDocs.map((d: any) => d.Label || d.DocumentType).join(", ");
+                    } else {
+                      variant = "action";
+                      text = "All checks passed — ready to mark this agreement executed.";
+                      cta = { label: "Mark Executed", onClick: () => handleAgreementAction("mark-executed") };
+                    }
+                    type VariantDef = { card: string; text: string; sub: string; icon: React.ReactNode };
+                    const variantDef: Record<BannerVariant, VariantDef> = {
+                      error:   { card: "border-red-300 bg-red-500/10 dark:border-red-800 dark:bg-red-950/50",     text: "text-red-700 dark:text-red-300",   sub: "text-red-600/80 dark:text-red-400/80",   icon: <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" /> },
+                      warning: { card: "border-amber-300 bg-[#ffe2021a] dark:border-amber-800 dark:bg-amber-950/50", text: "text-amber-800 dark:text-amber-200", sub: "text-amber-700/80 dark:text-amber-400/80", icon: <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" /> },
+                      info:    { card: "border-blue-300 bg-blue-500/10 dark:border-blue-800 dark:bg-blue-950/50",   text: "text-blue-800 dark:text-blue-200",   sub: "text-blue-700/80 dark:text-blue-400/80",   icon: <Info size={16} className="text-blue-500 shrink-0 mt-0.5" /> },
+                      success: { card: "border-green-300 bg-green-500/10 dark:border-green-800 dark:bg-green-950/50", text: "text-green-800 dark:text-green-200", sub: "text-green-700/80 dark:text-green-400/80", icon: <CheckCircle2 size={16} className="text-green-500 shrink-0 mt-0.5" /> },
+                      action:  { card: "border-primary/40 bg-primary/10",                                            text: "text-foreground",                   sub: "text-muted-foreground",                   icon: <ArrowRight size={16} className="text-primary shrink-0 mt-0.5" /> },
+                    };
+                    const vd = variantDef[variant];
+                    return (
+                      <div className={`flex items-start justify-between gap-3 flex-wrap rounded-xl border px-4 py-3 ${vd.card}`}>
+                        <div className="flex items-start gap-2.5">
+                          {vd.icon}
+                          <div>
+                            <p className={`text-sm font-semibold leading-snug ${vd.text}`}>{text}</p>
+                            {subtext && <p className={`text-xs mt-0.5 ${vd.sub}`}>{subtext}</p>}
+                          </div>
+                        </div>
+                        {cta && (
+                          <button onClick={cta.onClick}
+                            className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
+                            {cta.label}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1 overflow-x-auto thin-scroll">
                 {AGR_TABS.filter(tabAllowed).map((t, i) => (
                   <button key={t} onClick={() => setAgrTab(t)}
                     className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                       agrTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}>
-                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${
-                      agrTab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{i + 1}</span>
                     {t}
                   </button>
                 ))}
               </div>
 
-              {agrTab === "Overview" && (
+              {agrTab === "Details" && (
               <div className="rounded-xl border border-border overflow-hidden space-y-0">
                 <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
                   <div className="px-4 py-3">
@@ -1629,7 +1526,7 @@ const CrmAgreement: React.FC = () => {
               </div>
               )}
 
-              {agrTab === "Legal & Approval" && (() => {
+              {agrTab === "Progress" && (() => {
                 const a = detail.agreement;
                 const cancelled = isBookingCancelled(a);
                 const legalAssigned = a?.LegalExecutiveId != null;
@@ -1655,8 +1552,8 @@ const CrmAgreement: React.FC = () => {
                   <div className="space-y-4">
                     <div className="rounded-xl border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <UserCircle2 size={15} className="text-primary" /> Legal Executive
+                        <h3 className="text-sm font-semibold flex items-center gap-1.5" title="The person responsible for preparing this agreement's paperwork. Required before execution.">
+                          <UserCircle2 size={15} className="text-primary" /> Legal Executive <Info size={12} className="text-muted-foreground/70 shrink-0" />
                         </h3>
                         {legalAssigned
                           ? <span className="text-[0.6875rem] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
@@ -1664,7 +1561,6 @@ const CrmAgreement: React.FC = () => {
                         }
                       </div>
                       <div className="px-4 py-3 space-y-2">
-                        <p className="text-xs text-muted-foreground">The person responsible for preparing this agreement's paperwork. Required before execution (server-enforced).</p>
                         {a?.LegalExecutiveId != null && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border rounded-lg px-3 py-1.5">
@@ -1711,16 +1607,8 @@ const CrmAgreement: React.FC = () => {
                     <div className="rounded-xl border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
                         <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <ShieldAlert size={15} className="text-primary" /> Approval Timeline
+                          <ShieldAlert size={15} className="text-primary" /> Approval steps
                         </h3>
-                        <div className="flex items-center gap-2">
-                          <div className="flex gap-1">
-                            {[0,1,2,3,4].map((i) => (
-                              <div key={i} className={`w-2 h-2 rounded-full ${i < stepsComplete ? "bg-green-500" : "bg-muted"}`} />
-                            ))}
-                          </div>
-                          <span className="text-xs text-muted-foreground">{stepsComplete}/5</span>
-                        </div>
                       </div>
 
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-green-500/[0.04]" : seniorRejected ? "bg-red-500/[0.04]" : ""}`}>
@@ -1729,16 +1617,13 @@ const CrmAgreement: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="text-sm font-semibold">Senior Review</span>
+                            <span className="text-sm font-semibold flex items-center gap-1" title="An admin or super-admin approves this agreement before it is shared with the customer. Once submitted, review happens from the Approval Inbox.">Senior Review <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                             <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               seniorApproved ? "text-green-600 bg-green-50 border-green-200"
                               : seniorRejected ? "text-red-600 bg-red-50 border-red-200"
                               : "text-sky-600 bg-sky-50 border-sky-200"
                             }`}>{seniorStatus || "Pending"}</span>
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            An admin or super-admin approves this agreement before it's shared with the customer. Once submitted, review happens from the <strong>Admin Approval Inbox</strong>.
-                          </p>
                           {seniorApproved && a?.SeniorApprovedAt && (
                             <p className="text-xs text-green-700 flex items-center gap-1">
                               <CheckCircle2 size={11} /> Approved {String(a.SeniorApprovedAt).slice(0,10)}
@@ -1774,14 +1659,11 @@ const CrmAgreement: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="text-sm font-semibold">Shared with Customer</span>
+                            <span className="text-sm font-semibold flex items-center gap-1" title="The customer can view this agreement in their portal and approve it or request a recheck.">Shared with Customer <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                             <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               sent ? "text-blue-600 bg-blue-50 border-blue-200" : "text-muted-foreground bg-muted/30 border-border"
                             }`}>{sent ? "Sent" : "Not sent"}</span>
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            The customer can view this agreement in their portal and approve it or request a recheck.
-                          </p>
                           {sent && a?.SentToCustomerAt && (
                             <p className="text-xs text-blue-600 flex items-center gap-1">
                               <Send size={11} /> Sent {fmtIstIso(a.SentToCustomerAt)}
@@ -1813,16 +1695,13 @@ const CrmAgreement: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="text-sm font-semibold">Customer Approval</span>
+                            <span className="text-sm font-semibold flex items-center gap-1" title="Customer reviews the agreement from their portal and approves it or flags issues.">Customer Approval <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                             <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               custApproved ? "text-green-600 bg-green-50 border-green-200"
                               : custRecheck ? "text-red-600 bg-red-50 border-red-200"
                               : "text-sky-600 bg-sky-50 border-sky-200"
                             }`}>{custStatus || "Pending"}</span>
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            Customer reviews the agreement from their portal and approves it or flags issues.
-                          </p>
                           {custApproved && a?.CustomerApprovedAt && (
                             <p className="text-xs text-green-700 flex items-center gap-1">
                               <CheckCircle2 size={11} /> Approved by customer {String(a.CustomerApprovedAt).slice(0,10)}
@@ -1861,7 +1740,7 @@ const CrmAgreement: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="text-sm font-semibold">Agreement Date</span>
+                            <span className="text-sm font-semibold flex items-center gap-1" title="Both sides negotiate a mutually acceptable signing date through the portal. A super-admin confirms the final agreed date.">Agreement Date <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                             {dated ? (
                               <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-green-600 bg-green-50 border-green-200">
                                 Confirmed: {String(a.AgreementDate).slice(0,10)}
@@ -1874,9 +1753,6 @@ const CrmAgreement: React.FC = () => {
                               <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            Both sides negotiate a mutually acceptable signing date through the portal. A super-admin confirms the final agreed date.
-                          </p>
                           {!dated && custApproved && !cancelled && (() => {
                             if (a?.DateApprovalStatus === CrmStatus.PENDING) return (
                               <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 flex items-center gap-1.5">
@@ -1953,7 +1829,7 @@ const CrmAgreement: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <span className="text-sm font-semibold">Execution &amp; Registration</span>
+                            <span className="text-sm font-semibold flex items-center gap-1" title="All mandatory documents verified, then signed and executed, then registered at the Sub-Registrar office with a Doc No.">Execution &amp; Registration <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                             <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                               a?.Status === CrmStatus.REGISTERED ? "text-green-600 bg-green-50 border-green-200"
                               : a?.Status === CrmStatus.EXECUTED ? "text-blue-600 bg-blue-50 border-blue-200"
@@ -1962,9 +1838,6 @@ const CrmAgreement: React.FC = () => {
                               {a?.Status === CrmStatus.REGISTERED ? "Registered" : a?.Status === CrmStatus.EXECUTED ? "Executed" : "Pending"}
                             </span>
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            All mandatory documents verified → signed &amp; executed → registered at the Sub-Registrar's office with a Doc No.
-                          </p>
                           {a?.Status === CrmStatus.EXECUTED && (
                             <p className="text-xs text-blue-600">Agreement executed. Record the Sub-Registrar Doc No. to mark it Registered.</p>
                           )}
@@ -2094,18 +1967,9 @@ const CrmAgreement: React.FC = () => {
                 );
               })()}
 
-              {agrTab === "Timeline" && (
-                <AgreementTimeline
-                  agreement={detail.agreement}
-                  bookingId={detail.agreement.BookingId}
-                  onJump={(t) => setAgrTab(t)}
-                  canViewAfsPay={afsPayRights.canView}
-                  canViewAfsReg={afsRegRights.canView}
-                />
-              )}
-
-              {agrTab === "AFS Payment" && (
-                afsPayRights.canView ? (
+              {agrTab === "AFS fees & registry" && (
+              <div className="space-y-4">
+                {afsPayRights.canView ? (
                   <CrmAfsQueryPayment
                     embeddedBookingId={detail.agreement.BookingId}
                     agreementStatus={detail.agreement.Status}
@@ -2120,11 +1984,8 @@ const CrmAgreement: React.FC = () => {
                   <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
                     You don't have access to the AFS Query Payment stage.
                   </div>
-                )
-              )}
-
-              {agrTab === "AFS Registry" && (
-                afsRegRights.canView ? (
+                )}
+                {afsRegRights.canView ? (
                   <CrmAfsRegistry
                     embeddedBookingId={detail.agreement.BookingId}
                     onChanged={() => {
@@ -2137,7 +1998,8 @@ const CrmAgreement: React.FC = () => {
                   <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
                     You don't have access to the AFS Registry stage.
                   </div>
-                )
+                )}
+              </div>
               )}
             </>
           )}
