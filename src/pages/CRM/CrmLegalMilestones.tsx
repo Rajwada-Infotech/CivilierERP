@@ -525,7 +525,8 @@ const StageRow: React.FC<{
   bookingId: number;
   navigate: (path: string) => void;
   canEdit: boolean;
-}> = ({ stage, isLast, bookingId, navigate, canEdit }) => {
+  showLockHint?: boolean;
+}> = ({ stage, isLast, bookingId, navigate, canEdit, showLockHint = true }) => {
   const { isDone, isLocked, action } = stage;
   const hasRecord = !!stage.status;
   const isAuto = action.kind === "auto";
@@ -590,7 +591,7 @@ const StageRow: React.FC<{
         </div>
         <div className="flex-1 py-0.5 min-w-0 flex items-baseline gap-2 flex-wrap" title={stage.unlockedHint}>
           <span className="text-xs font-medium text-muted-foreground/60 select-none">{stage.label}</span>
-          {stage.unlockedHint && <span className="text-[0.625rem] text-muted-foreground/50">{stage.unlockedHint}</span>}
+          {showLockHint && stage.unlockedHint && <span className="text-[0.625rem] text-muted-foreground/50">{stage.unlockedHint}</span>}
         </div>
       </div>
     );
@@ -613,7 +614,13 @@ const StageRow: React.FC<{
           <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{stage.sublabel}</p>
         </div>
         {isAuto ? (
-          <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/50 border border-border rounded px-2 py-1 whitespace-nowrap">Auto</span>
+          <span className="shrink-0 flex items-center gap-1.5">
+            <span className="text-[0.625rem] text-muted-foreground bg-muted/50 border border-border rounded px-2 py-1 whitespace-nowrap" title="Ticks itself once it's done on the Agreement page">Auto</span>
+            <button onClick={() => navigate(`/crm/agreements?bookingId=${bookingId}`)}
+              className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border bg-background hover:bg-muted whitespace-nowrap">
+              Open Agreement <ExternalLink size={10} />
+            </button>
+          </span>
         ) : (isManual && !canEdit) || actionLabel === null ? null : (
           <button onClick={handleClick}
             className="shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border-primary btn-module text-white whitespace-nowrap">
@@ -685,9 +692,11 @@ const CrmLegalMilestones: React.FC = () => {
   // (selectRow below) so selection never depends on the object still being
   // present in the current page/filter — only the deep-link path above
   // needs the dedicated lookup.
-  const selected = selectedTracker && selectedTracker.Id === selectedId
-    ? selectedTracker
-    : (trackers as any[]).find((t: any) => t.Id === selectedId);
+  // The fresh list row wins over the snapshot taken at selection - the
+  // snapshot never refreshed, so after "Mark Done" the journey still showed
+  // the step as pending until the booking was picked again.
+  const selected = (trackers as any[]).find((t: any) => t.Id === selectedId)
+    ?? (selectedTracker && selectedTracker.Id === selectedId ? selectedTracker : undefined);
   const selectRow = (t: any) => { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); };
 
   // Pre-build WorkflowModel for every list row once per trackers change instead
@@ -735,7 +744,14 @@ const CrmLegalMilestones: React.FC = () => {
         body: JSON.stringify({ Status: status, Done: status === "Completed" ? new Date().toISOString().slice(0, 10) : undefined }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
+      toast.success("Marked done");
       qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
+      // A deep-linked booking may not be on the current list page: refresh
+      // its own snapshot as well.
+      if (selected?.BookingId != null) {
+        const fresh = await fetchTrackerByBooking(String(selected.BookingId));
+        if (fresh) setSelectedTracker(fresh);
+      }
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
@@ -904,7 +920,13 @@ const CrmLegalMilestones: React.FC = () => {
                                   <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{stage.sublabel}</p>
                                 </div>
                                 {btn === "auto" ? (
-                                  <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/50 border border-border rounded px-2 py-1 whitespace-nowrap" title="Ticks itself when it's done on its own page">Auto</span>
+                                  <span className="shrink-0 flex items-center gap-1.5">
+                                    <span className="text-[0.625rem] text-muted-foreground bg-muted/50 border border-border rounded px-2 py-1 whitespace-nowrap" title="Ticks itself once it's done on the Agreement page">Auto</span>
+                                    <button onClick={() => navigate(`/crm/agreements?bookingId=${selected.BookingId}`)}
+                                      className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted whitespace-nowrap">
+                                      Open Agreement <ExternalLink size={10} />
+                                    </button>
+                                  </span>
                                 ) : btn ? (
                                   <button onClick={btn.onClick}
                                     className="shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg btn-module text-white whitespace-nowrap">
@@ -952,6 +974,7 @@ const CrmLegalMilestones: React.FC = () => {
                             bookingId={selected.BookingId}
                             navigate={navigate}
                             canEdit={rights.canEdit}
+                            showLockHint={section.stages.findIndex((x) => x.isLocked && !x.isDone) === idx}
                           />
                         ))}
                       </div>
