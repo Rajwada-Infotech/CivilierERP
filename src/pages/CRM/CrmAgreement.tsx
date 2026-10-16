@@ -1134,8 +1134,8 @@ const CrmAgreement: React.FC = () => {
                       const cur = st.find((x) => x.state === "current");
                       return (
                         <div className="space-y-1">
-                          <div className="grid grid-cols-5 gap-0.5">
-                            {st.map((x) => <div key={x.label} className={`h-1 rounded-full ${x.state === "done" ? "bg-green-500" : x.state === "current" ? "bg-primary" : "bg-muted"}`} />)}
+                          <div className="flex gap-0.5">
+                            {st.map((x) => <div key={x.label} className={`flex-1 h-1 rounded-full ${x.state === "done" ? "bg-green-500" : x.state === "current" ? "bg-primary" : "bg-muted"}`} />)}
                           </div>
                           <div className="text-[0.6875rem] truncate">
                             {cur ? <><span className="font-medium text-foreground">{cur.label}</span><span className="text-muted-foreground"> · {cur.detail}</span></>
@@ -1204,49 +1204,6 @@ const CrmAgreement: React.FC = () => {
                         </button>
                       )
                     )}
-                    {detail.agreement?.Status === CrmStatus.DRAFT && (() => {
-                      const pendingDocs = unverifiedMandatoryDocs(detail.documents);
-                      if (isBookingCancelled(detail.agreement)) {
-                        return (
-                          <span title="Booking is cancelled — cannot mark executed" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
-                            Mark Executed
-                          </span>
-                        );
-                      }
-                      const approvalsReady = detail.agreement?.SeniorApprovalStatus === CrmStatus.APPROVED
-                        && detail.agreement?.CustomerApprovalStatus === CrmStatus.APPROVED
-                        && detail.agreement?.AgreementDate;
-                      if (!approvalsReady) {
-                        return (
-                          <span title="Requires senior approval, customer approval, and a mutually agreed date"
-                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
-                            Mark Executed (not ready)
-                          </span>
-                        );
-                      }
-                      if (detail.agreement?.LegalExecutiveId == null) {
-                        return (
-                          <span title="A Legal Executive must be assigned first — pick one from the Legal Executive field above"
-                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
-                            Mark Executed (legal exec. unassigned)
-                          </span>
-                        );
-                      }
-                      if (pendingDocs.length) {
-                        return (
-                          <span title={`Mandatory document(s) not yet verified: ${pendingDocs.map((d) => d.Label || d.DocumentType).join(", ")}`}
-                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
-                            Mark Executed (docs pending)
-                          </span>
-                        );
-                      }
-                      return (
-                        <button onClick={() => handleAgreementAction("mark-executed")}
-                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
-                          Mark Executed
-                        </button>
-                      );
-                    })()}
                     {detail.agreement?.Status === CrmStatus.EXECUTED && (
                       isBookingCancelled(detail.agreement) ? (
                         <span title="Booking is cancelled — cannot mark registered" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
@@ -1304,7 +1261,7 @@ const CrmAgreement: React.FC = () => {
                       : a?.ProposedDate ? <span>{String(a.ProposedDate).slice(0, 10)} <span className="text-muted-foreground">(proposed)</span></span>
                       : <span className="text-muted-foreground">Not set</span>],
                     ["Mandatory papers", fp.required ? `${fp.required - pending} of ${fp.required} verified` : <span className="text-muted-foreground">None requested</span>],
-                    ["Value", a?.GrandTotal ? `₹${Number(a.GrandTotal).toLocaleString("en-IN")}` : "—"],
+                    ["Value", a?.GrandTotal ? `₹${Number(a.GrandTotal).toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(Number(a.GrandTotal)) ? 0 : 2, maximumFractionDigits: 2 })}` : "—"],
                   ];
                   return (
                     <div className="px-4 py-2.5 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
@@ -1336,7 +1293,9 @@ const CrmAgreement: React.FC = () => {
                     if (cancelled) {
                       variant = "error";
                       text = `Booking is ${a?.BookingStatus || "inactive"} — this agreement is locked.`;
-                      subtext = "Cancel the agreement to formally close it out.";
+                      subtext = (a?.Status === CrmStatus.DRAFT || a?.Status === CrmStatus.EXECUTED)
+                        ? "Cancel the agreement to formally close it out."
+                        : "No further changes can be made to it here.";
                     } else if (a?.Status === CrmStatus.REGISTERED) {
                       variant = "success";
                       text = "Agreement fully complete — Registered at Sub-Registrar.";
@@ -1353,6 +1312,14 @@ const CrmAgreement: React.FC = () => {
                       text = "No Legal Executive assigned.";
                       subtext = "Assign someone responsible for preparing the paperwork — required before execution.";
                       cta = { label: "Assign legal executive", onClick: () => setAgrTab("Progress") };
+                    } else if (a?.SeniorApprovalStatus === CrmStatus.REJECTED) {
+                      variant = "error";
+                      text = "Senior review sent it back.";
+                      subtext = `${a?.SeniorApprovalRemarks ? `"${a.SeniorApprovalRemarks}" — ` : ""}fix it (Edit Details), then submit again.`;
+                      extra = (
+                        <ApprovalActions status={a?.SeniorApprovalStatus} recordId={a?.Id} endpoint={API} submitOnly
+                          onSuccess={() => { qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); qc.invalidateQueries({ queryKey: ["crm-agreements"] }); }} />
+                      );
                     } else if (a?.SeniorApprovalStatus !== CrmStatus.APPROVED) {
                       variant = "warning";
                       text = "Awaiting senior approval.";
@@ -1384,6 +1351,7 @@ const CrmAgreement: React.FC = () => {
                       if (a?.DateApprovalStatus === CrmStatus.PENDING) {
                         variant = "warning";
                         text = "Date agreed by both sides — awaiting super admin confirmation.";
+                        subtext = "A super admin confirms it from the Approval Inbox.";
                       } else if (a?.ProposedDateStatus === CrmStatus.PENDING_CUSTOMER_REVIEW) {
                         variant = "info";
                         text = `We proposed ${a?.ProposedDate ? String(a.ProposedDate).slice(0, 10) : "a date"} — waiting for customer's response.`;
@@ -1396,6 +1364,7 @@ const CrmAgreement: React.FC = () => {
                       } else {
                         variant = "action";
                         text = "Customer approved — now propose an agreement signing date.";
+                        subtext = "Customer gave a date off the portal? Record it in the Progress tab.";
                         cta = { label: "Propose Agreement Date", onClick: () => { setSendDate(preferredAgrDate); setProposeDateDialog(true); } };
                       }
                     } else if (pendingDocs.length) {
