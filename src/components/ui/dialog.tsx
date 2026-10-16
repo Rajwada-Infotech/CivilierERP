@@ -77,14 +77,20 @@ export function dedupeCloseControls(el: HTMLElement, anchor: HTMLElement | null)
     const dup = hasX && /^close$/i.test((b.textContent || "").trim()) && !b.querySelector("svg.lucide-x, svg.lucide-circle-x, svg.lucide-x-circle");
     b.toggleAttribute("data-dup-close", dup);
     if (!dup) return;
-    // The footer block this Close lived in (a direct child of the dialog):
-    // if nothing clickable is left in it, hide the whole bar — any status
-    // text there ("Locked for viewing") already shows at the top.
-    let bar: HTMLElement | null = b;
-    while (bar && bar.parentElement !== el) bar = bar.parentElement;
-    if (!bar) return;
-    const others = Array.from(bar.querySelectorAll("button, a, input, select, textarea")).filter((x) => !x.hasAttribute("data-dup-close"));
-    if (others.length === 0) bar.setAttribute("data-dup-close-bar", "");
+    // The bar this Close sits in: climb only while the wrapper holds nothing
+    // but this button (no other text, nothing else clickable) and hide that.
+    // It used to climb to the dialog's direct child unconditionally - when a
+    // dialog's whole body was one wrapper ending in a lone Close (OC/CC detail
+    // in view mode), the entire body was hidden and the dialog showed empty.
+    const own = (b.textContent || "").trim();
+    let bar: HTMLElement = b;
+    while (bar.parentElement && bar.parentElement !== el) {
+      const p = bar.parentElement;
+      const others = Array.from(p.querySelectorAll("button, a, input, select, textarea")).filter((x) => !x.hasAttribute("data-dup-close"));
+      if (others.length || (p.textContent || "").trim() !== own) break;
+      bar = p;
+    }
+    if (bar !== b) bar.setAttribute("data-dup-close-bar", "");
   });
 }
 

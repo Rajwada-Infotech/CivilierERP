@@ -28,6 +28,42 @@ async function recordProjectCertCoverage(pool, certId) {
       AND NOT EXISTS (SELECT 1 FROM dbo.CrmOccupancyCertificateBlock cb WHERE cb.CertificateId = oc.Id AND cb.BlockId = bm.Id)`);
 }
 
+// GET /board - every project with blocks or a certificate, worked out from
+// its blocks, plus each block's coverage and the bookings still waiting.
+// One call for the whole page (project scope applied).
+router.get("/board", requirePageRight("crm-oc-cc", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "pv.ProjectId", "AND") : "";
+    const scopeB = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "v.ProjectId", "AND") : "";
+    const [projects, blocks] = await Promise.all([
+      pool.request().query(`
+        SELECT pv.*, e.name AS ProjectName,
+          (SELECT COUNT(*) FROM dbo.CrmBooking b WHERE b.ProjectId = pv.ProjectId AND b.IsActive = 1
+             AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS LiveBookings,
+          (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.vw_CrmBookingOcCc bv ON bv.BookingId = b.Id
+            WHERE b.ProjectId = pv.ProjectId AND b.IsActive = 1 AND bv.Received = 0
+              AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS WaitingBookings
+        FROM dbo.vw_CrmProjectOcCc pv
+        JOIN dbo.enterprise e ON e.id = pv.ProjectId
+        WHERE (pv.ActiveBlocks > 0 OR EXISTS (SELECT 1 FROM dbo.CrmOccupancyCertificate oc WHERE oc.ProjectId = pv.ProjectId)) ${scope}
+        ORDER BY e.name`),
+      pool.request().query(`
+        SELECT v.*, oc.CertType, oc.CertificateNo,
+          (SELECT COUNT(*) FROM dbo.CrmBooking b LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+            WHERE um.BlockId = v.BlockId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS LiveBookings
+        FROM dbo.vw_CrmBlockOcCc v
+        LEFT JOIN dbo.CrmOccupancyCertificate oc ON oc.Id = v.CertificateId
+        WHERE v.IsActive = 1 ${scopeB}
+        ORDER BY v.ProjectId, v.BlockName`),
+    ]);
+    res.json({ projects: projects.recordset, blocks: blocks.recordset });
+  } catch (e) {
+    console.error("[crm-oc-cc] GET /board error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /overview?projectId= - the project's OC/CC worked out from its blocks:
 // each block (covered by its own certificate, by the project certificate, or
 // not yet) and whether the project as a whole has it.

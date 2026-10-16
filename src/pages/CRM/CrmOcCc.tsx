@@ -9,7 +9,7 @@ import { translateError } from "@/lib/translateError";
 import {
   Plus, Pencil, CheckCircle2, Clock, AlertTriangle,
   Building2, Hash, Calendar, Users, ShieldCheck,
-  FileText, CircleDot, Circle, Lock,
+  FileText, CircleDot, Circle, Lock, ChevronDown,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
@@ -89,109 +89,6 @@ function OcccStepper({ status }: { status: string }) {
           </React.Fragment>
         );
       })}
-    </div>
-  );
-}
-
-// ── Project card ──────────────────────────────────────────────────────────────
-function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onClick: () => void }) {
-  const isReceived = row.Status === "Received";
-  const appDays    = daysSince(row.ApplicationDate);
-  const overdue    = !isReceived && appDays != null && appDays > 45;
-  const warning    = !isReceived && appDays != null && appDays > 20 && !overdue;
-
-  return (
-    <div
-      onClick={onClick}
-      className={`group relative rounded-2xl border bg-card cursor-pointer transition-all hover:shadow-md hover:border-primary/30 ${
-        isReceived ? "border-emerald-200 dark:border-emerald-800/50" :
-        overdue    ? "border-red-200 dark:border-red-800/50" :
-        warning    ? "border-amber-200 dark:border-amber-800/50" :
-        "border-border"
-      }`}
-    >
-      {/* Top color strip */}
-      <div className={`h-1 rounded-t-2xl ${
-        isReceived ? "bg-emerald-400" : overdue ? "bg-red-400" : warning ? "bg-amber-400" : "bg-border"
-      }`} />
-
-      <div className="p-5 space-y-4">
-        {/* Header row */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="font-semibold text-base text-foreground leading-tight truncate">
-              {row.ProjectName}
-              {row.BlockName && <span className="text-muted-foreground font-normal"> · Block {row.BlockName}</span>}
-            </h3>
-            {row.IssuedBy && (
-              <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                <Building2 size={10} /> {row.IssuedBy}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={`text-[0.6875rem] font-bold px-2 py-0.5 rounded-md border ${CERT_COLOR[row.CertType] ?? CERT_COLOR["OC+CC"]}`}>
-              {row.CertType}
-            </span>
-          </div>
-        </div>
-
-        {/* Stepper */}
-        <OcccStepper status={row.Status} />
-
-        {/* Key info grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-          <div>
-            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Applied On</p>
-            <p className="font-medium">{fmtDate(row.ApplicationDate) || "—"}</p>
-          </div>
-          {isReceived ? (
-            <div>
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Received On</p>
-              <p className="font-medium text-emerald-600 dark:text-emerald-400">{fmtDate(row.ReceivedDate) || "—"}</p>
-            </div>
-          ) : (
-            <div>
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Days Pending</p>
-              <p className={`font-semibold ${overdue ? "text-red-600" : warning ? "text-amber-600" : ""}`}>
-                {appDays != null ? `${appDays} days` : "—"}
-              </p>
-            </div>
-          )}
-          {row.CertificateNo && (
-            <div className="col-span-2">
-              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Certificate No</p>
-              <p className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{row.CertificateNo}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Footer: booking counts + gate status */}
-        <div className="flex items-center justify-between pt-3 border-t border-border">
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Users size={11} /> {row.BookingCount ?? 0} bookings
-            </span>
-            {(row.BookingsAwaitingPossession ?? 0) > 0 && (
-              <span className={`flex items-center gap-1 font-medium ${
-                isReceived ? "text-emerald-600 dark:text-emerald-400" : "text-sky-600 dark:text-sky-400"
-              }`}>
-                {isReceived
-                  ? <><CheckCircle2 size={11} /> {row.BookingsAwaitingPossession} possession-ready</>
-                  : <><AlertTriangle size={11} /> {row.BookingsAwaitingPossession} awaiting OC/CC</>
-                }
-              </span>
-            )}
-          </div>
-          <div className={`flex items-center gap-1 text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border ${
-            isReceived
-              ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800"
-              : "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-950/30 dark:border-sky-800"
-          }`}>
-            {isReceived ? <><ShieldCheck size={10} /> Gate Cleared</> : <><Lock size={10} /> Gate Pending</>}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -344,102 +241,199 @@ function OcccForm({
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-// ── Project status: worked out from its blocks (migration 577) ─────────────
-// A block has OC/CC by its own certificate, or by a project-wide certificate
-// received while that block existed. The project has it when every active
-// block does - a block added later puts it back to "not yet" until that
-// block's own certificate arrives.
-function ProjectOcCcDiagram({ projects, canCreate, onAddForBlock }: {
-  projects: any[]; canCreate: boolean; onAddForBlock: (projectId: string, blockId: string) => void;
-}) {
-  const [projectId, setProjectId] = useState<string>("");
-  const pid = projectId || (projects[0] ? String(projects[0].Id) : "");
-  const { data, isLoading } = useQuery({
-    queryKey: ["crm-oc-cc-overview", pid],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/overview?projectId=${pid}`);
-      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load");
-      return r.json();
-    },
-    enabled: !!pid,
-    staleTime: 15_000,
-  });
-  const proj = data?.project;
-  const blocks: any[] = data?.blocks || [];
-  const active = blocks.filter((b) => b.IsActive);
-  const inactive = blocks.filter((b) => !b.IsActive);
-  const received = proj?.Received === 1;
-  const fmt = (d: any) => (d ? String(d).slice(0, 10) : "");
+// ── OC / CC board: one row per project, worked out from its blocks ─────────
+// (migration 577). A block has OC/CC by its own certificate or a project-wide
+// one received while it existed; the project has it when every active block
+// does. Opening a project shows its certificates and every block.
+type BoardData = { projects: any[]; blocks: any[] };
+
+function certAge(row: any) {
+  const days = daysSince(row.ApplicationDate);
+  const received = row.Status === "Received";
+  return { days, received, overdue: !received && days != null && days > 45, warning: !received && days != null && days > 20 && days <= 45 };
+}
+
+function CertLine({ row, onOpen }: { row: any; onOpen: () => void }) {
+  const a = certAge(row);
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h3 className="text-sm font-semibold flex items-center gap-1.5"><Building2 size={15} className="text-primary" /> Project status</h3>
-          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Worked out from its blocks — every active block must have OC/CC.</p>
-        </div>
-        <select value={pid} onChange={(e) => setProjectId(e.target.value)}
-          className="text-sm border border-border rounded-lg px-2 py-1.5 bg-background min-w-[200px]">
-          {projects.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-        </select>
+    <button onClick={onOpen}
+      className="w-full text-left flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-border hover:border-primary/40 hover:bg-muted/30 transition-colors">
+      <div className="min-w-0 flex items-center gap-2 flex-wrap">
+        <span className={`text-[0.625rem] font-bold px-1.5 py-0.5 rounded border ${CERT_COLOR[row.CertType] ?? CERT_COLOR["OC+CC"]}`}>{row.CertType}</span>
+        <span className="text-xs font-semibold">{row.BlockName ? `Block ${row.BlockName}` : "Whole project"}</span>
+        {row.CertificateNo && <span className="text-[0.6875rem] font-mono text-muted-foreground">{row.CertificateNo}</span>}
+        {row.IssuedBy && <span className="text-[0.6875rem] text-muted-foreground">· {row.IssuedBy}</span>}
+      </div>
+      <div className="flex items-center gap-2 shrink-0 text-[0.6875rem]">
+        {a.received
+          ? <span className="text-emerald-700 dark:text-emerald-400">Received {fmtDate(row.ReceivedDate) || ""}</span>
+          : <span className={a.overdue ? "text-red-600 font-semibold" : a.warning ? "text-amber-600 font-semibold" : "text-muted-foreground"}>
+              Applied {fmtDate(row.ApplicationDate) || ""}{a.days != null ? ` · ${a.days} day${a.days === 1 ? "" : "s"} pending` : ""}
+            </span>}
+        <span className={`px-1.5 py-0.5 rounded-full border font-semibold ${a.received
+          ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800"
+          : "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-950/30 dark:border-sky-800"}`}>{row.Status}</span>
+        <Pencil size={11} className="text-muted-foreground" />
+      </div>
+    </button>
+  );
+}
+
+function OcccBoard({ board, certs, canCreate, onAdd, onOpenCert }: {
+  board: BoardData | undefined; certs: any[]; canCreate: boolean;
+  onAdd: (projectId: string, blockId?: string) => void; onOpenCert: (row: any) => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "open" | "done">("all");
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const projects = board?.projects || [];
+  const blocksBy = useMemo(() => {
+    const m: Record<number, any[]> = {};
+    for (const b of board?.blocks || []) (m[b.ProjectId] ||= []).push(b);
+    return m;
+  }, [board]);
+  const certsBy = useMemo(() => {
+    const m: Record<number, any[]> = {};
+    for (const c of certs) (m[c.ProjectId] ||= []).push(c);
+    return m;
+  }, [certs]);
+
+  const done = projects.filter((p) => p.Received === 1);
+  const notDone = projects.filter((p) => p.Received !== 1);
+  const blocksMissing = projects.reduce((n, p) => n + Math.max(0, (p.ActiveBlocks || 0) - (p.CoveredBlocks || 0)), 0);
+  const waiting = projects.reduce((n, p) => n + (p.WaitingBookings || 0), 0);
+
+  const shown = projects
+    .filter((p) => filter === "all" || (filter === "done" ? p.Received === 1 : p.Received !== 1))
+    .filter((p) => !search.trim() || String(p.ProjectName).toLowerCase().includes(search.trim().toLowerCase()))
+    // what needs attention first: bookings waiting, then not complete, then complete
+    .sort((a, b) => (b.WaitingBookings || 0) - (a.WaitingBookings || 0) || (a.Received - b.Received) || String(a.ProjectName).localeCompare(String(b.ProjectName)));
+
+  const stats = [
+    { label: "Projects with OC / CC", value: done.length, cls: "text-emerald-700 dark:text-emerald-400" },
+    { label: "Projects not complete", value: notDone.length, cls: "text-amber-700 dark:text-amber-400" },
+    { label: "Blocks without OC / CC", value: blocksMissing, cls: "text-foreground" },
+    { label: "Bookings waiting on OC / CC", value: waiting, cls: waiting ? "text-red-600 dark:text-red-400" : "text-foreground" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {stats.map((m) => (
+          <div key={m.label} className="rounded-xl border border-border bg-card px-4 py-3">
+            <div className={`text-2xl font-bold font-heading tabular-nums ${m.cls}`}>{m.value}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{m.label}</div>
+          </div>
+        ))}
       </div>
 
-      {isLoading || !proj ? (
-        <div className="h-24 rounded-lg bg-muted animate-pulse" />
-      ) : (
-        <>
-          {/* the project, worked out */}
-          <div className={`mx-auto max-w-md rounded-xl border px-4 py-3 text-center ${received
-            ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"
-            : "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30"}`}>
-            <p className={`text-sm font-semibold flex items-center justify-center gap-1.5 ${received ? "text-emerald-800 dark:text-emerald-200" : "text-amber-800 dark:text-amber-200"}`}>
-              {received ? <ShieldCheck size={15} /> : <Clock size={15} />}
-              {received ? "Project has OC / CC" : "Project OC / CC not complete"}
-            </p>
-            <p className={`text-xs mt-0.5 ${received ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
-              {proj.Basis === "blocks"
-                ? `${proj.CoveredBlocks} of ${proj.ActiveBlocks} block${proj.ActiveBlocks === 1 ? "" : "s"} covered${received && proj.ReceivedDate ? ` · complete since ${fmt(proj.ReceivedDate)}` : ""}`
-                : received ? `Project certificate received ${fmt(proj.ReceivedDate)}` : "No blocks — needs a project certificate"}
-            </p>
-          </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {([["all", "All", projects.length], ["open", "Not complete", notDone.length], ["done", "Complete", done.length]] as const).map(([k, l, c]) => (
+          <button key={k} onClick={() => setFilter(k)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filter === k ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
+            {l}<span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full ${filter === k ? "bg-primary-foreground/20" : "bg-muted"}`}>{c}</span>
+          </button>
+        ))}
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search project…"
+          className="ml-auto w-full sm:w-56 text-sm border border-border rounded-lg px-3 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      </div>
 
-          {active.length > 0 && (
-            <>
-              <div className="flex justify-center"><div className="w-px h-4 bg-border" /></div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {active.map((b) => {
-                  const ok = b.Covered === 1;
-                  return (
-                    <div key={b.BlockId} className={`rounded-lg border px-3 py-2.5 ${ok ? "border-emerald-200 dark:border-emerald-900" : "border-dashed border-amber-400 dark:border-amber-700"}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold truncate">Block {b.BlockName}</span>
-                        {ok
-                          ? <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-semibold text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800 shrink-0">Has OC/CC</span>
-                          : <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-semibold text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-800 shrink-0">Not yet</span>}
-                      </div>
-                      <p className="text-[0.6875rem] text-muted-foreground mt-1">
-                        {ok
-                          ? `${b.Source === "block" ? "Own certificate" : "Project certificate"}${b.CertType ? ` (${b.CertType})` : ""}${b.CoveredDate ? ` · ${fmt(b.CoveredDate)}` : ""}`
-                          : "Not covered yet"}
-                      </p>
-                      <div className="flex items-center justify-between gap-2 mt-1.5">
-                        <span className="text-[0.6875rem] text-muted-foreground flex items-center gap-1"><Users size={11} /> {b.LiveBookings} live booking{b.LiveBookings === 1 ? "" : "s"}</span>
-                        {!ok && canCreate && (
-                          <button onClick={() => onAddForBlock(pid, String(b.BlockId))}
-                            className="text-[0.6875rem] font-semibold text-primary hover:underline flex items-center gap-0.5">
-                            <Plus size={11} /> Add OC/CC
-                          </button>
-                        )}
-                      </div>
+      {!board ? (
+        <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="h-16 rounded-xl bg-muted animate-pulse" />)}</div>
+      ) : shown.length === 0 ? (
+        <div className="py-12 text-center text-sm text-muted-foreground">No projects match.</div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+          {shown.map((p) => {
+            const blocks = blocksBy[p.ProjectId] || [];
+            const pc = certsBy[p.ProjectId] || [];
+            const projectCert = pc.find((c) => c.BlockId == null);
+            const isOpen = open[p.ProjectId] ?? false;
+            const ok = p.Received === 1;
+            return (
+              <div key={p.ProjectId}>
+                <div role="button" tabIndex={0} onClick={() => setOpen((o) => ({ ...o, [p.ProjectId]: !isOpen }))}
+                  onKeyDown={(e) => { if (e.key === "Enter") setOpen((o) => ({ ...o, [p.ProjectId]: !isOpen })); }}
+                  className="px-4 py-3 flex items-center gap-4 flex-wrap cursor-pointer hover:bg-muted/30 transition-colors">
+                  <ChevronDown size={15} className={`text-muted-foreground shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                  <div className="min-w-[180px] flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold">{p.ProjectName}</span>
+                      <span className={`text-[0.625rem] px-2 py-0.5 rounded-full border font-semibold ${ok
+                        ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800"
+                        : "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-800"}`}>
+                        {ok ? "Has OC / CC" : "Not complete"}
+                      </span>
                     </div>
-                  );
-                })}
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+                      {projectCert
+                        ? `Project certificate ${projectCert.CertType} · ${projectCert.Status === "Received" ? `received ${fmtDate(projectCert.ReceivedDate) || ""}` : `applied ${fmtDate(projectCert.ApplicationDate) || ""}`}`
+                        : pc.length ? `${pc.length} block certificate${pc.length === 1 ? "" : "s"}` : "No certificate yet"}
+                      {ok && p.ReceivedDate ? ` · complete since ${fmtDate(p.ReceivedDate)}` : ""}
+                    </p>
+                  </div>
+                  {p.ActiveBlocks > 0 && (
+                    <div className="w-40 shrink-0">
+                      <div className="flex gap-0.5">
+                        {blocks.map((b) => <div key={b.BlockId} title={`Block ${b.BlockName}`} className={`flex-1 h-1.5 rounded-full ${b.Covered === 1 ? "bg-emerald-500" : "bg-amber-400"}`} />)}
+                      </div>
+                      <div className="text-[0.6875rem] text-muted-foreground mt-1 tabular-nums">{p.CoveredBlocks} of {p.ActiveBlocks} blocks</div>
+                    </div>
+                  )}
+                  <div className="w-28 shrink-0 text-[0.6875rem] tabular-nums">
+                    <div className="flex items-center gap-1 text-muted-foreground"><Users size={11} /> {p.LiveBookings} live</div>
+                    {p.WaitingBookings > 0 && <div className="flex items-center gap-1 text-red-600 font-semibold"><AlertTriangle size={11} /> {p.WaitingBookings} waiting</div>}
+                  </div>
+                  {canCreate && (
+                    <button onClick={(e) => { e.stopPropagation(); onAdd(String(p.ProjectId)); }}
+                      className="shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-border hover:bg-muted flex items-center gap-1">
+                      <Plus size={12} /> Certificate
+                    </button>
+                  )}
+                </div>
+
+                {isOpen && (
+                  <div className="px-4 pb-4 pl-11 space-y-3 bg-muted/10">
+                    {pc.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">Certificates</p>
+                        {pc.map((c) => <CertLine key={c.Id} row={c} onOpen={() => onOpenCert(c)} />)}
+                      </div>
+                    )}
+                    {blocks.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">Blocks</p>
+                        <div className="rounded-lg border border-border bg-card divide-y divide-border">
+                          {blocks.map((b) => {
+                            const cov = b.Covered === 1;
+                            return (
+                              <div key={b.BlockId} className="px-3 py-2 flex items-center gap-3 flex-wrap text-xs">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${cov ? "bg-emerald-500" : "bg-amber-400"}`} />
+                                <span className="font-semibold w-28 truncate">Block {b.BlockName}</span>
+                                <span className={`flex-1 min-w-[160px] ${cov ? "text-foreground" : "text-amber-700 dark:text-amber-400"}`}>
+                                  {cov ? `${b.Source === "block" ? "Own certificate" : "Project certificate"}${b.CertType ? ` (${b.CertType})` : ""}${b.CoveredDate ? ` · ${fmtDate(b.CoveredDate)}` : ""}`
+                                    : "Not covered yet"}
+                                  {cov && b.CertificateNo && <span className="font-mono text-muted-foreground ml-1.5">{b.CertificateNo}</span>}
+                                </span>
+                                <span className="w-20 text-muted-foreground tabular-nums flex items-center gap-1"><Users size={11} /> {b.LiveBookings}</span>
+                                {!cov && canCreate ? (
+                                  <button onClick={() => onAdd(String(p.ProjectId), String(b.BlockId))}
+                                    className="text-[0.6875rem] font-semibold text-primary hover:underline flex items-center gap-0.5"><Plus size={11} /> Add OC/CC</button>
+                                ) : <span className="w-16" />}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground pt-1">This project has no blocks — its project certificate decides.</p>
+                    )}
+                  </div>
+                )}
               </div>
-            </>
-          )}
-          {inactive.length > 0 && (
-            <p className="text-[0.6875rem] text-muted-foreground">Inactive blocks (not counted): {inactive.map((b) => b.BlockName).join(", ")}</p>
-          )}
-        </>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -464,6 +458,15 @@ const CrmOcCc: React.FC = () => {
     useQuery({ queryKey: ["crm-oc-cc"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: projects = [] } =
     useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: board, refetch: refetchBoard } = useQuery<BoardData>({
+    queryKey: ["crm-oc-cc-board"],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/board`);
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load");
+      return r.json();
+    },
+    staleTime: 30_000,
+  });
 
   // ── Derived stats ──────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -532,7 +535,7 @@ const CrmOcCc: React.FC = () => {
       setCreateOpen(false);
       setCreateForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-oc-cc"] });
-      qc.invalidateQueries({ queryKey: ["crm-oc-cc-overview"] });
+      qc.invalidateQueries({ queryKey: ["crm-oc-cc-board"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
@@ -565,7 +568,7 @@ const CrmOcCc: React.FC = () => {
       toast.success("OC/CC record updated");
       closeDetail();
       qc.invalidateQueries({ queryKey: ["crm-oc-cc"] });
-      qc.invalidateQueries({ queryKey: ["crm-oc-cc-overview"] });
+      qc.invalidateQueries({ queryKey: ["crm-oc-cc-board"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
@@ -580,11 +583,11 @@ const CrmOcCc: React.FC = () => {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <CrmShell
-      title="Occupancy & Completion Certificate (OC / CC)"
+      title="OC / CC — Occupancy & Completion"
       subtitle="Per block or for the whole project — a project has OC/CC once every block does; possession waits on it"
       action={
         <div className="flex items-center gap-2">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => { refetch(); refetchBoard(); }} />
           {canCreate && (
             <button onClick={() => setCreateOpen(true)}
               className="flex items-center gap-1.5 px-3 py-2 btn-module text-white text-sm font-medium rounded-lg transition-colors">
@@ -594,71 +597,9 @@ const CrmOcCc: React.FC = () => {
         </div>
       }
     >
-      <ProjectOcCcDiagram projects={projects as any[]} canCreate={canCreate}
-        onAddForBlock={(projectId, blockId) => { setCreateForm({ ...EMPTY_FORM, ProjectId: projectId, BlockId: blockId }); setCreateOpen(true); }} />
-
-      {/* ── Summary metric cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Total Projects",     value: stats.total,    color: "text-foreground",      bg: "bg-muted/40"                                      },
-          { label: "Applied (Pending)",  value: stats.applied,  color: "text-amber-600 dark:text-amber-400",   bg: "bg-amber-50 dark:bg-amber-950/20"  },
-          { label: "Received (Cleared)", value: stats.received, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-950/20" },
-          { label: "Bookings Awaiting",  value: stats.blocked,  color: "text-red-600 dark:text-red-400",      bg: "bg-red-50 dark:bg-red-950/20"         },
-        ].map((m) => (
-          <div key={m.label} className={`rounded-xl border border-border px-4 py-3 ${m.bg}`}>
-            <div className={`text-2xl font-bold font-heading ${m.color}`}>{m.value}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{m.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Filter tabs ── */}
-      <div className="flex items-center gap-1.5">
-        {TABS.map((tab) => (
-          <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-              activeTab === tab.key
-                ? "btn-module text-white border-primary"
-                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}>
-            {tab.label}
-            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full ${activeTab === tab.key ? "bg-primary-foreground/20" : "bg-muted"}`}>
-              {tab.count}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* ── Cards grid ── */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="rounded-2xl border border-border bg-card p-5 space-y-3 animate-pulse">
-              <div className="h-5 w-2/3 bg-muted rounded" />
-              <div className="h-4 w-1/2 bg-muted rounded" />
-              <div className="h-8 bg-muted rounded" />
-              <div className="h-4 w-full bg-muted rounded" />
-            </div>
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground space-y-2">
-          <ShieldCheck size={36} className="opacity-30" />
-          <p className="text-sm">No OC/CC applications recorded yet</p>
-          {canCreate && (
-            <button onClick={() => setCreateOpen(true)}
-              className="mt-2 text-xs text-primary hover:underline flex items-center gap-1">
-              <Plus size={12} /> Add the first one
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(filtered as any[]).map((row: any) => (
-            <OcccCard key={row.Id} row={row} canEdit={canEdit} onClick={() => openDetail(row)} />
-          ))}
-        </div>
-      )}
+      <OcccBoard board={board} certs={rows as any[]} canCreate={canCreate}
+        onAdd={(projectId, blockId) => { setCreateForm({ ...EMPTY_FORM, ProjectId: projectId, BlockId: blockId || "" }); setCreateOpen(true); }}
+        onOpenCert={openDetail} />
 
       {/* ── Detail / Edit Dialog ── */}
       <Dialog open={!!detailRow} onOpenChange={(o) => { if (!o) closeDetail(); }}>
