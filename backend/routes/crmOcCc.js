@@ -13,6 +13,49 @@ const { rollupBookingTotals } = require("./crmParking");
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+// A project-wide certificate covers the blocks that exist when it is
+// received (migration 577) - a block added later needs its own certificate,
+// and until then the project shows OC/CC as not complete. Called only when a
+// project-wide certificate BECOMES Received, so editing an already-received
+// one never quietly extends it to newer blocks.
+async function recordProjectCertCoverage(pool, certId) {
+  await pool.request().input("id", sql.Int, certId).query(`
+    INSERT INTO dbo.CrmOccupancyCertificateBlock (CertificateId, BlockId)
+    SELECT oc.Id, bm.Id
+    FROM dbo.CrmOccupancyCertificate oc
+    JOIN dbo.BlockMaster bm ON bm.ProjectId = oc.ProjectId
+    WHERE oc.Id = @id AND oc.BlockId IS NULL AND oc.Status = 'Received'
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmOccupancyCertificateBlock cb WHERE cb.CertificateId = oc.Id AND cb.BlockId = bm.Id)`);
+}
+
+// GET /overview?projectId= - the project's OC/CC worked out from its blocks:
+// each block (covered by its own certificate, by the project certificate, or
+// not yet) and whether the project as a whole has it.
+router.get("/overview", requirePageRight("crm-oc-cc", "view"), async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId, 10);
+    if (!Number.isInteger(projectId)) return res.status(400).json({ error: "projectId is required" });
+    const scope = require("../services/projectScope");
+    if (!scope.assertProjectAllowed(req, res, projectId)) return;
+    const pool = getPool();
+    const [proj, blocks] = await Promise.all([
+      pool.request().input("pid", sql.Int, projectId).query("SELECT * FROM dbo.vw_CrmProjectOcCc WHERE ProjectId = @pid"),
+      pool.request().input("pid", sql.Int, projectId).query(`
+        SELECT v.*, oc.CertType, oc.CertificateNo,
+               (SELECT COUNT(*) FROM dbo.CrmBooking b LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+                 WHERE um.BlockId = v.BlockId AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred')) AS LiveBookings
+        FROM dbo.vw_CrmBlockOcCc v
+        LEFT JOIN dbo.CrmOccupancyCertificate oc ON oc.Id = v.CertificateId
+        WHERE v.ProjectId = @pid
+        ORDER BY v.IsActive DESC, v.BlockName`),
+    ]);
+    res.json({ project: proj.recordset[0] || { ProjectId: projectId, ActiveBlocks: 0, CoveredBlocks: 0, Received: 0, ReceivedDate: null, Basis: "project" }, blocks: blocks.recordset });
+  } catch (e) {
+    console.error("[crm-oc-cc] GET /overview error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Builds the SELECT with enrichment subqueries so the list page can show
 // booking counts and possession-gate status without extra round-trips.
 // A row with a BlockId scopes its counts to that block's own bookings
@@ -135,15 +178,16 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
     // while), and any pre-existing booking in scope needs its GST
     // reassessed immediately, not left stale until some unrelated edit.
     if ((b.Status || "Applied") === "Received") {
+      await recordProjectCertCoverage(pool, result.recordset[0].Id);
+      // Whole project: a block's certificate can complete the project, which
+      // bookings without a block follow. Recalculating an unchanged booking
+      // changes nothing.
       const affected = await pool.request()
         .input("pid", sql.Int, parseInt(b.ProjectId))
-        .input("bid", sql.Int, blockId)
         .query(`
           SELECT bk.Id FROM dbo.CrmBooking bk
-          LEFT JOIN dbo.UnitMaster um ON um.Id = bk.UnitId
           WHERE bk.ProjectId = @pid AND bk.IsActive = 1
             AND bk.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')
-            AND (@bid IS NULL OR bk.BlockId = @bid)
         `);
       for (const row of affected.recordset) {
         try {
@@ -215,18 +259,18 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
     // silently keep charging tax forever, contradicting the whole point of
     // this feature. Scoped exactly like buildSelect()'s BookingCount above:
     // this block's bookings if BlockId is set, the whole project otherwise.
-    const becameReceived = b.Status === "Received" || (wasReceived && b.ReceivedDate);
+    if (b.Status === "Received" && !wasReceived) await recordProjectCertCoverage(pool, id);
+    const becameReceived = b.Status === "Received" || (wasReceived && b.ReceivedDate) || (wasReceived && b.Status && b.Status !== "Received");
     if (becameReceived) {
-      const { ProjectId, BlockId } = cur.recordset[0];
+      // Whole project (see POST): a block's certificate can complete or
+      // un-complete the project that block-less bookings follow.
+      const { ProjectId } = cur.recordset[0];
       const affected = await pool.request()
         .input("pid", sql.Int, ProjectId)
-        .input("bid", sql.Int, BlockId)
         .query(`
           SELECT b.Id FROM dbo.CrmBooking b
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
           WHERE b.ProjectId = @pid AND b.IsActive = 1
             AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')
-            AND (@bid IS NULL OR b.BlockId = @bid)
         `);
       for (const row of affected.recordset) {
         try {

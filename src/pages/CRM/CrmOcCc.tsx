@@ -344,6 +344,107 @@ function OcccForm({
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
+// ── Project status: worked out from its blocks (migration 577) ─────────────
+// A block has OC/CC by its own certificate, or by a project-wide certificate
+// received while that block existed. The project has it when every active
+// block does - a block added later puts it back to "not yet" until that
+// block's own certificate arrives.
+function ProjectOcCcDiagram({ projects, canCreate, onAddForBlock }: {
+  projects: any[]; canCreate: boolean; onAddForBlock: (projectId: string, blockId: string) => void;
+}) {
+  const [projectId, setProjectId] = useState<string>("");
+  const pid = projectId || (projects[0] ? String(projects[0].Id) : "");
+  const { data, isLoading } = useQuery({
+    queryKey: ["crm-oc-cc-overview", pid],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/overview?projectId=${pid}`);
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load");
+      return r.json();
+    },
+    enabled: !!pid,
+    staleTime: 15_000,
+  });
+  const proj = data?.project;
+  const blocks: any[] = data?.blocks || [];
+  const active = blocks.filter((b) => b.IsActive);
+  const inactive = blocks.filter((b) => !b.IsActive);
+  const received = proj?.Received === 1;
+  const fmt = (d: any) => (d ? String(d).slice(0, 10) : "");
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-1.5"><Building2 size={15} className="text-primary" /> Project status</h3>
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Worked out from its blocks — every active block must have OC/CC.</p>
+        </div>
+        <select value={pid} onChange={(e) => setProjectId(e.target.value)}
+          className="text-sm border border-border rounded-lg px-2 py-1.5 bg-background min-w-[200px]">
+          {projects.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+        </select>
+      </div>
+
+      {isLoading || !proj ? (
+        <div className="h-24 rounded-lg bg-muted animate-pulse" />
+      ) : (
+        <>
+          {/* the project, worked out */}
+          <div className={`mx-auto max-w-md rounded-xl border px-4 py-3 text-center ${received
+            ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30"
+            : "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30"}`}>
+            <p className={`text-sm font-semibold flex items-center justify-center gap-1.5 ${received ? "text-emerald-800 dark:text-emerald-200" : "text-amber-800 dark:text-amber-200"}`}>
+              {received ? <ShieldCheck size={15} /> : <Clock size={15} />}
+              {received ? "Project has OC / CC" : "Project OC / CC not complete"}
+            </p>
+            <p className={`text-xs mt-0.5 ${received ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>
+              {proj.Basis === "blocks"
+                ? `${proj.CoveredBlocks} of ${proj.ActiveBlocks} block${proj.ActiveBlocks === 1 ? "" : "s"} covered${received && proj.ReceivedDate ? ` · complete since ${fmt(proj.ReceivedDate)}` : ""}`
+                : received ? `Project certificate received ${fmt(proj.ReceivedDate)}` : "No blocks — needs a project certificate"}
+            </p>
+          </div>
+
+          {active.length > 0 && (
+            <>
+              <div className="flex justify-center"><div className="w-px h-4 bg-border" /></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {active.map((b) => {
+                  const ok = b.Covered === 1;
+                  return (
+                    <div key={b.BlockId} className={`rounded-lg border px-3 py-2.5 ${ok ? "border-emerald-200 dark:border-emerald-900" : "border-dashed border-amber-400 dark:border-amber-700"}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold truncate">Block {b.BlockName}</span>
+                        {ok
+                          ? <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-semibold text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800 shrink-0">Has OC/CC</span>
+                          : <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-semibold text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-950/30 dark:border-amber-800 shrink-0">Not yet</span>}
+                      </div>
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1">
+                        {ok
+                          ? `${b.Source === "block" ? "Own certificate" : "Project certificate"}${b.CertType ? ` (${b.CertType})` : ""}${b.CoveredDate ? ` · ${fmt(b.CoveredDate)}` : ""}`
+                          : "Not covered yet"}
+                      </p>
+                      <div className="flex items-center justify-between gap-2 mt-1.5">
+                        <span className="text-[0.6875rem] text-muted-foreground flex items-center gap-1"><Users size={11} /> {b.LiveBookings} live booking{b.LiveBookings === 1 ? "" : "s"}</span>
+                        {!ok && canCreate && (
+                          <button onClick={() => onAddForBlock(pid, String(b.BlockId))}
+                            className="text-[0.6875rem] font-semibold text-primary hover:underline flex items-center gap-0.5">
+                            <Plus size={11} /> Add OC/CC
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {inactive.length > 0 && (
+            <p className="text-[0.6875rem] text-muted-foreground">Inactive blocks (not counted): {inactive.map((b) => b.BlockName).join(", ")}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const CrmOcCc: React.FC = () => {
   const qc = useQueryClient();
   const { canCreate, canEdit } = usePageRights("crm-oc-cc");
@@ -431,6 +532,7 @@ const CrmOcCc: React.FC = () => {
       setCreateOpen(false);
       setCreateForm({ ...EMPTY_FORM });
       qc.invalidateQueries({ queryKey: ["crm-oc-cc"] });
+      qc.invalidateQueries({ queryKey: ["crm-oc-cc-overview"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
@@ -463,6 +565,7 @@ const CrmOcCc: React.FC = () => {
       toast.success("OC/CC record updated");
       closeDetail();
       qc.invalidateQueries({ queryKey: ["crm-oc-cc"] });
+      qc.invalidateQueries({ queryKey: ["crm-oc-cc-overview"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-eligible"] });
       qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
@@ -478,7 +581,7 @@ const CrmOcCc: React.FC = () => {
   return (
     <CrmShell
       title="Occupancy & Completion Certificate (OC / CC)"
-      subtitle="Track OC/CC applications per project — possession handover is gated on Received status"
+      subtitle="Per block or for the whole project — a project has OC/CC once every block does; possession waits on it"
       action={
         <div className="flex items-center gap-2">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
@@ -491,6 +594,9 @@ const CrmOcCc: React.FC = () => {
         </div>
       }
     >
+      <ProjectOcCcDiagram projects={projects as any[]} canCreate={canCreate}
+        onAddForBlock={(projectId, blockId) => { setCreateForm({ ...EMPTY_FORM, ProjectId: projectId, BlockId: blockId }); setCreateOpen(true); }} />
+
       {/* ── Summary metric cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[

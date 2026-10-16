@@ -128,18 +128,10 @@ const LM_SELECT = `
     SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) mut
-  -- Block-level OC/CC (migration 447) is authoritative when this booking's
-  -- own block has a Received cert of its own; falls back to the project's
-  -- blanket (BlockId IS NULL) cert otherwise — same fallback resolveOcCcGate
-  -- (crmWorkflowGuards.js) implements for single-booking JS lookups.
+  -- OC/CC for this booking - its own block(s), or the project when it has
+  -- no block; one rule for every screen (migration 577, vw_CrmBookingOcCc).
   OUTER APPLY (
-    SELECT CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-      WHERE oc.Status = 'Received' AND (
-        (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
-        OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
-      )
-    ) THEN 1 ELSE 0 END AS HasReceived
+    SELECT ISNULL((SELECT v.Received FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id), 0) AS HasReceived
   ) occc
   OUTER APPLY (
     SELECT TOP 1 Status FROM dbo.CrmPrePossession

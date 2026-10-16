@@ -51,14 +51,9 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
         )
-        -- Block-level OC/CC (migration 447) checked first, falling back to
-        -- the project's blanket cert — same fallback as crmPrePossession.js.
+        -- OC/CC cleared for this booking (migration 577, vw_CrmBookingOcCc).
         AND (b.ProjectId IS NULL OR EXISTS (
-          SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-          WHERE oc.Status = 'Received' AND (
-            (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
-            OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
-          )
+          SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1
         ))
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmPossessionNotice pn

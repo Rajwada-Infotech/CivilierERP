@@ -1352,47 +1352,17 @@ async function resolveNocType(pool, bookingId) {
  * Returns { received, source: 'block'|'project'|null, receivedDate, certType, certRow }.
  */
 async function resolveOcCcGate(pool, bookingId, certType = null) {
-  const typeFilter = certType ? "AND oc.CertType = @ct" : "";
-  const req = () => {
-    const r = pool.request().input("bid", sql.Int, bookingId);
-    if (certType) r.input("ct", sql.NVarChar(20), certType);
-    return r;
-  };
-
-  // Booking -> Block, via the same UnitMaster join used everywhere else in
-  // this codebase to resolve a booking's real block.
-  const blockRow = await req().query(`
-    SELECT um.BlockId, b.ProjectId
-    FROM dbo.CrmBooking b
-    LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-    WHERE b.Id = @bid
-  `);
-  const { BlockId, ProjectId } = blockRow.recordset[0] || {};
-  if (ProjectId == null) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
-
-  if (BlockId != null) {
-    const blockCert = await req().input("bid2", sql.Int, BlockId).query(`
-      SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
-      WHERE oc.BlockId = @bid2 AND oc.Status = 'Received' ${typeFilter}
-      ORDER BY oc.ReceivedDate ASC
-    `);
-    if (blockCert.recordset.length) {
-      const row = blockCert.recordset[0];
-      return { received: true, source: "block", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
-    }
-  }
-
-  const projectCert = await req().input("pid", sql.Int, ProjectId).query(`
-    SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
-    WHERE oc.ProjectId = @pid AND oc.BlockId IS NULL AND oc.Status = 'Received' ${typeFilter}
-    ORDER BY oc.ReceivedDate ASC
-  `);
-  if (projectCert.recordset.length) {
-    const row = projectCert.recordset[0];
-    return { received: true, source: "project", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
-  }
-
-  return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  // One rule, kept in the database (migration 577, vw_CrmBookingOcCc): the
+  // booking's own block(s) - the unit's block and any plot's block - must be
+  // covered by their own Received certificate or by a project-wide one that
+  // was received while the block existed; a booking with no block follows the
+  // project, which is complete when every active block is. certType is no
+  // longer used by any caller (any of OC / CC / OC+CC counts).
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Received, ReceivedDate, Source FROM dbo.vw_CrmBookingOcCc WHERE BookingId = @bid");
+  const row = r.recordset[0];
+  if (!row || row.Received !== 1) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  return { received: true, source: row.Source, receivedDate: row.ReceivedDate, certType: null, certRow: null };
 }
 
 module.exports = { requireNotMidApproval, releaseBookingInventoryLines,

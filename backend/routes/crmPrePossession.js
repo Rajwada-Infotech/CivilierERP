@@ -174,12 +174,9 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
       // same fallback resolveOcCcGate (crmWorkflowGuards.js) implements in
       // JS for single-booking lookups. Kept inline here since this is one
       // big multi-row query, not a per-booking JS call.
+      // OC/CC for this booking - one rule everywhere (migration 577).
       "  CASE WHEN b.ProjectId IS NULL OR EXISTS (",
-      "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
-      "    WHERE oc.Status = 'Received' AND (",
-      "      (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)",
-      "      OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)",
-      "    )",
+      "    SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1",
       "  ) THEN 1 ELSE 0 END AS Gate2_OcCcReceived",
       "FROM dbo.CrmBooking b",
       "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
@@ -257,11 +254,7 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "  AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered')",
       // Same block-then-project OC/CC fallback as /gateway-status above.
       "  AND (b.ProjectId IS NULL OR EXISTS (",
-      "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
-      "    WHERE oc.Status = 'Received' AND (",
-      "      (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)",
-      "      OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)",
-      "    )",
+      "    SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1",
       "  ))",
       "ORDER BY b.BookingNo",
     ].join(" ");
