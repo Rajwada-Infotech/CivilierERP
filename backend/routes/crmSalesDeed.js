@@ -56,7 +56,13 @@ const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4
 const DEED_SELECT = `
   SELECT d.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
          b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile,
-         le.name AS LegalExecutiveName
+         le.name AS LegalExecutiveName,
+         -- For the list: where each deed stands (fees, registry, papers).
+         (SELECT TOP 1 qp.Status FROM dbo.CrmQueryPayment qp WHERE qp.BookingId = d.BookingId ORDER BY qp.Id DESC) AS ListQpStatus,
+         (SELECT TOP 1 r.Status FROM dbo.CrmRegistry r WHERE r.BookingId = d.BookingId
+            ORDER BY CASE WHEN r.Status = 'Cancelled' THEN 1 ELSE 0 END, r.Id DESC) AS ListRegistryStatus,
+         (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1) AS MandatoryDocCount,
+         (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1 AND x.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
   FROM dbo.CrmSalesDeed d
   JOIN dbo.CrmBooking b ON b.Id = d.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -64,8 +70,11 @@ const DEED_SELECT = `
   LEFT JOIN dbo.Users le ON le.id = d.LegalExecutiveId
 `;
 
-function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline }) {
+function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline, storedStatus = null }) {
   const today = new Date(new Date().toDateString());
+  // A deed cancelled on its own (booking still live) stays Cancelled - it
+  // showed as Draft / Overdue, since nothing below looked at its own status.
+  if (storedStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
   if (bookingStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
   if (registrationNo) return CrmStatus.REGISTERED;
   if (executedBy && registrationDeadline && new Date(registrationDeadline) < today) return "Overdue";
@@ -259,7 +268,7 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
       Status: deriveDeedStatus({
         bookingStatus: r.BookingStatus, registrationNo: r.RegistrationNo,
         executedBy: r.ExecutedBy, deedDate: r.DeedDate,
-        registrationDeadline: r.RegistrationDeadline,
+        registrationDeadline: r.RegistrationDeadline, storedStatus: r.Status,
       }),
     }));
     if (status) rows = rows.filter((r) => r.Status === status);
@@ -1488,6 +1497,7 @@ router.get("/:id", requirePageRight("crm-sales-deed", "view"), async (req, res) 
         executedBy: deedRes.recordset[0].ExecutedBy,
         deedDate: deedRes.recordset[0].DeedDate,
         registrationDeadline: deedRes.recordset[0].RegistrationDeadline,
+        storedStatus: deedRes.recordset[0].Status,
       })
     };
     res.json({ deed, documents: docRes.recordset, approvalLog: logRes.recordset });

@@ -108,7 +108,17 @@ function fmtBytes(n: number | null | undefined) {
 }
 // ── Deed Stepper ────────────────────────────────────────────────────────────
 type StepState = "done" | "current" | "upcoming";
-type DeedTab = "Timeline" | "Overview" | "Documents" | "Legal & Approval" | "Query Payment" | "Registry" | "History";
+type DeedTab = "Progress" | "Documents" | "Fees & registry" | "Details" | "History";
+const DEED_TABS: DeedTab[] = ["Progress", "Documents", "Fees & registry", "Details", "History"];
+// Old tab names (links from other pages, ?tab=Registry etc.) land on the new tab.
+function normalizeDeedTab(t: string | null | undefined): DeedTab {
+  const k = String(t || "").toLowerCase();
+  if (k === "documents") return "Documents";
+  if (k === "history") return "History";
+  if (k === "overview" || k === "details") return "Details";
+  if (k === "query payment" || k === "registry" || k === "fees & registry" || k === "fees") return "Fees & registry";
+  return "Progress"; // Timeline, Legal & Approval, Progress
+}
 
 function deedDocumentProgress(documents: any[] | undefined): { required: number; uploaded: number; percent: number } {
   const mandatory = (documents || []).filter((d) => d.IsMandatory);
@@ -118,121 +128,66 @@ function deedDocumentProgress(documents: any[] | undefined): { required: number;
   return { required, uploaded, percent };
 }
 
-function deedStepStates(d: any, documents: any[] | undefined, context: any): { label: string; state: StepState; tab: DeedTab }[] {
+type DeedStage = { label: string; detail: string; hint: string; state: StepState; tab: DeedTab };
+// The deed's journey in five stages (it used to be a 9-step scroller plus a
+// Timeline tab repeating it). Hover a stage for the steps it covers.
+function deedStages(d: any, documents: any[] | undefined, ctx: { qpStatus?: string | null; registryStatus?: string | null }): DeedStage[] {
   const legalAssigned = !!d?.LegalExecutiveId;
-  const docs = deedDocumentProgress(documents);
+  const docs = documents ? deedDocumentProgress(documents) : (() => {
+    const required = Number(d?.MandatoryDocCount || 0), uploaded = Number(d?.MandatoryUploadedCount || 0);
+    return { required, uploaded, percent: required > 0 ? Math.round((uploaded / required) * 100) : 0 };
+  })();
   const docsDone = docs.required > 0 && docs.percent === 100;
-  const senior = d?.SeniorApprovalStatus === "Approved";
-  const custApproved = d?.CustomerApprovalStatus === "Approved";
-  const dirApproved = d?.DirectorApprovalStatus === "Approved";
-  const qpConfirmed = context?.queryPaymentStatus === "Confirmed";
+  const sen = d?.SeniorApprovalStatus, cust = d?.CustomerApprovalStatus, dir = d?.DirectorApprovalStatus;
+  const approvalsDone = sen === "Approved" && cust === "Approved" && dir === "Approved";
+  const qp = ctx.qpStatus || null;
   const executed = !!d?.ExecutedBy || d?.Status === "Executed" || d?.Status === "Registered";
   const registered = !!d?.RegistrationNo || d?.Status === "Registered";
-
-  // Each step used to read its own "done" flag straight off the record and
-  // its "current" flag off just the PRECEDING step's flag, independently —
-  // so if the underlying data was ever out of sequence (e.g. a legacy/bad
-  // row where CustomerApprovalStatus and DirectorApprovalStatus were
-  // Approved despite SeniorApprovalStatus never being set — a combination
-  // the real gates added to this page now make impossible to reach honestly,
-  // but which can still exist as leftover data), the stepper showed
-  // contradictory checkmarks out of order AND two steps marked "current" at
-  // once. A step's true position in this chain is never independent of the
-  // ones before it — an approval that could only ever legitimately happen
-  // after an earlier gate can't meaningfully be "done" while that gate isn't.
-  // Single sequential pass instead: a step is "done" only if its own flag is
-  // true AND every step before it is also done; the first not-done step is
-  // the one and only "current" step; everything after that is "upcoming".
-  const raw: { label: string; done: boolean; tab: DeedTab }[] = [
-    { label: "Draft Setup", done: true, tab: "Overview" },
-    { label: "Legal Assigned", done: legalAssigned, tab: "Legal & Approval" },
-    { label: `Draft Docs${docs.required > 0 ? ` (${docs.percent}%)` : ""}`, done: docsDone, tab: "Documents" },
-    { label: "Senior Approve", done: senior, tab: "Legal & Approval" },
-    { label: "Customer Review", done: custApproved, tab: "Legal & Approval" },
-    { label: "Director Approve", done: dirApproved, tab: "Legal & Approval" },
-    { label: "Stamp Duty", done: qpConfirmed, tab: "Query Payment" },
-    { label: "Execution", done: executed, tab: "Legal & Approval" },
-    { label: "Registered", done: registered, tab: "Registry" },
+  const own = [legalAssigned && docsDone, approvalsDone, qp === "Confirmed", executed, registered];
+  const done = own.map((_, i) => own.slice(i).some(Boolean));
+  const first = done.findIndex((x) => !x);
+  const state = (i: number): StepState => (done[i] ? "done" : i === first ? "current" : "upcoming");
+  const approvalsDetail = sen === "Rejected" ? "Senior sent back"
+    : sen !== "Approved" ? (sen === "Pending" ? "Senior reviewing" : "Not submitted")
+    : !d?.SentToCustomerAt ? "Ready to send"
+    : cust === "RecheckRequested" ? "Recheck asked"
+    : cust !== "Approved" ? "Customer reviewing"
+    : dir === "Rejected" ? "Director sent back"
+    : dir !== "Approved" ? "Director review" : "Approved";
+  return [
+    { label: "Prepare", state: state(0), tab: legalAssigned ? "Documents" : "Progress",
+      hint: "Legal executive assigned · deed papers requested and uploaded",
+      detail: !legalAssigned ? "No legal executive" : docs.required ? `Papers ${docs.percent}%` : "No papers requested" },
+    { label: "Approvals", state: state(1), tab: "Progress",
+      hint: "Senior approval · shared with the customer · customer approval · director approval",
+      detail: approvalsDetail },
+    { label: "Fees", state: state(2), tab: "Fees & registry",
+      hint: "Query payment: stamp duty and registration fee sent to the customer and confirmed paid",
+      detail: qp === "Confirmed" ? "Paid" : qp === "InfoSent" ? "Sent to customer" : qp ? "Started" : "Not started" },
+    { label: "Sign", state: state(3), tab: "Progress",
+      hint: "All papers verified · deed signed and recorded as executed",
+      detail: executed ? "Executed" : "Not signed yet" },
+    { label: "Register", state: state(4), tab: "Fees & registry",
+      hint: "Sub-Registrar visit scheduled and completed · registration number recorded",
+      detail: registered ? "Registered" : ctx.registryStatus ? `Registry ${String(ctx.registryStatus).toLowerCase()}` : "After signing" },
   ];
-
-  let blocked = false;
-  return raw.map((s) => {
-    let state: StepState;
-    if (!blocked && s.done) {
-      state = "done";
-    } else if (!blocked) {
-      state = "current";
-      blocked = true;
-    } else {
-      state = "upcoming";
-    }
-    return { label: s.label, state, tab: s.tab };
-  });
 }
-
-function DeedStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: DeedTab }[]; activeTab: DeedTab; onStepClick: (t: DeedTab) => void }) {
+function DeedStageBar({ stages, onStageClick }: { stages: DeedStage[]; onStageClick: (t: DeedTab) => void }) {
   return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={cn("flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors group", activeTab === s.tab ? "bg-muted/50" : "")}>
-            <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2",
-              s.state === "done"
-                ? "bg-emerald-500 text-white ring-emerald-200 dark:ring-emerald-900"
-                : s.state === "current"
-                ? "bg-primary text-primary-foreground ring-primary/25"
-                : "bg-muted text-muted-foreground ring-transparent")}>
-              {s.state === "done" ? <Check size={11} /> : i + 1}
-            </span>
-            <span className={cn("text-[0.6875rem] font-semibold whitespace-nowrap leading-tight",
-              s.state === "done" ? "text-emerald-600 dark:text-emerald-400"
-              : s.state === "current" ? "text-foreground"
-              : "text-muted-foreground/60")}>
-              {s.label}
-            </span>
-          </button>
-          {i < steps.length - 1 && (
-            <div className={cn("w-4 h-px mx-0.5 shrink-0", steps[i + 1].state !== "upcoming" ? "bg-emerald-400" : "bg-border")} />
-          )}
-        </React.Fragment>
+    <div className="grid grid-cols-5 gap-2">
+      {stages.map((s) => (
+        <button key={s.label} onClick={() => onStageClick(s.tab)} title={s.hint}
+          className="min-w-0 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-muted/50 transition-colors">
+          <div className={cn("h-1.5 rounded-full", s.state === "done" ? "bg-emerald-500" : s.state === "current" ? "bg-primary" : "bg-muted")} />
+          <div className={cn("mt-1.5 flex items-center gap-1 text-xs font-semibold",
+            s.state === "done" ? "text-emerald-700 dark:text-emerald-400" : s.state === "current" ? "text-foreground" : "text-muted-foreground")}>
+            {s.state === "done" && <Check size={11} className="shrink-0" />}
+            <span className="truncate">{s.label}</span>
+          </div>
+          <div className={cn("text-[0.6875rem] truncate", s.state === "upcoming" ? "text-muted-foreground/60" : "text-muted-foreground")}>{s.detail}</div>
+        </button>
       ))}
     </div>
-  );
-}
-
-// ── Timeline tab (mirrors CrmAgreement.tsx's own Timeline tab) — the same
-// step data the horizontal DeedStepper above already computes, presented as
-// a vertical jump-to-tab list so the two most-used CRM detail pages feel
-// like one consistent system.
-function SDTlRow({ n, title, detailText, state, badge, onJump, last }: {
-  n: number; title: string; detailText?: string; state: StepState; badge?: string;
-  onJump: () => void; last?: boolean;
-}) {
-  const ring =
-    state === "done" ? "bg-emerald-500 text-white" :
-    state === "current" ? "bg-primary text-primary-foreground" :
-    "bg-muted text-muted-foreground";
-  return (
-    <button onClick={onJump} className="w-full text-left flex gap-3 group">
-      <div className="flex flex-col items-center">
-        <span className={cn("w-7 h-7 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0", ring)}>
-          {state === "done" ? <Check size={13} /> : n}
-        </span>
-        {!last && <span className={cn("w-px flex-1 my-1", state === "done" ? "bg-emerald-400" : "bg-border")} />}
-      </div>
-      <div className={cn("flex-1 min-w-0", last ? "pb-0" : "pb-4")}>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={cn("text-sm font-semibold",
-            state === "done" ? "text-emerald-700 dark:text-emerald-400"
-            : state === "current" ? "text-foreground"
-            : "text-muted-foreground")}>{title}</span>
-          {badge && <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-border bg-muted/50 text-muted-foreground">{badge}</span>}
-          <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-        {detailText && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detailText}</p>}
-      </div>
-    </button>
   );
 }
 
@@ -667,7 +622,8 @@ const CrmSalesDeed: React.FC = () => {
     canDoAction("approval-inbox" as any, "edit");
 
   // State management additions
-  const [activeTab, setActiveTab] = useState<DeedTab>('Timeline');
+  const [activeTab, setActiveTabRaw] = useState<DeedTab>('Progress');
+  const setActiveTab = (t: string) => setActiveTabRaw(normalizeDeedTab(t));
   const [assigningLegal, setAssigningLegal] = useState(false);
   const [selectedLegalExec, setSelectedLegalExec] = useState('');
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -900,7 +856,7 @@ const CrmSalesDeed: React.FC = () => {
   }, [deepLinkBookingId, deedDeepLinkOpened, deeds]);
 
   useEffect(() => {
-    if (tabDeepLink && detailId != null) setActiveTab(tabDeepLink as DeedTab);
+    if (tabDeepLink && detailId != null) setActiveTab(tabDeepLink);
   }, [tabDeepLink, detailId]);
 
   useEffect(() => {
@@ -1188,10 +1144,9 @@ const CrmSalesDeed: React.FC = () => {
       const res = await fetchWithAuth(`${API}/query-payment/attachment/${a.AttachmentId}`);
       if (!res.ok) throw new Error("Failed");
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const win = window.open(url, "_blank");
-      if (!win) { const anchor = document.createElement("a"); anchor.href = url; anchor.download = a.FileName; anchor.click(); }
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      // Shown in the preview card on this page (it opened a new browser tab).
+      if (previewDoc) URL.revokeObjectURL(previewDoc.url);
+      setPreviewDoc({ url: URL.createObjectURL(blob), mime: a.MimeType || blob.type, name: a.FileName || "Attachment" });
     } catch { toast.error("Could not open attachment"); }
   };
 
@@ -1227,7 +1182,7 @@ const CrmSalesDeed: React.FC = () => {
     setExecEditing(false);
     setDetailId(id);
     setSp((p) => { p.set("deedId", String(id)); return p; }, { replace: true });
-    setActiveTab('Timeline');
+    setActiveTab('Progress');
   };
 
   const saveFields = async (fields: Record<string, any>) => {
@@ -1519,11 +1474,25 @@ const CrmSalesDeed: React.FC = () => {
                         {d.BookingStatus === 'Cancelled' && (
                           <div className="text-[0.625rem] font-semibold text-red-600">⚠ Booking cancelled — locked</div>
                         )}
-                        <div className="text-[0.6875rem] font-mono text-muted-foreground">{d.DeedNo}</div>
                         <div className="flex items-center justify-between gap-2">
-                          <div className="text-[0.6875rem] text-muted-foreground truncate">{d.BookingNo} · {d.UnitNo}</div>
+                          <div className="text-[0.6875rem] text-muted-foreground truncate"><span className="font-mono">{d.DeedNo}</span> · {d.BookingNo} · {d.UnitNo}</div>
                           {d.RegistrationNo && <div className="shrink-0 text-[0.625rem] text-emerald-600 font-mono">{d.RegistrationNo}</div>}
                         </div>
+                        {d.Status !== 'Cancelled' && (() => {
+                          const st = deedStages(d, undefined, { qpStatus: d.ListQpStatus, registryStatus: d.ListRegistryStatus });
+                          const cur = st.find((x) => x.state === "current");
+                          return (
+                            <div className="space-y-1">
+                              <div className="flex gap-0.5">
+                                {st.map((x) => <div key={x.label} className={cn("flex-1 h-1 rounded-full", x.state === "done" ? "bg-emerald-500" : x.state === "current" ? "bg-primary" : "bg-muted")} />)}
+                              </div>
+                              <div className="text-[0.6875rem] truncate">
+                                {cur ? <><span className="font-medium text-foreground">{cur.label}</span><span className="text-muted-foreground"> · {cur.detail}</span></>
+                                  : <span className="text-emerald-700 dark:text-emerald-400 font-medium">Complete</span>}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         <div className="text-[0.6875rem] flex items-center gap-1">
                           <UserCircle2 size={10} className="text-muted-foreground shrink-0" />
                           {d.LegalExecutiveName ? <span className="text-foreground font-medium truncate">{d.LegalExecutiveName}</span> : <span className="text-sky-600 font-medium">Unassigned</span>}
@@ -1547,9 +1516,71 @@ const CrmSalesDeed: React.FC = () => {
               <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
             ) : (
               <>
+                {/* Header — name, status, and every global action */}
+                <div className="rounded-xl border border-border bg-card">
+                  <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="font-bold text-base text-foreground leading-tight truncate"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></h2>
+                        <StatusBadge status={detail.Status} />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <span className="font-mono">{detail.DeedNo}</span>
+                        {detail.VersionNo > 1 && <span className="ml-1 text-violet-600">v{detail.VersionNo}</span>}
+                        {" · "}{detail.BookingNo} · {detail.UnitNo}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {detail.BookingStatus === 'Cancelled' && (
+                        <span title={`Booking Cancelled — Edit/Send/Mark actions are locked.`}
+                          className="text-xs px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-600 font-medium cursor-help">
+                          ⚠ Booking Cancelled
+                        </span>
+                      )}
+                      
+                      {/* Global Header Actions */}
+                      {detail.Status !== 'Cancelled' && (
+                        detail.BookingStatus === 'Cancelled' ? (
+                          <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                            Edit Details
+                          </span>
+                        ) : (
+                          <button onClick={() => setActiveTab('Details')}
+                            className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                            Edit Details
+                          </button>
+                        )
+                      )}
+                      {detail.Status !== 'Registered' && detail.Status !== 'Cancelled' && (
+                        <button onClick={() => { if (window.confirm("Cancel this sale deed?")) handleCancelDeed(); }}
+                          className="text-xs px-2.5 py-1 border border-red-200 rounded-lg text-red-600 bg-red-50/50 hover:bg-red-100 font-medium">
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {(() => {
+                    const money = (v: any) => (v != null && v !== "" ? `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : null);
+                    const facts: [string, React.ReactNode][] = [
+                      ["Legal executive", detail.LegalExecutiveName || <span className="text-sky-600">Unassigned</span>],
+                      ["Deed date", detail.DeedDate ? fmtDate(detail.DeedDate) : <span className="text-muted-foreground">Not set</span>],
+                      ["Deed value", money(detail.DeedValue) || "—"],
+                      ["Stamp duty + fee", detail.StampDuty || detail.RegistrationFee ? `${money(detail.StampDuty) || "₹0"} + ${money(detail.RegistrationFee) || "₹0"}` : <span className="text-muted-foreground">Not set</span>],
+                    ];
+                    return (
+                      <div className="px-4 py-2.5 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                        {facts.map(([k, v]) => (
+                          <div key={k} className="min-w-0">
+                            <div className="text-[0.6875rem] text-muted-foreground">{k}</div>
+                            <div className="text-xs font-medium truncate">{v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 {detail.Status !== 'Cancelled' && (
-                  <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-                  <DeedStepper steps={deedStepStates(detail, deedDetail?.documents, detailContext)} activeTab={activeTab as any} onStepClick={setActiveTab as any} />
+                  <div className="px-4 pt-3 pb-4 border-t border-border space-y-3">
+                  <DeedStageBar stages={deedStages(detail, deedDetail?.documents, { qpStatus: detailContext?.queryPaymentStatus ?? qpDetail?.Status, registryStatus: registry?.Status })} onStageClick={setActiveTab} />
                   
                   {(() => {
                     const d = detail;
@@ -1560,6 +1591,10 @@ const CrmSalesDeed: React.FC = () => {
                     let text = "";
                     let subtext = "";
                     let cta: { label: string; onClick: () => void } | null = null;
+                    // The other buttons for the step it is on (the same ones the
+                    // Progress tab has), so nothing needs hunting for.
+                    let extra: React.ReactNode = null;
+                    const docsP = deedDocumentProgress(deedDetail?.documents);
                     if (cancelled) {
                       variant = "error";
                       text = `Booking is ${d?.BookingStatus || "inactive"} — this deed is locked.`;
@@ -1570,15 +1605,32 @@ const CrmSalesDeed: React.FC = () => {
                     } else if (d?.Status === "Executed") {
                       variant = "info";
                       text = "Deed executed.";
-                      subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
+                      subtext = "Next: the Sub-Registrar visit (Fees & registry), then the registration number.";
+                      cta = { label: "Open fees & registry", onClick: () => setActiveTab("Fees & registry") };
                     } else if (!d?.LegalExecutiveId) {
                       variant = "warning";
                       text = "No Legal Executive assigned.";
                       subtext = "Assign someone responsible for preparing the paperwork — required before execution.";
-                    } else if (d?.SeniorApprovalStatus !== "Approved") {
+                      cta = { label: "Assign legal executive", onClick: () => setActiveTab("Progress") };
+                    } else if (d?.SeniorApprovalStatus === "Rejected") {
+                      variant = "error";
+                      text = "Senior review sent it back.";
+                      subtext = `${d?.SeniorApprovalRemarks ? `"${d.SeniorApprovalRemarks}" — ` : ""}fix it, then resubmit.`;
+                      cta = { label: "Resubmit for Approval", onClick: handleResubmit };
+                    } else if (d?.SeniorApprovalStatus === "Pending") {
                       variant = "warning";
                       text = "Awaiting senior approval.";
-                      subtext = "Upload all mandatory docs via Documents tab, then submit for Senior Approval.";
+                      subtext = "An admin approves or sends it back.";
+                      extra = <ApprovalActions status={d.SeniorApprovalStatus} recordId={d.Id} endpoint={API} actionPathSuffix="" approverRoles={["admin", "dba", "super_admin"]} submitOnly={false} onSuccess={invalidate} />;
+                    } else if (d?.SeniorApprovalStatus !== "Approved") {
+                      const ready = docsP.required > 0 && docsP.percent === 100;
+                      variant = ready ? "action" : "warning";
+                      text = ready ? "Papers ready — submit for senior approval." : "Papers needed before senior approval.";
+                      subtext = docsP.required === 0 ? "Request a mandatory document first." : `${docsP.uploaded} of ${docsP.required} mandatory papers uploaded.`;
+                      cta = ready
+                        ? (canActAsLegal ? { label: "Submit for Senior Approval", onClick: handleResubmit } : null)
+                        : { label: "Open documents", onClick: () => setActiveTab("Documents") };
+                      if (ready && !canActAsLegal) subtext = legalLockReason || subtext;
                     } else if (!d?.SentToCustomerAt) {
                       variant = "action";
                       text = "Senior-approved — ready to share with the customer.";
@@ -1591,22 +1643,35 @@ const CrmSalesDeed: React.FC = () => {
                     } else if (d?.CustomerApprovalStatus !== "Approved") {
                       variant = "info";
                       text = "Sent to customer — awaiting their review and approval.";
-                      subtext = d?.SentToCustomerAt ? `Sent ${String(d.SentToCustomerAt).slice(0, 10)}` : "";
+                      subtext = d?.SentToCustomerAt ? `Sent ${String(d.SentToCustomerAt).slice(0, 10)} · customer not on the portal? Record their answer here.` : "";
+                      extra = (
+                        <>
+                          <button onClick={() => setProxyRecheckDialog(true)} className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium bg-background hover:bg-muted whitespace-nowrap disabled:opacity-50">Record recheck (offline)</button>
+                          <button onClick={() => setProxyApproveDialog(true)} className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium bg-background hover:bg-muted whitespace-nowrap disabled:opacity-50">Record approval (offline)</button>
+                        </>
+                      );
+                    } else if (d?.DirectorApprovalStatus === "Rejected") {
+                      variant = "error";
+                      text = "Director sent it back.";
+                      subtext = d?.DirectorApprovalRemarks ? `"${d.DirectorApprovalRemarks}"` : "See the reason in the Progress tab.";
                     } else if (d?.DirectorApprovalStatus && d.DirectorApprovalStatus !== "NotRequired" && d.DirectorApprovalStatus !== "Approved") {
                       variant = "warning";
                       text = "Customer approved — awaiting Director's internal sign-off.";
+                      if (d.DirectorApprovalStatus === "Pending") extra = <ApprovalActions status={d.DirectorApprovalStatus} recordId={d.Id} endpoint={API} actionPathSuffix="director" approverRoles={["super_admin"]} onSuccess={invalidate} />;
                     } else if (detailContext?.queryPaymentStatus !== "Confirmed") {
                       variant = "warning";
                       text = "Awaiting Stamp Duty Payment confirmation.";
-                      subtext = "The finance team must confirm the receipt of the Stamp Duty payment.";
+                      subtext = "Send the stamp duty and fee to the customer, then confirm it's paid.";
+                      cta = { label: "Open fees & registry", onClick: () => setActiveTab("Fees & registry") };
                     } else if (pendingDocs.length) {
                       variant = "warning";
                       text = `${pendingDocs.length} mandatory document${pendingDocs.length > 1 ? "s" : ""} still need verification.`;
                       subtext = pendingDocs.map((doc: any) => doc.Label || doc.DocumentType).join(", ");
+                      cta = { label: "Open documents", onClick: () => setActiveTab("Documents") };
                     } else {
                       variant = "action";
                       text = "All checks passed — ready to mark this deed executed.";
-                      cta = { label: "Mark Executed", onClick: () => { setActiveTab('Legal & Approval'); setExecEditing(true); } };
+                      cta = { label: "Mark Executed", onClick: () => { setActiveTab('Progress'); setExecEditing(true); } };
                     }
                     type VariantDef = { card: string; text: string; sub: string; icon: React.ReactNode };
                     const variantDef: Record<BannerVariant, VariantDef> = {
@@ -1626,11 +1691,16 @@ const CrmSalesDeed: React.FC = () => {
                             {subtext && <p className={`text-xs mt-0.5 ${vd.sub}`}>{subtext}</p>}
                           </div>
                         </div>
-                        {cta && (
-                          <button onClick={cta.onClick}
-                            className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
-                            {cta.label}
-                          </button>
+                        {(extra || cta) && (
+                          <div className="flex items-center gap-2 flex-wrap shrink-0">
+                            {extra}
+                            {cta && (
+                              <button onClick={cta.onClick}
+                                className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
+                                {cta.label}
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     );
@@ -1638,119 +1708,40 @@ const CrmSalesDeed: React.FC = () => {
                   </div>
                 )}
 
-                {/* Header — name, status, and every global action */}
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <div className={`px-4 py-3 flex items-center justify-between gap-3 flex-wrap ${
-                    detail.Status === "Registered" ? "bg-gradient-to-r from-green-500/10 to-green-500/5 border-b border-green-200/60 dark:border-green-900/40"
-                    : detail.Status === "Executed" ? "bg-gradient-to-r from-blue-500/10 to-blue-500/5 border-b border-blue-200/60 dark:border-blue-900/40"
-                    : detail.Status === "Cancelled" ? "bg-gradient-to-r from-red-500/10 to-red-500/5 border-b border-red-200/60 dark:border-red-900/40"
-                    : "bg-muted/20 border-b border-border"
-                  }`}>
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className={`p-2 rounded-xl shrink-0 ${
-                        detail.Status === "Registered" ? "bg-green-100 dark:bg-green-900/40"
-                        : detail.Status === "Executed" ? "bg-blue-100 dark:bg-blue-900/40"
-                        : detail.Status === "Cancelled" ? "bg-red-100 dark:bg-red-900/40"
-                        : "bg-primary/10"}`}>
-                        <ScrollText size={16} className={
-                          detail.Status === "Registered" ? "text-green-600"
-                          : detail.Status === "Executed" ? "text-blue-600"
-                          : detail.Status === "Cancelled" ? "text-red-600"
-                          : "text-primary"} />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></h2>
-                        <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
-                          {detail.DeedNo}
-                          {detail.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.VersionNo}</span>}
-                          <span className="ml-1.5 text-muted-foreground">· {detail.BookingNo} · {detail.UnitNo}</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-xs px-2.5 py-1 rounded-lg border font-semibold ${
-                        detail.Status === 'Registered' ? "bg-green-50 text-green-700 border-green-200"
-                        : detail.Status === 'Executed' ? "bg-blue-50 text-blue-700 border-blue-200"
-                        : detail.Status === 'Cancelled' ? "bg-red-50 text-red-700 border-red-200"
-                        : "bg-sky-50 text-sky-700 border-sky-200"
-                      }`}>
-                        {detail.Status}
-                      </span>
-                      {detail.BookingStatus === 'Cancelled' && (
-                        <span title={`Booking Cancelled — Edit/Send/Mark actions are locked.`}
-                          className="text-xs px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-600 font-medium cursor-help">
-                          ⚠ Booking Cancelled
-                        </span>
-                      )}
-                      
-                      {/* Global Header Actions */}
-                      {detail.Status !== 'Cancelled' && (
-                        detail.BookingStatus === 'Cancelled' ? (
-                          <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
-                            Edit Details
-                          </span>
-                        ) : (
-                          <button onClick={() => setActiveTab('Overview')}
-                            className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
-                            Edit Details
-                          </button>
-                        )
-                      )}
-                      {detail.Status !== 'Registered' && detail.Status !== 'Cancelled' && (
-                        <button onClick={() => { if (window.confirm("Cancel this sale deed?")) handleCancelDeed(); }}
-                          className="text-xs px-2.5 py-1 border border-red-200 rounded-lg text-red-600 bg-red-50/50 hover:bg-red-100 font-medium">
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </div>
                 </div>
-                
+
                 {/* Tab bar — same visual pattern as CrmAgreement.tsx */}
-                <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1">
-                  {(['Timeline', 'Overview', 'Documents', 'Legal & Approval', 'Query Payment', 'Registry', 'History'] as const).map((t, i) => (
+                <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1 overflow-x-auto thin-scroll">
+                  {DEED_TABS.map((t, i) => (
                     <button key={t} onClick={() => setActiveTab(t)}
                       className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                         activeTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                       }`}>
-                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${
-                        activeTab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{i + 1}</span>
                       {t}
                     </button>
                   ))}
                 </div>
 
-                {/* Tab content renders below */}
-
-                  {activeTab === 'Timeline' && (() => {
-                    const steps = deedStepStates(detail, deedDetail?.documents, detailContext);
-                    const stepBadges: (string | undefined)[] = [
-                      detail.Status,
-                      undefined,
-                      deedDocumentProgress(deedDetail?.documents).required > 0 ? `${deedDocumentProgress(deedDetail?.documents).percent}%` : undefined,
-                      detail.SeniorApprovalStatus,
-                      detail.CustomerApprovalStatus,
-                      detail.DirectorApprovalStatus,
-                      qpDetail?.Status,
-                      undefined,
-                      registry?.Status,
-                    ];
-                    return (
-                      <div className="rounded-xl border border-border bg-card p-5">
-                        <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
-                          <ScrollText size={15} className="text-primary" /> Workflow Timeline
-                        </h3>
-                        <div>
-                          {steps.map((s, i) => (
-                            <SDTlRow key={s.label} n={i + 1} title={s.label} state={s.state}
-                              badge={stepBadges[i]} onJump={() => setActiveTab(s.tab)} last={i === steps.length - 1} />
-                          ))}
-                        </div>
+                {previewDoc && (
+                  <div ref={(el) => el?.scrollIntoView({ block: "nearest", behavior: "smooth" })} className="rounded-xl border border-primary/30 bg-card overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-muted/30">
+                      <span className="text-xs font-medium truncate flex items-center gap-2"><FileText size={14} className="text-muted-foreground shrink-0" /> {previewDoc.name}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <a href={previewDoc.url} download={previewDoc.name} className="text-xs px-2 py-1 rounded-md text-primary hover:bg-muted flex items-center gap-1"><Download size={12} /> Download</a>
+                        <button onClick={closePreview} aria-label="Close preview" className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"><X size={14} /></button>
                       </div>
-                    );
-                  })()}
+                    </div>
+                    <div className="bg-muted/20 flex items-center justify-center min-h-[200px]">
+                      {previewDoc.mime === 'application/pdf' || /\.pdf$/i.test(previewDoc.name)
+                        ? <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-[65vh] border-0" />
+                        : String(previewDoc.mime || '').startsWith('image/')
+                        ? <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-[65vh] object-contain" />
+                        : <p className="py-8 text-sm text-muted-foreground">No preview for this file type — use Download.</p>}
+                    </div>
+                  </div>
+                )}
 
-                  {activeTab === 'Overview' && (
+                  {activeTab === 'Details' && (
                     <div className="space-y-4">
                       {/* Read-only overview stats mirroring CrmAgreement */}
                       <div className="rounded-xl border border-border overflow-hidden space-y-0">
@@ -1807,7 +1798,7 @@ const CrmSalesDeed: React.FC = () => {
                     </div>
                   )}
 
-                  {activeTab === 'Legal & Approval' && (
+                  {activeTab === 'Progress' && (
                     <div className="space-y-4">
                       {/* Legal Executive Assignment (identical to Agreement) */}
                       <div className="rounded-xl border border-border overflow-hidden">
@@ -1907,7 +1898,7 @@ const CrmSalesDeed: React.FC = () => {
                               </div>
                               <div className="flex-1 min-w-0 space-y-1.5">
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <span className="text-sm font-semibold">Senior Review</span>
+                                  <span className="text-sm font-semibold flex items-center gap-1" title="An admin or super-admin approves this deed before it&apos;s shared with the customer.">Senior Review <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                                   <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                                     done ? "text-green-600 bg-green-50 border-green-200"
                                     : rejected ? "text-red-600 bg-red-50 border-red-200"
@@ -1915,9 +1906,6 @@ const CrmSalesDeed: React.FC = () => {
                                     : "text-sky-600 bg-sky-50 border-sky-200"
                                   }`}>{notSubmitted ? "Not Submitted" : status}</span>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  An admin or super-admin approves this deed before it's shared with the customer.
-                                </p>
                                 {done && detail.SeniorApprovedAt && (
                                   <p className="text-xs text-green-700 flex items-center gap-1">
                                     <CheckCircle2 size={11} /> Approved {String(detail.SeniorApprovedAt).slice(0,10)}
@@ -1978,14 +1966,11 @@ const CrmSalesDeed: React.FC = () => {
                               </div>
                               <div className="flex-1 min-w-0 space-y-1.5">
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <span className="text-sm font-semibold">Shared with Customer</span>
+                                  <span className="text-sm font-semibold flex items-center gap-1" title="The customer can view this deed in their portal and approve it or request a recheck.">Shared with Customer <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                                   <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                                     sent ? "text-blue-600 bg-blue-50 border-blue-200" : "text-muted-foreground bg-muted/30 border-border"
                                   }`}>{sent ? "Sent" : "Not sent"}</span>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  The customer can view this deed in their portal and approve it or request a recheck.
-                                </p>
                                 {sent && (
                                   <p className="text-xs text-blue-600 flex items-center gap-1">
                                     <Send size={11} /> Sent {fmtIstIso(detail.SentToCustomerAt)}
@@ -2015,16 +2000,13 @@ const CrmSalesDeed: React.FC = () => {
                               </div>
                               <div className="flex-1 min-w-0 space-y-1.5">
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <span className="text-sm font-semibold">Customer Review</span>
+                                  <span className="text-sm font-semibold flex items-center gap-1" title="Customer&apos;s response from the portal. They can approve or request changes.">Customer Review <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                                   <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                                     done ? "text-green-600 bg-green-50 border-green-200"
                                     : recheck ? "text-red-600 bg-red-50 border-red-200"
                                     : "text-muted-foreground bg-muted/30 border-border"
                                   }`}>{status || "Pending"}</span>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  Customer's response from the portal. They can approve or request changes.
-                                </p>
                                 {done && detail.CustomerApprovedAt && (
                                   <p className="text-xs text-green-700 flex items-center gap-1">
                                     <CheckCircle2 size={11} /> Approved {String(detail.CustomerApprovedAt).slice(0,10)}
@@ -2065,16 +2047,13 @@ const CrmSalesDeed: React.FC = () => {
                               </div>
                               <div className="flex-1 min-w-0 space-y-1.5">
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <span className="text-sm font-semibold">Director Review</span>
+                                  <span className="text-sm font-semibold flex items-center gap-1" title="Final internal sign-off by the director before proceeding to execution.">Director Review <Info size={12} className="text-muted-foreground/70 shrink-0" /></span>
                                   <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
                                     done ? "text-green-600 bg-green-50 border-green-200"
                                     : rejected ? "text-red-600 bg-red-50 border-red-200"
                                     : "text-sky-600 bg-sky-50 border-sky-200"
                                   }`}>{status || "Pending"}</span>
                                 </div>
-                                <p className="text-xs text-muted-foreground">
-                                  Final internal sign-off by the director before proceeding to execution.
-                                </p>
                                 {done && detail.DirectorApprovedAt && (
                                   <p className="text-xs text-green-700 flex items-center gap-1">
                                     <CheckCircle2 size={11} /> Approved {String(detail.DirectorApprovedAt).slice(0,10)}
@@ -2205,7 +2184,7 @@ const CrmSalesDeed: React.FC = () => {
                     </div>
                   )}
 
-                  {activeTab === 'Query Payment' && (
+                  {activeTab === 'Fees & registry' && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -2397,7 +2376,7 @@ const CrmSalesDeed: React.FC = () => {
                     </div>
                   )}
 
-                  {activeTab === 'Registry' && (
+                  {activeTab === 'Fees & registry' && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <div>
@@ -2907,21 +2886,6 @@ const CrmSalesDeed: React.FC = () => {
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <button onClick={() => setRegCancelOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Back</button>
               <button onClick={handleRegCancel} className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700">Confirm Cancel</button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent accent="crm" className="max-w-3xl p-0 gap-0 overflow-hidden">
-            <DialogHeader className="px-4 py-2.5 border-b border-border">
-              <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
-            </DialogHeader>
-            <div className="bg-muted/30 flex items-center justify-center" style={{ height: '75vh' }}>
-              {previewDoc?.mime === 'application/pdf' ? (
-                <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-full border-0" />
-              ) : previewDoc ? (
-                <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-full object-contain" />
-              ) : null}
             </div>
           </DialogContent>
         </Dialog>
