@@ -9,7 +9,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckCircle2, Circle, ExternalLink, Lock } from "lucide-react";
+import { Plus, CheckCircle2, Circle, ExternalLink, Lock, Check, Info, ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
@@ -269,7 +269,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
         {
           key: "ocCc",
           label: "OC / CC",
-          sublabel: "Project's Occupancy or Completion Certificate from the authority — a project-level record, not gated on any single booking's progress (the backend has no per-booking gate on this)",
+          sublabel: "The project's Occupancy / Completion Certificate from the authority — recorded once for the project (or block), not per booking",
           no: null,
           status: null,
           isDone: t.OcCcReceived === 1,
@@ -432,6 +432,69 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
   return { isPhysicallyComplete, agreementDone, sections, progressChecks, journeyLabel, doneCount, totalCount };
 }
 
+// ─── Journey summary (one bar, one "what's next") ───────────────────────────
+//
+// The page used to show progress three ways (an n/19 bar, an unlabelled row
+// of numbered dots, then every step of every section) and never said what to
+// do next. Sections are now summarised as one labelled bar, the steps that can
+// move right now are listed together with their buttons, and finished or
+// locked sections fold into one line.
+
+const SECTION_SHORT: Record<string, string> = {
+  agreement: "Agreement", afsVisit1: "AFS registration", noc: "NOC", possession: "Possession",
+  saleDeed: "Sale deed", afsVisit2: "Deed registration", mutation: "Mutation",
+};
+type SectionState = "done" | "current" | "upcoming";
+const liveStages = (sec: Section) => sec.stages.filter((st) => st.isApplicable !== false);
+function sectionState(sec: Section): SectionState {
+  const st = liveStages(sec);
+  if (st.length && st.every((x) => x.isDone)) return "done";
+  return st.some((x) => !x.isDone && !x.isLocked) ? "current" : "upcoming";
+}
+/** Steps that can be worked on right now, in journey order. */
+function actionableStages(model: WorkflowModel): { stage: Stage; section: Section }[] {
+  return model.sections.filter((sec) => sec.isApplicable)
+    .flatMap((sec) => liveStages(sec).map((stage) => ({ stage, section: sec })))
+    .filter(({ stage }) => !stage.isDone && !stage.isLocked);
+}
+/** The button a stage offers - same rules as its row in the timeline. */
+function stageButton(stage: Stage, bookingId: number, navigate: (p: string) => void, canEdit: boolean): { label: string; onClick: () => void } | "auto" | null {
+  const { action, isDone, isLocked } = stage;
+  if (isLocked) return null;
+  if (action.kind === "auto") return "auto";
+  if (action.kind === "manual") return canEdit ? { label: "Mark Done", onClick: action.onAction } : null;
+  const go = () => navigate(`${action.path}${action.path.includes("?") ? "&" : "?"}bookingId=${bookingId}`);
+  return { label: isDone ? "Open" : stage.status ? "Continue" : "Start", onClick: go };
+}
+
+function JourneyBar({ model, onSectionClick }: { model: WorkflowModel; onSectionClick: (key: string) => void }) {
+  const secs = model.sections.filter((sec) => sec.isApplicable);
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-x-1.5 gap-y-2">
+      {secs.map((sec) => {
+        const state = sectionState(sec);
+        const st = liveStages(sec);
+        const done = st.filter((x) => x.isDone).length;
+        const next = st.find((x) => !x.isDone && !x.isLocked);
+        return (
+          <button key={sec.key} onClick={() => onSectionClick(sec.key)} title={`${sec.title} — ${done} of ${st.length} done`}
+            className="min-w-0 text-left rounded-lg px-1 py-1 -mx-1 hover:bg-muted/50 transition-colors">
+            <div className={`h-1.5 rounded-full ${state === "done" ? "bg-green-500" : state === "current" ? "bg-primary" : "bg-muted"}`} />
+            <div className={`mt-1.5 flex items-center gap-1 text-[0.6875rem] font-semibold ${
+              state === "done" ? "text-green-700 dark:text-green-400" : state === "current" ? "text-foreground" : "text-muted-foreground"}`}>
+              {state === "done" && <Check size={10} className="shrink-0" />}
+              <span className="truncate">{SECTION_SHORT[sec.key] || sec.title}</span>
+            </div>
+            <div className={`text-[0.625rem] truncate ${state === "upcoming" ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+              {state === "done" ? "Done" : next ? next.label : `${done}/${st.length} · locked`}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Status colour map ────────────────────────────────────────────────────────
 
 const statusColor: Record<string, string> = {
@@ -505,6 +568,7 @@ const StageRow: React.FC<{
             <span className="text-xs font-semibold text-green-700 dark:text-green-300">{stage.label}</span>
             {stage.no && <span className="text-[0.625rem] font-mono text-muted-foreground/60 bg-muted/50 px-1 rounded">{stage.no}</span>}
             {stage.status && <span className={`text-[0.625rem] px-1.5 py-0.5 rounded border font-semibold ${statusColor[stage.status] ?? STATUS_COLOR_FALLBACK}`}>{stage.status}</span>}
+            {/^Completed \d/.test(stage.sublabel) && <span className="text-[0.625rem] text-muted-foreground">{stage.sublabel.replace("Completed ", "")}</span>}
           </div>
           {action.kind === "navigate" && (
             <button onClick={handleClick} className="shrink-0 text-[0.625rem] text-muted-foreground/50 hover:text-primary flex items-center gap-0.5 whitespace-nowrap transition-colors">
@@ -524,8 +588,9 @@ const StageRow: React.FC<{
         <div className="shrink-0 z-10 w-[22px] h-[22px] rounded-full bg-muted/20 border border-border/40 flex items-center justify-center mt-0.5">
           <Lock size={8} className="text-muted-foreground/25" />
         </div>
-        <div className="flex-1 py-0.5 min-w-0" title={stage.unlockedHint}>
-          <span className="text-xs font-medium text-muted-foreground/35 select-none">{stage.label}</span>
+        <div className="flex-1 py-0.5 min-w-0 flex items-baseline gap-2 flex-wrap" title={stage.unlockedHint}>
+          <span className="text-xs font-medium text-muted-foreground/60 select-none">{stage.label}</span>
+          {stage.unlockedHint && <span className="text-[0.625rem] text-muted-foreground/50">{stage.unlockedHint}</span>}
         </div>
       </div>
     );
@@ -677,13 +742,22 @@ const CrmLegalMilestones: React.FC = () => {
   };
 
   const model = selected ? buildWorkflowModel(selected, (step) => handleStepUpdate(step, "Completed")) : null;
+  // Sections in progress are open; finished / locked ones fold to one line
+  // (a click opens any of them). Reset when another booking is picked.
+  const [openSecs, setOpenSecs] = useState<Record<string, boolean>>({});
+  useEffect(() => { setOpenSecs({}); }, [selectedId]);
+  const isSecOpen = (sec: Section) => openSecs[sec.key] ?? sectionState(sec) === "current";
+  const openSection = (key: string) => {
+    setOpenSecs((o) => ({ ...o, [key]: true }));
+    setTimeout(() => document.getElementById(`lm-sec-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "CRM", "Legal Journey Overview"]} />
+      <Breadcrumbs items={["Dashboard", "CRM", "Legal Journey"]} />
       <CrmShell
-        title="Legal Journey Overview"
-        subtitle="The complete property transaction lifecycle — from Agreement signing to Mutation — for every booking, dynamically laid out per its own project's sale process"
+        title="Legal Journey"
+        subtitle="Every booking's legal steps — agreement, registrations, NOC, possession, sale deed and mutation — and what is next"
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
@@ -738,9 +812,15 @@ const CrmLegalMilestones: React.FC = () => {
                         )}
                       </div>
                       <div className="text-[0.6875rem] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
-                      <div className={`text-[0.6875rem] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
-                        {done ? <CheckCircle2 size={10} /> : <Circle size={10} />}
-                        {text}
+                      <div className="flex gap-0.5 pt-0.5">
+                        {m.sections.filter((sec) => sec.isApplicable).map((sec) => {
+                          const st = sectionState(sec);
+                          return <div key={sec.key} title={SECTION_SHORT[sec.key]} className={`flex-1 h-1 rounded-full ${st === "done" ? "bg-green-500" : st === "current" ? "bg-primary" : "bg-muted"}`} />;
+                        })}
+                      </div>
+                      <div className={`text-[0.6875rem] font-medium flex items-center gap-1 truncate ${done ? "text-green-600" : "text-foreground"}`}>
+                        {done ? <><CheckCircle2 size={10} className="shrink-0" /> Journey complete</>
+                          : (() => { const nx = actionableStages(m)[0]; return <><span className="text-muted-foreground font-normal">Next:</span> <span className="truncate">{nx ? nx.stage.label : text.replace(/ pending$/, "")}</span></>; })()}
                       </div>
                     </div>
                   </div>
@@ -782,56 +862,87 @@ const CrmLegalMilestones: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  {/* One continuous progress bar (doneCount/totalCount, every
-                      applicable stage across the WHOLE journey) plus a row of
-                      per-section dots underneath — replaces the old two
-                      different progress indicators (Phase-1-only step count +
-                      a separate Phase-2+ dot row) that made it easy to think
-                      the journey was further along, or less along, than it
-                      really was. */}
-                  <div className="px-5 py-3 space-y-2">
+                  <div className="px-5 py-3 space-y-3">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Overall progress</span>
-                      <span className="text-[0.6875rem] font-semibold text-foreground">{model.doneCount}/{model.totalCount} steps</span>
+                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Journey</span>
+                      <span className="text-[0.6875rem] text-muted-foreground">{model.doneCount} of {model.totalCount} steps done</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${model.journeyLabel.done ? "bg-green-500" : "bg-primary"}`}
-                        style={{ width: `${model.totalCount ? Math.round((model.doneCount / model.totalCount) * 100) : 0}%` }}
-                      />
-                    </div>
-                    {/* Numbered dots per section — hover for full section name */}
-                    <div className="flex items-center gap-1 pt-0.5">
-                      {model.progressChecks.map((p, i) => (
-                        <span key={p.label} title={p.label}
-                          className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[0.5625rem] font-bold border transition-colors ${
-                            p.done
-                              ? "bg-green-500 border-green-500 text-white"
-                              : "bg-muted/30 border-border text-muted-foreground/50"
-                          }`}>
-                          {p.done ? "✓" : i + 1}
-                        </span>
-                      ))}
-                    </div>
+                    <JourneyBar model={model} onSectionClick={openSection} />
+                    {(() => {
+                      const now = actionableStages(model);
+                      if (model.journeyLabel.done) return (
+                        <div className="rounded-xl border border-green-300 bg-green-500/10 dark:border-green-800 dark:bg-green-950/50 px-4 py-3 flex items-center gap-2.5">
+                          <CheckCircle2 size={16} className="text-green-600 shrink-0" />
+                          <p className="text-sm font-semibold text-green-800 dark:text-green-200">Legal journey complete — mutation approved.</p>
+                        </div>
+                      );
+                      if (!now.length) {
+                        const waiting = model.sections.filter((sec) => sec.isApplicable).flatMap(liveStages).find((x) => !x.isDone);
+                        return (
+                          <div className="rounded-xl border border-blue-300 bg-blue-500/10 dark:border-blue-800 dark:bg-blue-950/50 px-4 py-3">
+                            <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">Waiting — nothing can move right now.</p>
+                            {waiting && <p className="text-xs text-blue-700/80 dark:text-blue-400/80 mt-0.5">{waiting.label}: {waiting.unlockedHint}</p>}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="rounded-xl border border-primary/40 bg-primary/[0.06] overflow-hidden">
+                          <div className="px-4 pt-2.5 pb-1 text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">
+                            What's next{now.length > 1 ? ` · ${now.length} steps can move` : ""}
+                          </div>
+                          {now.map(({ stage, section }) => {
+                            const btn = stageButton(stage, selected.BookingId, navigate, rights.canEdit);
+                            return (
+                              <div key={stage.key} className="px-4 py-2 border-t border-primary/15 first:border-t-0 flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-sm font-semibold">{stage.label}</span>
+                                    {stage.no && <span className="text-[0.625rem] font-mono text-muted-foreground bg-muted/60 px-1 rounded">{stage.no}</span>}
+                                    {stage.status && <span className={`text-[0.625rem] px-1.5 py-0.5 rounded border font-semibold ${statusColor[stage.status] ?? STATUS_COLOR_FALLBACK}`}>{stage.status}</span>}
+                                    <span className="text-[0.625rem] text-muted-foreground">· {SECTION_SHORT[section.key] || section.title}</span>
+                                  </div>
+                                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{stage.sublabel}</p>
+                                </div>
+                                {btn === "auto" ? (
+                                  <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/50 border border-border rounded px-2 py-1 whitespace-nowrap" title="Ticks itself when it's done on its own page">Auto</span>
+                                ) : btn ? (
+                                  <button onClick={btn.onClick}
+                                    className="shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg btn-module text-white whitespace-nowrap">
+                                    {btn.label} {btn.label !== "Mark Done" && <ExternalLink size={10} />}
+                                  </button>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
-                {model.sections.map((section) => (
-                  <div key={section.key} className="rounded-xl border border-border bg-card overflow-hidden">
-                    {/* Compact section header — description available on the ⓘ hover */}
-                    <div className="px-4 py-2.5 border-b border-border bg-muted/10 flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-foreground">{section.title}</span>
-                      {section.isApplicable && (
-                        <span
-                          title={section.description}
-                          className="text-[0.625rem] text-muted-foreground/50 hover:text-muted-foreground cursor-default transition-colors select-none"
-                        >ⓘ</span>
-                      )}
-                      {!section.isApplicable && (
-                        <span className="text-[0.625rem] text-muted-foreground/50">{section.notApplicableReason}</span>
-                      )}
-                    </div>
-                    {section.isApplicable && (
+                {model.sections.map((section) => {
+                  const sst = sectionState(section);
+                  const live = liveStages(section);
+                  const doneN = live.filter((x) => x.isDone).length;
+                  const open = section.isApplicable && isSecOpen(section);
+                  return (
+                  <div key={section.key} id={`lm-sec-${section.key}`} className={`rounded-xl border bg-card overflow-hidden scroll-mt-2 ${sst === "current" ? "border-primary/30" : "border-border"}`}>
+                    <button type="button" onClick={() => section.isApplicable && setOpenSecs((o) => ({ ...o, [section.key]: !open }))}
+                      className={`w-full text-left px-4 py-2.5 flex items-center justify-between gap-2 hover:bg-muted/30 transition-colors ${open ? "border-b border-border" : ""}`}>
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                          sst === "done" ? "bg-green-500 text-white" : sst === "current" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                          {sst === "done" ? <Check size={11} /> : sst === "current" ? <Circle size={7} className="fill-current" /> : <Lock size={9} />}
+                        </span>
+                        <span className="text-xs font-bold text-foreground truncate">{section.title}</span>
+                        <span title={section.description} className="text-muted-foreground/60 shrink-0"><Info size={12} /></span>
+                      </span>
+                      <span className="flex items-center gap-2 shrink-0 text-[0.6875rem] text-muted-foreground">
+                        {section.isApplicable ? `${doneN} of ${live.length} done` : section.notApplicableReason}
+                        {section.isApplicable && <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />}
+                      </span>
+                    </button>
+                    {open && (
                       <div className="px-4 py-3 space-y-0">
                         {section.stages.map((stage, idx) => (
                           <StageRow
@@ -846,7 +957,8 @@ const CrmLegalMilestones: React.FC = () => {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
