@@ -483,14 +483,19 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
     .input("ProjectId", sql.Int, row.ProjectId ?? null)
     .input("Notes", sql.NVarChar(500), `CRM on-account deposit ${row.ReceiptNo}`)
     .input("CreatedBy", sql.NVarChar(150), userEmail)
+    // Once per deposit: a GL posting that was reversed and posted again
+    // (e.g. a repair) re-ran this and put the deposit on the tracker twice.
     .query(`
-      INSERT INTO dbo.OnAccountLedger
-        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
-      VALUES
-        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
-      UPDATE dbo.AccountHeadMaster
-        SET OnAccountBalance = OnAccountBalance + @Amount
-        WHERE LHeadId = @PartyId;
+      IF NOT EXISTS (SELECT 1 FROM dbo.OnAccountLedger WHERE RefType = 'CrmOnAccountPayment' AND RefId = @RefId AND TxnType = 'CREDIT')
+      BEGIN
+        INSERT INTO dbo.OnAccountLedger
+          (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+        VALUES
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+        UPDATE dbo.AccountHeadMaster
+          SET OnAccountBalance = OnAccountBalance + @Amount
+          WHERE LHeadId = @PartyId;
+      END
     `);
 
   return { posted: true };
