@@ -1,6 +1,7 @@
 // Types, row <-> form conversions, CSV columns, the HSN dropdown and the field wrapper shared by the Item Master page and its parts.
 import React, { useState, useRef, useEffect } from "react";
 import { Search, X, ChevronDown } from "lucide-react";
+import { rankHsn } from "@/lib/hsnSearch";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type ExportColumn } from "@/lib/export";
 
@@ -144,13 +145,8 @@ export const HsnDropdown: React.FC<{
   const inputRef = useRef<HTMLInputElement>(null);
 
   const selected = hsnCodes.find((h) => h.code === value);
-  const filtered = query.trim()
-    ? hsnCodes.filter(
-        (h) =>
-          h.code.includes(query) ||
-          h.description.toLowerCase().includes(query.toLowerCase()),
-      )
-    : hsnCodes;
+  // The code typed comes first (see lib/hsnSearch.ts).
+  const filtered = rankHsn(hsnCodes, query, (h) => h.code, (h) => h.description);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -220,11 +216,19 @@ export const HsnDropdown: React.FC<{
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || !query.trim() || !filtered[0]) return;
+                e.preventDefault();
+                onChange(filtered[0].code);
+                setOpen(false);
+                setQuery("");
+              }}
               placeholder="Search by code or description..."
               className="w-full pl-8 pr-3 py-1.5 text-sm font-body bg-card border border-foreground/30 text-foreground focus:outline-none"
             />
           </div>
-          <div className="max-h-48 overflow-y-auto">
+          {/* Keyed on the search so the list starts from the top for every new search. */}
+          <div key={query} className="max-h-48 overflow-y-auto">
             {hsnCodes.length === 0 ? (
               <p className="px-3 py-4 text-center text-sm text-muted-foreground">
                 No {label} codes available
@@ -234,9 +238,10 @@ export const HsnDropdown: React.FC<{
                 No {label} codes found
               </p>
             ) : (
-              filtered.map((h) => (
+              filtered.map((h, i) => (
                 <button
-                  key={h.code}
+                  // HSN codes are not unique in the master; keying on the code alone left stale rows on screen.
+                  key={`${h.code}-${i}`}
                   type="button"
                   onClick={() => {
                     onChange(h.code);

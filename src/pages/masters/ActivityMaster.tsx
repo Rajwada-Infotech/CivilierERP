@@ -575,8 +575,8 @@ const ActivityMaster: React.FC = () => {
                           : "Select SAC Code…"}
                       </option>
                       {isActivity &&
-                        hsnOptions.map((h) => (
-                          <option key={h.code} value={h.code}>
+                        hsnOptions.map((h, i) => (
+                          <option key={`${h.code}-${i}`} value={h.code}>
                             {h.code}
                             {h.desc ? ` — ${h.desc}` : ""}
                           </option>

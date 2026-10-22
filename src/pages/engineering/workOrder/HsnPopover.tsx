@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { X, Receipt, Search, List } from "lucide-react";
 import { WOGSTType, Activity } from "./config";
+import { rankHsn } from "@/lib/hsnSearch";
 
 // ─── HSN Popover ──────────────────────────────────────────────────────────────
 // Uses Radix Popover (built-in portal) — no manual position math needed.
@@ -23,11 +24,7 @@ export const HsnPopover: React.FC<{
   const [hsnOpen, setHsnOpen] = useState(false);
   const [hsnSearch, setHsnSearch] = useState("");
 
-  const filteredHsn = hsnRecords.filter(
-    (h) =>
-      h.code.toLowerCase().includes(hsnSearch.toLowerCase()) ||
-      h.shortDesc.toLowerCase().includes(hsnSearch.toLowerCase()),
-  );
+  const filteredHsn = rankHsn(hsnRecords, hsnSearch, (h) => h.code, (h) => h.shortDesc);
 
   const hasHsn = Boolean(activity.hsnCode);
 
@@ -91,13 +88,20 @@ export const HsnPopover: React.FC<{
             autoFocus
             value={hsnSearch}
             onChange={(e) => setHsnSearch(e.target.value)}
+            onKeyDown={(e) => {
+              const h = filteredHsn[0];
+              if (e.key !== "Enter" || !hsnSearch.trim() || !h) return;
+              e.preventDefault();
+              onUpdate({ hsnCode: h.code, hsnGstRate: h.cgstRate + h.sgstRate || h.igstRate, hsnGstType: h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst" });
+              setHsnOpen(false);
+            }}
             placeholder="Search code or description…"
             className="w-full text-xs border border-foreground/30 px-2.5 py-1.5 bg-card text-foreground focus:outline-none"
           />
         </div>
 
         {/* List */}
-        <div className="max-h-56 overflow-y-auto divide-y divide-foreground/10">
+        <div key={hsnSearch} className="max-h-56 overflow-y-auto divide-y divide-foreground/10">
           {hasHsn && (
             <button
               type="button"
@@ -119,13 +123,13 @@ export const HsnPopover: React.FC<{
               No SAC records found
             </p>
           ) : (
-            filteredHsn.map((h) => {
+            filteredHsn.map((h, i) => {
               const gstRate = h.cgstRate + h.sgstRate || h.igstRate;
               const gstType: WOGSTType =
                 h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst";
               return (
                 <button
-                  key={h.code}
+                  key={`${h.code}-${i}`}
                   type="button"
                   onClick={() => {
                     onUpdate({
