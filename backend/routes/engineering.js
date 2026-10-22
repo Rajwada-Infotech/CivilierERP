@@ -3,6 +3,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const { projectPredicate } = require("../services/projectScope");
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
@@ -129,6 +130,10 @@ const selectWorkDoneSql = `
 router.get("/dashboard", async (req, res) => {
   try {
     const pool = getPool();
+    // Everything on the dashboard is kept to the user's projects (null scope = every project).
+    const inScope = (col) => projectPredicate(req.projectScope, col);
+    // Rejected / cancelled documents are not work in hand: they stay out of every value.
+    const LIVE = "NOT IN ('Rejected', 'Cancelled', 'Deleted')";
     const hasWorkDone = await hasTable(pool, WORK_DONE_TABLE);
     const hasBOQ = true;
     const hasWO = true;
@@ -152,8 +157,9 @@ router.get("/dashboard", async (req, res) => {
               COUNT(1) AS total,
               SUM(CASE WHEN ISNULL(h.Status, 'Draft') IN ('Draft', 'Pending', 'Open', 'In Progress') THEN 1 ELSE 0 END) AS openCount,
               SUM(CASE WHEN h.DocumentDate >= DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1) THEN 1 ELSE 0 END) AS thisMonth,
-              ISNULL(SUM(h.TotalAmount), 0) AS totalValue
+              ISNULL(SUM(CASE WHEN ISNULL(h.Status, 'Draft') ${LIVE} THEN h.TotalAmount ELSE 0 END), 0) AS totalValue
             FROM dbo.WorkOrderHeader h
+            WHERE 1=1${inScope("h.ProjectId")}
           `)
         : Promise.resolve({ recordset: [{}] }),
       hasWO
@@ -166,6 +172,7 @@ router.get("/dashboard", async (req, res) => {
               h.TotalAmount
             FROM dbo.WorkOrderHeader h
             LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+            WHERE 1=1${inScope("h.ProjectId")}
             ORDER BY ISNULL(h.UpdatedAt, h.CreatedAt) DESC
           `)
         : Promise.resolve({ recordset: [] }),
@@ -173,6 +180,7 @@ router.get("/dashboard", async (req, res) => {
         ? pool.request().query(`
             SELECT ISNULL(h.Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(h.TotalAmount), 0) AS TotalValue
             FROM dbo.WorkOrderHeader h
+            WHERE 1=1${inScope("h.ProjectId")}
             GROUP BY ISNULL(h.Status, 'Draft')
           `)
         : Promise.resolve({ recordset: [] }),
@@ -181,8 +189,9 @@ router.get("/dashboard", async (req, res) => {
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN Status = 'Approved' THEN 1 ELSE 0 END) AS approved,
-              ISNULL(SUM(TotalAmount), 0) AS totalValue
+              ISNULL(SUM(CASE WHEN ISNULL(Status, 'Draft') ${LIVE} THEN TotalAmount ELSE 0 END), 0) AS totalValue
             FROM dbo.BOQ
+            WHERE 1=1${inScope("ProjectId")}
           `)
         : Promise.resolve({ recordset: [{}] }),
       hasBOQ
@@ -195,6 +204,7 @@ router.get("/dashboard", async (req, res) => {
               b.TotalAmount AS TotalValue
             FROM dbo.BOQ b
             LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
+            WHERE 1=1${inScope("b.ProjectId")}
             ORDER BY ISNULL(b.UpdatedAt, b.CreatedAt) DESC
           `)
         : Promise.resolve({ recordset: [] }),
@@ -202,9 +212,10 @@ router.get("/dashboard", async (req, res) => {
         ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
-              SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
-              ISNULL(SUM(CertifiedAmount), 0) AS certifiedAmount
+              SUM(CASE WHEN ISNULL(Status, 'Draft') IN ('Draft', 'Pending') THEN 1 ELSE 0 END) AS pending,
+              ISNULL(SUM(CASE WHEN Status = 'Approved' THEN CertifiedAmount ELSE 0 END), 0) AS certifiedAmount
             FROM dbo.WorkDone
+            WHERE 1=1${inScope("ProjectId")}
           `)
         : Promise.resolve({ recordset: [{}] }),
       hasWorkDone
@@ -217,6 +228,7 @@ router.get("/dashboard", async (req, res) => {
               wd.CertifiedAmount
             FROM dbo.WorkDone wd
             LEFT JOIN dbo.WorkOrderHeader woh ON woh.Id = wd.WorkOrderID
+            WHERE 1=1${inScope("wd.ProjectId")}
             ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
           `)
         : Promise.resolve({ recordset: [] }),
@@ -224,6 +236,7 @@ router.get("/dashboard", async (req, res) => {
         ? pool.request().query(`
             SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(CertifiedAmount), 0) AS TotalValue
             FROM dbo.WorkDone
+            WHERE 1=1${inScope("ProjectId")}
             GROUP BY ISNULL(Status, 'Draft')
           `)
         : Promise.resolve({ recordset: [] }),
@@ -232,7 +245,7 @@ router.get("/dashboard", async (req, res) => {
             COUNT(1) AS total,
             SUM(CASE WHEN ISNULL(discontinue, 0) = 0 THEN 1 ELSE 0 END) AS active
           FROM dbo.enterprise
-          WHERE business_type = 'P'
+          WHERE business_type = 'P'${inScope("id")}
         `),
       // ── Work Order value — daily totals, last 14 days ──────────────────
       hasWO
@@ -242,6 +255,7 @@ router.get("/dashboard", async (req, res) => {
               ISNULL(SUM(h.TotalAmount), 0) AS Amount
             FROM dbo.WorkOrderHeader h
             WHERE CAST(h.DocumentDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+              AND ISNULL(h.Status, 'Draft') ${LIVE}${inScope("h.ProjectId")}
             GROUP BY CAST(h.DocumentDate AS DATE)
           `)
         : Promise.resolve({ recordset: [] }),
@@ -253,6 +267,7 @@ router.get("/dashboard", async (req, res) => {
               ISNULL(SUM(CertifiedAmount), 0) AS Amount
             FROM dbo.WorkDone
             WHERE CAST(DocDate AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE))
+              AND Status = 'Approved'${inScope("ProjectId")}
             GROUP BY CAST(DocDate AS DATE)
           `)
         : Promise.resolve({ recordset: [] }),

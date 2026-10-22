@@ -117,8 +117,8 @@ export default function MaterialDashboard() {
           </div>
           <div className="mono titleblock" style={{ flex: "1 1 280px", maxWidth: 380, minWidth: 240, display: "grid", gridTemplateColumns: "1fr 1fr", borderLeft: "1px solid var(--ink)", fontSize: 13 }}>
             <div style={{ gridColumn: "1 / -1", padding: "10px 14px", borderBottom: "1px solid var(--ink)" }}>
-              <span className="label" style={{ display: "block", marginBottom: 3 }}>Refreshes</span>
-              every 30 seconds
+              <span className="label" style={{ display: "block", marginBottom: 3 }}>Date</span>
+              {readAt.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </div>
             <div style={{ padding: "10px 14px", borderRight: "1px solid var(--ink)" }}>
               <span className="label" style={{ display: "block", marginBottom: 3 }}>Read at</span>
