@@ -129,9 +129,10 @@ export default function BOQ() {
   const totalPages = listData?.totalPages ?? 1;
   const total = listData?.total ?? 0;
 
-  const totalValue = rows.reduce((s, r) => s + (r.TotalAmount ?? 0), 0);
-  const countApproved = rows.filter((r) => r.Status === "Approved").length;
-  const countPending = rows.filter((r) => r.Status === "Pending").length;
+  // Over every BOQ the filters match (server totals), not just the rows on this page.
+  const totalValue: number = listData?.summary?.totalValue ?? 0;
+  const countApproved: number = listData?.summary?.approved ?? 0;
+  const countPending: number = listData?.summary?.pending ?? 0;
 
   const loadMasterData = useCallback(async () => {
     try {
