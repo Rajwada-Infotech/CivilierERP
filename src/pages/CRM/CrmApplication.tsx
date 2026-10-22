@@ -1191,13 +1191,43 @@ const CrmApplication: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId, selectedUnit?.Id]);
 
-  const computedTotal = useMemo(() => {
-    const area = selectedPlots.length
+  const totalAreaSqFt = useMemo(() => (
+    selectedPlots.length
       ? selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0)
-      : Number(selectedUnit?.AreaSqFt) || 0;
+      : Number(selectedUnit?.AreaSqFt) || 0
+  ), [selectedUnit, selectedPlots]);
+  const computedTotal = useMemo(() => {
     const rate = Number(form.RatePerSqFt) || 0;
-    return area && rate ? Math.round(area * rate) : 0;
-  }, [selectedUnit, selectedPlots, form.RatePerSqFt]);
+    return totalAreaSqFt && rate ? Math.round(totalAreaSqFt * rate) : 0;
+  }, [totalAreaSqFt, form.RatePerSqFt]);
+
+  // Total Value can be typed directly instead of Rate — the rate is back-
+  // calculated from it (Rate = Total ÷ Area) so staff who are quoted a flat
+  // price don't have to do that division themselves. The field keeps its
+  // own local text while focused (so typing isn't fought by the rounded
+  // echo coming back through Rate → computedTotal) and only snaps to the
+  // settled, rate-accurate total on blur or when the rate/unit changes from
+  // elsewhere.
+  const [totalValueInput, setTotalValueInput] = useState("");
+  const totalFieldFocused = useRef(false);
+  useEffect(() => {
+    if (totalFieldFocused.current) return;
+    setTotalValueInput(computedTotal ? String(computedTotal) : "");
+  }, [computedTotal]);
+  const handleTotalValueChange = (raw: string) => {
+    setTotalValueInput(raw);
+    if (!totalAreaSqFt) return;
+    const total = Number(raw);
+    if (!raw.trim() || !Number.isFinite(total) || total <= 0) return;
+    // 4-decimal rate keeps the settled total (area × rate, shown on blur)
+    // within a paise of what was typed — rounds away to nothing once
+    // computedTotal rounds to the nearest rupee. 2 decimals wasn't enough
+    // precision and visibly drifted the total by several rupees; raw
+    // (unrounded) division also isn't used here since it can surface
+    // floating-point noise like 1874.7238999999998 in the Rate field.
+    const rate = Math.round((total / totalAreaSqFt) * 10000) / 10000;
+    setForm((f) => ({ ...f, RatePerSqFt: String(rate) }));
+  };
   const unitParkingGstPreview = useMemo(
     () => (crmGstRates ? computeUnitParkingGst(computedTotal, detailParkingBase, crmGstRates) : null),
     [crmGstRates, computedTotal, detailParkingBase],
@@ -2403,9 +2433,12 @@ const CrmApplication: React.FC = () => {
                       <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
                     </div>
                     <div className="col-span-3 lg:col-span-3">
-                      <label className={labelCls}>Est. Total Value</label>
-                      <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
-                        className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                      <label className={labelCls}>Total Value</label>
+                      <input type="text" inputMode="decimal" disabled={!totalAreaSqFt} value={totalValueInput}
+                        onFocus={() => { totalFieldFocused.current = true; }}
+                        onBlur={() => { totalFieldFocused.current = false; setTotalValueInput(computedTotal ? String(computedTotal) : ""); }}
+                        onChange={(e) => { if (/^[0-9]*\.?[0-9]*$/.test(e.target.value)) handleTotalValueChange(e.target.value); }}
+                        className={`${inputCls} disabled:bg-muted/30 disabled:text-muted-foreground`} />
                     </div>
                   </div>
                 </div>
