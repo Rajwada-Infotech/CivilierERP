@@ -40,25 +40,36 @@ const section = (t) => console.log(`\n${"=".repeat(78)}\n${t}\n${"=".repeat(78)}
   }
 
   // ── GL posting ──
+  // An invoice can carry two postings: 'ExpenseBooking' (automatic, on approval) and 'InvoicePosting'
+  // (Post to GL). Post to GL reverses the automatic one and replaces it, so the vendor is credited once.
   section("POSTED TO GL");
   const gl = await q(`
     SELECT g.*, ah.LHeadName
     FROM dbo.GeneralLedgerEntry g
     LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = g.LHeadId
-    WHERE g.SourceType = 'ExpenseBooking' AND g.SourceId = @id
-    ORDER BY g.VoucherNo, g.DebitAmount DESC`);
+    WHERE g.SourceType IN ('ExpenseBooking', 'InvoicePosting') AND g.SourceId = @id
+    ORDER BY g.CreatedAt, g.VoucherNo, g.DebitAmount DESC`);
   if (!gl.length) console.log("  Nothing posted.");
-  let dr = 0, cr = 0;
+  const groups = new Map();
   for (const g of gl) {
-    dr += Number(g.DebitAmount) || 0;
-    cr += Number(g.CreditAmount) || 0;
-    console.log(`  ${String(g.VoucherNo || "").padEnd(18)} ${String(g.LHeadName || `#${g.LHeadId}`).padEnd(34)} Dr ${money(g.DebitAmount).padStart(14)}  Cr ${money(g.CreditAmount).padStart(14)}${g.IsReversed ? "  [REVERSED]" : ""}`);
+    const key = `${g.SourceType}|${g.VoucherNo}|${g.IsReversed ? 1 : 0}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(g);
   }
-  if (gl.length) {
-    const g0 = gl[0];
-    console.log(`  ${"".padEnd(53)} -- ${money(dr).padStart(14)}     ${money(cr).padStart(14)}${Math.abs(dr - cr) > 0.009 ? "  NOT BALANCED" : "  balanced"}`);
-    console.log(`  voucher date ${ist(g0.VoucherDate)} · posted by ${g0.CreatedBy || "—"} at ${ist(g0.CreatedAt)}`);
-    if (g0.Narration) console.log(`  narration: ${g0.Narration}`);
+  for (const rows of groups.values()) {
+    const g0 = rows[0];
+    const label = g0.SourceType === "InvoicePosting" ? "Post to GL" : "automatic, on approval";
+    console.log(`
+  ${g0.SourceType} (${label})${g0.IsReversed ? "  — REVERSED, no longer counts" : "  — in force"}`);
+    console.log(`  posted by ${g0.CreatedBy || "—"} at ${ist(g0.CreatedAt)} · voucher ${g0.VoucherNo || "—"} dated ${ist(g0.VoucherDate)}`);
+    let dr = 0, cr = 0;
+    for (const g of rows) {
+      dr += Number(g.DebitAmount) || 0;
+      cr += Number(g.CreditAmount) || 0;
+      console.log(`    ${String(g.LHeadName || `#${g.LHeadId}`).padEnd(40)} Dr ${money(g.DebitAmount).padStart(14)}  Cr ${money(g.CreditAmount).padStart(14)}`);
+    }
+    console.log(`    ${"".padEnd(40)}    ${money(dr).padStart(14)}     ${money(cr).padStart(14)}${Math.abs(dr - cr) > 0.009 ? "  NOT BALANCED" : "  balanced"}`);
+    if (g0.Narration) console.log(`    narration: ${g0.Narration}`);
   }
 
   // ── approvals ──
@@ -66,10 +77,8 @@ const section = (t) => console.log(`\n${"=".repeat(78)}\n${t}\n${"=".repeat(78)}
   const ap = await q("SELECT * FROM dbo.ApprovalAuditLog WHERE TableName = 'ExpenseBooking' AND RecordId = @id ORDER BY 1");
   if (!ap.length) console.log("  none");
   for (const a of ap) {
-    const when = a.CreatedAt || a.ActionAt || a.ActedAt || a.Timestamp;
-    const who = a.ActedBy || a.ActionBy || a.UserEmail || a.ChangedBy || a.CreatedBy;
-    const what = [a.Action, a.FromStatus && `${a.FromStatus} → ${a.ToStatus}`, a.Level != null && `level ${a.Level}`, a.Note || a.Comments || a.Remarks].filter(Boolean).join(" · ");
-    console.log(`  ${ist(when)}  ${String(who || "—").padEnd(30)} ${what}`);
+    const what = [a.ActionStatus, a.Level != null && `level ${a.Level}`, a.Role, a.Note].filter(Boolean).join(" · ");
+    console.log(`  ${ist(a.ActionAt || a.CreatedAt)}  ${String(a.ApproverEmail || "—").padEnd(32)} ${what}`);
   }
 
   // ── amendments ──
