@@ -398,6 +398,9 @@ const HsnMaster: React.FC = () => {
         }
       >
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="HSN"
           fields={[
             {

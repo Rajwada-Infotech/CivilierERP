@@ -73,6 +73,8 @@ const ElectricityProviderMaster: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "Maintenance", "Electricity Provider Master"]} />
       <MaintenanceShell title="Electricity Provider Master" subtitle="Discoms serving your projects — never hard-coded" icon={Zap}>
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
           title="Electricity Provider"
           fields={[
             { name: "name", label: "Provider Name", type: "text", required: true, placeholder: "e.g. CESC" },

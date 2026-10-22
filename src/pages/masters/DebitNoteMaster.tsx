@@ -699,6 +699,9 @@ const DebitNoteMaster: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "Finance Module", "Debit Note"]} />
       <SheetShell eyebrow="CivilierERP · Material" title="Debit notes" subtitle="Value adjustments against supplier, contractor, customer and broker invoices, plus the quality rejections raised at the gate.">
       <MasterPage
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         title="Debit Note"
         gridCols={2}
         fields={fields}

@@ -103,6 +103,9 @@ const ChargeHeadMaster: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "Maintenance", "Charge Head Master"]} />
       <MaintenanceShell title="Charge Head Master" subtitle="Standard maintenance service rates & tax" icon={ReceiptText}>
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="Charge Head"
           fields={[
             { name: "name", label: "Charge Head Name", type: "text", required: true, fullWidth: true, placeholder: "e.g. Lift Maintenance" },

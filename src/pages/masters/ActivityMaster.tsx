@@ -523,6 +523,9 @@ const ActivityMaster: React.FC = () => {
       {/* ── Form only (table hidden via hideTable prop) ── */}
       <div>
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="Activity"
           hideTable
           fields={[

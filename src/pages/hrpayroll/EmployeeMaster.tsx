@@ -614,6 +614,9 @@ export default function EmployeeMaster() {
           ))}
         </div>
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="Employee"
           gridCols={3}
           collapsibleAddForm

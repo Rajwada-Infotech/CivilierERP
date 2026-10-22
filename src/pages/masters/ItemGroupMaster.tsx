@@ -281,6 +281,9 @@ const ItemGroupMaster: React.FC = () => {
         }
       >
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
         saveButtonClass="btn-module "
           title="Item Group"
           fields={[
