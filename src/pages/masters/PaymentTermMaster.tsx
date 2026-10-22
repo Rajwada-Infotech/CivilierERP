@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type FieldDef,
@@ -9,7 +9,8 @@ import {
 } from "@/components/MasterPage";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
-import { CalendarClock, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   getVendorPaymentTerms,
   addVendorPaymentTerm,
@@ -27,6 +28,7 @@ const mapRow = (row: VendorPaymentTermRow): Record<string, unknown> => ({
 
 const PaymentTermMaster: React.FC = () => {
   const rights = usePageRights("payment-terms");
+  const queryClient = useQueryClient();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -67,62 +69,60 @@ const PaymentTermMaster: React.FC = () => {
   ];
 
   const columnRenderers = {
-    Days: (value: unknown) => (
-      <span className="font-mono text-xs font-semibold text-foreground">
-        {String(value ?? "")} days
-      </span>
-    ),
-    IsActive: (value: unknown) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
-          value
-            ? "bg-primary/10 text-primary border-primary/20"
-            : "bg-destructive/10 text-destructive border-destructive/20"
-        }`}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-            value ? "bg-primary" : "bg-destructive"
-          }`}
-        />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
+    Description: (value: unknown) => <span className="text-sm font-medium text-foreground">{String(value ?? "")}</span>,
+    Days: (value: unknown) => <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{String(value ?? "")} days</span>,
+    IsActive: (value: unknown) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "waiting"} />,
   };
+
+  // Due date = vendor invoice date + days, so days must be a whole number of days, none negative.
+  // (The server rounds a fraction down and the old form turned a bad entry into 0.)
+  const checkDays = (form: Record<string, unknown>) => {
+    const raw = String(form.Days ?? "").trim();
+    const days = Number(raw);
+    if (raw === "" || !Number.isInteger(days) || days < 0 || days > 3650) {
+      toast.error("Days must be a whole number from 0 to 3650.");
+      return null;
+    }
+    return form;
+  };
+
+  // Purchase orders and the contractor master keep their own copy of the term list.
+  const refreshElsewhere = () => {
+    for (const key of ["payment-terms-po", "vendor-payment-term-options"]) queryClient.invalidateQueries({ queryKey: [key] });
+  };
+
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       const record = event.record as Record<string, unknown>;
       await addVendorPaymentTerm({
         Description: String(record.Description ?? "").trim(),
-        Days: Number(record.Days) || 0,
+        Days: Number(record.Days),
         IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
       });
-      toast.success("Payment term added!");
       await refetch();
     } else if (event.action === "update") {
       const record = event.record as Record<string, unknown>;
       await updateVendorPaymentTerm(Number(event.id), {
         Description: String(record.Description ?? "").trim(),
-        Days: Number(record.Days) || 0,
+        Days: Number(record.Days),
         IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
       });
-      toast.success("Payment term updated!");
       await refetch();
     } else if (event.action === "delete") {
       await deleteVendorPaymentTerm(Number(event.id));
-      toast.success("Payment term deleted!");
       await refetch();
     }
+    refreshElsewhere();
   };
 
   return (
     <>
       <Breadcrumbs items={["Masters", "Payment Terms"]} />
-      <MaterialShell
-        title="Payment Terms"
-        subtitle="Net-day terms for POs and invoices — due date = vendor invoice date + days"
-        icon={CalendarClock}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Payment terms"
+        subtitle="Net-day terms for purchase orders and invoices: the due date is the vendor invoice date plus the days."
       >
         {loading ? (
           <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
@@ -137,6 +137,7 @@ const PaymentTermMaster: React.FC = () => {
             columnRenderers={columnRenderers}
             initialData={rows}
             onDataEvent={handleDataEvent}
+            onCustomSave={checkDays}
             canCreate={rights.canCreate}
             canEdit={rights.canEdit}
             canDelete={rights.canDelete}
@@ -158,7 +159,7 @@ const PaymentTermMaster: React.FC = () => {
             }
           />
         )}
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 };
