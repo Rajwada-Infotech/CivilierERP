@@ -95,7 +95,7 @@ const selectWorkDoneSql = `
     wd.SupplierId,
     sup.LHeadName AS SupplierName,
     wd.WorkOrderID,
-    woh.DocumentNumber AS WorkOrderNo,
+    COALESCE(woh.DocNo, woh.DocumentNumber) AS WorkOrderNo,
     ctr.LHeadName AS ContractorName,
     wd.PeriodFrom,
     wd.PeriodTo,
@@ -335,6 +335,27 @@ router.get("/dashboard", async (req, res) => {
   }
 });
 
+// Work done certified against a work order cannot add up to more than the work order is worth. Returns the
+// reason when this entry would take it over (rejected / deleted entries and the entry itself left out), else null.
+async function certifiedOverContract(request, woId, certified, selfId) {
+  if (!woId) return null;
+  const r = await request
+    .input("CWOId", sql.Int, woId)
+    .input("CSelf", sql.BigInt, selfId ? parseInt(selfId, 10) : null).query(`
+      SELECT h.TotalAmount AS ContractValue,
+        (SELECT ISNULL(SUM(CertifiedAmount), 0) FROM dbo.WorkDone
+          WHERE WorkOrderID = @CWOId AND (@CSelf IS NULL OR ID <> @CSelf)
+            AND ISNULL(Status, '') NOT IN ('Rejected', 'Cancelled', 'Deleted')) AS SoFar
+      FROM dbo.WorkOrderHeader h WHERE h.Id = @CWOId`);
+  const row = r.recordset[0];
+  const contract = Number(row?.ContractValue) || 0;
+  if (contract <= 0) return null;
+  const soFar = Number(row.SoFar) || 0;
+  if (soFar + certified <= contract + 0.5) return null;
+  const inr = (n) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return `This would certify ${inr(soFar + certified)} against a work order worth ${inr(contract)}; ${inr(Math.max(0, contract - soFar))} is left to certify.`;
+}
+
 router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   try {
     const companyId = parseInt(req.query.companyId, 10) || null;
@@ -357,11 +378,16 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
     // document picker load every approved Work Done entry unscoped (same
     // as its PO/allPO master lists) and filter client-side once the user
     // picks a company on the form, rather than requiring one up front.
-    const whereParts = [];
+    // Deleted entries are gone; a project-scoped user sees only their projects' entries.
+    const whereParts = ["ISNULL(wd.Status, '') <> 'Deleted'"];
+    const scoped = projectPredicate(req.projectScope, "wd.ProjectId", "");
+    if (scoped) whereParts.push(scoped);
     if (companyId) whereParts.push("wd.CompanyId = @companyId");
     if (statusFilter) whereParts.push("ISNULL(wd.Status, 'Draft') = @statusFilter");
     const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
-    const countWhereParts = [];
+    const countWhereParts = ["ISNULL(Status, '') <> 'Deleted'"];
+    const countScoped = projectPredicate(req.projectScope, "ProjectId", "");
+    if (countScoped) countWhereParts.push(countScoped);
     if (companyId) countWhereParts.push("CompanyId = @companyId");
     if (statusFilter) countWhereParts.push("ISNULL(Status, 'Draft') = @statusFilter");
     const countWhere = countWhereParts.length ? `WHERE ${countWhereParts.join(" AND ")}` : "";
@@ -386,17 +412,23 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
         ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),
-      countReq.query(
-        `SELECT COUNT(1) AS total FROM dbo.WorkDone ${countWhere}`,
-      ),
+      countReq.query(`
+        SELECT COUNT(1) AS total,
+          ISNULL(SUM(CASE WHEN ISNULL(Status, 'Draft') NOT IN ('Rejected', 'Cancelled') THEN CertifiedAmount END), 0) AS certified,
+          SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
+          SUM(CASE WHEN Status = 'Approved' THEN 1 ELSE 0 END) AS approved
+        FROM dbo.WorkDone ${countWhere}`),
     ]);
+    const sum = countResult.recordset[0];
 
     res.json({
       data: dataResult.recordset,
-      total: countResult.recordset[0].total,
+      total: sum.total,
+      // Over every entry the filters match, not just this page: certified leaves rejected ones out.
+      summary: { certified: Number(sum.certified) || 0, pending: sum.pending || 0, approved: sum.approved || 0 },
       page,
       limit,
-      pages: Math.ceil(countResult.recordset[0].total / limit),
+      pages: Math.ceil(sum.total / limit),
     });
   } catch (err) {
     console.error("[GET /engineering/work-done]", err);
@@ -482,7 +514,7 @@ router.get("/work-done/:id", async (req, res) => {
   }
 });
 
-router.post("/work-done", requirePageRight("engineering-work-order", "create"), async (req, res) => {
+router.post("/work-done", requirePageRight("work-done", "create"), async (req, res) => {
   let transaction;
   try {
     const userEmail = requireUserEmail(req, res);
@@ -545,7 +577,7 @@ router.post("/work-done", requirePageRight("engineering-work-order", "create"), 
 
     // Period overlap guard
     if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
-      const overlapCheck = await pool
+      const overlapCheck = await transaction
         .request()
         .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
         .input("PFrom", sql.Date, body.PeriodFrom)
@@ -555,13 +587,21 @@ router.post("/work-done", requirePageRight("engineering-work-order", "create"), 
           WHERE WorkOrderID = @WOId
             AND PeriodFrom IS NOT NULL AND PeriodTo IS NOT NULL
             AND PeriodFrom <= @PTo AND PeriodTo >= @PFrom
+            AND ISNULL(Status, '') NOT IN ('Rejected', 'Cancelled', 'Deleted')
         `);
       if ((overlapCheck.recordset[0]?.cnt ?? 0) > 0) {
+        await transaction.rollback();
         return res.status(409).json({
           error:
             "A Work Done entry already exists for an overlapping period on this Work Order.",
         });
       }
+    }
+
+    const overBy = await certifiedOverContract(transaction.request(), toIntOrNull(body.WorkOrderID), certified, null);
+    if (overBy) {
+      await transaction.rollback();
+      return res.status(400).json({ error: overBy });
     }
 
     let finalDocNo = body.DocNo || null;
@@ -647,11 +687,11 @@ router.post("/work-done", requirePageRight("engineering-work-order", "create"), 
   }
 });
 
-router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
+router.put("/work-done/:id", requirePageRight("work-done", "edit"), async (req, res) => {
   let wasApproved = false;
   try {
     const currentStatus = await getRecordStatus("work-done", req.params.id);
-    const allowPostApproval = await resolveAllowPostApproval(req, "engineering-work-order");
+    const allowPostApproval = await resolveAllowPostApproval(req, "work-done");
     await guardEdit("work-done", req.params.id, { allowPostApproval });
     wasApproved = currentStatus === "Approved";
   } catch (err) {
@@ -712,6 +752,7 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
             AND ID <> @SelfId
             AND PeriodFrom IS NOT NULL AND PeriodTo IS NOT NULL
             AND PeriodFrom <= @PTo AND PeriodTo >= @PFrom
+            AND ISNULL(Status, '') NOT IN ('Rejected', 'Cancelled', 'Deleted')
         `);
       if ((overlapCheck.recordset[0]?.cnt ?? 0) > 0) {
         return res.status(409).json({
@@ -720,6 +761,9 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
         });
       }
     }
+
+    const overBy = await certifiedOverContract(pool.request(), toIntOrNull(body.WorkOrderID), certified, req.params.id);
+    if (overBy) return res.status(400).json({ error: overBy });
 
     const result = await pool
       .request()
@@ -849,7 +893,7 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
   }
 });
 
-router.delete("/work-done/:id", requirePageRight("engineering-work-order", "delete"), async (req, res) => {
+router.delete("/work-done/:id", requirePageRight("work-done", "delete"), async (req, res) => {
   try {
     const role = req.user?.role;
     if (!role || !["admin", "manager"].includes(role.toLowerCase())) {
@@ -890,7 +934,7 @@ router.delete("/work-done/:id", requirePageRight("engineering-work-order", "dele
   }
 });
 
-router.put("/work-done/:id/submit", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
+router.put("/work-done/:id/submit", requirePageRight("work-done", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -974,6 +1018,8 @@ router.get(
         SELECT
           h.Id,
           COALESCE(h.DocNo, h.DocumentNumber) AS DocNo,
+          h.CompanyId,
+          h.ProjectId,
           ah.LHeadName AS ContractorName,
           COUNT(a.Id) AS ActivityCount,
           ISNULL(SUM(a.GrandTotal), 0) AS GrossTotal,
@@ -984,7 +1030,8 @@ router.get(
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
         WHERE ISNULL(h.Status, 'Draft') = 'Approved'
           AND (@companyId IS NULL OR h.CompanyId = @companyId)
-        GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
+          ${projectPredicate(req.projectScope, "h.ProjectId")}
+        GROUP BY h.Id, h.DocNo, h.DocumentNumber, h.CompanyId, h.ProjectId, ah.LHeadName
         ORDER BY h.Id DESC
       `);
       res.json(result.recordset);
