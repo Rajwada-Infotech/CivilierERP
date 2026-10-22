@@ -31,6 +31,7 @@ router.get("/search", authenticateToken, requirePageRight("short-close", "view")
       finYearId: req.query.finYearId || null,
       companyId: req.query.companyId || null,
       projectId: req.query.projectId || null,
+      scope: req.projectScope ?? null,
     });
     res.json(rows);
   } catch (err) {
@@ -56,6 +57,7 @@ router.post("/process", authenticateToken, requirePageRight("short-close", "edit
       ids,
       remarks: req.body.remarks || null,
       userEmail: user,
+      scope: req.projectScope ?? null,
     });
 
     await bumpCacheVersion(docType === "PO" ? "purchase-orders" : "material-requests");
