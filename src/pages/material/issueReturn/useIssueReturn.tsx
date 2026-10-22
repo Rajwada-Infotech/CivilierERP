@@ -2,6 +2,7 @@
 // the open return, delete and CSV import. The page and its parts read from this one object.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -176,6 +177,18 @@ export function useIssueReturn() {
     if (!form.items.some((i) => i.Quantity > 0)) return void toast.error("All items have zero quantity");
     saveMut.mutate({ ...form });
   };
+
+  // Deep-link support — the Stock drill-down navigates here as
+  // /material/issue-return?view=<ReturnId> to open this exact return.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    openDetail({ ReturnId: Number(viewId) } as ReturnRow);
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const stats = useMemo(
     () => ({
