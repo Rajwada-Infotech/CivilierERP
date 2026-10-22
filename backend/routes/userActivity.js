@@ -495,14 +495,10 @@ router.post("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
 
-    // Resolve the real client IP: trust X-Forwarded-For (set by proxies/load
-    // balancers) first, fall back to the socket remote address, then to the
-    // client-supplied value, and finally "unknown".
-    const serverIp =
-      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
-      req.socket?.remoteAddress ||
-      req.ip ||
-      null;
+    // The visitor's address as Express resolves it: counted back from the right of X-Forwarded-For past
+    // the trusted proxies (server.js "trust proxy"). Reading the header's first entry let anyone write
+    // the address recorded against them by sending their own X-Forwarded-For.
+    const serverIp = (req.ip || req.socket?.remoteAddress || "").replace(/^::ffff:/, "") || null;
     const resolvedIp =
       serverIp || normalizeNullableString(rest.ipAddress, 50) || "unknown";
 

@@ -409,7 +409,11 @@ async function createApp() {
   // container. nginx forwards the real client/ALB IP via X-Forwarded-For,
   // so trust 1 hop — not `true`, which would trust any spoofed header from
   // anywhere and defeat rate limiting and IP-based checks below.
-  app.set("trust proxy", 1);
+  // TRUST_PROXY_HOPS: how many proxies sit in front of this process. 1 today (nginx); set it to 2 when an
+  // AWS load balancer is added in front of nginx, so req.ip is the visitor's address the ALB passed on.
+  // Express counts back from the right of X-Forwarded-For, so a visitor sending their own header can't
+  // pick the address that gets recorded.
+  app.set("trust proxy", Math.max(1, parseInt(process.env.TRUST_PROXY_HOPS || "1", 10) || 1));
 
   app.disable("x-powered-by");
   app.use(requestLogger);
