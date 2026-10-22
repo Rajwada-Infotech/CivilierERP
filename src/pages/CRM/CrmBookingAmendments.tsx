@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { fmtIstDateTime } from "@/lib/istTime";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -25,18 +24,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { CrmShell } from "@/components/crm/CrmShell";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
+import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const BASE = "/api/crm/booking-amendments";
 
 type AmendmentStatus = "Pending" | "Approved" | "Rejected";
-type StatusFilter = AmendmentStatus | "All";
 
 interface AmendmentRow {
   Id: number;
@@ -70,6 +69,12 @@ function formatChangeType(type: string, action: string) {
       : type;
   return `${typeLabel} — ${action}`;
 }
+
+const STATUS_ACCENT: Record<AmendmentStatus, string> = {
+  Pending: "border-l-amber-400",
+  Approved: "border-l-emerald-500",
+  Rejected: "border-l-red-500",
+};
 
 function StatusBadge({ status }: { status: AmendmentStatus }) {
   if (status === "Approved")
@@ -126,25 +131,12 @@ function ProposedChangeDiffCard({ json }: { json: string }) {
   );
 }
 
-const PAGE_SIZE = 20;
-interface AmendmentListFilters {
-  status?: string;
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchAmendmentsList(filters: AmendmentListFilters, page: number): Promise<{ rows: AmendmentRow[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.status) params.set("status", filters.status);
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  const r = await fetchWithAuth(`${BASE}?${params}`);
+interface ListPage { rows: AmendmentRow[]; total: number; counts: Record<string, number> }
+async function fetchAmendmentsList(q: CrmListQuery): Promise<ListPage> {
+  const r = await fetchWithAuth(`${BASE}?${listParams(q)}`);
   if (!r.ok) throw new Error(await r.text());
-  const data = await r.json();
-  return { rows: data.rows || [], total: data.total || 0 };
+  const d = await r.json();
+  return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
 
 async function reviewAmendment(
@@ -161,51 +153,32 @@ async function reviewAmendment(
   return r.json();
 }
 
-const STATUS_FILTERS: StatusFilter[] = ["Pending", "Approved", "Rejected", "All"];
-
-const filterAccent: Record<StatusFilter, string> = {
-  Pending: "#f59e0b",
-  Approved: "#10b981",
-  Rejected: "#ef4444",
-  All: "#6366f1",
-};
-
 export default function CrmBookingAmendments() {
   const { canEdit } = usePageRights("crm-bookings");
   const { currentUser, canDoAction } = useAuth();
   const qc = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Pending");
   const [reviewDialog, setReviewDialog] = useState<{
     row: AmendmentRow;
     action: "approve" | "reject";
   } | null>(null);
   const [notes, setNotes] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch] = useState("");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
+
+  const list = useCrmListState({ pageSize: 25, defaultSort: { key: "RequestedAt", dir: "desc" }, defaultStatus: "Pending" });
 
   const isApprover =
     AMENDMENT_APPROVER_ROLES.includes(
       String(currentUser?.role || "").toLowerCase()
     ) || canDoAction("approval-inbox" as any, "edit");
 
-  const listFilters: AmendmentListFilters = useMemo(() => ({
-    status: statusFilter === "All" ? undefined : statusFilter,
-    search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId,
-  }), [statusFilter, search, cpb]);
-  const { data: listResult, isLoading } = useQuery({
-    queryKey: ["crm-booking-amendments", listFilters, page],
-    queryFn: () => fetchAmendmentsList(listFilters, page),
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ["crm-booking-amendments", list.query],
+    queryFn: () => fetchAmendmentsList(list.query),
     staleTime: 30_000,
   });
-  const rows = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
+  const pageData = useSticky(data);
+  const rows = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const counts = pageData?.counts ?? {};
 
   const mutation = useMutation({
     mutationFn: ({
@@ -228,38 +201,35 @@ export default function CrmBookingAmendments() {
     onError: (e: Error) => toast.error(e.message || "Failed"),
   });
 
-  const columns: ColumnDef<AmendmentRow>[] = [
+  const columns: CrmColumn<AmendmentRow>[] = [
     {
-      header: "Booking",
-      accessorKey: "BookingNo",
-      cell: ({ row }) => (
+      key: "booking", header: "Booking", sortKey: "BookingNo",
+      cell: (r) => (
         <div>
-          <div className="font-semibold text-xs">{row.original.BookingNo}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">
-            {row.original.ProjectName} · {row.original.UnitNo}
+          <div className="font-semibold text-xs whitespace-nowrap">{r.BookingNo}</div>
+          <div className="text-[0.6875rem] text-muted-foreground whitespace-nowrap">
+            {r.ProjectName} · {r.UnitNo}
           </div>
         </div>
       ),
     },
     {
-      header: "Customer",
-      accessorKey: "ApplicantName",
-      cell: ({ row }) => (
-        <span className="text-xs font-medium"><ApplicantNames name={row.original.ApplicantName} bookingId={row.original.BookingId} /></span>
+      key: "customer", header: "Customer", sortKey: "ApplicantName", className: "hidden md:table-cell",
+      cell: (r) => (
+        <span className="text-xs font-medium"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} /></span>
       ),
     },
     {
-      header: "Change",
-      accessorKey: "ChangeType",
-      cell: ({ row }) => (
+      key: "change", header: "Change", className: "hidden lg:table-cell",
+      cell: (r) => (
         <div>
-          <div className="text-xs font-medium">
-            {formatChangeType(row.original.ChangeType, row.original.Action)}
+          <div className="text-xs font-medium whitespace-nowrap">
+            {formatChangeType(r.ChangeType, r.Action)}
           </div>
           {(() => {
             let parsed: Record<string, unknown> = {};
             try {
-              parsed = JSON.parse(row.original.ProposedChange || "{}");
+              parsed = JSON.parse(r.ProposedChange || "{}");
             } catch {
               /* ignore */
             }
@@ -277,49 +247,46 @@ export default function CrmBookingAmendments() {
       ),
     },
     {
-      header: "Reason",
-      accessorKey: "Reason",
-      cell: ({ row }) => (
+      key: "reason", header: "Reason", className: "hidden xl:table-cell",
+      cell: (r) => (
         <span
           className="text-xs text-muted-foreground max-w-[180px] block truncate"
-          title={row.original.Reason}
+          title={r.Reason}
         >
-          {row.original.Reason || "—"}
+          {r.Reason || "—"}
         </span>
       ),
     },
     {
-      header: "Requested By",
-      accessorKey: "RequestedByName",
-      cell: ({ row }) => (
+      key: "requestedBy", header: "Requested By", sortKey: "RequestedAt", className: "hidden lg:table-cell",
+      cell: (r) => (
         <div>
-          <div className="text-xs font-medium">
-            {row.original.RequestedByName || "—"}
+          <div className="text-xs font-medium whitespace-nowrap">
+            {r.RequestedByName || "—"}
           </div>
-          <div className="text-[0.6875rem] text-muted-foreground">
-            {fmtDate(row.original.RequestedAt)}
+          <div className="text-[0.6875rem] text-muted-foreground whitespace-nowrap">
+            {fmtDate(r.RequestedAt)}
           </div>
         </div>
       ),
     },
     {
-      header: "Status",
-      accessorKey: "Status",
-      cell: ({ row }) => (
+      key: "status", header: "Status", sortKey: "Status",
+      cell: (r) => (
         <div>
-          <StatusBadge status={row.original.Status} />
-          {row.original.ReviewedByName && (
+          <StatusBadge status={r.Status} />
+          {r.ReviewedByName && (
             <div className="text-[0.6875rem] text-muted-foreground mt-0.5">
-              by {row.original.ReviewedByName} ·{" "}
-              {fmtDate(row.original.ReviewedAt)}
+              by {r.ReviewedByName} ·{" "}
+              {fmtDate(r.ReviewedAt)}
             </div>
           )}
-          {row.original.ReviewNotes && (
+          {r.ReviewNotes && (
             <div
               className="text-[0.6875rem] text-muted-foreground italic mt-0.5 max-w-[160px] truncate"
-              title={row.original.ReviewNotes}
+              title={r.ReviewNotes}
             >
-              {row.original.ReviewNotes}
+              {r.ReviewNotes}
             </div>
           )}
         </div>
@@ -328,19 +295,16 @@ export default function CrmBookingAmendments() {
     ...(canEdit && isApprover
       ? [
           {
-            id: "actions",
-            header: "",
-            enableSorting: false,
-            size: 72,
-            cell: ({ row }: { row: { original: AmendmentRow } }) => {
-              if (row.original.Status !== "Pending") return null;
+            key: "actions", header: <span className="sr-only">Actions</span>, align: "right" as const, className: "w-px whitespace-nowrap",
+            cell: (r: AmendmentRow) => {
+              if (r.Status !== "Pending") return null;
               return (
-                <div className="flex items-center gap-1.5 justify-end">
+                <div className="flex items-center gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     title="Approve this amendment"
                     onClick={() => {
-                      setReviewDialog({ row: row.original, action: "approve" });
+                      setReviewDialog({ row: r, action: "approve" });
                       setNotes("");
                     }}
                     className="w-7 h-7 rounded-lg flex items-center justify-center text-green-600 hover:bg-green-50 hover:text-green-700 dark:hover:bg-green-900/30 border border-transparent hover:border-green-200 dark:hover:border-green-800 transition-colors"
@@ -351,7 +315,7 @@ export default function CrmBookingAmendments() {
                     type="button"
                     title="Reject this amendment"
                     onClick={() => {
-                      setReviewDialog({ row: row.original, action: "reject" });
+                      setReviewDialog({ row: r, action: "reject" });
                       setNotes("");
                     }}
                     className="w-7 h-7 rounded-lg flex items-center justify-center text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 border border-transparent hover:border-red-200 dark:hover:border-red-800 transition-colors"
@@ -361,12 +325,19 @@ export default function CrmBookingAmendments() {
                 </div>
               );
             },
-          } as ColumnDef<AmendmentRow>,
+          } as CrmColumn<AmendmentRow>,
         ]
       : []),
   ];
 
   const isApprove = reviewDialog?.action === "approve";
+
+  const tabs: CrmStatusTab[] = [
+    { key: "All",      label: "All",      count: counts.All ?? 0 },
+    { key: "Pending",  label: "Pending",  count: counts.Pending ?? 0,  dot: "bg-amber-400" },
+    { key: "Approved", label: "Approved", count: counts.Approved ?? 0, dot: "bg-emerald-500" },
+    { key: "Rejected", label: "Rejected", count: counts.Rejected ?? 0, dot: "bg-red-500" },
+  ];
 
   return (
     <CrmShell
@@ -376,78 +347,23 @@ export default function CrmBookingAmendments() {
     >
       <Breadcrumbs items={["Dashboard", "CRM", "Booking Amendments"]} />
 
-      {/* ── Status filter tab bar ─────────────────────────────────────────── */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {STATUS_FILTERS.map((s) => {
-          const active = statusFilter === s;
-          const accent = filterAccent[s];
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => updateFilter(setStatusFilter)(s)}
-              className="relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all"
-              style={
-                active
-                  ? {
-                      background: `${accent}18`,
-                      border: `1px solid ${accent}50`,
-                      color: accent,
-                      boxShadow: `0 0 8px ${accent}20`,
-                    }
-                  : {
-                      background: "transparent",
-                      border: "1px solid var(--border)",
-                      color: "var(--muted-foreground)",
-                    }
-              }
-            >
-              {s === "Pending" && (
-                <Clock className="w-3 h-3" style={{ color: active ? accent : undefined }} />
-              )}
-              {s === "Approved" && (
-                <CheckCircle2 className="w-3 h-3" style={{ color: active ? accent : undefined }} />
-              )}
-              {s === "Rejected" && (
-                <XCircle className="w-3 h-3" style={{ color: active ? accent : undefined }} />
-              )}
-              {s}
-              {/* Live count badge — total matching this status, not just the current page */}
-              {!isLoading && statusFilter === s && total > 0 && (
-                <span
-                  className="text-[0.625rem] font-bold px-1 py-0.5 rounded-full leading-none min-w-[18px] text-center"
-                  style={{
-                    background: `${accent}25`,
-                    color: accent,
-                  }}
-                >
-                  {total}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      <div className="space-y-3">
+        <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
+          searchValue={list.searchInput} onSearch={list.setSearchInput}
+          placeholder="Search by booking, customer…">
+          <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+        </CrmListToolbar>
 
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative flex-1 min-w-48">
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search by booking, customer..."
-            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+        <CrmDataTable
+          columns={columns} rows={rows} rowKey={(r) => r.Id}
+          loading={isLoading} fetching={isFetching}
+          error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
+          sort={list.sort} onSort={list.toggleSort}
+          rowAccent={(r) => STATUS_ACCENT[r.Status]}
+          empty={<>No amendment requests match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
+          page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+        />
       </div>
-
-      {/* ── Main data table ───────────────────────────────────────────────── */}
-      <DataTable
-        columns={columns}
-        data={rows}
-        loading={isLoading}
-        searchable={false}
-        emptyMessage="No amendment requests found."
-      />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* ── Review dialog ─────────────────────────────────────────────────── */}
       {reviewDialog && (
