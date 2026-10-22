@@ -302,7 +302,7 @@ export const Field = ({
   children: React.ReactNode;
 }) => (
   <div className="space-y-1.5">
-    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">
+    <label className="block text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
       {label} {required && <span className="text-destructive">*</span>}
     </label>
     {children}
@@ -318,7 +318,7 @@ export const DetailRow = ({
   value?: React.ReactNode;
 }) => (
   <div>
-    <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-1">
+    <p className="text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground mb-1">
       {label}
     </p>
     <p className="font-medium text-foreground">{value || "—"}</p>

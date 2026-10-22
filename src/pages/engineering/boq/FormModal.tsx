@@ -221,7 +221,7 @@ export const FormModal: React.FC<FormModalProps> = ({
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted px-2 font-semibold text-sm border border-border bg-transparent"
+              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-primary/5 px-2 font-semibold text-sm border border-foreground/30 bg-transparent"
             >
               <ArrowLeft size={15} /> Back
             </Button>
@@ -275,7 +275,7 @@ export const FormModal: React.FC<FormModalProps> = ({
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="gradient-engineering inline-flex items-center gap-1.5 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg h-auto"
+              className="inline-flex items-center gap-1.5 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] bg-foreground text-card border border-foreground px-4 py-1.5 h-9"
             >
               {saving ? (
                 <RefreshCw className="animate-spin" size={14} />
@@ -389,7 +389,7 @@ export const FormModal: React.FC<FormModalProps> = ({
                   value={form.BoqNo || ""}
                   readOnly
                   placeholder="Auto generated"
-                  className="h-10 bg-muted/50 text-muted-foreground cursor-not-allowed focus-visible:ring-0"
+                  className="h-10 bg-card text-muted-foreground cursor-not-allowed"
                 />
               </Field>
 
@@ -402,7 +402,7 @@ export const FormModal: React.FC<FormModalProps> = ({
                   <DateInput
                     value={form.BoqDate}
                     onChange={(e) => set("BoqDate", e.target.value)}
-                    className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer${errors.BoqDate ? " border-destructive" : " border-border"}`}
+                    className={`w-full pl-8 pr-3 py-2 text-sm bg-card border text-foreground focus:outline-none transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer${errors.BoqDate ? " border-destructive" : " border-foreground/30"}`}
                   />
                 </div>
               </Field>

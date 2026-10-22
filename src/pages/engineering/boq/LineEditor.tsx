@@ -338,7 +338,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                               );
                             }}
                           >
-                            <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                            <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
                               <SelectValue placeholder="— Select group —" />
                             </SelectTrigger>
                             <SelectContent className="z-[300] max-h-60">
@@ -390,7 +390,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             );
                           }}
                         >
-                          <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                          <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
                             <SelectValue placeholder="— Select item —" />
                           </SelectTrigger>
                           <SelectContent className="z-[300] max-h-60">
@@ -429,7 +429,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                             onActivitySelected?.(sel.id);
                           }}
                         >
-                          <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                          <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
                             <SelectValue
                               placeholder={
                                 rowGroupId(row)
@@ -485,7 +485,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                               );
                             }}
                           >
-                            <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                            <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
                               <SelectValue placeholder="— None —" />
                             </SelectTrigger>
                             <SelectContent className="z-[300] max-h-60">
@@ -731,7 +731,7 @@ export const LineEditor: React.FC<LineEditorProps> = ({
                           value={row.uomName}
                           onValueChange={(val) => upd(idx, "uomName", val)}
                         >
-                          <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                          <SelectTrigger className="h-8 text-xs border-foreground/30 w-full">
                             <SelectValue placeholder="UOM" />
                           </SelectTrigger>
                           <SelectContent className="z-[300] max-h-52">

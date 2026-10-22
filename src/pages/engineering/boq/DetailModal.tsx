@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Trash2, Edit3, Printer, ArrowLeft, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/StatusBadge";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { BoqRecord, Company, Project, UomOption, apiFetch, fmt, fmtDate, rowToItem, rowToActivity, DetailRow, canEditBoq } from "./config";
 import { LineEditor } from "./LineEditor";
@@ -39,9 +40,9 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   const [lineTab, setLineTab] = useState<"items" | "activities">("activities");
   const [acting, setActing] = useState(false);
 
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const doDelete = async () => {
-    if (!window.confirm("Delete this BOQ and all its items/activities?"))
-      return;
+    setConfirmDelete(false);
     setActing(true);
     try {
       await apiFetch(`/boq/${record.BoqID}`, { method: "DELETE" });
@@ -104,7 +105,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted px-2 font-semibold text-sm border border-border bg-transparent"
+              className="gap-1.5 text-muted-foreground hover:text-foreground hover:bg-primary/5 px-2 font-semibold text-sm border border-foreground/30 bg-transparent"
             >
               <ArrowLeft size={15} /> Back
             </Button>
@@ -122,7 +123,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             >
               {record.BoqNo || record.DocNo}
             </span>
-            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} fallback={<StatusBadge status={record.Status} />} />
+            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} fallback={<SheetMark text={record.Status || "Draft"} tone={statusTone(record.Status || "Draft")} />} />
           </div>
 
           {/* Right-side actions */}
@@ -132,7 +133,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                 variant="outline"
                 size="sm"
                 disabled={acting}
-                onClick={doDelete}
+                onClick={() => setConfirmDelete(true)}
                 className="text-destructive hover:bg-destructive/10 border-destructive/30"
               >
                 <Trash2 size={13} className="mr-1.5" /> Delete
@@ -272,7 +273,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             <Button
               variant="outline"
               disabled={acting}
-              onClick={doDelete}
+              onClick={() => setConfirmDelete(true)}
               className="text-destructive hover:bg-destructive/10 border-destructive/30"
             >
               <Trash2 size={14} className="mr-1.5" /> Delete
@@ -311,6 +312,25 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           </div>
         </div>
       </div>
+      <Dialog open={confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(false)}>
+        <DialogContent className="sheet-frame max-w-sm p-0 gap-0" style={{ margin: 0 }}>
+          <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+            <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Bill of quantities</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Delete {record.BoqNo || record.DocNo}?</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground mt-1">
+              The BOQ and all its items and activities are removed for good. A BOQ a work order is raised against cannot be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 px-5 py-4">
+            <button type="button" onClick={() => setConfirmDelete(false)} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] h-9 px-4 border border-foreground hover:bg-primary/10">
+              Cancel
+            </button>
+            <button type="button" onClick={doDelete} disabled={acting} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] h-9 px-4 bg-destructive text-destructive-foreground border border-destructive disabled:opacity-40">
+              Delete
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

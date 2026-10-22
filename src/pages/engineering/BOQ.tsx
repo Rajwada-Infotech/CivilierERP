@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml, raw } from "@/utils/escapeHtml";
 import { printStatusLabel } from "@/utils/printStatus";
-import { EngineeringShell } from "@/components/engineering/EngineeringShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/engineeringActivityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { BoqExcelImportModal } from "./BoqExcelImportModal";
@@ -75,10 +74,18 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "Status",
     header: "Status",
     cell: ({ getValue }) => (
-      <StatusBadge status={(getValue() as string) || "Draft"} />
+      <SheetMark text={(getValue() as string) || "Draft"} tone={statusTone((getValue() as string) || "Draft")} />
     ),
   },
 ];
+
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const CHIP = (on: boolean) =>
+  `${KEY} h-8 px-3 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
+const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
 
 export default function BOQ() {
   const { finYears } = useFinYear();
@@ -462,7 +469,7 @@ export default function BOQ() {
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 w-8 p-0 text-violet-600"
+              className="h-8 w-8 p-0 text-foreground"
               onClick={async () => {
                 const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
                   () => row.original,
@@ -508,38 +515,18 @@ export default function BOQ() {
     },
   ];
 
-  // Summary stat cards config
+  // Summary figures: server totals over every BOQ the filters match
   const stats = [
-    { label: "Total BOQs", value: total, color: "#3b82f6" },
-    { label: "Portfolio Value", value: fmt(totalValue), color: "#10b981" },
-    { label: "Pending Approval", value: countPending, color: "#f59e0b" },
-    { label: "Approved", value: countApproved, color: "#8b5cf6" },
+    { label: "BOQs", value: fmtNum(total), note: "matching the filters" },
+    { label: "Value", value: fmt(totalValue), note: "rejected ones left out" },
+    { label: "Awaiting approval", value: fmtNum(countPending), note: "sent for approval" },
+    { label: "Approved", value: fmtNum(countApproved), note: "ready for work orders" },
   ];
+  const listView = !showForm && !viewRecord;
 
   return (
     <>
       <Breadcrumbs items={["Engineering", "Transaction", "BOQ"]} />
-
-      {/* ── Inline Form (create / edit) ── */}
-      {showForm && (
-        <FormModal
-          record={editRecord}
-          companies={companies}
-          projects={projects}
-          docTypes={docTypes}
-          uoms={uoms}
-          itemOptions={itemOptions}
-          activityOptions={activityOptions}
-          activityGroups={activityGroups}
-          finYears={finYears}
-          activeFinYear={activeFinYear}
-          onClose={() => {
-            setShowForm(false);
-            setEditRecord(null);
-          }}
-          onSaved={() => loadList()}
-        />
-      )}
 
       {showImport && (
         <BoqExcelImportModal
@@ -558,49 +545,20 @@ export default function BOQ() {
         />
       )}
 
-      {/* ── Inline Detail / View ── */}
-      {!showForm && viewRecord && (
-        <DetailModal
-          record={viewRecord}
-          uoms={uoms}
-          onClose={() => setViewRecord(null)}
-          onEdit={() => openEdit(viewRecord)}
-          onPrint={() => handlePrint(viewRecord)}
-          onRefresh={() => {
-            setViewRecord(null);
-            loadList();
-          }}
-          canDelete={rights.canDelete}
-          canPrint={rights.canPrint}
-          canEdit={rights.canEdit}
-        />
-      )}
-
-      {/* ── List page ── */}
-      {!showForm && !viewRecord && (
-        <EngineeringShell
-          title="Bill of Quantities"
-          subtitle="Manage material items and work activities with structured cost estimation"
-          icon={FileText}
-          action={
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => loadList()}
-                disabled={loading}
-                className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-all duration-200 active:scale-90 disabled:opacity-50"
-              >
-                <RefreshCw
-                  size={13}
-                  className={`transition-transform duration-500 ${loading ? "animate-spin" : "group-hover:rotate-180"}`}
-                />
-                Refresh
+      {/* One sheet frame for all three views: the list, the form (new / edit) and one BOQ opened. */}
+      <SheetShell
+        eyebrow="CivilierERP · Engineering"
+        title="Bills of quantities"
+        subtitle="Material items and work activities priced out for a project; an approved BOQ is what work orders are raised against."
+        action={
+          listView ? (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button onClick={() => loadList()} disabled={loading} className={`${KEY_LINE} h-9 w-9`} title="Refresh">
+                <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               </button>
               {rights.canCreate && (
-                <button
-                  onClick={() => setShowImport(true)}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted transition-all"
-                >
-                  <FileSpreadsheet size={13} /> Excel Import
+                <button onClick={() => setShowImport(true)} className={`${KEY_LINE} h-9 px-3`}>
+                  <FileSpreadsheet size={13} /> Excel import
                 </button>
               )}
               {rights.canCreate && (
@@ -609,87 +567,93 @@ export default function BOQ() {
                     setEditRecord(null);
                     setShowForm(true);
                   }}
-                  className="gradient-engineering inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white text-xs px-4 py-1.5 rounded-lg transition-all"
+                  className={`${KEY_INK} h-9 px-4`}
                 >
                   <Plus size={13} /> New BOQ
                 </button>
               )}
             </div>
-          }
-        >
-          {/* Stat cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {stats.map((s) => (
-              <div
-                key={s.label}
-                style={{
-                  background: "hsl(var(--background))",
-                  border: "1px solid hsl(var(--border))",
-                  borderTop: `3px solid ${s.color}`,
-                  borderRadius: "calc(var(--radius) + 2px)",
-                  padding: "14px 16px",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.07em",
-                    color: "hsl(var(--muted-foreground))",
-                  }}
-                >
-                  {s.label}
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    marginTop: 4,
-                    fontFamily: "'DM Sans', 'Noto Sans', sans-serif",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {s.value}
-                </div>
-              </div>
-            ))}
-          </div>
+          ) : undefined
+        }
+      >
+        {showForm && (
+          <FormModal
+            record={editRecord}
+            companies={companies}
+            projects={projects}
+            docTypes={docTypes}
+            uoms={uoms}
+            itemOptions={itemOptions}
+            activityOptions={activityOptions}
+            activityGroups={activityGroups}
+            finYears={finYears}
+            activeFinYear={activeFinYear}
+            onClose={() => {
+              setShowForm(false);
+              setEditRecord(null);
+            }}
+            onSaved={() => loadList()}
+          />
+        )}
 
-          {/* Table card */}
-          <Card className="shadow-sm">
-            <CardHeader className="p-4 border-b flex flex-col md:flex-row md:items-center gap-4">
-              <div className="relative flex-1 max-w-sm">
-                <Search
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-                <Input
-                  value={search}
-                  placeholder="Search BOQ no, company, project…"
-                  onChange={(e) => onSearchChange(e.target.value)}
-                  className="pl-9 h-9"
-                />
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                {statuses.map((s) => (
-                  <Button
-                    key={s}
-                    variant={filterStatus === s ? "default" : "outline"}
-                    size="sm"
-                    className={`h-8 rounded-full text-xs font-semibold${filterStatus === s ? " gradient-engineering text-white border-0" : ""}`}
-                    onClick={() => {
-                      setFilterStatus(s);
-                      setPage(1);
-                    }}
-                  >
-                    {s}
-                  </Button>
+        {!showForm && viewRecord && (
+          <DetailModal
+            record={viewRecord}
+            uoms={uoms}
+            onClose={() => setViewRecord(null)}
+            onEdit={() => openEdit(viewRecord)}
+            onPrint={() => handlePrint(viewRecord)}
+            onRefresh={() => {
+              setViewRecord(null);
+              loadList();
+            }}
+            canDelete={rights.canDelete}
+            canPrint={rights.canPrint}
+            canEdit={rights.canEdit}
+          />
+        )}
+
+        {listView && (
+          <div className="space-y-5">
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                {stats.map((x) => (
+                  <div key={x.label}>
+                    <p className="label">{x.label}</p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{loading ? "…" : x.value}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
                 ))}
               </div>
-            </CardHeader>
+            </div>
 
-            <CardContent className="p-0">
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="px-5 py-4 flex flex-col md:flex-row md:items-center gap-3" style={{ borderBottom: RULE }}>
+                <div className="relative flex-1 max-w-sm">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <input
+                    value={search}
+                    placeholder="Search BOQ no, company, project…"
+                    onChange={(e) => onSearchChange(e.target.value)}
+                    className="w-full h-9 pl-9 pr-3 text-sm bg-card border border-foreground/40 focus:outline-none focus:border-foreground"
+                  />
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {statuses.map((s) => (
+                    <button
+                      key={s}
+                      className={CHIP(filterStatus === s)}
+                      onClick={() => {
+                        setFilterStatus(s);
+                        setPage(1);
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {loading ? (
                 <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
                   <RefreshCw size={15} className="animate-spin" /> Loading BOQs…
@@ -705,36 +669,26 @@ export default function BOQ() {
                     getRowId={(r: any) => String(r.BoqID)}
                   />
                   {totalPages > 1 && (
-                    <div className="flex items-center justify-between border-t p-4 text-sm">
-                      <span className="text-muted-foreground">
-                        Page {page} of {totalPages} ({total} records)
+                    <div className="flex items-center justify-between px-5 py-3" style={{ borderTop: RULE }}>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground tabular-nums">
+                        Page {page} of {totalPages} · {total} records
                       </span>
                       <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={page === 1}
-                          onClick={() => setPage((p) => p - 1)}
-                        >
-                          Prev
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={page === totalPages}
-                          onClick={() => setPage((p) => p + 1)}
-                        >
+                        <button className={`${KEY_LINE} h-8 px-3`} disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                          Previous
+                        </button>
+                        <button className={`${KEY_LINE} h-8 px-3`} disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
                           Next
-                        </Button>
+                        </button>
                       </div>
                     </div>
                   )}
                 </>
               )}
-            </CardContent>
-          </Card>
-        </EngineeringShell>
-      )}
+            </div>
+          </div>
+        )}
+      </SheetShell>
     </>
   );
 }
