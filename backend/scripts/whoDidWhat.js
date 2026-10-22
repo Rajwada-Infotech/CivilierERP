@@ -23,17 +23,18 @@ const ONLY = (arg("--user") || "").toLowerCase();
 const SINCE = arg("--since");
 const CSV = process.argv.includes("--csv");
 
-// Column names that say who did something, by action.
-const ACTION_COLS = {
-  created: ["CreatedBy", "created_by", "CreatedByUserId", "CreatedByEmail", "CreatedByName", "M_CreatedBy", "EnteredBy", "IssuedBy"],
-  updated: ["UpdatedBy", "updated_by", "ModifiedBy", "modified_by", "LastModifiedBy", "UpdatedByUserId", "EditedBy"],
-  approved: ["ApprovedBy", "approved_by", "M_ApprovedBy", "ApprovedByUserId"],
+// Columns that say who did something, matched by pattern: tables prefix them (ECreatedBy on invoices,
+// PCreatedBy on payments, RPCreatedBy on received payments, M_CreatedBy on items, created_by_id ...).
+const ACTION_RX = {
+  created: /^[A-Za-z]{0,3}_?(created_?by|entered_?by|posted_?by|raised_?by|issued_?by)(_?id|_?user_?id|_?email|_?name)?$/i,
+  updated: /^[A-Za-z]{0,3}_?(updated_?by|modified_?by|last_?modified_?by|edited_?by)(_?id|_?user_?id|_?email|_?name)?$/i,
+  approved: /^[A-Za-z]*_?approved_?by(_?id|_?user_?id)?$/i,
 };
-// The date that goes with each action, first match wins.
-const DATE_COLS = {
-  created: ["CreatedAt", "created_at", "CreatedDate", "created_datetime", "M_CreatedDate", "CreatedOn"],
-  updated: ["UpdatedAt", "updated_at", "ModifiedAt", "ModifiedDate", "UpdatedDate", "LastModifiedAt"],
-  approved: ["ApprovedAt", "approved_at", "ApprovedDate", "ApprovedOn"],
+// The date that goes with each action (same table), first match wins.
+const DATE_RX = {
+  created: /^[A-Za-z]{0,3}_?created_?(at|date|on|datetime|time)$/i,
+  updated: /^[A-Za-z]{0,3}_?(updated|modified|last_?modified)_?(at|date|on|datetime|time)$/i,
+  approved: /^[A-Za-z]{0,3}_?approved_?(at|date|on|datetime|time)$/i,
 };
 
 const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace("T", " ") : "—");
@@ -62,14 +63,14 @@ const csvCell = (v) => {
   };
 
   // ── every table / column that records who ───────────────────────────────
-  const allCols = Object.values(ACTION_COLS).flat().concat(Object.values(DATE_COLS).flat());
   const cols = (await pool.request().query(`
     SELECT s.name AS schemaName, t.name AS tableName, c.name AS colName
     FROM sys.columns c
     JOIN sys.tables t ON t.object_id = c.object_id
     JOIN sys.schemas s ON s.schema_id = t.schema_id
-    WHERE c.name IN (${allCols.map((n) => `'${n}'`).join(",")})
-  `)).recordset;
+    WHERE c.name LIKE '%by%' OR c.name LIKE '%by[_]id' OR c.name LIKE '%created%' OR c.name LIKE '%updated%'
+       OR c.name LIKE '%modified%' OR c.name LIKE '%approved%'
+  `)).recordset.filter((r) => [...Object.values(ACTION_RX), ...Object.values(DATE_RX)].some((rx) => rx.test(r.colName)));
   const tables = new Map();
   for (const r of cols) {
     const key = `${r.schemaName}.${r.tableName}`;
@@ -89,10 +90,12 @@ const csvCell = (v) => {
   };
 
   for (const [table, set] of tables) {
-    for (const [action, names] of Object.entries(ACTION_COLS)) {
-      const col = names.find((n) => set.has(n));
-      if (!col) continue;
-      const dateCol = DATE_COLS[action].find((n) => set.has(n)) || null;
+    for (const [baseAction, rx] of Object.entries(ACTION_RX)) {
+      const matches = [...set].filter((n) => rx.test(n));
+      // A table can have several approvers (ApprovedBy, DirectorApprovedBy ...): each is its own column.
+      for (const col of matches) {
+      const action = matches.length > 1 && !/^(approved_?by|created_?by|updated_?by)$/i.test(col) ? `${baseAction} (${col})` : baseAction;
+      const dateCol = [...set].find((n) => DATE_RX[baseAction].test(n)) || null;
       const [s, t] = table.split(".");
       const ref = `[${s}].[${t}]`;
       const where = SINCE && dateCol ? `WHERE [${dateCol}] >= @since` : "";
@@ -119,6 +122,7 @@ const csvCell = (v) => {
         }
       } catch (e) {
         if (!CSV) console.error(`  (skipped ${table}.${col}: ${e.message})`);
+      }
       }
     }
   }
@@ -172,7 +176,7 @@ const csvCell = (v) => {
     const t = tally.get(String(u.id));
     const a = activity.get(String(u.id));
     const totals = { created: 0, updated: 0, approved: 0 };
-    for (const acts of (t || new Map()).values()) for (const [k, v] of Object.entries(acts)) totals[k] += v.n;
+    for (const acts of (t || new Map()).values()) for (const [k, v] of Object.entries(acts)) totals[k.split(" ")[0]] += v.n;
     console.log("=".repeat(78));
     console.log(`${u.name}  <${u.email}>  #${u.id}  ${u.role || "no role"}${u.discontinue ? "  [DISCONTINUED]" : ""}`);
     console.log(`  records: ${totals.created} created · ${totals.updated} last edited · ${totals.approved} approved`);
