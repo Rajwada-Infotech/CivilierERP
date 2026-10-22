@@ -1,23 +1,23 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Star, UserCheck } from "lucide-react";
+import { Plus, Star } from "lucide-react";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
+import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const API         = "/api/crm/service-tickets";
 const BKG_API     = "/api/crm/bookings";
@@ -41,30 +41,23 @@ const statusColor: Record<string, string> = {
   Closed:     "text-muted-foreground bg-muted/50 border-border",
   Reopened:   "text-red-600 bg-red-50 border-red-200",
 };
+const STATUS_ACCENT: Record<string, string> = {
+  Open:       "border-l-sky-400",
+  Assigned:   "border-l-blue-400",
+  InProgress: "border-l-purple-400",
+  Resolved:   "border-l-green-500",
+  Closed:     "border-l-border",
+  Reopened:   "border-l-red-500",
+};
 
 const EMPTY_FORM = { BookingId: "", Category: "Complaint", Priority: "Normal", Subject: "", Description: "", AssignedTo: "" };
 
-const PAGE_SIZE = 20;
-interface TicketListFilters {
-  search: string;
-  status: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchTicketsList(filters: TicketListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.status !== "All") params.set("status", filters.status);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+interface ListPage { rows: any[]; total: number; counts: Record<string, number> }
+async function fetchTicketsList(q: CrmListQuery): Promise<ListPage> {
+  const r = await fetchWithAuth(`${API}?${listParams(q)}`);
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
+  const d = await r.json();
+  return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -80,13 +73,6 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 
 const CrmServiceTickets: React.FC = () => {
   const qc = useQueryClient();
-  const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch]           = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen]   = useState(false);
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [saving, setSaving]           = useState(false);
@@ -101,24 +87,16 @@ const CrmServiceTickets: React.FC = () => {
   const [reopenTicketId, setReopenTicketId] = useState<number | null>(null);
   const [reopenReason, setReopenReason]   = useState("");
 
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
-  const listFilters: TicketListFilters = useMemo(
-    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, statusFilter, cpb]
-  );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-service-tickets", listFilters, page],
-    queryFn: () => fetchTicketsList(listFilters, page),
-    staleTime: 30_000,
-  });
-  const tickets = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
+  const list = useCrmListState({ pageSize: 25, defaultSort: { key: "Priority", dir: "asc" } });
+  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } =
+    useQuery({ queryKey: ["crm-service-tickets", list.query], queryFn: () => fetchTicketsList(list.query), staleTime: 30_000 });
+  const pageData = useSticky(data);
+  const tickets = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const counts = pageData?.counts ?? {};
+  const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters;
   const { data: bookings = [] }           = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: users = [] }             = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
-
-  const filtered = tickets;
 
   const handleCreate = async () => {
     if (!form.BookingId || !form.Subject.trim()) { toast.error("Booking and Subject are required"); return; }
@@ -216,55 +194,52 @@ const CrmServiceTickets: React.FC = () => {
 
   const isOverdue = (t: any) => t.SlaDueDate && new Date(t.SlaDueDate) < new Date() && !["Resolved", "Closed"].includes(t.Status);
 
-  const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "TicketNo", header: "Ticket No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
-    { accessorKey: "ApplicantName", header: "Customer", size: 150,
-      cell: (i) => (
+  const columns: CrmColumn<any>[] = [
+    { key: "ticketNo", header: "Ticket No", sortKey: "TicketNo",
+      cell: (t) => <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{t.TicketNo}</span> },
+    { key: "applicant", header: "Customer", sortKey: "ApplicantName",
+      cell: (t) => (
         <div>
-          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+          <div className="font-medium"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} applicationId={t.ApplicationId} /></div>
+          <div className="text-xs text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
         </div>
       ) },
-    { accessorKey: "Category", header: "Category", size: 100,
-      cell: (i) => <span className="text-xs">{(i.getValue() as string).replace(/([A-Z])/g, " $1").trim()}</span> },
-    { accessorKey: "Subject", header: "Subject", size: 180,
-      cell: (i) => (
+    { key: "category", header: "Category", sortKey: "Category", className: "hidden lg:table-cell",
+      cell: (t) => <span className="text-xs whitespace-nowrap">{String(t.Category).replace(/([A-Z])/g, " $1").trim()}</span> },
+    { key: "subject", header: "Subject", className: "hidden md:table-cell",
+      cell: (t) => (
         <div className="max-w-xs truncate">
-          {i.row.original.Subject}
-          {i.row.original.RaisedByCustomer && (
+          {t.Subject}
+          {t.RaisedByCustomer && (
             <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
           )}
         </div>
       ) },
-    { accessorKey: "Priority", header: "Priority", size: 90,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor[i.row.original.Priority] || ""}`}>{i.row.original.Priority}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 110,
-      cell: (i) => <span className="text-sm">{(i.getValue() as string) || "—"}</span> },
-    { id: "slaDue", header: "SLA Due", size: 140, enableSorting: false,
-      cell: (i) => {
-        const t = i.row.original;
+    { key: "priority", header: "Priority", sortKey: "Priority",
+      cell: (t) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${priorityColor[t.Priority] || ""}`}>{t.Priority}</span> },
+    { key: "assignee", header: "Assigned To", className: "hidden lg:table-cell",
+      cell: (t) => <span className="text-sm whitespace-nowrap">{t.AssigneeName || "—"}</span> },
+    { key: "slaDue", header: "SLA Due", sortKey: "SlaDueDate", className: "hidden xl:table-cell",
+      cell: (t) => {
         const overdue = isOverdue(t);
         return (
-          <span className={`text-xs ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
+          <span className={`text-xs whitespace-nowrap ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
             {t.SlaDueDate ? fmtIstIso(t.SlaDueDate) : "—"}
             {overdue && " (OVERDUE)"}
           </span>
         );
       } },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { id: "rating", header: "Rating", size: 80, enableSorting: false,
-      cell: (i) => i.row.original.CustomerRating ? (
-        <span className="flex items-center gap-0.5 text-yellow-500 text-xs">
-          <Star size={12} fill="currentColor" /> {i.row.original.CustomerRating}/5
+    { key: "status", header: "Status", sortKey: "Status",
+      cell: (t) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${statusColor[t.Status] || ""}`}>{t.Status}</span> },
+    { key: "rating", header: "Rating", className: "hidden xl:table-cell",
+      cell: (t) => t.CustomerRating ? (
+        <span className="flex items-center gap-0.5 text-yellow-500 text-xs whitespace-nowrap">
+          <Star size={12} fill="currentColor" /> {t.CustomerRating}/5
         </span>
-      ) : <span>—</span> },
-    { id: "actions", header: "Actions", size: 240, enableSorting: false,
-      cell: (i) => {
-        const t = i.row.original;
-        return (
-          <div className="flex items-center gap-2 flex-wrap">
+      ) : <span className="text-xs text-muted-foreground">—</span> },
+    { key: "actions", header: <span className="sr-only">Actions</span>, align: "right", className: "w-px whitespace-nowrap",
+      cell: (t) => (
+          <div className="flex items-center justify-end gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
             {/* Open: Assign dropdown */}
             {t.Status === CrmStatus.OPEN && (
               <SearchableNativeSelect
@@ -327,11 +302,17 @@ const CrmServiceTickets: React.FC = () => {
               <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
             )}
           </div>
-        );
-      } },
+      ) },
   ];
 
   usePageRights("crm-service-tickets");
+
+  const tabs: CrmStatusTab[] = STATUSES.map((s) => ({
+    key: s, label: s.replace(/([A-Z])/g, " $1").trim(), count: counts[s] ?? 0,
+    dot: s === "Open" ? "bg-sky-500" : s === "Assigned" ? "bg-blue-500" : s === "InProgress" ? "bg-purple-500"
+      : s === "Resolved" ? "bg-green-500" : s === "Closed" ? "bg-muted-foreground/50" : "bg-red-500",
+  }));
+  tabs.unshift({ key: "All", label: "All", count: counts.All ?? 0 });
 
   return (
     <>
@@ -349,32 +330,43 @@ const CrmServiceTickets: React.FC = () => {
         </div>
       }
     >
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search ticket, customer, subject..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
-          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-          <option value="All">All Statuses</option>
-          {STATUSES.map((s) => <option key={s}>{s}</option>)}
-        </select>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
+      {!showOnboarding && (
+        <div className="space-y-3">
+          <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
+            searchValue={list.searchInput} onSearch={list.setSearchInput}
+            placeholder="Search ticket, customer, subject…">
+            <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+          </CrmListToolbar>
 
-      <DataTable
-        data={filtered}
-        columns={columns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage="No service tickets found"
-        rowClassName={(row) => isOverdue(row.original) ? "bg-red-50/30" : ""}
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          <CrmDataTable
+            columns={columns} rows={tickets} rowKey={(t) => t.Id}
+            loading={isLoading} fetching={isFetching}
+            error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
+            sort={list.sort} onSort={list.toggleSort}
+            rowAccent={(t) => isOverdue(t) ? "border-l-red-500" : (STATUS_ACCENT[t.Status] ?? undefined)}
+            empty={<>No service tickets match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
+            page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+          />
+        </div>
+      )}
+
+      {showOnboarding && (
+        <div className="p-8 rounded-xl border-2 border-dashed border-border bg-muted/10 text-center space-y-3">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+            <Plus size={26} className="text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">No service tickets yet</p>
+            <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
+              Raise one for any post-handover warranty, complaint, or service request.
+            </p>
+          </div>
+          <button onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-1.5 text-sm px-4 py-2 btn-module text-white rounded-lg font-semibold mx-auto">
+            <Plus size={13} /> Raise Ticket
+          </button>
+        </div>
+      )}
 
       {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>

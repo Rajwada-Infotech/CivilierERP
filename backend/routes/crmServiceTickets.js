@@ -12,7 +12,6 @@ const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
-const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -41,83 +40,98 @@ const TICKET_SELECT = `
   LEFT JOIN dbo.Users cu ON cu.id = t.CreatedBy
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmHandover / CrmMutation / CrmNoc:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&priority=&category=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Open, Assigned, InProgress, Resolved, Closed, Reopened } }
+// `counts` honours priority/category/search/company/project/block/scope but
+// NOT status, so the tabs always show what each status would contain.
+// Non-admins only ever see their own assigned tickets, in counts too.
+// Without `page` the legacy full-array response is returned (also used,
+// unpaginated, by the Maintenance module's handedOverOnly=true lookup).
+const TST_STATUSES = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reopened"];
+const TST_PRIORITY_RANK = "CASE t.Priority WHEN 'Urgent' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END";
+const TST_SORT = {
+  TicketNo: "t.TicketNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Category: "t.Category",
+  Priority: TST_PRIORITY_RANK,
+  Status: "t.Status",
+  SlaDueDate: "t.SlaDueDate",
+  CreatedAt: "t.CreatedAt",
+};
+function buildTicketWhere(request, query, includeStatus, isAdmin, req) {
+  const conds = [];
+  if (!isAdmin) { request.input("actorId", sql.Int, actorId(req)); conds.push("t.AssignedTo = @actorId"); }
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  if (PRIORITIES.includes(query.priority)) { request.input("priority", sql.NVarChar(20), query.priority); conds.push("t.Priority = @priority"); }
+  if (CATEGORIES.includes(query.category)) { request.input("category", sql.NVarChar(50), query.category); conds.push("t.Category = @category"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
+  }
+  // handedOverOnly=true — used by the Maintenance module's "Service Requests" view
+  // to scope tickets to genuinely post-handover (after-sales) customers only.
+  // Same eligibility rule as services/maintenanceEligibility.js.
+  if (query.handedOverOnly === "true") {
+    conds.push("EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')");
+  }
+  if (includeStatus && TST_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("t.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all tickets (non-admins see only tickets assigned to them)
 router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, priority, category, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
     const isAdmin = isSaAdmin(req);
-    if (!isAdmin) {
-      req0.input("actorId", sql.Int, actorId(req));
-      conds.push("t.AssignedTo = @actorId");
-    }
-    if (status)   { req0.input("st", sql.NVarChar(30), status);   conds.push("t.Status = @st"); }
-    if (priority) { req0.input("pr", sql.NVarChar(20), priority); conds.push("t.Priority = @pr"); }
-    if (category) { req0.input("ct", sql.NVarChar(50), category); conds.push("t.Category = @ct"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
-    }
-    // handedOverOnly=true — used by the Maintenance module's "Service Requests" view
-    // to scope tickets to genuinely post-handover (after-sales) customers only.
-    // Same eligibility rule as services/maintenanceEligibility.js.
-    if (req.query.handedOverOnly === "true") {
-      conds.push("EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${TICKET_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const ORDER = `ORDER BY
-      CASE t.Priority WHEN 'Urgent' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END,
-      t.CreatedAt DESC`;
+    const ORDER = `ORDER BY ${TST_PRIORITY_RANK}, t.CreatedAt DESC`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildTicketWhere(r0, req.query, true, isAdmin, req);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const countReq = pool.request()
-      .input("companyId2", sql.Int, companyId)
-      .input("projectId2", sql.Int, projectId)
-      .input("blockId2", sql.Int, blockId)
-      .input("st2", sql.NVarChar(30), status || null)
-      .input("pr2", sql.NVarChar(20), priority || null)
-      .input("ct2", sql.NVarChar(50), category || null)
-      .input("search2", sql.NVarChar(200), search ? `%${search}%` : null);
-    if (!isAdmin) countReq.input("actorId2", sql.Int, actorId(req));
-    const handedOverOnlyClause = req.query.handedOverOnly === "true"
-      ? "AND EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')"
-      : "";
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      countReq.query(`
-        SELECT COUNT(*) AS total
-        FROM dbo.CrmServiceTicket t
-        JOIN dbo.CrmBooking b ON b.Id = t.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-        WHERE ${isAdmin ? "1=1" : "t.AssignedTo = @actorId2"}
-          AND (@st2 IS NULL OR t.Status = @st2)
-          AND (@pr2 IS NULL OR t.Priority = @pr2)
-          AND (@ct2 IS NULL OR t.Category = @ct2)
-          AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-          AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-          AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-          AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR t.TicketNo LIKE @search2 OR t.Subject LIKE @search2))
-          ${handedOverOnlyClause}
-      `),
-    ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(TST_SORT, req.query.sortKey) ? TST_SORT[req.query.sortKey] : null;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const orderClause = sortCol ? `ORDER BY ${sortCol} ${dir}, t.Id DESC` : ORDER;
+
+    const countReq = pool.request();
+    const countWhere = buildTicketWhere(countReq, req.query, false, isAdmin, req);
+    const countRes = await countReq.query(
+      `SELECT t.Status, COUNT(*) AS C FROM dbo.CrmServiceTicket t
+       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       ${countWhere} GROUP BY t.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = TST_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildTicketWhere(pageReq, req.query, true, isAdmin, req);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ${orderClause} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    res.json({ rows: rowsRes.recordset, total, counts });
   } catch (e) {
     console.error("[crm-service-tickets] GET error:", e.message);
     res.status(500).json({ error: e.message });
