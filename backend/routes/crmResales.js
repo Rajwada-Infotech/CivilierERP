@@ -45,6 +45,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { actorId } = require("../services/saAccess");
 const { LineStatus, ResaleStatus } = require("../constants/crmStatuses");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -430,6 +431,9 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
   const kind = b.Kind === "BuyBack" ? "BuyBack" : "Resale";
   const bookingId = parseInt(b.FromBookingId, 10);
   if (!Number.isInteger(bookingId)) return res.status(400).json({ error: "Choose the property that is changing hands" });
+
+  const allowed = await assertBookingProjectScope(req, res, bookingId);
+  if (allowed === false) return;
   const toCustomerId = b.ToCustomerId != null && b.ToCustomerId !== "" ? parseInt(b.ToCustomerId, 10) : null;
   if (kind === "Resale" && !Number.isInteger(toCustomerId)) return res.status(400).json({ error: "Choose the new buyer" });
   const agreed = num(b.AgreedValue);

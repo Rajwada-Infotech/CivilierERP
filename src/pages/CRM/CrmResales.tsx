@@ -133,6 +133,10 @@ const CrmResales: React.FC = () => {
   const save = async () => {
     if (!form.FromBookingId) return toast.error("Choose the property that is changing hands");
     if (form.Kind === "Resale" && !form.ToCustomerId) return toast.error("Choose the new buyer");
+    if (form.Kind === "Resale" && holding && String(form.ToCustomerId) === String(holding.CustomerId)) {
+      toast.error("Seller and buyer cannot be the same customer");
+      return;
+    }
     if (form.Kind === "BuyBack" && !(Number(form.AgreedValue) > 0)) return toast.error("Enter the agreed buy-back price");
     setSaving(true);
     try {
@@ -350,15 +354,21 @@ const CrmResales: React.FC = () => {
               <>
                 <div>
                   <label className={label}>New buyer</label>
-                  <SearchableSelect
-                    value={form.ToCustomerId}
-                    onChange={(v) => setForm((f) => ({ ...f, ToCustomerId: v }))}
-                    placeholder="Choose the new buyer"
-                    searchPlaceholder="Search name, mobile or customer no…"
-                    options={customers.filter((c: any) => !holding || c.Id !== holding.CustomerId).map((c: any) => ({
-                      value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
-                    }))}
-                  />
+                  {(() => {
+                    const currentSellerId = holding?.CustomerId;
+                    const availableBuyers = customers.filter((c: any) => !currentSellerId || c.Id !== currentSellerId);
+                    return (
+                      <SearchableSelect
+                        value={form.ToCustomerId}
+                        onChange={(v) => setForm((f) => ({ ...f, ToCustomerId: v }))}
+                        placeholder="Choose the new buyer"
+                        searchPlaceholder="Search name, mobile or customer no…"
+                        options={availableBuyers.map((c: any) => ({
+                          value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
+                        }))}
+                      />
+                    );
+                  })()}
                   <p className="mt-1 text-[0.6875rem] text-muted-foreground">Not listed? Add them in <a href="/crm/customers" target="_blank" rel="noreferrer" className="text-primary hover:underline">Customers</a> first.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">

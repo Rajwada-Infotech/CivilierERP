@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, Pencil, Trash2, LayoutGrid, RotateCcw, CheckCircle2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type { LayoutType } from "@/api/unitBhkConfigApi";
@@ -64,6 +65,9 @@ export function VillaTypesDialog({
   const [showRemoved, setShowRemoved] = useState(false);
   // Ref to the add/edit form so we can scroll to it when the pencil is clicked.
   const formRef = useRef<HTMLDivElement>(null);
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
 
   // Pick the starting project once, when the dialog opens. The parent rebuilds
   // `projects` on every render (and refetches in the background), so reacting
@@ -114,13 +118,14 @@ export function VillaTypesDialog({
   };
 
   const remove = async (type: VillaType) => {
-    if (!window.confirm(`Remove villa type ${type.Code}?`)) return;
-    try {
-      const response = await fetchWithAuth(`${VILLA_TYPE_API}/${type.Id}`, { method: "DELETE" });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Could not remove the villa type");
-      toast.success("Villa type removed"); refresh();
-    } catch (e: any) { toast.error(e.message); }
+    requestConfirm(`Remove villa type ${type.Code}?`, async () => {
+      try {
+        const response = await fetchWithAuth(`${VILLA_TYPE_API}/${type.Id}`, { method: "DELETE" });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || "Could not remove the villa type");
+        toast.success("Villa type removed"); refresh();
+      } catch (e: any) { toast.error(e.message); }
+    });
   };
 
   const restore = async (type: VillaType) => {
@@ -546,6 +551,19 @@ export function VillaTypesDialog({
           )}
         </div>
       </DialogContent>
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Remove</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

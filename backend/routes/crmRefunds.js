@@ -20,6 +20,8 @@ const {
   ensureCrmCustomerLedgerHead, postCrmRefundPaid,
   postCrmHeldCreditReallocateLedgerOnly, postCrmHeldCreditCrossCompanyMirror,
 } = require("../services/crmLedger");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { refundCreateSchema } = require("../validation/crmBookingSchemas");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -203,7 +205,7 @@ async function settlePaidRefunds(pool, userEmail) {
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    await settlePaidRefunds(pool, req.user?.email || req.user?.name || null);
+    // Note: settlePaidRefunds should be called by scheduled cron job only, not on every read.
     const { status, search } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
@@ -278,6 +280,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
     const req0 = pool.request();
     if (customerId) req0.input("cust", sql.Int, customerId);
     const custFilter = customerId ? "AND a.CustomerId = @cust" : "";
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await req0.query(`
       SELECT
         'CancellationHeldCredit' AS SourceType,
@@ -291,7 +294,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       LEFT JOIN dbo.CrmCancellation c ON c.Id = oa.HeldSourceRefId
       LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = oa.HeldSourceRefId
-      WHERE oa.Status = 'Held' AND (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) > 0.01 ${custFilter}
+      WHERE oa.Status = 'Held' AND (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) > 0.01 ${custFilter} ${scope}
 
       UNION ALL
 
@@ -307,7 +310,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       WHERE ISNULL(oa.Status,'') IN ('Unapplied','PartiallyApplied')
         AND (oa.Amount - ISNULL(oa.AppliedAmount,0) - ${RESERVED_SUBQUERY}) > 0.01
-        AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred') ${custFilter}
+        AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred') ${custFilter} ${scope}
       ORDER BY AsOf DESC
     `);
     res.json(result.recordset);
@@ -473,6 +476,20 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
   try {
     const pool = getPool();
     const b = req.body || {};
+
+    // Basic field type validation — GrossAmount must be a positive number
+    const { z } = require("zod");
+    const refundBodySchema = z.object({
+      GrossAmount: z.coerce.number().positive({ message: "GrossAmount must be a positive number" }),
+      SourceType: z.string().min(1, "SourceType is required"),
+      BookingId: z.coerce.number().int().positive({ message: "BookingId must be a positive integer" }).optional().nullable(),
+      TdsAmount: z.coerce.number().min(0).optional().nullable(),
+    });
+    const parsed = refundBodySchema.safeParse(b);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+    }
+
     const sourceType = b.SourceType;
     // Every refund pays back money we hold: a cancelled booking's held credit
     // or an overpayment. A 'Manual' refund (any customer, any amount, nothing
@@ -509,6 +526,9 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
       `);
       const oa = oaRow.recordset[0];
       if (!oa) return res.status(404).json({ error: "Source on-account row not found" });
+
+      const allowed = await assertBookingProjectScope(req, res, oa.BookingId);
+      if (allowed === false) return;
       const { unclaimed } = await getUnclaimedRemaining(pool, sourceOnAccountId);
       if (gross > unclaimed + 0.01) {
         return res.status(400).json({ error: `Amount exceeds the source's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by another pending refund or re-booking transfer` });
@@ -1175,6 +1195,11 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     `);
     const held = heldRes.recordset[0];
     if (!held) return res.status(404).json({ error: "Held credit not found" });
+
+    const fromAllowed = await assertBookingProjectScope(req, res, held.FromBookingId);
+    if (fromAllowed === false) return;
+    const toAllowed = await assertBookingProjectScope(req, res, toBookingId);
+    if (toAllowed === false) return;
     if (held.Status !== "Held") return res.status(400).json({ error: "That on-account row is not a held credit" });
     const { unclaimed } = await getUnclaimedRemaining(pool, heldId);
     if (amount > unclaimed + 0.01) {
@@ -1297,3 +1322,4 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
 module.exports = router;
 module.exports.markCrmRefundPaid = markCrmRefundPaid;
 module.exports.applyRebookingTransferToBooking = applyRebookingTransferToBooking;
+module.exports.settlePaidRefunds = settlePaidRefunds;

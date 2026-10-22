@@ -22,6 +22,10 @@ import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActio
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { RefreshButton } from "@/components/ui/RefreshButton";
@@ -557,6 +561,14 @@ const CrmSalesDeed: React.FC = () => {
   const [proxyRecheckDialog, setProxyRecheckDialog] = useState(false);
   const [proxySaving, setProxySaving] = useState(false);
 
+  // Replaces window.confirm — a shared AlertDialog for destructive confirmations
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; message: string; onConfirm: () => void }>({ open: false, message: '', onConfirm: () => {} });
+  const requestConfirm = (message: string, onConfirm: () => void) => setConfirmDialog({ open: true, message, onConfirm });
+
+  // Replaces window.prompt — a shared inline input dialog for reject remarks
+  const [rejectPrompt, setRejectPrompt] = useState<{ open: boolean; title: string; value: string; onSubmit: (v: string) => void }>({ open: false, title: '', value: '', onSubmit: () => {} });
+  const requestRejectRemarks = (title: string, onSubmit: (v: string) => void) => setRejectPrompt({ open: true, title, value: '', onSubmit });
+
   // Execution / Registration fields
   const [execForm, setExecForm] = useState({ ExecutedBy: "", RegistrationNo: "", BookNo: "", PartNo: "", RegistrationDate: "", PossessionDate: "" });
   const [execSaving, setExecSaving] = useState(false);
@@ -1000,18 +1012,19 @@ const CrmSalesDeed: React.FC = () => {
 
   const handleRegRejectDoc = async (docId: number) => {
     if (registryId == null) return;
-    const remarks = window.prompt("Describe what's wrong with this document (required):");
-    if (!remarks?.trim()) return;
-    try {
-      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document rejected");
-      invalidateRegistry();
-    } catch (e: any) { toast.error(translateError(e.message)); }
+    requestRejectRemarks("Describe what's wrong with this document (required):", async (remarks) => {
+      if (!remarks.trim()) return;
+      try {
+        const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast.success("Document rejected");
+        invalidateRegistry();
+      } catch (e: any) { toast.error(translateError(e.message)); }
+    });
   };
 
   const handleRegPreviewDoc = async (doc: any) => {
@@ -1393,18 +1406,19 @@ const CrmSalesDeed: React.FC = () => {
   // mandatory, not optional.
   const handleRejectDoc = async (docId: number) => {
     if (detailId == null) return;
-    const remarks = window.prompt("Describe what's wrong with this document (required):");
-    if (!remarks?.trim()) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
-        method: 'PUT', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document rejected");
-      invalidateDetail();
-    } catch (e: any) { toast.error(translateError(e.message)); }
+    requestRejectRemarks("Describe what's wrong with this document (required):", async (remarks) => {
+      if (!remarks.trim()) return;
+      try {
+        const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
+          method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast.success("Document rejected");
+        invalidateDetail();
+      } catch (e: any) { toast.error(translateError(e.message)); }
+    });
   };
 
   const handleCancelDeed = async () => {
@@ -1552,7 +1566,7 @@ const CrmSalesDeed: React.FC = () => {
                         )
                       )}
                       {detail.Status !== 'Registered' && detail.Status !== 'Cancelled' && (
-                        <button onClick={() => { if (window.confirm("Cancel this sale deed?")) handleCancelDeed(); }}
+                        <button onClick={() => requestConfirm("Cancel this sale deed?", handleCancelDeed)}
                           className="text-xs px-2.5 py-1 border border-red-200 rounded-lg text-red-600 bg-red-50/50 hover:bg-red-100 font-medium">
                           Cancel
                         </button>
@@ -3031,6 +3045,68 @@ const CrmSalesDeed: React.FC = () => {
         />
       )}
     </CrmShell>
+
+      {/* Shared AlertDialog — replaces window.confirm for destructive actions */}
+      <AlertDialog
+        open={confirmDialog.open}
+        onOpenChange={(o) => !o && setConfirmDialog((d) => ({ ...d, open: false }))}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Action</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                confirmDialog.onConfirm();
+                setConfirmDialog((d) => ({ ...d, open: false }));
+              }}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Shared prompt Dialog — replaces window.prompt for rejection remarks */}
+      {rejectPrompt.open && (
+        <Dialog
+          open={rejectPrompt.open}
+          onOpenChange={(o) => !o && setRejectPrompt((d) => ({ ...d, open: false }))}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Rejection Remarks</DialogTitle>
+              <DialogDescription>{rejectPrompt.title}</DialogDescription>
+            </DialogHeader>
+            <Input
+              value={rejectPrompt.value}
+              onChange={(e) => setRejectPrompt((d) => ({ ...d, value: e.target.value }))}
+              placeholder="Describe the issue…"
+              className="mt-2"
+            />
+            <DialogFooter>
+              <button
+                onClick={() => setRejectPrompt((d) => ({ ...d, open: false }))}
+                className="px-3 py-1.5 text-sm border rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  rejectPrompt.onSubmit(rejectPrompt.value);
+                  setRejectPrompt((d) => ({ ...d, open: false }));
+                }}
+                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Reject
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 };

@@ -11,6 +11,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -34,6 +35,7 @@ const PN_SELECT = `
 router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT
         b.Id, b.BookingNo,
@@ -47,6 +49,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
       ) bv
       WHERE b.IsActive = 1
         AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+        ${scope}
         AND EXISTS (
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
@@ -168,6 +171,9 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

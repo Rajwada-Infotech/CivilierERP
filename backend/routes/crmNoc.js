@@ -15,6 +15,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -213,6 +214,7 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
     const pool = getPool();
     const { type } = req.query; // "Bank" | "Organisation" | "" (= no filter)
     const typeFilter = NOC_TYPES.includes(type) ? type : null;
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const candidates = await pool.request().query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -230,6 +232,7 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1
         AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+        ${scope}
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
         AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
@@ -260,6 +263,9 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

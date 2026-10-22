@@ -73,6 +73,14 @@ function buildAmdWhere(request, query, includeStatus, projectScope = null) {
     request.input("status", sql.NVarChar(20), query.status);
     conds.push("r.Status = @status");
   }
+  if (query.from) {
+    request.input("from", sql.Date, query.from);
+    conds.push("CAST(r.RequestedAt AS DATE) >= @from");
+  }
+  if (query.to) {
+    request.input("to", sql.Date, query.to);
+    conds.push("CAST(r.RequestedAt AS DATE) <= @to");
+  }
   return conds.length ? "WHERE " + conds.join(" AND ") : "";
 }
 

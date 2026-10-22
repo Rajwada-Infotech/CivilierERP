@@ -19,7 +19,7 @@ router.use(apiRateLimit);
 // application, in applicant order, so every CRM screen can show a booking as
 // "Mr. Roy & Mrs. Roy" (src/components/crm/ApplicantNames.tsx). A booking's
 // list includes its application's co-applicants. Project-scoped.
-router.get("/names", async (req, res) => {
+router.get("/names", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const { projectPredicate } = require("../services/projectScope");
     const r = await getPool().request().query(`
@@ -50,7 +50,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
     const bookingId = parseId(req.params.bookingId);
     if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
-      .query(`SELECT c.*, cu.CustomerNo, ROW_NUMBER() OVER (ORDER BY c.CreatedAt, c.Id) + 1 AS ApplicantNo
+      .query(`SELECT c.Id, c.BookingId, c.ApplicationId, c.Name, c.Relation, c.Mobile, c.Email,
+                     CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+                     CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+                     c.DateOfBirth, c.Gender, c.Occupation, c.AnnualIncome,
+                     c.Address, c.City, c.[State], c.Pincode, c.Notes,
+                     c.SourceType, c.CustomerId, c.IsActive, c.CreatedBy, c.CreatedAt, c.UpdatedBy, c.UpdatedAt,
+                     cu.CustomerNo, ROW_NUMBER() OVER (ORDER BY c.CreatedAt, c.Id) + 1 AS ApplicantNo
               FROM dbo.CrmCoApplicant c LEFT JOIN dbo.CrmCustomer cu ON cu.Id = c.CustomerId
               WHERE c.BookingId = @bid AND c.IsActive = 1 ORDER BY c.CreatedAt, c.Id`);
     res.json(result.recordset);
@@ -291,7 +297,9 @@ router.get("/application/:applicationId", requirePageRight("crm-applications", "
     if (isNaN(applicationId)) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId)
       .query(`
-        SELECT c.Id, c.Name, c.Relation, c.Mobile, c.Email, c.PanNo, c.AadhaarNo,
+        SELECT c.Id, c.Name, c.Relation, c.Mobile, c.Email,
+               CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+               CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
                c.DateOfBirth, c.Gender, c.Occupation, c.AnnualIncome,
                c.Address, c.City, c.[State], c.Pincode, c.Notes,
                c.SourceType, c.BookingId, c.ApplicationId, c.CreatedAt, c.UpdatedAt,

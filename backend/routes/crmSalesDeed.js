@@ -32,6 +32,7 @@ const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const { applyPagination } = require("../services/crmListPagination");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const multer = require('multer');
 
 router.use(authMiddleware);
@@ -206,6 +207,7 @@ async function getDeedBookingLockReason(pool, deedId) {
 router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              ag.Status AS AgreementStatus, ag.AgreementNo,
@@ -223,6 +225,7 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
       ) hov
       WHERE b.IsActive = 1
         AND b.Status NOT IN ${DEAD_BOOKING_SQL}
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id AND ISNULL(Status, '') <> 'Cancelled')
         AND ag.Status = 'Registered'
         AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
@@ -481,6 +484,7 @@ router.get("/registry/booking/:bookingId", requirePageRight("crm-registry", "vie
 router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              qp.QPNo, sd.DeedNo
@@ -490,6 +494,7 @@ router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view
       JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
       WHERE b.Status <> 'Cancelled'
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')
       ORDER BY b.CreatedAt DESC
     `);
@@ -538,6 +543,9 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1163,6 +1171,9 @@ router.post("/query-payment", requirePageRight("crm-query-payment", "create"), a
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -2398,6 +2409,9 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), validateBody(crmS
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

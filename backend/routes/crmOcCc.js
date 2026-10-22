@@ -217,21 +217,24 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
       await recordProjectCertCoverage(pool, result.recordset[0].Id);
       // Whole project: a block's certificate can complete the project, which
       // bookings without a block follow. Recalculating an unchanged booking
-      // changes nothing.
-      const affected = await pool.request()
+      // changes nothing. Run async (setImmediate) so the HTTP response isn't
+      // blocked by potentially many bookings.
+      const affectedIds = await pool.request()
         .input("pid", sql.Int, parseInt(b.ProjectId))
         .query(`
           SELECT bk.Id FROM dbo.CrmBooking bk
           WHERE bk.ProjectId = @pid AND bk.IsActive = 1
             AND bk.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')
         `);
-      for (const row of affected.recordset) {
-        try {
-          await rollupBookingTotals(pool, row.Id);
-        } catch (gstErr) {
-          console.error(`[crm-oc-cc] GST recalc failed for booking ${row.Id}:`, gstErr.message);
+      setImmediate(async () => {
+        for (const row of affectedIds.recordset) {
+          try {
+            await rollupBookingTotals(pool, row.Id);
+          } catch (gstErr) {
+            console.error(`[crm-oc-cc] GST recalc failed for booking ${row.Id}:`, gstErr.message);
+          }
         }
-      }
+      });
     }
 
     res.status(201).json({ success: true, id: result.recordset[0].Id });
@@ -301,23 +304,26 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
       // Whole project (see POST): a block's certificate can complete or
       // un-complete the project that block-less bookings follow.
       const { ProjectId } = cur.recordset[0];
-      const affected = await pool.request()
+      const affectedPut = await pool.request()
         .input("pid", sql.Int, ProjectId)
         .query(`
           SELECT b.Id FROM dbo.CrmBooking b
           WHERE b.ProjectId = @pid AND b.IsActive = 1
             AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred')
         `);
-      for (const row of affected.recordset) {
-        try {
-          await rollupBookingTotals(pool, row.Id);
-        } catch (gstErr) {
-          // One booking's recalc failing (e.g. a data quirk on a single old
-          // record) shouldn't roll back the certificate update itself or
-          // block every other booking in the batch from getting recalced.
-          console.error(`[crm-oc-cc] GST recalc failed for booking ${row.Id}:`, gstErr.message);
+      // Run async (setImmediate) so PUT response isn't blocked by project-wide rollup
+      setImmediate(async () => {
+        for (const row of affectedPut.recordset) {
+          try {
+            await rollupBookingTotals(pool, row.Id);
+          } catch (gstErr) {
+            // One booking's recalc failing (e.g. a data quirk on a single old
+            // record) shouldn't roll back the certificate update itself or
+            // block every other booking in the batch from getting recalced.
+            console.error(`[crm-oc-cc] GST recalc failed for booking ${row.Id}:`, gstErr.message);
+          }
         }
-      }
+      });
     }
 
     res.json({ success: true });

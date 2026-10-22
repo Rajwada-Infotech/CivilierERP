@@ -12,6 +12,10 @@ import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download, CheckCircle2, AlertCircle, Info, CalendarDays, BarChart3 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
@@ -1024,6 +1028,13 @@ const CrmAgreement: React.FC = () => {
 
   const [assigningLegal, setAssigningLegal] = useState(false);
   const [editingLegalExec, setEditingLegalExec] = useState(false);
+
+  // Replaces window.confirm — shared AlertDialog for destructive confirmations
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; message: string; onConfirm: () => void }>({
+    open: false, message: "", onConfirm: () => {},
+  });
+  const requestConfirm = (message: string, onConfirm: () => void) =>
+    setConfirmDialog({ open: true, message, onConfirm });
   const handleAssignLegal = async (legalExecutiveId: string) => {
     if (selectedId == null) return;
     setAssigningLegal(true);
@@ -1243,7 +1254,7 @@ const CrmAgreement: React.FC = () => {
                       )
                     )}
                     {(detail.agreement?.Status === CrmStatus.DRAFT || detail.agreement?.Status === CrmStatus.EXECUTED) && (
-                      <button onClick={() => { if (window.confirm("Cancel this agreement?")) handleAgreementAction("cancel"); }}
+                      <button onClick={() => requestConfirm("Cancel this agreement?", () => handleAgreementAction("cancel"))}
                         className="text-xs px-2.5 py-1 border border-red-200 rounded-lg text-red-600 bg-red-50/50 hover:bg-red-100 font-medium">
                         Cancel
                       </button>
@@ -2497,6 +2508,30 @@ const CrmAgreement: React.FC = () => {
         </DialogContent>
       </Dialog>
     </CrmShell>
+
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog
+        open={confirmDialog.open}
+        onOpenChange={(o) => !o && setConfirmDialog((d) => ({ ...d, open: false }))}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Action</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                confirmDialog.onConfirm();
+                setConfirmDialog((d) => ({ ...d, open: false }));
+              }}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

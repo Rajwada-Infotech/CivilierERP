@@ -31,10 +31,17 @@ router.use(apiRateLimit);
 //     permanent fields on every write (see POST/PUT below), so any
 //     consumer reading Current* directly always gets a real value instead
 //     of having to fall back to Permanent* itself.
+// Masked PAN/Aadhaar — for the list/search view only. GET /:id (used to
+// pre-fill the Edit form) must NOT use this: the form round-trips whatever
+// it receives back on save, so a masked value here would silently overwrite
+// the real PAN/Aadhaar on file (and would usually fail the frontend's PAN
+// format check first, blocking the save entirely either way).
 const CUSTOMER_SELECT = `
   SELECT
     c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
-    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome, c.GstNo,
+    CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+    CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+    c.Occupation, c.AnnualIncome, c.GstNo,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
     c.DateOfBirth, c.InvoiceMode,
@@ -52,6 +59,15 @@ const CUSTOMER_SELECT = `
   LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
   LEFT JOIN dbo.SaLead l ON l.Id = c.LeadId
 `;
+
+// Real (unmasked) PAN/Aadhaar — for GET /:id only, see note above.
+const CUSTOMER_SELECT_DETAIL = CUSTOMER_SELECT.replace(
+  "CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,",
+  "c.PanNo,",
+).replace(
+  "CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,",
+  "c.AadhaarNo,",
+);
 
 function normalizeEmail(value) {
   const trimmed = String(value || "").trim().toLowerCase();
@@ -274,7 +290,7 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
+      pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT_DETAIL} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
         SELECT a.Id, a.ApplicationNo, a.Status, a.InterestedProject, a.CreatedAt,
                b.Id AS BookingId, b.BookingNo, b.Status AS BookingStatus
@@ -344,6 +360,13 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const pool = getPool();
     const b = req.body;
 
+    // Full input validation via Zod schema (replaces the manual CustomerName check below)
+    const { customerCreateSchema } = require("../validation/crmBookingSchemas");
+    const parsed = customerCreateSchema.safeParse(b || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+    }
+
     // Server-side requiredness for Customer Name — the frontend already
     // enforces this, but relying on that alone left this endpoint creating
     // nameless customers whenever it was hit directly, which then crashed
@@ -353,6 +376,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     // and CrmCustomer.Mobile / CrmApplication.Mobile are both nullable to
     // match (migrations 425 and 445).
     if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+
 
     if (b.Mobile?.trim()) {
       const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())

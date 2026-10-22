@@ -29,12 +29,15 @@ async function movingBookings(db, bookingId) {
   const p = await propertyOfBooking(db, bookingId);
   const ids = p.bookings.map((b) => b.Id);
   if (!ids.length) return [];
-  return (await db.request().query(`
+  const req = db.request();
+  ids.forEach((id, i) => req.input(`bid${i}`, sql.Int, id));
+  const inList = ids.map((_, i) => `@bid${i}`).join(",");
+  return (await req.query(`
     SELECT b.Id, b.BookingNo, b.UnitId, b.UnitNo, b.ProjectId, b.CompanyId, b.TotalValue, b.Status, b.ApplicationId, a.CustomerId,
            (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
              + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-    WHERE b.Id IN (${ids.join(",")}) AND ${LIVE}`)).recordset;
+    WHERE b.Id IN (${inList}) AND ${LIVE}`)).recordset;
 }
 
 /**
@@ -48,10 +51,13 @@ async function movingBookings(db, bookingId) {
 async function conveyedReason(db, bookingIds) {
   const ids = (bookingIds || []).map(Number).filter(Number.isInteger);
   if (!ids.length) return null;
-  const r = (await db.request().query(`
+  const req = db.request();
+  ids.forEach((id, i) => req.input(`cid${i}`, sql.Int, id));
+  const inList = ids.map((_, i) => `@cid${i}`).join(",");
+  const r = (await req.query(`
     SELECT TOP 1 b.BookingNo, N'its sale deed is registered' AS Why
     FROM dbo.CrmBooking b
-    WHERE b.Id IN (${ids.join(",")})
+    WHERE b.Id IN (${inList})
       AND EXISTS (SELECT 1 FROM dbo.CrmSalesDeed d WHERE d.BookingId = b.Id AND d.Status = N'Registered')`)).recordset[0];
   return r ? `${r.BookingNo}: ${r.Why} — the property is conveyed to its owner, so it can no longer be resold or bought back through its booking — record a new owner in Ownership Changes instead` : null;
 }
@@ -59,10 +65,14 @@ async function conveyedReason(db, bookingIds) {
 /** An open resale or buy-back already on any of these bookings (being prepared, waiting, approved, or sent back to fix). */
 async function openResaleOn(db, bookingIds, exceptId = null) {
   if (!bookingIds.length) return null;
-  const likes = bookingIds.map((id) => `(',' + ISNULL(r.BookingIds, CAST(r.FromBookingId AS NVARCHAR(20))) + ',') LIKE '%,${Number(id)},%'`).join(" OR ");
-  return (await db.request().query(`
+  const req = db.request();
+  bookingIds.forEach((id, i) => req.input(`oid${i}`, sql.Int, Number(id)));
+  const likes = bookingIds.map((_, i) => `(',' + ISNULL(r.BookingIds, CAST(r.FromBookingId AS NVARCHAR(20))) + ',') LIKE '%,' + CAST(@oid${i} AS NVARCHAR(20)) + ',%'`).join(" OR ");
+  const exceptClause = exceptId != null ? ` AND r.Id <> @exceptId` : "";
+  if (exceptId != null) req.input("exceptId", sql.Int, Number(exceptId));
+  return (await req.query(`
     SELECT TOP 1 r.Id, r.Kind, r.Status FROM dbo.CrmUnitResale r
-    WHERE r.IsActive = 1 AND r.Status IN (N'Draft', N'Pending', N'Approved', N'Rejected') AND (${likes})${exceptId ? ` AND r.Id <> ${Number(exceptId)}` : ""}`)).recordset[0] || null;
+    WHERE r.IsActive = 1 AND r.Status IN (N'Draft', N'Pending', N'Approved', N'Rejected') AND (${likes})${exceptClause}`)).recordset[0] || null;
 }
 
 /**
@@ -147,13 +157,16 @@ async function endorseToBuyer(tx, resale, actorUserId) {
   const buyer = (await tx.request().input("c", sql.Int, resale.ToCustomerId)
     .query("SELECT Id, CustomerName, Mobile, Email FROM dbo.CrmCustomer WHERE Id = @c")).recordset[0];
   if (!buyer) throw new ResaleError("Name the new buyer before completing the resale");
-  const bookings = (await tx.request().query(`
+  const bReq = tx.request();
+  ids.forEach((id, i) => bReq.input(`rid${i}`, sql.Int, id));
+  const bInList = ids.map((_, i) => `@rid${i}`).join(",");
+  const bookings = (await bReq.query(`
     SELECT b.Id, b.BookingNo, b.UnitId, b.UnitNo, b.ProjectId, b.CompanyId, b.ApplicationId, a.CustomerId,
            a.ProjectId AS AppProjectId, a.InterestedProject, a.InterestedUnit, a.PaymentPlanId,
            (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
              + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
     FROM dbo.CrmBooking b WITH (UPDLOCK, HOLDLOCK) JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-    WHERE b.Id IN (${ids.join(",")}) AND ${LIVE}`)).recordset;
+    WHERE b.Id IN (${bInList}) AND ${LIVE}`)).recordset;
   if (bookings.length !== ids.length) throw new ResaleError("A booking in this resale is no longer live — it can't be transferred", 409);
   const conveyed = await conveyedReason(tx, ids);
   if (conveyed) throw new ResaleError(conveyed, 409);
@@ -193,11 +206,14 @@ async function endorseToBuyer(tx, resale, actorUserId) {
 /** Raises the buy-back payout voucher. Inside the caller's transaction. */
 async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actorEmail }) {
   const ids = String(resale.BookingIds || resale.FromBookingId || "").split(",").map(Number).filter(Number.isInteger);
-  const bookings = (await tx.request().query(`
+  const bbReq = tx.request();
+  ids.forEach((id, i) => bbReq.input(`bbid${i}`, sql.Int, id));
+  const bbInList = ids.length ? ids.map((_, i) => `@bbid${i}`).join(",") : "0";
+  const bookings = (await bbReq.query(`
     SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.CompanyId, a.CustomerId,
            (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Unapplied
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-    WHERE b.Id IN (${ids.join(",") || "0"}) AND ${LIVE}`)).recordset;
+    WHERE b.Id IN (${bbInList}) AND ${LIVE}`)).recordset;
   if (!bookings.length || bookings.length !== ids.length) throw new ResaleError("A booking in this buy-back is no longer live", 409);
   const conveyed = await conveyedReason(tx, ids);
   if (conveyed) throw new ResaleError(conveyed, 409);
@@ -206,9 +222,12 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
   // stays there — the full-booking hold), and completeBuyBack uses it up. It
   // must not be promised elsewhere meanwhile: an open refund or re-booking
   // transfer on the same credit would pay it out twice.
-  const claimed = (await tx.request().query(`
+  const refReq = tx.request();
+  ids.forEach((id, i) => refReq.input(`refid${i}`, sql.Int, id));
+  const refInList = ids.length ? ids.map((_, i) => `@refid${i}`).join(",") : "0";
+  const claimed = (await refReq.query(`
     SELECT TOP 1 r.RefundNo FROM dbo.CrmRefund r
-    WHERE r.BookingId IN (${ids.join(",") || "0"}) AND r.Status NOT IN ('Paid', 'Rejected', 'Cancelled')`)).recordset[0];
+    WHERE r.BookingId IN (${refInList}) AND r.Status NOT IN ('Paid', 'Rejected', 'Cancelled')`)).recordset[0];
   if (claimed) throw new ResaleError(`Refund ${claimed.RefundNo} is open on this property's money — finish or reject it first`, 409);
   const price = Math.round(Number(resale.AgreedValue || 0) * 100) / 100;
   const tds = Math.round(Number(resale.TdsAmount || 0) * 100) / 100;
@@ -272,9 +291,12 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
       return { done: false };
     }
     const ids = String(resale.BookingIds || resale.FromBookingId).split(",").map(Number).filter(Number.isInteger);
-    const paid = (await tx.request().query(`
-      SELECT (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId IN (${ids.join(",")}))
-           + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId IN (${ids.join(",")})) AS Paid`)).recordset[0].Paid;
+    const cbReq = tx.request();
+    ids.forEach((id, i) => cbReq.input(`cbid${i}`, sql.Int, id));
+    const cbInList = ids.length ? ids.map((_, i) => `@cbid${i}`).join(",") : "0";
+    const paid = (await cbReq.query(`
+      SELECT (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId IN (${cbInList}))
+           + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId IN (${cbInList})) AS Paid`)).recordset[0].Paid;
     const { releaseBookingInventoryLines } = require("./crmWorkflowGuards");
     const { syncApplicationOnBookingTerminal } = require("./crmApplicationWorkflow");
     for (const id of ids) {

@@ -12,6 +12,7 @@ const { crmMutationCreateSchema, crmMutationApproveSchema } = require("../valida
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { canPerformCrmGatedAction } = require("../services/approvalService");
 const { logCrmAudit } = require("../services/crmAudit");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
@@ -175,6 +176,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-mutation", "view"), asyn
 router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              reg.RegNo, sd.DeedNo
@@ -184,6 +186,7 @@ router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async
       JOIN dbo.CrmRegistry reg ON reg.BookingId = b.Id AND reg.Status = 'Completed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND ISNULL(sd.Status, '') <> 'Cancelled'
       WHERE b.Status <> 'Cancelled'
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)
       ORDER BY b.CreatedAt DESC
     `);
@@ -230,6 +233,9 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

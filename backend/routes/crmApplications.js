@@ -3,7 +3,7 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on applications outside their projects.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmApplication WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -407,6 +407,22 @@ router.post("/", requirePageRight("crm-applications", "create"), async (req, res
   try {
     const pool = getPool();
     const actor = actorId(req);
+    let projectId = req.body?.ProjectId != null && req.body?.ProjectId !== "" ? parseInt(req.body.ProjectId, 10) : null;
+    if (projectId === null && req.body?.PreferredUnitId) {
+      const uRow = await pool.request().input("uid", sql.Int, parseInt(req.body.PreferredUnitId, 10))
+        .query("SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @uid");
+      if (uRow.recordset.length) projectId = uRow.recordset[0].ProjectId;
+    }
+    if (projectId === null && Array.isArray(req.body?.PreferredPlotIds) && req.body.PreferredPlotIds.length > 0) {
+      const pRow = await pool.request().input("pid", sql.Int, parseInt(req.body.PreferredPlotIds[0], 10))
+        .query("SELECT ProjectId FROM dbo.PlotMaster WHERE Id = @pid");
+      if (pRow.recordset.length) projectId = pRow.recordset[0].ProjectId;
+    }
+    if (req.projectScope && (projectId === null || !assertProjectAllowed(req, res, projectId))) {
+      if (projectId === null) res.status(403).json({ error: "You don't have access to this project." });
+      return;
+    }
+    if (projectId !== null && !assertProjectAllowed(req, res, projectId)) return;
     // The human-filed Application form never lets AssignedTo/AssignedBy be
     // picked — the filer becomes the assignee, permanently recorded as the
     // filer too. (saHandoff.js, the other caller of this shared service,

@@ -11,6 +11,14 @@ import { DateInput } from "@/components/ui/date-input";
 import {
   ArrowLeft, ArrowRight, ArrowRightLeft, Check, ChevronDown, Eye, Loader2, Lock, Undo2, Upload, X, ExternalLink,
 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 // One resale / buy-back CASE, as a guided flow: the step you're on is open
 // with its checklist (✓ done / ○ still needed), the documents that step needs
@@ -56,6 +64,17 @@ const CrmResaleCase: React.FC = () => {
   const [fee, setFee] = useState({ PaymentMode: "", TransactionRef: "", ReceivedDate: new Date().toISOString().slice(0, 10) });
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingDocType = useRef<string>("");
+
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Replaces window.prompt
+  const [rejectPrompt, setRejectPrompt] = useState<{ label: string; onOk: (v: string) => void } | null>(null);
+  const [rejectInput, setRejectInput] = useState("");
+  const requestRejectRemarks = (label: string, onOk: (v: string) => void) => {
+    setRejectInput("");
+    setRejectPrompt({ label, onOk });
+  };
 
   const q = useQuery<CaseState>({
     queryKey: ["crm-resale-case", id],
@@ -118,9 +137,14 @@ const CrmResaleCase: React.FC = () => {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
   const review = (d: CaseDoc, decision: "Verified" | "Rejected") => {
-    let remarks = "";
-    if (decision === "Rejected") { remarks = window.prompt("Why is it rejected? The uploader sees this.") || ""; if (!remarks.trim()) return; }
-    call(`doc-${d.Id}`, `documents/${d.Id}/review`, { decision, remarks }, decision);
+    if (decision === "Rejected") {
+      // Replaces window.prompt — uses Radix Dialog instead
+      requestRejectRemarks("Why is it rejected? The uploader sees this.", (remarks) => {
+        call(`doc-${d.Id}`, `documents/${d.Id}/review`, { decision, remarks }, decision);
+      });
+      return;
+    }
+    call(`doc-${d.Id}`, `documents/${d.Id}/review`, { decision, remarks: "" }, decision);
   };
 
   if (q.isLoading) return <CrmShell title="Resale case" subtitle=""><div className="p-10 grid place-items-center text-muted-foreground"><Loader2 className="animate-spin" /></div></CrmShell>;
@@ -320,7 +344,14 @@ const CrmResaleCase: React.FC = () => {
                             : "Finance pays the agreed price; when they approve it the property returns to stock."}
                         </p>
                         {isResale
-                          ? <button className={primary} disabled={!readyToFinish || busy === "finish"} onClick={() => { if (window.confirm(`Pass ${c.Property} to ${c.ToName}?`)) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
+                          ? <button className={primary} disabled={!readyToFinish || busy === "finish" || (!!c.FromCustomerId && !!c.ToCustomerId && c.FromCustomerId === c.ToCustomerId)} onClick={() => {
+                              if (c.FromCustomerId && c.ToCustomerId && c.FromCustomerId === c.ToCustomerId) {
+                                toast.error("Seller and buyer cannot be the same customer");
+                                return;
+                              }
+                              // Replaces window.confirm
+                              requestConfirm(`Pass ${c.Property} to ${c.ToName}?`, () => call("finish", "transfer", {}, "Transferred to the buyer"));
+                            }}>Transfer to buyer</button>
                           : <button className={primary} disabled={!readyToFinish || busy === "finish" || !!c.PayoutNewPaymentId} onClick={() => call("finish", "send-to-finance", {}, "Sent to Finance")}>Send payout to Finance</button>}
                       </div>
                     )}
@@ -358,6 +389,49 @@ const CrmResaleCase: React.FC = () => {
           </section>
         </aside>
       </div>
+
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Action</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Shared prompt Dialog — replaces window.prompt */}
+      <Dialog open={rejectPrompt !== null} onOpenChange={(o) => !o && setRejectPrompt(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rejection Reason</DialogTitle>
+            <DialogDescription>{rejectPrompt?.label}</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={rejectInput}
+            onChange={(e) => setRejectInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && rejectInput.trim()) {
+                rejectPrompt?.onOk(rejectInput.trim());
+                setRejectPrompt(null);
+              }
+            }}
+            placeholder="Enter reason…"
+          />
+          <DialogFooter>
+            <button className={ghost} onClick={() => setRejectPrompt(null)}>Cancel</button>
+            <button className={primary} disabled={!rejectInput.trim()} onClick={() => {
+              rejectPrompt?.onOk(rejectInput.trim());
+              setRejectPrompt(null);
+            }}>Submit</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </CrmShell>
   );
 };

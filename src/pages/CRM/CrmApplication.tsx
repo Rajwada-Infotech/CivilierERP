@@ -19,6 +19,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { SearchableSelect } from "@/components/SearchableSelect";
@@ -1623,6 +1624,9 @@ const CrmApplication: React.FC = () => {
   const [cancellingApp, setCancellingApp] = useState<any | null>(null);
   const [cancelRemarks, setCancelRemarks] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
   const handleCancelApplication = async () => {
     if (!cancellingApp) return;
     setCancelling(true);
@@ -1653,20 +1657,21 @@ const CrmApplication: React.FC = () => {
     }
   };
   const handleDeleteApplication = async (a: any) => {
-    if (!window.confirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`)) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete application");
-      toast.success(data.message || "Application deleted");
-      qc.invalidateQueries({ queryKey: ["crm-apps"] });
-      qc.invalidateQueries({ queryKey: ["unit-master"] });
-      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
-      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
-      if (viewingAppId === a.Id) closeApplication();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
+    requestConfirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`, async () => {
+      try {
+        const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to delete application");
+        toast.success(data.message || "Application deleted");
+        qc.invalidateQueries({ queryKey: ["crm-apps"] });
+        qc.invalidateQueries({ queryKey: ["unit-master"] });
+        qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+        qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+        if (viewingAppId === a.Id) closeApplication();
+      } catch (e: any) {
+        toast.error(translateError(e.message));
+      }
+    });
   };
   const handleCreateBooking = async (a: any) => {
     if (!a.PreferredUnitId) {
@@ -3325,6 +3330,19 @@ const CrmApplication: React.FC = () => {
           onClose={() => setPdfDialogApp(null)}
         />
       )}
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Action</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </CrmShell>
     </>
   );

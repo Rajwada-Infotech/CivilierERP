@@ -11,7 +11,12 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock, MapPin } from "lucide-react";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useAuth } from "@/contexts/AuthContext";
@@ -916,6 +921,11 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   const [coForm, setCoForm] = useState({ Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "", Reason: "" });
   const [addingCo, setAddingCo] = useState(false);
 
+  // Replaces window.prompt — for the "needs reason" co-applicant removal case
+  const [coRemovePrompt, setCoRemovePrompt] = useState<{
+    open: boolean; coId: number | null; value: string;
+  }>({ open: false, coId: null, value: "" });
+
   // Bank Preference tab — telecaller captures which bank(s) the customer
   // prefers for their home loan during the call; multiple entries allowed.
   const [bpBankName, setBpBankName] = useState("");
@@ -1235,20 +1245,20 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     }
   };
 
-  const handleRemoveCoApplicant = async (id: number) => {
+  const _doRemoveCoApplicant = async (id: number, reason?: string) => {
     try {
-      let res = await fetchWithAuth(`${CO_API}/${id}`, { method: "DELETE" });
-      let data = await res.json().catch(() => ({}));
+      const opts: RequestInit = reason
+        ? { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Reason: reason.trim() }) }
+        : { method: "DELETE" };
+      const res = await fetchWithAuth(`${CO_API}/${id}`, opts);
+      const data = await res.json().catch(() => ({}));
       // Same legal-work-started gate as adding one — the backend asks for a
       // reason only when it's actually needed, so ask here rather than
       // always demanding one up front for the common (no legal work yet) case.
       if (!res.ok && /reason is required/i.test(data.error || "")) {
-        const reason = window.prompt("Legal documents already exist for this booking — describe why this co-applicant should be removed:");
-        if (!reason?.trim()) return;
-        res = await fetchWithAuth(`${CO_API}/${id}`, {
-          method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Reason: reason.trim() }),
-        });
-        data = await res.json().catch(() => ({}));
+        // Open the prompt dialog; the submit handler will call _doRemoveCoApplicant again with a reason
+        setCoRemovePrompt({ open: true, coId: id, value: "" });
+        return;
       }
       if (!res.ok) throw new Error(data.error);
       toast.success(data.pending
@@ -1259,6 +1269,8 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
       toast.error(translateError(e.message));
     }
   };
+
+  const handleRemoveCoApplicant = (id: number) => _doRemoveCoApplicant(id);
 
   const handleAddBankPreference = async () => {
     if (!bpBankName.trim()) { toast.error("Enter a bank name before adding"); return; }
@@ -2170,6 +2182,44 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     )}
     {viewingInvoice && (
       <InvoicePdfDialog bookingId={booking.BookingId} invoice={viewingInvoice} onClose={() => setViewingInvoice(null)} />
+    )}
+
+    {/* Prompt dialog — replaces window.prompt for co-applicant removal with reason */}
+    {coRemovePrompt.open && coRemovePrompt.coId != null && (
+      <Dialog open onOpenChange={(o) => !o && setCoRemovePrompt((d) => ({ ...d, open: false }))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Removal Reason Required</DialogTitle>
+            <DialogDescription>
+              Legal documents already exist for this booking — describe why this co-applicant should be removed:
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={coRemovePrompt.value}
+            onChange={(e) => setCoRemovePrompt((d) => ({ ...d, value: e.target.value }))}
+            placeholder="Reason for removal…"
+            className="mt-2"
+          />
+          <DialogFooter>
+            <button
+              onClick={() => setCoRemovePrompt((d) => ({ ...d, open: false }))}
+              className="px-3 py-1.5 text-sm border rounded"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                const { coId, value } = coRemovePrompt;
+                setCoRemovePrompt((d) => ({ ...d, open: false }));
+                if (coId != null && value.trim()) _doRemoveCoApplicant(coId, value.trim());
+              }}
+              className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Remove
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     )}
     </>
   );

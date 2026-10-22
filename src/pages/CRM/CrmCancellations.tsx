@@ -131,6 +131,13 @@ const CrmCancellations: React.FC = () => {
   const handleRequest = async () => {
     if (!form.BookingId) { toast.error("Booking is required"); return; }
     if (!form.Reason.trim()) { toast.error("Give the reason for the cancellation"); return; }
+    if (form.DeductionPercent !== "") {
+      const deductions = parseFloat(form.DeductionPercent);
+      if (isNaN(deductions) || deductions < 0 || deductions > 100) {
+        toast.error("Deductions must be between 0 and total received amount");
+        return;
+      }
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(API, {

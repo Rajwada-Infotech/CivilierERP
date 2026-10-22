@@ -29,7 +29,7 @@ const SA_LEADS_API = "/api/sa/leads";
 // will be rejected by the server.
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   Scheduled:      ["SnagInspection", "Cancelled"],
-  SnagInspection: ["SnagPending", "Cancelled"],
+  SnagInspection: ["SnagPending", "Completed", "Cancelled"],
   SnagPending:    ["Completed", "Cancelled"],
   Completed:      [],
   Cancelled:      [],
@@ -143,7 +143,10 @@ const CrmHandover: React.FC = () => {
   // one booking being deep-linked to if it's not on the current page.
   useEffect(() => {
     if (!deepLinkBookingId) return;
-    setSp({}, { replace: true });
+    setSp((prev) => {
+      prev.delete("bookingId");
+      return prev;
+    }, { replace: true });
     fetchHandoverByBooking(deepLinkBookingId).then((existing) => {
       if (existing) {
         setSelectedId(existing.Id);
@@ -321,7 +324,15 @@ const CrmHandover: React.FC = () => {
       <span className="font-medium block truncate max-w-[220px]" title={h.ApplicantName}><ApplicantNames name={h.ApplicantName} bookingId={h.BookingId} applicationId={h.ApplicationId} /></span>
     ) },
     { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
-      cell: (h) => <span className="text-xs text-muted-foreground whitespace-nowrap">{h.BookingNo}</span> },
+      cell: (h) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); navigate(`/crm/bookings?view=${h.BookingId}`); }}
+          className="text-xs text-muted-foreground whitespace-nowrap hover:text-foreground hover:underline"
+          title="View booking"
+        >
+          {h.BookingNo}
+        </button>
+      ) },
     { key: "unit", header: "Unit", className: "hidden md:table-cell",
       cell: (h) => <span className="text-xs whitespace-nowrap">{h.UnitNo}</span> },
     { key: "status", header: "Status", sortKey: "Status", cell: (h) => {
@@ -535,7 +546,15 @@ const CrmHandover: React.FC = () => {
         open={selectedId != null}
         onClose={() => setSelectedId(null)}
         title={detail ? <ApplicantNames name={detail.handover.ApplicantName} bookingId={detail.handover.BookingId} applicationId={detail.handover.ApplicationId} /> : ""}
-        subtitle={detail ? `${detail.handover.BookingNo} · ${detail.handover.UnitNo}` : undefined}
+        subtitle={detail ? (
+          <button
+            onClick={() => navigate(`/crm/bookings?view=${detail.handover.BookingId}`)}
+            className="hover:underline text-left"
+            title="View booking"
+          >
+            {detail.handover.BookingNo} · {detail.handover.UnitNo}
+          </button>
+        ) : undefined}
         badge={detail && (
           <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${(STATUS_CONFIG[detail.handover.Status] ?? STATUS_CONFIG.Scheduled).badgeCls}`}>
             {(STATUS_CONFIG[detail.handover.Status] ?? STATUS_CONFIG.Scheduled).label}

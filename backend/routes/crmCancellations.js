@@ -13,6 +13,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { crmCancellationCreateSchema } = require("../validation/crmCancellationSchemas");
 const { actorId, requireUserEmail } = require("../services/saAccess");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 const { getNextDocNumber } = require("../services/docNumber");
 const { applyPagination } = require("../services/crmListPagination");
@@ -134,6 +135,9 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     const { bookingId } = req.query;
     if (!bookingId) return res.status(400).json({ error: "bookingId is required" });
 
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
+
     const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
       .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')");
     if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found or not eligible for cancellation" });
@@ -246,6 +250,9 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -720,6 +727,16 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
         await pool.request().input("id", sql.Int, id).query(
           "UPDATE dbo.CrmCancellation SET Status = 'Pending', UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = 'Approved'",
         );
+        // Clean up the orphaned ApprovalAuditLog entry so we don't leave an 'Approved' audit log
+        // for a non-cancelled booking, and so retry doesn't falsely read this level as already satisfied.
+        await pool.request().input("id", sql.Int, id).query(`
+          DELETE FROM dbo.ApprovalAuditLog
+          WHERE Id IN (
+            SELECT TOP 1 Id FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'CrmCancellation' AND RecordId = @id AND ActionStatus = 'Approved'
+            ORDER BY ActionAt DESC, Id DESC
+          )
+        `);
       } catch (compErr) {
         console.error("[crm-cancellations] approve compensation failed:", compErr.message);
       }

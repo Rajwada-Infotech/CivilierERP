@@ -3,7 +3,9 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
-{ const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmBrokerageMaster")); }
+const { crmProjectGuards, crmViaBookingSql, projectPredicate } = require("../services/projectScope");
+crmProjectGuards(router, crmViaBookingSql("CrmBrokerageMaster"));
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -136,8 +138,10 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
     const { status } = req.query;
     const req0 = pool.request();
     const conds = [];
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await req0.query(`
       SELECT p.Id, p.BrokerageId, p.Amount, p.PaidDate, p.PaymentMode, p.TransactionRef, p.Notes, p.CreatedAt,
              CAST(NULL AS INT) AS FinancePaymentId, CAST(NULL AS NVARCHAR(100)) AS FinancePaymentDocNo, 'Paid' AS FinancePaymentStatus,
@@ -169,7 +173,7 @@ router.get("/payments", requirePageRight("crm-brokerage", "view"), async (req, r
       -- A voucher already recorded as a broker payment (approved) is listed
       -- once, by that payment row above — not twice.
       WHERE np.Status IN ('${CrmStatus.DRAFT}','${CrmStatus.PENDING}','${CrmStatus.APPROVED}')
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBrokerPayment bp WHERE bp.SourceNewPaymentId = np.PPaymentID) ${status ? "AND br.Status = @st" : ""}
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmBrokerPayment bp WHERE bp.SourceNewPaymentId = np.PPaymentID) ${status ? "AND br.Status = @st" : ""} ${scope}
       ORDER BY PaidDate DESC, CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -342,6 +346,10 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+
+    const allowed = await assertBookingProjectScope(req, res, b.BookingId);
+    if (allowed === false) return;
+
     if (!b.BrokerId) return res.status(400).json({ error: "Broker is required — select one from Broker Master" });
 
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));

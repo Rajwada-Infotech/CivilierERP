@@ -219,6 +219,16 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     throw Object.assign(new Error("Total value is ₹0 — set the rate (and the unit's saleable area) before sending for approval"), { status: 400 });
   }
 
+  const m1 = await pool.request()
+    .input("bid", sql.Int, bookingId)
+    .query(`SELECT TOP 1 AmountPaid, AmountDue, Status 
+            FROM dbo.CrmPaymentMilestone 
+            WHERE BookingId = @bid 
+            ORDER BY MilestoneNo ASC`);
+  const milestone1 = m1.recordset[0];
+  if (!milestone1 || (milestone1.Status !== "Paid" && milestone1.AmountPaid < milestone1.AmountDue)) {
+    throw Object.assign(new Error("Milestone 1 (token payment) must be paid before submitting for approval"), { status: 400 });
+  }
 
   const tx = pool.transaction();
   await tx.begin();
@@ -337,6 +347,29 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     await tx.commit();
   } catch (txErr) {
     try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    // approvalTransition already committed on its own transaction before this stage
+    // update opened. If this stage update transaction fails, compensate by walking
+    // booking Status back to 'Pending' (if it reached 'Approved') and removing the
+    // orphaned ApprovalAuditLog entry so the booking does not sit in a contradictory state.
+    try {
+      if (confirmedNow) {
+        await pool.request().input("bid", sql.Int, bookingId).query(
+          "UPDATE dbo.CrmBooking SET Status = 'Pending', UpdatedAt = SYSDATETIME() WHERE Id = @bid AND Status = 'Approved'"
+        );
+      }
+      await pool.request()
+        .input("bid", sql.Int, bookingId)
+        .query(`
+          DELETE FROM dbo.ApprovalAuditLog
+          WHERE Id IN (
+            SELECT TOP 1 Id FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'CrmBooking' AND RecordId = @bid AND ActionStatus = 'Approved'
+            ORDER BY ActionAt DESC, Id DESC
+          )
+        `);
+    } catch (compErr) {
+      console.error("[crm-booking-stage] approve compensation failed:", compErr.message);
+    }
     throw txErr;
   }
 

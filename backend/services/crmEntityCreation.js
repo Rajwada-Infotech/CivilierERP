@@ -60,9 +60,12 @@ async function assertCommercialGst(pool, unitIds) {
 
 async function assertConnectedPlotGroup(pool, plotIds) {
   if (plotIds.length < 2) return;
-  const pairs = await pool.request().query(`
+  const req = pool.request();
+  plotIds.forEach((id, i) => req.input(`cpid${i}`, sql.Int, id));
+  const inList = plotIds.map((_, i) => `@cpid${i}`).join(",");
+  const pairs = await req.query(`
     SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
-    WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+    WHERE PlotId IN (${inList}) AND AdjacentPlotId IN (${inList})
   `);
   const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
   pairs.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
@@ -85,12 +88,13 @@ async function assertConnectedPlotGroup(pool, plotIds) {
 async function validatePlotSelection(pool, plotIds, { projectId = null, applicationId = null, requireAdjacent = true } = {}) {
   if (!plotIds.length) return [];
   const requestedProjectId = projectId != null && projectId !== "" ? Number(projectId) : null;
-  const result = await pool.request()
-    .input("applicationId", sql.Int, applicationId)
-    .query(`
+  const pReq = pool.request().input("applicationId", sql.Int, applicationId);
+  plotIds.forEach((id, i) => pReq.input(`ppid${i}`, sql.Int, id));
+  const plotInList = plotIds.map((_, i) => `@ppid${i}`).join(",");
+  const result = await pReq.query(`
       SELECT p.Id, p.PlotName, p.ProjectId, p.BlockId
       FROM dbo.PlotMaster p
-      WHERE p.Id IN (${plotIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+      WHERE p.Id IN (${plotInList}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmBookingPlot bp
           JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
@@ -858,14 +862,17 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     await assertCommercialGst(pool, unitIds);
   }
 
-  // Fetch all selected units
-  const unitsRes = await pool.request().query(isPlotBooking ? `
+  // Fetch all selected units — parameterized IN list to avoid SQL injection
+  const uReq = pool.request();
+  unitIds.forEach((id, i) => uReq.input(`ubid${i}`, sql.Int, id));
+  const unitInList = unitIds.map((_, i) => `@ubid${i}`).join(",");
+  const unitsRes = await uReq.query(isPlotBooking ? `
     SELECT p.Id, p.PlotName AS UnitName, p.ProjectId, p.BlockId, CAST(NULL AS NVARCHAR(50)) AS UnitType,
            p.AreaSqFt, p.RatePerSqFt, proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
     FROM dbo.PlotMaster p
     LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
-    WHERE p.Id IN (${unitIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+    WHERE p.Id IN (${unitInList}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
   ` : `
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.UnitKind, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
@@ -874,7 +881,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     FROM dbo.UnitMaster u
     LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-    WHERE u.Id IN (${unitIds.join(",")}) AND u.IsActive = 1
+    WHERE u.Id IN (${unitInList}) AND u.IsActive = 1
   `);
   if (unitsRes.recordset.length !== unitIds.length) {
     throw new CrmCreationError("One or more selected units do not exist or are inactive");

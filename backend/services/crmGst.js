@@ -59,6 +59,9 @@ async function checkGstExemption(pool, bookingId) {
       WHERE m.BookingId = @bid
       UNION ALL
       SELECT MIN(ReceivedDate) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+      UNION ALL
+      SELECT ReceiptDate FROM dbo.CrmMoneyReceipt 
+      WHERE BookingId = @bid AND Status NOT IN (N'Cancelled', N'Bounced')
     ) x
   `);
   const earliestPaid = paidRow.recordset[0]?.EarliestPaid || null;

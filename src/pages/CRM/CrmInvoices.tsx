@@ -1125,9 +1125,9 @@ const CrmInvoices: React.FC = () => {
             {INVOICED_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         )}
-        <DateInput value={dateFrom} onChange={(e) => resetToFirstPage(setDateFrom)(e.target.value)}
+        <DateInput value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
           title="From date" className="px-2.5 py-2 text-sm border border-border rounded-lg bg-background" />
-        <DateInput value={dateTo} onChange={(e) => resetToFirstPage(setDateTo)(e.target.value)}
+        <DateInput value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
           title="To date" className="px-2.5 py-2 text-sm border border-border rounded-lg bg-background" />
         <button onClick={() => { setSearch(searchInput.trim()); setPage(1); }} className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
         {hasActiveFilters && (

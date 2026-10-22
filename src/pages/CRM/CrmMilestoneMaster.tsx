@@ -7,6 +7,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, ListOrdered, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -30,6 +31,9 @@ const CrmMilestoneMaster: React.FC = () => {
   // Opens locked (read-only) whenever editing an existing row — "New
   // Milestone" opens unlocked since there's nothing existing to protect.
   const [locked, setLocked] = useState(false);
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const { data: milestones = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchAll, staleTime: 30_000 });
@@ -79,19 +83,20 @@ const CrmMilestoneMaster: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("Delete this milestone? This cannot be undone.")) return;
-    setDeletingId(id);
-    try {
-      const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Milestone deleted");
-      qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setDeletingId(null);
-    }
+    requestConfirm("Delete this milestone? This cannot be undone.", async () => {
+      setDeletingId(id);
+      try {
+        const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast.success("Milestone deleted");
+        qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
+      } catch (e: any) {
+        toast.error(translateError(e.message));
+      } finally {
+        setDeletingId(null);
+      }
+    });
   };
 
   const milestoneColumns: ColumnDef<any, unknown>[] = [
@@ -202,6 +207,19 @@ const CrmMilestoneMaster: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </CrmShell>
     </>
   );

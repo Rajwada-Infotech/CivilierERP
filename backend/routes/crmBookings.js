@@ -447,6 +447,10 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
 // identical Unit Master validation, milestone generation, and hold
 // conversion — no second, drifting copy of this logic.
 router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) => {
+  // Validate the request body up-front so downstream code never sees garbage.
+  const { bookingCreateSchema } = require("../validation/crmBookingSchemas");
+  const parse = bookingCreateSchema.safeParse(req.body);
+  if (!parse.success) return res.status(400).json({ error: parse.error.errors[0]?.message || "Invalid request" });
   try {
     const pool = getPool();
     // If this booking is being created from an application, verify the
@@ -471,6 +475,7 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
     res.status(e.status || 500).json({ error: e.message });
   }
 });
+
 
 // PUT /:id — update booking. Status is never accepted here — it starts
 // 'Pending' at creation and only moves via /submit, /approve, /reject above,
@@ -2577,11 +2582,14 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
     }
 
     const mob = bkgRow.CustomerMobile;
+    const maskedMobile = mob && mob.length >= 4
+      ? mob.slice(0, 2) + '******' + mob.slice(-2)
+      : (mob ? '**********' : null);
     res.json({
       hasPortal: !!portalRow,
       portalUserId: portalRow ? portalRow.Id : null,
       email: portalRow ? portalRow.Email : (bkgRow.CustomerEmail || null),
-      maskedMobile: mob || null,
+      maskedMobile,
       isActive: portalRow ? !!portalRow.IsActive : false,
       mustChangePassword: portalRow ? !!portalRow.MustChangePassword : false,
       portalCreatedAt: portalRow ? portalRow.CreatedAt : null,

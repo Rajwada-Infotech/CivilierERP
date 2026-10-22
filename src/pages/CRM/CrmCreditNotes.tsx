@@ -597,11 +597,13 @@ function DetailDialog({
   canEdit,
   onClose,
   onChanged,
+  onSelectId,
 }: {
   id: number;
   canEdit: boolean;
   onClose: () => void;
   onChanged: () => void;
+  onSelectId?: (id: number) => void;
 }) {
   const qc = useQueryClient();
   const { data: n, isLoading, isError, error } = useQuery<any>({
@@ -943,6 +945,7 @@ function DetailDialog({
                       <li key={x.Id}>
                         <button
                           onClick={() => {
+                            onSelectId?.(x.Id);
                             qc.invalidateQueries({ queryKey: ["crm-credit-note", x.Id] });
                           }}
                           className="w-full flex justify-between gap-2 hover:underline text-left"
@@ -1689,8 +1692,21 @@ const CrmCreditNotes: React.FC = () => {
         <DetailDialog
           id={selectedId}
           canEdit={rights.canEdit}
-          onClose={() => setSelectedId(null)}
+          onClose={() => {
+            setSelectedId(null);
+            setSp((prev) => {
+              prev.delete("id");
+              return prev;
+            }, { replace: true });
+          }}
           onChanged={reload}
+          onSelectId={(newId) => {
+            setSelectedId(newId);
+            setSp((prev) => {
+              prev.set("id", String(newId));
+              return prev;
+            }, { replace: true });
+          }}
         />
       )}
 

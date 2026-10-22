@@ -25,7 +25,7 @@ async function getBookingOnAccountCoverage(pool, bookingId) {
     FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
   `);
   const oaRes = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT ISNULL(SUM(Amount), 0) AS TotalOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+    SELECT ISNULL(SUM(Amount), 0) AS TotalOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND Status NOT IN (N'Bounced', N'Void', N'Cancelled', N'Refunded')
   `);
   const totalOnAccount = Number(oaRes.recordset[0]?.TotalOnAccount) || 0;
 

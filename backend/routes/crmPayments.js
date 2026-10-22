@@ -16,6 +16,7 @@ const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
 const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage } = require("../services/crmOnAccountCoverage");
+const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -595,6 +596,11 @@ async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestone
 router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (req, res) => {
   try {
     const pool = getPool();
+    // Input validation
+    const parsed = bulkDemandSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+    }
     const { projectName, milestoneName } = req.body || {};
 
     const req0 = pool.request();
@@ -605,10 +611,15 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
       "(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0",
     ];
     if (projectName) {
+      if (req.projectScope) {
+        const { assertProjectRawAllowed } = require("../services/projectScope");
+        if (!await assertProjectRawAllowed(req, res, projectName)) return;
+      }
       req0.input("pname", sql.NVarChar(200), projectName);
       // Filter by ProjectId via enterprise master so a renamed project still matches.
       conds.push("b.ProjectId IN (SELECT id FROM dbo.enterprise WHERE name = @pname AND business_type = 'P')");
     }
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (milestoneName) {
       req0.input("mname", sql.NVarChar(200), milestoneName);
       conds.push("m.MilestoneName = @mname");

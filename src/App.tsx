@@ -2405,6 +2405,10 @@ function AppRoutes() {
         }
       />
 
+      {/* Retire legacy /customer-portal — redirect to CRM client portal */}
+      <Route path="/customer-portal" element={<Navigate to="/crm-client-portal" replace />} />
+      <Route path="/customer-portal/*" element={<Navigate to="/crm-client-portal" replace />} />
+
       {/* CUSTOMER PORTAL */}
       <Route
         path="/customer-portal/:userId?"

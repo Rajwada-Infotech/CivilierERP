@@ -285,18 +285,10 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose} className="px-3.5 py-1.5 text-sm rounded-lg border border-border hover:bg-muted">Cancel</button>
-            {notFullyPaid ? (
-              <span title={`Auto-settles once fully funded — ₹${fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will trigger this automatically`}
-                className="px-3.5 py-1.5 text-sm rounded-lg border border-border text-muted-foreground flex items-center gap-2 cursor-not-allowed select-none">
-                <Wallet size={13} />Auto-settles once fully funded
-              </span>
-            ) : (
-              <button onClick={apply} disabled={selId == null || busy}
-                title="This booking is fully funded and should auto-settle — use this only as a manual fallback"
-                className="px-3.5 py-1.5 text-sm rounded-lg btn-module text-white hover:shadow-lg disabled:opacity-50 flex items-center gap-2">
-                {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply Manually</>}
-              </button>
-            )}
+            <button onClick={apply} disabled={selId == null || busy}
+              className="px-3.5 py-1.5 text-sm rounded-lg btn-module text-white hover:shadow-lg disabled:opacity-50 flex items-center gap-2">
+              {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply Manually</>}
+            </button>
           </div>
         </div>
       </DialogContent>
@@ -706,7 +698,7 @@ export default function CrmOnAccount() {
                                 Adjust
                               </button>
                             )}
-                            <button onClick={() => navigate(`/crm/booking/${d.BookingId}`)}
+                            <button onClick={() => navigate(`/crm/bookings?view=${d.BookingId}`)}
                               title="Open booking"
                               className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                               <ExternalLink size={12} />

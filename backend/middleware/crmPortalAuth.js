@@ -19,7 +19,7 @@ module.exports = (req, res, next) => {
     }
     if (!token) return res.status(401).json({ error: "No token provided" });
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET);
     if (decoded.type !== "crm_portal") {
       return res.status(401).json({ error: "Invalid portal token" });
     }

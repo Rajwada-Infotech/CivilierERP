@@ -132,8 +132,14 @@ function ProposedChangeDiffCard({ json }: { json: string }) {
 }
 
 interface ListPage { rows: AmendmentRow[]; total: number; counts: Record<string, number> }
-async function fetchAmendmentsList(q: CrmListQuery): Promise<ListPage> {
-  const r = await fetchWithAuth(`${BASE}?${listParams(q)}`);
+async function fetchAmendmentsList(q: CrmListQuery & { from?: string; to?: string }): Promise<ListPage> {
+  // Server-side filtering: status, search, and cpb are handled via listParams;
+  // status, from, and to are explicitly forwarded as query params for server-side filtering.
+  const params = listParams(q);
+  if (q.status && q.status !== "All") params.set("status", q.status);
+  if (q.from) params.set("from", q.from);
+  if (q.to) params.set("to", q.to);
+  const r = await fetchWithAuth(`${BASE}?${params}`);
   if (!r.ok) throw new Error(await r.text());
   const d = await r.json();
   return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
@@ -171,8 +177,8 @@ export default function CrmBookingAmendments() {
     ) || canDoAction("approval-inbox" as any, "edit");
 
   const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
-    queryKey: ["crm-booking-amendments", list.query],
-    queryFn: () => fetchAmendmentsList(list.query),
+    queryKey: ["crm-booking-amendments", list.query, list.status],
+    queryFn: () => fetchAmendmentsList({ ...list.query, status: list.status }),
     staleTime: 30_000,
   });
   const pageData = useSticky(data);

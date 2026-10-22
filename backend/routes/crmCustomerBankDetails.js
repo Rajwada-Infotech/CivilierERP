@@ -147,7 +147,15 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     bookingExtra.Milestone1VirtuallyCovered = await isMilestoneOneCoveredByOnAccount(pool, bid);
 
     const result = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
+             CASE WHEN LEN(d.AccountNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AccountNo) - 4), RIGHT(d.AccountNo, 4)) ELSE d.AccountNo END AS AccountNo,
+             d.IfscCode, d.AccountHolderName,
+             d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
+             CASE WHEN LEN(d.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.PanNo) - 4), RIGHT(d.PanNo, 4)) ELSE d.PanNo END AS PanNo,
+             CASE WHEN LEN(d.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AadhaarNo) - 4), RIGHT(d.AadhaarNo, 4)) ELSE d.AadhaarNo END AS AadhaarNo,
+             d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
+             d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
+             vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
       LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
       WHERE d.BookingId = @bid
@@ -164,7 +172,11 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // genuinely new information this form is the first place to capture, so
     // they stay blank and unlocked.
     const prefill = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
+      SELECT
+        CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+        c.CustomerName AS AccountHolderName,
+        CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+        c.Occupation, c.AnnualIncome
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
@@ -370,7 +382,15 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     const aid = parseId(req.params.applicationId);
     if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
-      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
+             CASE WHEN LEN(d.AccountNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AccountNo) - 4), RIGHT(d.AccountNo, 4)) ELSE d.AccountNo END AS AccountNo,
+             d.IfscCode, d.AccountHolderName,
+             d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
+             CASE WHEN LEN(d.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.PanNo) - 4), RIGHT(d.PanNo, 4)) ELSE d.PanNo END AS PanNo,
+             CASE WHEN LEN(d.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AadhaarNo) - 4), RIGHT(d.AadhaarNo, 4)) ELSE d.AadhaarNo END AS AadhaarNo,
+             d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
+             d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
+             vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
       LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
       WHERE d.ApplicationId = @aid
@@ -383,7 +403,11 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // Customer intake (dbo.CrmCustomer). Flagged _prefilledFrom so the UI can
     // lock these fields for review/confirm rather than freshly-typed edit.
     const prefill = await pool.request().input("aid", sql.Int, aid).query(`
-      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
+      SELECT
+        CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+        c.CustomerName AS AccountHolderName,
+        CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+        c.Occupation, c.AnnualIncome
       FROM dbo.CrmApplication a
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE a.Id = @aid

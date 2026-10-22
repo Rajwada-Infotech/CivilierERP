@@ -15,6 +15,10 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
@@ -381,6 +385,13 @@ const CrmMutation: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<{ url: string; mime: string; name: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<number | null>(null);
 
+  // Replaces window.prompt — shared Dialog for document rejection remarks
+  const [rejectPrompt, setRejectPrompt] = useState<{
+    open: boolean; title: string; value: string; onSubmit: (v: string) => void;
+  }>({ open: false, title: "", value: "", onSubmit: () => {} });
+  const requestRejectRemarks = (title: string, onSubmit: (v: string) => void) =>
+    setRejectPrompt({ open: true, title, value: "", onSubmit });
+
   const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-mutation-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
 
   const { data: detailData } = useQuery({
@@ -541,20 +552,21 @@ const CrmMutation: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
-  const handleRejectDoc = async (docId: number) => {
+  const handleRejectDoc = (docId: number) => {
     if (detailId == null) return;
-    const remarks = window.prompt("Describe what's wrong with this document (required):");
-    if (!remarks?.trim()) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document rejected");
-      invalidateDetail();
-    } catch (e: any) { toast.error(translateError(e.message)); }
+    requestRejectRemarks("Describe what's wrong with this document (required):", async (remarks) => {
+      if (!remarks?.trim()) return;
+      try {
+        const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast.success("Document rejected");
+        invalidateDetail();
+      } catch (e: any) { toast.error(translateError(e.message)); }
+    });
   };
 
   const handlePreviewDoc = async (doc: any) => {
@@ -711,7 +723,7 @@ const CrmMutation: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Mutation Fee</label>
-                  <Input type="number" value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
+                  <Input type="number" min={0} value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
                 </div>
               </div>
             </div>
@@ -821,6 +833,40 @@ const CrmMutation: React.FC = () => {
           />
         )}
       </CrmSideDrawer>
+
+      {/* Shared prompt Dialog — replaces window.prompt for document rejection remarks */}
+      {rejectPrompt.open && (
+        <Dialog open={rejectPrompt.open} onOpenChange={(o) => !o && setRejectPrompt((d) => ({ ...d, open: false }))}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Rejection Remarks</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground mb-2">{rejectPrompt.title}</p>
+            <Input
+              value={rejectPrompt.value}
+              onChange={(e) => setRejectPrompt((d) => ({ ...d, value: e.target.value }))}
+              placeholder="Describe the issue…"
+            />
+            <DialogFooter>
+              <button
+                onClick={() => setRejectPrompt((d) => ({ ...d, open: false }))}
+                className="px-3 py-1.5 text-sm border rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  rejectPrompt.onSubmit(rejectPrompt.value);
+                  setRejectPrompt((d) => ({ ...d, open: false }));
+                }}
+                className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Reject
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 };

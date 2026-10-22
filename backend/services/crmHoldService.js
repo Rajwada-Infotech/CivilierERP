@@ -99,6 +99,19 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   // Without this try/catch, the loser gets a raw SQL constraint-violation
   // message surfaced as a generic 500 instead of the same clean 409 the
   // app-layer check already produces for the non-race case.
+  // Expire any stale holds that are past their HoldUntil time before inserting a new hold
+  await pool.request()
+    .input("entityType", sql.NVarChar(20), entityType)
+    .input("entityId", sql.Int, entityId)
+    .query(`
+      UPDATE dbo.CrmInventoryHold
+      SET Status = 'Expired', ExpiredAt = SYSDATETIME()
+      WHERE EntityType = @entityType
+        AND EntityId = @entityId
+        AND Status = 'Active'
+        AND HoldUntil < SYSDATETIME()
+    `);
+
   let result;
   try {
     result = await pool.request()

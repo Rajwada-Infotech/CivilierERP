@@ -631,10 +631,25 @@ async function applyAdjustment(pool, id, user) {
     throw e;
   }
   // After commit — each step is idempotent and never undoes the credit note.
-  try { await require("./crmGst").recalculateBookingGst(pool, n.BookingId); } catch (e) { console.error(`[credit-note ${docNo}] booking recalc:`, e.message); }
-  try { await postAdjustmentToGL(pool, id, user.email); } catch (e) { console.error(`[credit-note ${docNo}] ledger:`, e.message); }
+  try {
+    await require("./crmGst").recalculateBookingGst(pool, n.BookingId);
+  } catch (err) {
+    console.error("[crmGstNotes] Critical post-commit failure:", err);
+    throw err;
+  }
+  try {
+    await postAdjustmentToGL(pool, id, user.email);
+  } catch (err) {
+    console.error("[crmGstNotes] Critical post-commit failure:", err);
+    throw err;
+  }
   if (onAccountId) {
-    try { await onAccountLedger(pool, n, onAccountId, moved, docNo, "CREDIT", user.email); } catch (e) { console.error(`[credit-note ${docNo}] on-account ledger:`, e.message); }
+    try {
+      await onAccountLedger(pool, n, onAccountId, moved, docNo, "CREDIT", user.email);
+    } catch (err) {
+      console.error("[crmGstNotes] Critical post-commit failure:", err);
+      throw err;
+    }
   }
 }
 
@@ -747,10 +762,25 @@ async function reverseAdjustment(pool, n, user) {
     }
     await tx.commit();
   } catch (e) { try { await tx.rollback(); } catch { /* rolled back */ } throw e; }
-  try { await require("./crmGst").recalculateBookingGst(pool, n.BookingId); } catch (e) { console.error(`[credit-note ${n.DocNo}] recalc on cancel:`, e.message); }
-  try { await require("./generalLedger").reversePostingBySource(pool, "CrmGstNote", n.Id); } catch (e) { console.error(`[credit-note ${n.DocNo}] ledger reversal:`, e.message); }
+  try {
+    await require("./crmGst").recalculateBookingGst(pool, n.BookingId);
+  } catch (err) {
+    console.error("[crmGstNotes] Critical post-commit failure:", err);
+    throw err;
+  }
+  try {
+    await require("./generalLedger").reversePostingBySource(pool, "CrmGstNote", n.Id);
+  } catch (err) {
+    console.error("[crmGstNotes] Critical post-commit failure:", err);
+    throw err;
+  }
   if (n.OnAccountId && Number(n.MovedToAccount) > 0) {
-    try { await onAccountLedger(pool, n, n.OnAccountId, r2(n.MovedToAccount), n.DocNo, "DEBIT", user.email); } catch (e) { console.error(`[credit-note ${n.DocNo}] on-account ledger on cancel:`, e.message); }
+    try {
+      await onAccountLedger(pool, n, n.OnAccountId, r2(n.MovedToAccount), n.DocNo, "DEBIT", user.email);
+    } catch (err) {
+      console.error("[crmGstNotes] Critical post-commit failure:", err);
+      throw err;
+    }
   }
 }
 

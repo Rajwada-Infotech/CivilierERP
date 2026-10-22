@@ -17,6 +17,7 @@ import {
   AlertTriangle, Trash2, Lock,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -240,7 +241,7 @@ const CrmBooking: React.FC = () => {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
   const viewFilter = sp.get("view") || "";
 
@@ -264,7 +265,10 @@ const CrmBooking: React.FC = () => {
   // write side, kept in sync with it via the same param name.
   const openBooking = (id: number) => {
     setViewingBookingId(id);
-    navigate(`/crm/bookings?view=${id}`, { replace: true });
+    setSp((prev) => {
+      prev.set("view", String(id));
+      return prev;
+    }, { replace: true });
   };
 
   const listFilters: BookingListFilters = useMemo(
@@ -309,9 +313,11 @@ const CrmBooking: React.FC = () => {
         // ?view=abc or a negative id — the detail panel will never open
         // (viewingBookingId stays null, so {viewingBookingId != null && …}
         // is falsy), which means the onClose handler that normally clears
-        // the URL will never run. Actively navigate to the clean URL here
-        // so the stale bad param doesn't sit in the address bar forever.
-        navigate("/crm/bookings", { replace: true });
+        // the URL will never run. Clean up the bad param without clobbering other filters.
+        setSp((prev) => {
+          prev.delete("view");
+          return prev;
+        }, { replace: true });
       }
       setDeepLinkOpened(true);
       return;
@@ -1180,11 +1186,12 @@ const CrmBooking: React.FC = () => {
           bookingId={viewingBookingId}
           onClose={() => {
             setViewingBookingId(null);
-            // Always clear any ?view= / ?applicationId= param so the URL is
-            // clean after closing — previously conditioned on appFilter ||
-            // viewFilter which meant ?view=0 (an invalid id that never opened
-            // the panel) was never cleaned up since the close path never ran.
-            navigate("/crm/bookings", { replace: true });
+            // Targeted deletion: delete only the specific deep-link param(s)
+            setSp((prev) => {
+              prev.delete("view");
+              prev.delete("applicationId");
+              return prev;
+            }, { replace: true });
           }}
         />
       )}

@@ -22,6 +22,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { getMoneyReceiptPdfBuffer, deriveStatus } = require("../services/moneyReceiptPdf");
 const {
   MoneyReceiptError,
@@ -256,6 +257,8 @@ router.post("/", requirePageRight("crm-money-receipts", "create"), async (req, r
       : req.body?.bookingId;
     const bookingId = parseInt(rawBookingId, 10);
     if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "BookingId is required" });
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
     const row = await createMoneyReceiptForBooking(pool, bookingId, req.body || {}, actorId(req), { skipIfExists: true });
     res.status(row.existing ? 200 : 201).json({ success: true, ...row });
   } catch (e) {

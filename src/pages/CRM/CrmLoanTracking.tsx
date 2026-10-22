@@ -471,7 +471,14 @@ const CrmLoanTracking: React.FC = () => {
                   <label className="text-xs text-muted-foreground block mb-1 font-medium">Sanction Status</label>
                   <select
                     value={form.SanctionStatus}
-                    onChange={(e) => setForm((f) => ({ ...f, SanctionStatus: e.target.value as LoanStatus }))}
+                    onChange={(e) => {
+                      const newStatus = e.target.value as LoanStatus;
+                      if (newStatus === "NotApplied" && (Number(editingRow?.DisbursedAmount) > 0 || editingRow?.SanctionStatus === "Disbursed")) {
+                        toast.error("Cannot revert a disbursed loan to Not Applied");
+                        return;
+                      }
+                      setForm((f) => ({ ...f, SanctionStatus: newStatus }));
+                    }}
                     className={inputCls}
                   >
                     {SANCTION_STATUSES.map((s) => (

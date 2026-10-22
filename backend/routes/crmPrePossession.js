@@ -10,6 +10,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -248,6 +249,7 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
       "WHERE b.IsActive = 1",
       "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "', 'Expired', 'Transferred')",
+      req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "",
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
       // Agreement for Sale, registered at the Sub-Registrar, is mandatory
       // for every booking regardless of project type — no exception.
@@ -274,6 +276,9 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

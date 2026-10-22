@@ -235,7 +235,11 @@ const CrmNoc: React.FC = () => {
   useEffect(() => {
     if (!deepLinkBookingId || deepLinkResolved) return;
     setDeepLinkResolved(true);
-    setSp({}, { replace: true }); // clear params so this only fires once
+    setSp((prev) => {
+      prev.delete("bookingId");
+      prev.delete("nocType");
+      return prev;
+    }, { replace: true }); // clear params so this only fires once
     const type = deepLinkNocType || "Organisation";
     fetchNocByBooking(deepLinkBookingId, type).then((existing) => {
       if (existing) {

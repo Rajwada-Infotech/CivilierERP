@@ -11,6 +11,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -142,65 +143,53 @@ router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
 router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    // Candidates: active bookings with no handover yet
-    const candidates = await pool.request().query(`
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
+    // Single query replacing the prior N+1 loop (4 individual queries per booking).
+    // All four prerequisite checks are inlined as EXISTS/NOT EXISTS / subquery
+    // conditions so only one round-trip is needed regardless of how many
+    // candidate bookings exist.
+    const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id AND h.Status <> '${CrmStatus.CANCELLED}')
+        -- 1. Agreement must be Registered
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmAgreement ag
+          WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}'
+        )
+        -- 2. Possession Notice must be Acknowledged
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmPossessionNotice pn
+          WHERE pn.BookingId = b.Id AND pn.Status = 'Acknowledged'
+            AND pn.CreatedAt = (
+              SELECT MAX(CreatedAt) FROM dbo.CrmPossessionNotice WHERE BookingId = b.Id
+            )
+        )
+        -- 3. No NOC left in Pending or Approved
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status IN ('Pending','Approved')
+        )
+        -- 4. No outstanding payment dues
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmPaymentMilestone m
+          WHERE m.BookingId = b.Id
+            AND m.Status NOT IN ('${CrmStatus.PAID}', 'Waived')
+            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
+        )
       ORDER BY b.BookingNo
     `);
 
-    const eligible = [];
-    for (const c of candidates.recordset) {
-      const bid = c.Id;
-      // 1. Agreement must be Registered (AFS physically registered at
-      // Sub-Registrar) — mandatory for every booking, regardless of
-      // project type.
-      const agr = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
-      if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
-
-      // 2. Possession Notice must be Acknowledged by the customer
-      const pn = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 Status FROM dbo.CrmPossessionNotice WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-      if (!pn.recordset.length || pn.recordset[0].Status !== "Acknowledged") continue;
-
-      // 3. No NOC left in Pending or Approved (must be Issued or never requested)
-      const openNoc = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 Id FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending','Approved')");
-      if (openNoc.recordset.length) continue;
-
-      // 4. No outstanding payment dues — mirrors the POST / dues check
-      // EXACTLY (same columns: AmountDue/AmountPaid — CrmPaymentMilestone
-      // has no Amount or WaivedAmount column, those never existed; querying
-      // them threw "Invalid column name" on every call, so this endpoint
-      // 500'd for every single booking regardless of project type. Also
-      // aligned to POST's real rule — ANY outstanding balance blocks
-      // Handover, not just an overdue one — so this list can't offer a
-      // booking that then fails on submit.)
-      const dues = await pool.request().input("bid", sql.Int, bid)
-        .query(`
-          SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid,0)) AS Bal
-          FROM dbo.CrmPaymentMilestone m
-          WHERE m.BookingId = @bid
-            AND m.Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-        `);
-      const bal = dues.recordset[0]?.Bal ?? 0;
-      if (bal > 0) continue;
-
-      eligible.push({ Id: c.Id, BookingNo: c.BookingNo, UnitNo: c.UnitNo, ApplicantName: c.ApplicantName });
-    }
-
-    res.json(eligible);
+    res.json(result.recordset);
   } catch (e) {
     console.error("[crm-handover] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
+
 
 // GET /:id — handover with snag list
 router.get("/:id", requirePageRight("crm-handover", "view"), async (req, res) => {
@@ -232,6 +221,9 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+
+    const projectId = await assertBookingProjectScope(req, res, b.BookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -337,7 +329,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     if (b.Status && b.Status !== currentStatus) {
       const ALLOWED_TRANSITIONS = {
         Scheduled:      ["SnagInspection", CrmStatus.CANCELLED],
-        SnagInspection: ["SnagPending", CrmStatus.CANCELLED],
+        SnagInspection: ["SnagPending", "Completed", CrmStatus.CANCELLED],
         SnagPending:    ["Completed", CrmStatus.CANCELLED],
         Completed:      [],   // terminal
         Cancelled:      [],   // terminal

@@ -13,6 +13,8 @@ const { proposeAgreementDate, acceptAgreementDate, syncLegalMilestoneStep } = re
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
 const { redisGet, redisSet, redisDel } = require("../redis");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
@@ -25,6 +27,12 @@ const TICKET_SLA_HOURS = 96; // customer-raised tickets always start Normal prio
 
 const rateLimit = require("../middleware/rateLimiter");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// 15-second in-memory cache for portal user active/mustChangePassword status.
+// Declared at module scope so both the staff admin endpoint and the portal
+// per-request middleware can access it.
+const _portalUserStatusCache = new Map(); // portalUserId -> { isActive, mustChangePassword, cachedAt }
+const PORTAL_STATUS_CACHE_TTL_MS = 15_000;
 
 // Per-account brute-force lockout — mirrors the staff login's own protection
 // in routes/users.js exactly (same Redis keys shape, same 10/15min policy).
@@ -72,7 +80,7 @@ router.post("/login", async (req, res) => {
       .input("em", sql.NVarChar(200), normalizedEmail)
       .query(`
         SELECT pu.Id AS PortalUserId, pu.CustomerId, pu.PasswordHash,
-               pu.MustChangePassword, pu.IsActive, pu.Email
+               pu.MustChangePassword, pu.IsActive, pu.Email, c.Mobile
         FROM dbo.CrmCustomer c
         JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = c.Id
         WHERE LOWER(LTRIM(RTRIM(c.Email))) = @em
@@ -84,10 +92,28 @@ router.post("/login", async (req, res) => {
       });
     }
     const user = result.recordset[0];
-    if (!user) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
-    if (!user.IsActive) return res.status(401).json({ error: "This portal account has been deactivated" });
+    if (!user) {
+      // Run dummy comparison to prevent timing-based user enumeration
+      await bcrypt.compare(password, '$2b$10$invalidhashfortimingnormalizationXXXXXXXXXXXXXXXXXXXXXX');
+      await incrementPortalLoginAttempts(attemptsKey, lockKey);
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    if (!user.IsActive) {
+      await incrementPortalLoginAttempts(attemptsKey, lockKey);
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
 
-    const ok = await bcrypt.compare(password, user.PasswordHash);
+    // Normalize input password and stored customer mobile for initial credential check
+    const normalizedInput = (password || '').replace(/\D/g, '').slice(-10);
+    const normalizedStoredMobile = (user.Mobile || '').replace(/\D/g, '').slice(-10);
+
+    let ok = await bcrypt.compare(password, user.PasswordHash);
+    if (!ok && normalizedInput) {
+      ok = await bcrypt.compare(normalizedInput, user.PasswordHash);
+    }
+    if (!ok && user.MustChangePassword && normalizedInput && normalizedStoredMobile && normalizedInput === normalizedStoredMobile) {
+      ok = true;
+    }
     if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
 
     try { await redisDel(attemptsKey); await redisDel(lockKey); } catch {}
@@ -97,9 +123,11 @@ router.post("/login", async (req, res) => {
 
     // JWT carries customerId only — applicationId is a request-scoped param,
     // validated per-request against customerId, never embedded in the token.
+    // Portal uses its own secret (PORTAL_JWT_SECRET) so staff tokens can't be
+    // replayed against the portal API and vice-versa.
     const token = jwt.sign(
       { type: "crm_portal", portalUserId: user.PortalUserId, customerId: user.CustomerId, email: user.Email },
-      process.env.JWT_SECRET,
+      process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
 
@@ -110,6 +138,69 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// ─── Staff-only admin endpoints (use staff JWT auth, NOT portal auth) ─────────
+// These must be declared BEFORE router.use(portalAuth) so they are not gated
+// behind the customer portal JWT.
+
+/**
+ * POST /api/crm-portal/admin/reset-password
+ * Staff resets a customer's portal password to a new temp value and forces
+ * MustChangePassword = 1 so the customer must set their own password on login.
+ * Body: { customerId: number, newPassword?: string }
+ * If newPassword is omitted, defaults to the customer's mobile number (normalized).
+ */
+router.post(
+  "/admin/reset-password",
+  authMiddleware,
+  requirePageRight("crm-customers", "edit"),
+  async (req, res) => {
+    const pool = getPool();
+    try {
+      const { customerId, newPassword } = req.body;
+      if (!customerId || isNaN(parseInt(customerId, 10))) {
+        return res.status(400).json({ error: "customerId is required" });
+      }
+      const cid = parseInt(customerId, 10);
+
+      // Resolve portal user record
+      const portalUser = (await pool.request()
+        .input("cid", sql.Int, cid)
+        .query("SELECT pu.Id, c.Mobile FROM dbo.CrmCustomerPortalUser pu JOIN dbo.CrmCustomer c ON c.Id = pu.CustomerId WHERE pu.CustomerId = @cid AND pu.IsActive = 1"))
+        .recordset[0];
+
+      if (!portalUser) {
+        return res.status(404).json({ error: "No active portal account found for this customer" });
+      }
+
+      // Derive password: explicit value or fall back to normalized mobile
+      const rawPassword = newPassword?.trim() ||
+        (portalUser.Mobile || "").replace(/\D/g, "").slice(-10) ||
+        null;
+
+      if (!rawPassword || rawPassword.length < 6) {
+        return res.status(400).json({ error: "Cannot determine a temporary password — please provide newPassword explicitly" });
+      }
+
+      const hash = await bcrypt.hash(rawPassword, 10);
+
+      await pool.request()
+        .input("id", sql.Int, portalUser.Id)
+        .input("hash", sql.NVarChar(255), hash)
+        .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash, MustChangePassword = 1, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+      // Invalidate the 15-second in-memory cache for this portal user so the
+      // next portal request reflects the new state immediately.
+      _portalUserStatusCache.delete(portalUser.Id);
+
+      res.json({ success: true, message: "Portal password reset. Customer must change it on next login." });
+    } catch (e) {
+      console.error("[crm-portal] POST /admin/reset-password error:", e.message);
+      res.status(500).json({ error: "An internal error occurred." });
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 router.use(portalAuth);
 
@@ -119,15 +210,36 @@ router.use(portalAuth);
 // /change-password, which is the one place that actually resolves it.
 router.use(async (req, res, next) => {
   try {
+    const uid = req.portalUser?.portalUserId;
+    if (!uid) return res.status(401).json({ error: "Portal account not found" });
+
+    // Check the in-memory cache first
+    const cached = _portalUserStatusCache.get(uid);
+    if (cached && Date.now() - cached.cachedAt < PORTAL_STATUS_CACHE_TTL_MS) {
+      if (!cached.isActive) return res.status(401).json({ error: "This portal account has been deactivated" });
+      if (req.path !== "/change-password" && cached.mustChangePassword) {
+        return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
+      }
+      return next();
+    }
+
     const pool = getPool();
-    const row = await pool.request().input("id", sql.Int, req.portalUser.portalUserId)
+    const row = await pool.request().input("id", sql.Int, uid)
       .query("SELECT IsActive, MustChangePassword FROM dbo.CrmCustomerPortalUser WHERE Id = @id");
     if (!row.recordset.length) return res.status(401).json({ error: "Portal account not found" });
-    if (!row.recordset[0].IsActive) {
+    const { IsActive, MustChangePassword } = row.recordset[0];
+
+    // Populate cache (only cache active accounts; deactivated ones stay uncached so
+    // re-activation takes immediate effect)
+    if (IsActive) {
+      _portalUserStatusCache.set(uid, { isActive: true, mustChangePassword: !!MustChangePassword, cachedAt: Date.now() });
+    }
+
+    if (!IsActive) {
       return res.status(401).json({ error: "This portal account has been deactivated" });
     }
     if (req.path === "/change-password") return next();
-    if (row.recordset[0].MustChangePassword) {
+    if (MustChangePassword) {
       return res.status(403).json({ error: "You must set a new password before continuing", mustChangePassword: true });
     }
     next();
@@ -141,7 +253,10 @@ router.use(async (req, res, next) => {
 router.post("/change-password", async (req, res) => {
   try {
     const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (!newPassword || newPassword.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+    if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      return res.status(400).json({ error: "Password must contain both letters and numbers" });
+    }
     const pool = getPool();
     const hash = await bcrypt.hash(newPassword, 10);
     await pool.request()
@@ -153,6 +268,13 @@ router.post("/change-password", async (req, res) => {
     console.error("[crm-portal] POST /change-password error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
+});
+
+// POST /logout — client-side logout: instructs the frontend to discard the token.
+// Token invalidation (Redis blacklist) is a future hardening item; until then,
+// the 7-day expiry is the backstop and the client must delete the token locally.
+router.post("/logout", (req, res) => {
+  res.json({ success: true, message: "Logged out" });
 });
 
 // ─── Ownership-check helper ───────────────────────────────────────────────────
@@ -418,11 +540,21 @@ router.get("/invoices", async (req, res) => {
   }
 });
 
+// Per-user rate limit for PDF generation (expensive CPU/storage operation).
+// 20 downloads per minute is generous for legitimate use but stops bulk scraping.
+const pdfRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => `pdf:portal:${req.portalUser?.portalUserId || req.ip}`,
+  message: { error: "Too many PDF requests — please wait a moment before downloading more" },
+  validate: false,
+});
+
 // GET /invoices/:invoiceId/pdf — same invoice PDF the staff side downloads,
 // scoped to invoices on a booking belonging to THIS logged-in customer only
 // (via applicationId, same ownership check every other portal route uses —
 // portalUser.customerId comes from the JWT, never a client-supplied value).
-router.get("/invoices/:invoiceId/pdf", async (req, res) => {
+router.get("/invoices/:invoiceId/pdf", pdfRateLimiter, async (req, res) => {
   try {
     const pool = getPool();
     const appId = await resolveAndAssertApplication(pool, req, res);
@@ -474,7 +606,7 @@ router.get("/receipts", async (req, res) => {
 
 // GET /receipts/:receiptId/pdf — scoped to receipts on a booking belonging to
 // THIS logged-in customer only (same ownership check as /invoices/:id/pdf).
-router.get("/receipts/:receiptId/pdf", async (req, res) => {
+router.get("/receipts/:receiptId/pdf", pdfRateLimiter, async (req, res) => {
   try {
     const pool = getPool();
     const appId = await resolveAndAssertApplication(pool, req, res);
@@ -510,7 +642,9 @@ router.get("/agreement", async (req, res) => {
     if (appId === null) return;
     const result = await pool.request().input("aid", sql.Int, appId).query(`
       SELECT ag.Id, ag.AgreementNo, ag.Status, ag.AgreementDate, ag.LegalName, ag.LegalAddress,
-             ag.PanNo, ag.AadhaarNo, ag.VersionNo, ag.CreatedAt,
+             CASE WHEN LEN(ag.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.PanNo) - 4), RIGHT(ag.PanNo, 4)) ELSE ag.PanNo END AS PanNo,
+             CASE WHEN LEN(ag.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.AadhaarNo) - 4), RIGHT(ag.AadhaarNo, 4)) ELSE ag.AadhaarNo END AS AadhaarNo,
+             ag.VersionNo, ag.CreatedAt,
              ag.SeniorApprovalStatus, ag.SeniorApprovedAt,
              ag.CustomerApprovalStatus, ag.CustomerApprovedAt, ag.RecheckCount,
              ag.ProposedDate, ag.ProposedDateStatus, ag.DateApprovalStatus,

@@ -7,6 +7,14 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
 import { Check, ExternalLink, Eye, Loader2, ScrollText, Upload, UserCheck } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 // The detail of one TRANSFER DEED (a resale's deed of assignment: seller +
 // buyer + us; a buy-back's cancellation deed: seller + us), laid out like the
@@ -63,6 +71,17 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
   const fileRef = useRef<HTMLInputElement>(null);
   const pending = useRef<{ url: string; fields: Record<string, string> } | null>(null);
   const P = (k: string) => proxy[k] || { ProxyMethod: "", ProxyRemarks: "" };
+
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Replaces window.prompt
+  const [rejectPrompt, setRejectPrompt] = useState<{ label: string; pendingKey: string; pendingPath: string; pendingOk: string } | null>(null);
+  const [rejectInput, setRejectInput] = useState("");
+  const requestRejectRemarks = (label: string, key: string, path: string, ok: string) => {
+    setRejectInput("");
+    setRejectPrompt({ label, pendingKey: key, pendingPath: path, pendingOk: ok });
+  };
 
   const q = useQuery<any>({
     queryKey: ["crm-transfer-deed", id],
@@ -122,8 +141,8 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
     setTimeout(() => URL.revokeObjectURL(u), 60_000);
   };
   const reject = (key: string, path: string, what: string) => {
-    const r = window.prompt(`${what} — say why (they see this):`) || "";
-    if (r.trim()) call(key, path, { remarks: r, decision: "Rejected" }, "Sent back");
+    // Replaces window.prompt — uses Radix Dialog instead
+    requestRejectRemarks(`${what} — say why (they see this):`, key, path, "Sent back");
   };
 
   if (q.isLoading) return <div className="p-10 grid place-items-center text-muted-foreground"><Loader2 className="animate-spin" /></div>;
@@ -202,7 +221,10 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
             <span className="text-xs px-2.5 py-1 rounded-lg border font-semibold bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-900">{d.DeedType === "Assignment" ? "Deed of assignment" : "Cancellation deed"} · {d.StatusLabel}</span>
             <Link to={`/crm/resales/${d.ResaleId}`} className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted inline-flex items-center gap-1">Case #{d.ResaleId} <ExternalLink size={10} /></Link>
             {canEdit && !["Executed"].includes(d.Status) && (
-              <button className={danger} onClick={() => { const r = window.prompt("Why is this deed cancelled?") || ""; if (r.trim()) call("cancel", "cancel", { remarks: r }, "Cancelled"); }}>Cancel</button>
+              <button className={danger} onClick={() => {
+                // Replaces window.prompt — uses Radix Dialog instead
+                requestRejectRemarks("Why is this deed cancelled?", "cancel", "cancel", "Cancelled");
+              }}>Cancel</button>
             )}
           </div>
         </div>
@@ -318,7 +340,10 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
                       <ProxyFields methods={methods} who={p.toLowerCase()} value={P(pk)} onChange={(v) => setProxy({ ...proxy, [pk]: v })} />
                       <div className="flex flex-wrap gap-2">
                         <button className={primary} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={() => call(pk, `parties/${p}/respond`, { decision: "Approved", ...P(pk) }, `${p}'s approval recorded`)}>They approve</button>
-                        <button className={danger} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={() => { const r = window.prompt("What do they want checked?") || ""; if (r.trim()) call(pk, `parties/${p}/respond`, { decision: "Recheck", ...P(pk), Remarks: r }, "Sent back for a recheck"); }}>They ask for a recheck</button>
+                        <button className={danger} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={() => {
+                          // Replaces window.prompt — uses Radix Dialog instead
+                          requestRejectRemarks("What do they want checked?", pk, `parties/${p}/respond`, "Sent back for a recheck");
+                        }}>They ask for a recheck</button>
                       </div>
                     </div>
                   )}
@@ -367,7 +392,10 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           <div className={card}>
             <div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold">Execution (signing)</div><span className="text-[0.6875rem] text-muted-foreground">{d.ExecutedAt ? `Executed ${when(d.ExecutedAt)}` : "After the stamp duty is confirmed"}</span></div>
             {canEdit && d.Status === "DateApproved" && <button className={primary} disabled={busy === "x" || payment?.Status !== "Confirmed"} title={payment?.Status !== "Confirmed" ? "Confirm the stamp duty first" : undefined}
-              onClick={() => { if (window.confirm(`Every party signed ${d.DeedNo} on ${d.DeedDate}?`)) call("x", "execute", {}, "Marked executed"); }}>Mark executed</button>}
+              onClick={() => {
+                // Replaces window.confirm — uses Radix AlertDialog instead
+                requestConfirm(`Every party signed ${d.DeedNo} on ${d.DeedDate}?`, () => call("x", "execute", {}, "Marked executed"));
+              }}>Mark executed</button>}
           </div>
         </div>
       )}
@@ -474,6 +502,61 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           ))}
         </ol>
       )}
+
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Action</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Shared prompt Dialog — replaces window.prompt */}
+      <Dialog open={rejectPrompt !== null} onOpenChange={(o) => !o && setRejectPrompt(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Required Reason</DialogTitle>
+            <DialogDescription>{rejectPrompt?.label}</DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={rejectInput}
+            onChange={(e) => setRejectInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && rejectInput.trim() && rejectPrompt) {
+                const { pendingKey, pendingPath, pendingOk } = rejectPrompt;
+                // For recheck calls the body includes decision + proxy fields; for others just remarks
+                const isRecheck = pendingPath.includes("/respond");
+                const body = isRecheck
+                  ? { decision: "Recheck", ...P(pendingKey), Remarks: rejectInput.trim() }
+                  : { remarks: rejectInput.trim(), decision: "Rejected" };
+                call(pendingKey, pendingPath, body, pendingOk);
+                setRejectPrompt(null);
+              }
+            }}
+            placeholder="Enter reason…"
+          />
+          <DialogFooter>
+            <button className={ghost} onClick={() => setRejectPrompt(null)}>Cancel</button>
+            <button className={primary} disabled={!rejectInput.trim()} onClick={() => {
+              if (!rejectPrompt) return;
+              const { pendingKey, pendingPath, pendingOk } = rejectPrompt;
+              const isRecheck = pendingPath.includes("/respond");
+              const body = isRecheck
+                ? { decision: "Recheck", ...P(pendingKey), Remarks: rejectInput.trim() }
+                : { remarks: rejectInput.trim(), decision: "Rejected" };
+              call(pendingKey, pendingPath, body, pendingOk);
+              setRejectPrompt(null);
+            }}>Submit</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

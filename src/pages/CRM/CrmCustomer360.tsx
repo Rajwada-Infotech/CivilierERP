@@ -299,7 +299,7 @@ const CrmCustomer360: React.FC = () => {
                                   every milestone-wise invoice after that is manual but
                                   synced to the real paid amount) — this deep-links
                                   there instead of duplicating that dialog here. */}
-                              <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/crm/bookings?applicationId=${b.ApplicationId}`); }}
+                              <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/crm/bookings?view=${b.Id || b.BookingId || b.ApplicationId}`); }}
                                 className="flex items-center gap-1 text-xs text-primary hover:underline">
                                 Invoices <ExternalLink size={11} />
                               </button>
@@ -471,7 +471,7 @@ const CrmCustomer360: React.FC = () => {
 const TONE_CLASSES: Record<string, string> = {
   default: "text-foreground",
   green: "text-green-600",
-  orange: "text-sky-600",
+  orange: "text-orange-600 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:text-orange-300",
   sky: "text-sky-600",
 };
 
