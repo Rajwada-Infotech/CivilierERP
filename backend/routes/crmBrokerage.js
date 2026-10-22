@@ -17,7 +17,6 @@ const { requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { assertSanePercentRate } = require("../services/brokerageValidation");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
-const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -47,59 +46,82 @@ const BROKERAGE_SELECT = `
   ) fp
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmHandover / CrmServiceTickets / CrmBookingAmendments:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Pending, Approved, Paid } }
+// `counts` honours search + company/project/block but NOT status, so the
+// tabs always show what each status would contain. Without `page` the
+// legacy full-array response is returned so existing callers keep working.
+const BRK_STATUSES = ["Pending", "Approved", "Paid"];
+const BRK_SORT = {
+  BookingNo: "b.BookingNo",
+  BrokerName: "ahm.LHeadName",
+  Status: "br.Status",
+  ComputedAmount: "br.ComputedAmount",
+  CreatedAt: "br.CreatedAt",
+};
+function buildBrkWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR ahm.LHeadName LIKE @search)");
+  }
+  if (includeStatus && BRK_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(20), query.status);
+    conds.push("br.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all brokerage records. Staff/internal only — never exposed to crm-portal.
 router.get("/", requirePageRight("crm-brokerage", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR ahm.LHeadName LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${BROKERAGE_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildBrkWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmBrokerageMaster br
-          JOIN dbo.CrmBooking b ON b.Id = br.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
-          WHERE (@st2 IS NULL OR br.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR ahm.LHeadName LIKE @search2))
-        `),
-    ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(BRK_SORT, req.query.sortKey) ? BRK_SORT[req.query.sortKey] : BRK_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildBrkWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT br.Status, COUNT(*) AS C FROM dbo.CrmBrokerageMaster br
+       JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
+       ${countWhere} GROUP BY br.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = BRK_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildBrkWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, br.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    res.json({ rows: rowsRes.recordset, total, counts });
   } catch (e) {
     console.error("[crm-brokerage] GET error:", e.message);
     res.status(500).json({ error: e.message });

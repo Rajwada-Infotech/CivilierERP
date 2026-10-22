@@ -6,18 +6,18 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, ShieldAlert, IndianRupee, Lock, Unlock, Search } from "lucide-react";
+import { Plus, ShieldAlert, IndianRupee, Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
+import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -28,6 +28,11 @@ const statusColor: Record<string, string> = {
   Approved: "text-blue-600 bg-blue-50 border-blue-200",
   Paid: "text-green-600 bg-green-50 border-green-200",
 };
+const STATUS_ACCENT: Record<string, string> = {
+  Pending: "border-l-orange-400",
+  Approved: "border-l-blue-400",
+  Paid: "border-l-green-500",
+};
 
 const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", TDSId: "", Notes: "" };
 
@@ -35,25 +40,12 @@ async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-const PAGE_SIZE = 20;
-interface BrokerageListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchBrokerageList(filters: BrokerageListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+interface ListPage { rows: any[]; total: number; counts: Record<string, number> }
+async function fetchBrokerageList(q: CrmListQuery): Promise<ListPage> {
+  const r = await fetchWithAuth(`${API}?${listParams(q)}`);
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
+  const d = await r.json();
+  return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -86,27 +78,18 @@ const CrmBrokerage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const isApprover = CRM_APPROVER_ROLES.includes(getUserRole() ?? "") || hasApprovalInboxEdit;
-  const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch] = useState("");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
 
-  const listFilters: BrokerageListFilters = useMemo(
-    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, cpb]
-  );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-brokerage", listFilters, page],
-    queryFn: () => fetchBrokerageList(listFilters, page),
+  const list = useCrmListState({ pageSize: 25, defaultSort: { key: "CreatedAt", dir: "desc" } });
+  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-brokerage", list.query],
+    queryFn: () => fetchBrokerageList(list.query),
     staleTime: 30_000,
   });
-  const records = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
+  const pageData = useSticky(data);
+  const records = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const counts = pageData?.counts ?? {};
+  const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters;
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { tdsRecords } = useTds();
@@ -216,20 +199,19 @@ const CrmBrokerage: React.FC = () => {
     }
   };
 
-  const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "BookingNo", header: "Booking", size: 110, cell: (i) => <span className="font-mono text-xs">{i.getValue() as string}</span> },
-    { accessorKey: "BrokerName", header: "Broker", size: 150,
-      cell: (i) => (
+  const columns: CrmColumn<any>[] = [
+    { key: "booking", header: "Booking", sortKey: "BookingNo", cell: (r) => <span className="font-mono text-xs whitespace-nowrap">{r.BookingNo}</span> },
+    { key: "broker", header: "Broker", sortKey: "BrokerName", className: "hidden md:table-cell",
+      cell: (r) => (
         <div>
-          <div className="font-medium">{i.row.original.BrokerName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BrokerFirm || "—"}</div>
+          <div className="font-medium">{r.BrokerName}</div>
+          <div className="text-xs text-muted-foreground">{r.BrokerFirm || "—"}</div>
         </div>
       ) },
-    { id: "rate", header: "Rate", size: 90, enableSorting: false,
-      cell: (i) => <span className="text-xs">{i.row.original.RateType === "Percentage" ? `${i.row.original.RateValue}%` : `₹${i.row.original.RateValue}`}</span> },
-    { id: "tranche", header: "Tranche", size: 150, enableSorting: false,
-      cell: (i) => {
-        const r = i.row.original;
+    { key: "rate", header: "Rate", className: "hidden lg:table-cell",
+      cell: (r) => <span className="text-xs whitespace-nowrap">{r.RateType === "Percentage" ? `${r.RateValue}%` : `₹${r.RateValue}`}</span> },
+    { key: "tranche", header: "Tranche", className: "hidden xl:table-cell",
+      cell: (r) => {
         // TrancheLabel/UnlockGate cover all three payment plans now:
         // OneTime -> single "Full" row, gate "Booking".
         // TwoPart -> "Booking" (unlocked immediately) + "Agreement" tranches.
@@ -245,14 +227,13 @@ const CrmBrokerage: React.FC = () => {
           ? `${r.TrancheLabel || "Booking"} — unlocks on booking amount paid`
           : `Milestone ${r.MilestoneNo}${r.MilestoneName ? ` — ${r.MilestoneName}` : ""}`;
         return (
-          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${r.IsLocked ? "text-red-600 bg-red-50 border-red-200" : "text-green-600 bg-green-50 border-green-200"}`}>
+          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${r.IsLocked ? "text-red-600 bg-red-50 border-red-200" : "text-green-600 bg-green-50 border-green-200"}`}>
             {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} {label}
           </span>
         );
       } },
-    { accessorKey: "ComputedAmount", header: "Amount / TDS / Net", size: 180,
-      cell: (i) => {
-        const r = i.row.original;
+    { key: "amount", header: "Amount / TDS / Net", sortKey: "ComputedAmount",
+      cell: (r) => {
         const gross = Number(r.ComputedAmount || 0);
         const tds   = Number(r.TDSAmount || 0);
         const net   = Number(r.NetPayable ?? gross);
@@ -268,19 +249,18 @@ const CrmBrokerage: React.FC = () => {
           </div>
         );
       } },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { id: "actions", header: "Actions", size: 160, enableSorting: false,
-      cell: (i) => {
-        const r = i.row.original;
+    { key: "status", header: "Status", sortKey: "Status",
+      cell: (r) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${statusColor[r.Status] || ""}`}>{r.Status}</span> },
+    { key: "actions", header: <span className="sr-only">Actions</span>, align: "right", className: "w-px whitespace-nowrap",
+      cell: (r) => {
         if (r.IsLocked) {
           // Only an Agreement-gated tranche (TwoPart's second half /
           // AgreementOnly) is ever created locked — a Booking-gated tranche
           // always starts unlocked (see buildBrokerageTranches).
-          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> Unlocks once the Agreement is Executed</span>;
+          return <span className="flex items-center gap-1 text-xs text-red-600 whitespace-nowrap"><Lock size={11} /> Unlocks once the Agreement is Executed</span>;
         }
         return (
-          <>
+          <div className="flex items-center gap-2 justify-end flex-wrap" onClick={(e) => e.stopPropagation()}>
             {/* submitOnly: Approve/Reject only ever happen from the Admin
                 Approval Inbox (admin/super_admin/dba), never self-service here */}
             <ApprovalActions
@@ -291,17 +271,24 @@ const CrmBrokerage: React.FC = () => {
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
             />
             {rights.canEdit && r.Status === CrmStatus.PENDING && (
-              <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
+              <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline whitespace-nowrap">Customize amount</button>
             )}
             {r.Status === CrmStatus.APPROVED && (
-              <button onClick={() => navigate(r.FinancePaymentId != null ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
+              <button onClick={() => navigate(r.FinancePaymentId != null ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline whitespace-nowrap">
                 {r.FinancePaymentDocNo ? `Finance: ${r.FinancePaymentDocNo}` : "Sent to Finance"}
               </button>
             )}
-            {r.Status === CrmStatus.PAID && <span className="text-xs text-muted-foreground">Fully paid</span>}
-          </>
+            {r.Status === CrmStatus.PAID && <span className="text-xs text-muted-foreground whitespace-nowrap">Fully paid</span>}
+          </div>
         );
       } },
+  ];
+
+  const tabs: CrmStatusTab[] = [
+    { key: "All",      label: "All",      count: counts.All ?? 0 },
+    { key: "Pending",  label: "Pending",  count: counts.Pending ?? 0,  dot: "bg-orange-400" },
+    { key: "Approved", label: "Approved", count: counts.Approved ?? 0, dot: "bg-blue-500" },
+    { key: "Paid",     label: "Paid",     count: counts.Paid ?? 0,     dot: "bg-green-500" },
   ];
 
   return (
@@ -332,25 +319,45 @@ const CrmBrokerage: React.FC = () => {
         </button>
       </div>
 
-      <div className="flex gap-3 flex-wrap items-center mt-3 mb-3">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search customer, booking, broker..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
+      {!showOnboarding && (
+        <div className="space-y-3 mt-3">
+          <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
+            searchValue={list.searchInput} onSearch={list.setSearchInput}
+            placeholder="Search customer, booking, broker…">
+            <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+          </CrmListToolbar>
 
-      <DataTable
-        data={records}
-        columns={columns}
-        loading={isLoading}
-        emptyMessage="No brokerage records"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          <CrmDataTable
+            columns={columns} rows={records} rowKey={(r) => r.Id}
+            loading={isLoading} fetching={isFetching}
+            error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
+            sort={list.sort} onSort={list.toggleSort}
+            rowAccent={(r) => STATUS_ACCENT[r.Status]}
+            empty={<>No brokerage records match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
+            page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+          />
+        </div>
+      )}
+
+      {showOnboarding && (
+        <div className="p-8 rounded-xl border-2 border-dashed border-border bg-muted/10 text-center space-y-3 mt-3">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+            <IndianRupee size={26} className="text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold text-foreground">No brokerage records yet</p>
+            <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
+              Add a broker to a booking to track their commission and payout.
+            </p>
+          </div>
+          {rights.canCreate && (
+            <button onClick={openCreate}
+              className="flex items-center gap-1.5 text-sm px-4 py-2 btn-module text-white rounded-lg font-semibold mx-auto">
+              <Plus size={13} /> Add Broker
+            </button>
+          )}
+        </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
         <DialogContent accent="crm" className="max-w-md">
