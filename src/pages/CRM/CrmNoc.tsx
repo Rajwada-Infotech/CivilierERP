@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock,
-  ShieldCheck, Building2, ArrowRight, Search,
+  ShieldCheck, Building2, ArrowRight,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
@@ -21,34 +21,27 @@ import {
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
+import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
+import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const API = "/api/crm/noc";
 
 // ─── Status badge ──────────────────────────────────────────────────────────
 
-const STATUS_CFG: Record<string, { text: string; bar: string }> = {
-  Pending:  { text: "text-amber-700",   bar: "bg-amber-500" },
-  Approved: { text: "text-blue-700",    bar: "bg-blue-500" },
-  Issued:   { text: "text-emerald-700", bar: "bg-emerald-500" },
-  Rejected: { text: "text-rose-700",    bar: "bg-rose-500" },
+const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: string }> = {
+  Pending:  { label: "Pending",  badgeCls: "text-amber-700 bg-amber-50 border-amber-200",     accent: "border-l-amber-400" },
+  Approved: { label: "Approved", badgeCls: "text-blue-700 bg-blue-50 border-blue-200",         accent: "border-l-blue-400" },
+  Issued:   { label: "Issued",   badgeCls: "text-emerald-700 bg-emerald-50 border-emerald-200", accent: "border-l-emerald-500" },
+  Rejected: { label: "Rejected", badgeCls: "text-rose-700 bg-rose-50 border-rose-200",         accent: "border-l-rose-500" },
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
-  return (
-    <span className={cn(
-      "inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[0.625rem] font-semibold uppercase tracking-wider",
-      c.text,
-    )}>
-      <span className={cn("w-[3px] h-3 rounded-[1px]", c.bar)} />
-      {status}
-    </span>
-  );
+  const c = STATUS_CONFIG[status] ?? STATUS_CONFIG.Pending;
+  return <span className={cn("text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap", c.badgeCls)}>{c.label}</span>;
 }
 
 // ─── Detail row ────────────────────────────────────────────────────────────
@@ -69,30 +62,14 @@ function fmtDate(d?: string | null) {
 
 // ─── Fetchers ──────────────────────────────────────────────────────────────
 
-
-const PAGE_SIZE = 20;
-interface NocListFilters {
-  type: string;
-  status: string;
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchNocList(filters: NocListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.type !== "All") params.set("type", filters.type);
-  if (filters.status !== "All") params.set("status", filters.status);
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+interface ListPage { rows: any[]; total: number; counts: Record<string, number> }
+async function fetchNocList(q: CrmListQuery & { type: string }): Promise<ListPage> {
+  const params = listParams(q);
+  if (q.type !== "All") params.set("type", q.type);
+  const r = await fetchWithAuth(`${API}?${params}`);
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
+  const d = await r.json();
+  return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
 
 // No type param here — NOC type is resolved per booking (see NocType on
@@ -201,18 +178,19 @@ const CrmNoc: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
   const deepLinkNocType   = sp.get("nocType"); // "Bank" | "Organisation"
 
-  // Filter tabs
-  const [typeFilter, setTypeFilter]     = useState("All");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch] = useState("");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
+  const [typeFilter, setTypeFilter] = useState("All");
+  const list = useCrmListState({ pageSize: 20, defaultSort: { key: "CreatedAt", dir: "desc" } });
+  const listFilters = { ...list.query, type: typeFilter };
+  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-noc", listFilters],
+    queryFn: () => fetchNocList(listFilters),
+    staleTime: 30_000,
+  });
+  const pageData = useSticky(data);
+  const nocs = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const counts = pageData?.counts ?? {};
+  const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters && typeFilter === "All";
 
   // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -224,19 +202,6 @@ const CrmNoc: React.FC = () => {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [markingIssued, setMarkingIssued] = useState(false);
   const [editNoc, setEditNoc] = useState<any>(null);
-
-  // Data
-  const listFilters: NocListFilters = useMemo(
-    () => ({ type: typeFilter, status: statusFilter, search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [typeFilter, statusFilter, search, cpb]
-  );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-noc", listFilters, page],
-    queryFn: () => fetchNocList(listFilters, page),
-    staleTime: 30_000,
-  });
-  const nocs = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
 
   const { data: eligibleBookings = [], isFetching: bkgFetching } = useQuery({
     queryKey: ["crm-noc-eligible"],
@@ -370,50 +335,36 @@ const CrmNoc: React.FC = () => {
     }
   };
 
-  // Table columns
-  const nocColumns: ColumnDef<any, unknown>[] = [
-    {
-      accessorKey: "NocNo", header: "NOC No", size: 120,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span>,
-    },
-    {
-      accessorKey: "ApplicantName", header: "Customer", size: 200,
-      cell: (i) => (
-        <div>
-          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "NocType", header: "Type", size: 120,
-      cell: (i) => {
-        const t = i.getValue() as string;
-        return (
-          <span className={cn(
-            "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border font-medium",
-            t === "Bank" ? "text-blue-700 bg-blue-50 border-blue-200" : "text-purple-700 bg-purple-50 border-purple-200",
-          )}>
-            {t === "Bank" ? <Landmark size={10} /> : <Building2 size={10} />} {t}
-          </span>
-        );
-      },
-    },
-    {
-      id: "bankLoan", header: "Bank / Loan", size: 160, enableSorting: false,
-      cell: (i) => {
-        const n = i.row.original;
-        return <span className="text-xs">{n.NocType === "Bank" ? `${n.BankName || "—"} · ${n.LoanAmount ? formatINR(n.LoanAmount) : "—"}` : "—"}</span>;
-      },
-    },
-    {
-      accessorKey: "Status", header: "Status", size: 110,
-      cell: (i) => <StatusBadge status={i.row.original.Status} />,
-    },
-    {
-      accessorKey: "IssuedDate", header: "Issued", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{fmtDate(i.row.original.IssuedDate)}</span>,
-    },
+  const tabs: CrmStatusTab[] = [
+    { key: "All",      label: "All",      count: counts.All ?? 0 },
+    { key: "Pending",  label: "Pending",  count: counts.Pending ?? 0,  dot: "bg-amber-400" },
+    { key: "Approved", label: "Approved", count: counts.Approved ?? 0, dot: "bg-blue-500" },
+    { key: "Issued",   label: "Issued",   count: counts.Issued ?? 0,   dot: "bg-emerald-500" },
+    { key: "Rejected", label: "Rejected", count: counts.Rejected ?? 0, dot: "bg-rose-500" },
+  ];
+
+  const columns: CrmColumn<any>[] = [
+    { key: "nocNo", header: "NOC No", sortKey: "NocNo", cell: (i) => <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{i.NocNo}</span> },
+    { key: "applicant", header: "Customer", sortKey: "ApplicantName", cell: (i) => (
+      <div>
+        <div className="font-medium"><ApplicantNames name={i.ApplicantName} bookingId={i.BookingId} applicationId={i.ApplicationId} /></div>
+        <div className="text-xs text-muted-foreground">{i.BookingNo} · {i.UnitNo}</div>
+      </div>
+    ) },
+    { key: "type", header: "Type", sortKey: "NocType", cell: (i) => (
+      <span className={cn(
+        "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border font-medium whitespace-nowrap",
+        i.NocType === "Bank" ? "text-blue-700 bg-blue-50 border-blue-200" : "text-purple-700 bg-purple-50 border-purple-200",
+      )}>
+        {i.NocType === "Bank" ? <Landmark size={10} /> : <Building2 size={10} />} {i.NocType}
+      </span>
+    ) },
+    { key: "bankLoan", header: "Bank / Loan", cell: (i) => (
+      <span className="text-xs whitespace-nowrap">{i.NocType === "Bank" ? `${i.BankName || "—"} · ${i.LoanAmount ? formatINR(i.LoanAmount) : "—"}` : "—"}</span>
+    ) },
+    { key: "status", header: "Status", sortKey: "Status", cell: (i) => <StatusBadge status={i.Status} /> },
+    { key: "issued", header: "Issued", sortKey: "IssuedDate", className: "hidden lg:table-cell",
+      cell: (i) => <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtDate(i.IssuedDate)}</span> },
   ];
 
   return (
@@ -436,43 +387,56 @@ const CrmNoc: React.FC = () => {
           </div>
         }
       >
-        {/* Filter bar */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-            {(["All", "Organisation", "Bank"] as const).map((t) => (
-              <button key={t} onClick={() => updateFilter(setTypeFilter)(t)}
-                className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-            {(["All", "Pending", "Approved", "Issued", "Rejected"] as const).map((s) => (
-              <button key={s} onClick={() => updateFilter(setStatusFilter)(s)}
-                className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
-                {s}
-              </button>
-            ))}
-          </div>
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search customer, booking..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-          </div>
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-        </div>
+        {!showOnboarding && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex rounded-lg border border-border overflow-hidden text-xs shrink-0">
+                {(["All", "Organisation", "Bank"] as const).map((t) => (
+                  <button key={t} onClick={() => setTypeFilter(t)}
+                    className={cn("px-2.5 py-1.5 transition-colors font-medium", typeFilter === t ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
+              searchValue={list.searchInput} onSearch={list.setSearchInput}
+              placeholder="Search NOC, customer, booking…">
+              <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+            </CrmListToolbar>
 
-        <DataTable
-          data={nocs as any[]}
-          columns={nocColumns}
-          loading={isLoading}
-          emptyMessage="No NOC requests matching the current filter"
-          className="rounded-xl border border-border overflow-hidden bg-card"
-          onRowClick={(row) => setDetailId(row.original.Id)}
-        />
-        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+            <CrmDataTable
+              columns={columns} rows={nocs as any[]} rowKey={(i) => i.Id}
+              loading={isLoading} fetching={isFetching}
+              error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
+              sort={list.sort} onSort={list.toggleSort}
+              onRowClick={(r) => setDetailId(r.Id)} activeKey={detailId}
+              rowAccent={(r) => (STATUS_CONFIG[r.Status] ?? STATUS_CONFIG.Pending).accent}
+              empty={<>No NOC requests match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
+              page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+            />
+          </div>
+        )}
+
+        {showOnboarding && (
+          <div className="p-8 rounded-xl border-2 border-dashed border-border bg-muted/10 text-center space-y-3">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+              <ShieldCheck size={26} className="text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">No NOC requests yet</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
+                Request one once a booking's Agreement for Sale is Registered.
+              </p>
+            </div>
+            {rights.canCreate && (
+              <button onClick={() => setDialogOpen(true)}
+                className="flex items-center gap-1.5 text-sm px-4 py-2 btn-module text-white rounded-lg font-semibold mx-auto">
+                <Plus size={13} /> Request NOC
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ── Request dialog ────────────────────────────────────────────── */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
@@ -588,101 +552,6 @@ const CrmNoc: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* ── Detail dialog ─────────────────────────────────────────────── */}
-        <Dialog open={detailId != null} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
-          <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
-            {detail && (
-              <>
-                <DialogHeader className="px-6 py-4 border-b border-border">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <ShieldCheck size={15} className="text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <DialogTitle className="text-sm font-semibold font-heading font-mono">{detail.NocNo}</DialogTitle>
-                      <DialogDescription className="text-[0.6875rem] mt-0.5">{detail.NocType} NOC</DialogDescription>
-                    </div>
-                    <div className="ml-auto flex items-center gap-2">
-                      <StatusBadge status={detail.Status} />
-                      {/* Edit button — available while not Issued (no point editing a closed NOC) */}
-                      {detail.Status !== "Issued" && (
-                        <button onClick={() => setEditNoc(detail)} title="Edit details"
-                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                          <Pencil size={13} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </DialogHeader>
-
-                <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
-                  {/* Customer summary */}
-                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
-                    <p className="text-sm font-semibold text-foreground"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · {detail.Mobile}</p>
-                  </div>
-
-                  {/* Fields */}
-                  <div>
-                    <DetailRow label="NOC Date"     value={fmtDate(detail.NocDate)} />
-                    <DetailRow label="Reason"        value={detail.Reason || "—"} />
-                    {detail.NocType === "Bank" && (
-                      <>
-                        <DetailRow label="Bank Name"     value={detail.BankName || "—"} />
-                        <DetailRow label="Loan A/C No."  value={detail.LoanAccountNo || "—"} mono />
-                        <DetailRow label="Loan Amount"   value={detail.LoanAmount ? formatINR(detail.LoanAmount) : "—"} mono />
-                      </>
-                    )}
-                    {detail.ApprovalDate && <DetailRow label="Approved"    value={fmtDate(detail.ApprovalDate)} />}
-                    {detail.IssuedDate   && <DetailRow label="Issued"      value={fmtDate(detail.IssuedDate)} />}
-                    {detail.Notes        && <DetailRow label="Notes"       value={<span className="italic">{detail.Notes}</span>} />}
-                  </div>
-
-                  {/* Action area — strictly status-gated */}
-                  <div>
-                    {detail.Status === "Issued" ? (
-                      <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
-                        <CheckCircle2 size={16} />
-                        Issued {fmtDate(detail.IssuedDate)} — no further action required
-                      </div>
-                    ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
-                      <button onClick={handleMarkIssued} disabled={markingIssued}
-                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium btn-module text-white rounded-lg hover:shadow-lg disabled:opacity-40 transition-colors">
-                        <ArrowRight size={14} />
-                        {markingIssued ? "Marking…" : "Mark as Issued"}
-                      </button>
-                    ) : detail.Status === CrmStatus.PENDING ? (
-                      // ApprovalActions renders Approve + Reject for approver roles,
-                      // and a "Pending approval" note for non-approvers.
-                      <ApprovalActions
-                        status={detail.Status}
-                        recordId={detail.Id}
-                        endpoint={API}
-                        onSuccess={() => { invalidate(); setDetailId(null); }}
-                      />
-                    ) : detail.Status === CrmStatus.REJECTED ? (
-                      <ApprovalActions
-                        status={detail.Status}
-                        recordId={detail.Id}
-                        endpoint={API}
-                        submitOnly
-                        onSuccess={() => { invalidate(); setDetailId(null); }}
-                      />
-                    ) : null}
-                  </div>
-                </div>
-
-                <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
-                  <button onClick={() => setDetailId(null)}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">
-                    Close
-                  </button>
-                </DialogFooter>
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
-
         {/* ── Edit dialog ───────────────────────────────────────────────── */}
         {editNoc && (
           <EditNocDialog
@@ -692,6 +561,84 @@ const CrmNoc: React.FC = () => {
           />
         )}
       </CrmShell>
+
+      {/* ── Detail drawer ─────────────────────────────────────────────── */}
+      <CrmSideDrawer
+        open={detailId != null}
+        onClose={() => setDetailId(null)}
+        title={detail?.NocNo ?? ""}
+        subtitle={detail ? `${detail.NocType} NOC` : undefined}
+        badge={detail && (
+          <span className="flex items-center gap-2">
+            <StatusBadge status={detail.Status} />
+            {detail.Status !== "Issued" && (
+              <button onClick={() => setEditNoc(detail)} title="Edit details"
+                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+                <Pencil size={13} />
+              </button>
+            )}
+          </span>
+        )}
+      >
+        {detail && (
+          <div className="space-y-5">
+            {/* Customer summary */}
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
+              <p className="text-sm font-semibold text-foreground"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></p>
+              <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · {detail.Mobile}</p>
+            </div>
+
+            {/* Fields */}
+            <div>
+              <DetailRow label="NOC Date"     value={fmtDate(detail.NocDate)} />
+              <DetailRow label="Reason"        value={detail.Reason || "—"} />
+              {detail.NocType === "Bank" && (
+                <>
+                  <DetailRow label="Bank Name"     value={detail.BankName || "—"} />
+                  <DetailRow label="Loan A/C No."  value={detail.LoanAccountNo || "—"} mono />
+                  <DetailRow label="Loan Amount"   value={detail.LoanAmount ? formatINR(detail.LoanAmount) : "—"} mono />
+                </>
+              )}
+              {detail.ApprovalDate && <DetailRow label="Approved"    value={fmtDate(detail.ApprovalDate)} />}
+              {detail.IssuedDate   && <DetailRow label="Issued"      value={fmtDate(detail.IssuedDate)} />}
+              {detail.Notes        && <DetailRow label="Notes"       value={<span className="italic">{detail.Notes}</span>} />}
+            </div>
+
+            {/* Action area — strictly status-gated */}
+            <div>
+              {detail.Status === "Issued" ? (
+                <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
+                  <CheckCircle2 size={16} />
+                  Issued {fmtDate(detail.IssuedDate)} — no further action required
+                </div>
+              ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
+                <button onClick={handleMarkIssued} disabled={markingIssued}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium btn-module text-white rounded-lg hover:shadow-lg disabled:opacity-40 transition-colors">
+                  <ArrowRight size={14} />
+                  {markingIssued ? "Marking…" : "Mark as Issued"}
+                </button>
+              ) : detail.Status === CrmStatus.PENDING ? (
+                // ApprovalActions renders Approve + Reject for approver roles,
+                // and a "Pending approval" note for non-approvers.
+                <ApprovalActions
+                  status={detail.Status}
+                  recordId={detail.Id}
+                  endpoint={API}
+                  onSuccess={() => { invalidate(); setDetailId(null); }}
+                />
+              ) : detail.Status === CrmStatus.REJECTED ? (
+                <ApprovalActions
+                  status={detail.Status}
+                  recordId={detail.Id}
+                  endpoint={API}
+                  submitOnly
+                  onSuccess={() => { invalidate(); setDetailId(null); }}
+                />
+              ) : null}
+            </div>
+          </div>
+        )}
+      </CrmSideDrawer>
     </>
   );
 };
