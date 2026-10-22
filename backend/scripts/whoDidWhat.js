@@ -5,7 +5,8 @@
 //      counted per person (with the latest date where the table has one). These columns hold a
 //      user id, an email or a name depending on the table; each is matched back to dbo.users.
 //   2. The activity log (dbo.UserActivityLog, what the Activity Browser shows): each person's
-//      creates / updates / deletes / page views and when they were last seen.
+//      creates / updates / deletes / page views and when they were last seen. The home page's
+//      module-usage pings (POST /api/home/usage) are left out: they were logged as creates but change nothing.
 // Then the names in those columns that match no user, and the rows that carry no name at all.
 //
 //   node scripts/whoDidWhat.js                       everyone
@@ -40,7 +41,11 @@ const DATE_RX = {
   approved: /^[A-Za-z]{0,3}_?approved_?(at|date|on|datetime|time)$/i,
 };
 
-const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 16).replace("T", " ") : "—");
+// Times in India Standard Time (the database stores UTC).
+const fmtDate = (d) =>
+  d
+    ? new Date(d).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) + " IST"
+    : "—";
 const csvCell = (v) => {
   const s = v == null ? "" : String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -137,7 +142,8 @@ const csvCell = (v) => {
     if (SINCE) req.input("since", sql.DateTime2, new Date(SINCE));
     const rows = (await req.query(`
       SELECT UserId, LOWER(ISNULL(ActionType, EventType)) AS kind, COUNT(*) AS n, MAX(CreatedAt) AS last
-      FROM dbo.UserActivityLog ${SINCE ? "WHERE CreatedAt >= @since" : ""}
+      FROM dbo.UserActivityLog
+      WHERE ISNULL(RequestUrl, '') NOT LIKE '%/api/home/usage%' ${SINCE ? "AND CreatedAt >= @since" : ""}
       GROUP BY UserId, LOWER(ISNULL(ActionType, EventType))
     `)).recordset;
     for (const r of rows) {
@@ -212,6 +218,7 @@ const csvCell = (v) => {
           SELECT CreatedAt, LOWER(ISNULL(ActionType, EventType)) AS kind, Resource, Details, RequestMethod, RequestUrl
           FROM dbo.UserActivityLog
           WHERE CAST(UserId AS NVARCHAR(50)) = @uid AND LOWER(ISNULL(ActionType, '')) IN ('create', 'update', 'delete')
+            AND ISNULL(RequestUrl, '') NOT LIKE '%/api/home/usage%'
           ${SINCE ? "AND CreatedAt >= @since" : ""}
           ORDER BY CreatedAt DESC
         `)).recordset;
