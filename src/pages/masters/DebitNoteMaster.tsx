@@ -124,13 +124,13 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
         <table className="w-full text-xs">
           <thead className="bg-card border-b border-foreground">
             <tr>
-              <th className={thCls + "w-6 hidden sm:table-cell"}>#</th>
+              <th className={`${thCls} w-6 hidden sm:table-cell`}>#</th>
               <th className={thCls}>Description *</th>
-              <th className={thCls + "w-16"}>Qty</th>
-              <th className={thCls + "w-14 hidden sm:table-cell"}>UOM</th>
-              <th className={thCls + "w-20"}>Rate</th>
-              <th className={thCls + "w-20"}>Amount</th>
-              <th className={thCls + "w-6"}></th>
+              <th className={`${thCls} w-16`}>Qty</th>
+              <th className={`${thCls} w-14 hidden sm:table-cell`}>UOM</th>
+              <th className={`${thCls} w-20`}>Rate</th>
+              <th className={`${thCls} w-20`}>Amount</th>
+              <th className={`${thCls} w-6`}></th>
             </tr>
           </thead>
           <tbody>
@@ -141,16 +141,16 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
                   <input className={inp} value={it.Description} onChange={(e) => update(idx, "Description", e.target.value)} placeholder="Item / description" />
                 </td>
                 <td className="px-2 py-1">
-                  <input className={inp + "text-right"} type="number" value={it.Quantity} onChange={(e) => update(idx, "Quantity", e.target.value)} placeholder="0" step="any" min={0} />
+                  <input className={`${inp} text-right`} type="number" value={it.Quantity} onChange={(e) => update(idx, "Quantity", e.target.value)} placeholder="0" step="any" min={0} />
                 </td>
                 <td className="px-2 py-1 hidden sm:table-cell">
                   <input className={inp} value={it.UOMSymbol} onChange={(e) => update(idx, "UOMSymbol", e.target.value)} placeholder="Nos" />
                 </td>
                 <td className="px-2 py-1">
-                  <input className={inp + "text-right"} type="number" value={it.Rate} onChange={(e) => update(idx, "Rate", e.target.value)} placeholder="0.00" step="any" min={0} />
+                  <input className={`${inp} text-right`} type="number" value={it.Rate} onChange={(e) => update(idx, "Rate", e.target.value)} placeholder="0.00" step="any" min={0} />
                 </td>
                 <td className="px-2 py-1">
-                  <input className={inp + "text-right bg-card"} value={it.Amount} onChange={(e) => update(idx, "Amount", e.target.value)} placeholder="0.00" />
+                  <input className={`${inp} text-right bg-card`} value={it.Amount} onChange={(e) => update(idx, "Amount", e.target.value)} placeholder="0.00" />
                 </td>
                 <td className="px-2 py-1 text-center">
                   <button type="button" onClick={() => removeRow(idx)} className="p-1 text-destructive hover:bg-destructive/10">
