@@ -113,14 +113,19 @@ async function syncBillStatus(pool, sql, expenseRef) {
       (parseFloat(oaRes.recordset[0].TotalAdjusted) || 0);
     // Outstanding balance is against the TDS-net, debit-note-adjusted
     // payable — not the raw invoice amount.
-    const remaining = Math.max(0, adjustedPayable - totalPaid);
+    // The net amount is rounded to the rupee (₹64,800) while the amount paid is the exact figure the
+    // vendor was credited (₹64,799.70): a shortfall under a rupee is that round-off, not money owed,
+    // so it counts as settled instead of leaving the bill "Partially Paid" with paise remaining.
+    const ROUND_OFF = 1;
+    const shortfall = adjustedPayable - totalPaid;
+    const remaining = shortfall > 0 && shortfall < ROUND_OFF ? 0 : Math.max(0, shortfall);
 
     let billStatus;
     if (totalPaid <= 0) {
       // Fully settled by TDS alone (e.g. 100% TDS on a small bill) even
       // with zero cash paid is still "Paid", not "Payment Due".
       billStatus = adjustedPayable <= 0 ? "Paid" : "Payment Due";
-    } else if (totalPaid >= adjustedPayable) {
+    } else if (totalPaid >= adjustedPayable || remaining === 0) {
       billStatus = "Paid";
     } else {
       billStatus = "Partially Paid";
