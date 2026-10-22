@@ -253,23 +253,6 @@ export const deletePurchaseOrder = (id: number | string) =>
     handleResponse(r),
   );
 
-export const submitPurchaseOrder = (id: number | string) =>
-  fetchWithAuth(`/purchase-orders/${id}/submit`, { method: "PUT" }).then((r) =>
-    handleResponse(r),
-  );
-
-export const approvePurchaseOrder = (id: number | string) =>
-  fetchWithAuth(`/purchase-orders/${id}/approve`, { method: "PUT" }).then((r) =>
-    handleResponse(r),
-  );
-
-export const rejectPurchaseOrder = (id: number | string, note?: string) =>
-  fetchWithAuth(`/purchase-orders/${id}/reject`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ note }),
-  }).then((r) => handleResponse(r));
-
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 // Returns [{ LHeadId, LHeadName, ... }] — Vendors and Suppliers, not Landlords
 // (a Landlord is stored as LHeadType='S'/LHeadCategory='Landlord' — see

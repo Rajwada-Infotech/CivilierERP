@@ -130,11 +130,6 @@ export const deleteMaterialRequest = (id: number | string) =>
     handleResponse(r),
   );
 
-export const submitMaterialRequest = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/submit`, { method: "PUT" }).then((r) =>
-    handleResponse(r),
-  );
-
 // ── Master data ────────────────────────────────────────────────────────────────
 
 export const getMRCompanies = () =>
@@ -155,11 +150,6 @@ export const getMRItemOptions = (projectId?: string | number | null) => {
 
 export const getMRUomOptions = () =>
   fetchWithAuth(`${BASE}/uom-options`).then((r) => handleResponse<any[]>(r));
-
-export const previewNextMRNumber = () =>
-  fetchWithAuth(`${BASE}/preview-next-number`).then((r) =>
-    handleResponse<{ nextDocNo: string | null }>(r),
-  );
 
 // ── PO creation from MR ────────────────────────────────────────────────────────
 
@@ -195,28 +185,11 @@ export interface MRItemFulfillment {
   PendingQty: number;
 }
 
-export interface MRPendingSummary {
-  MRId: number;
-  items: MRItemFulfillment[];
-  totalRequested: number;
-  totalOrdered: number;
-  totalPending: number;
-}
-
 export interface MRPendingSummaryTotals {
   MRId: number;
   totalRequested: number;
   totalOrdered: number;
   totalPending: number;
-}
-
-export interface MRLinkedPO {
-  purchaseOrderId: number;
-  poNumber: string;
-  date: string;
-  status: string;
-  orderedQty: number;
-  remainingQtyAfter: number;
 }
 
 export interface MRPOPrefill {
@@ -263,11 +236,6 @@ export const getApprovedMRList = (params?: {
   );
 };
 
-export const getMRPOPrefillByDocNo = (docNo: string) =>
-  fetchWithAuth(
-    `${BASE}/by-docno/${encodeURIComponent(docNo.trim().toUpperCase())}`,
-  ).then((r) => handleResponse<MRPOPrefill>(r));
-
 export const getMRPOPrefill = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/create-po-prefill`).then((r) =>
     handleResponse<MRPOPrefill>(r),
@@ -309,24 +277,7 @@ export const getICTMRPrefill = (id: number | string) =>
     handleResponse<ICTMRPrefill>(r),
   );
 
-export const markMROrdered = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/mark-ordered`, { method: "PUT" }).then((r) =>
-    handleResponse(r),
-  );
-
-// ── Partial-fulfillment tracking ────────────────────────────────────────────────
-
-export const getMRPendingSummary = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/pending-summary`).then((r) =>
-    handleResponse<MRPendingSummary>(r),
-  );
-
 export const getBulkMRPendingSummary = () =>
   fetchWithAuth(`${BASE}/pending-summary`).then((r) =>
     handleResponse<MRPendingSummaryTotals[]>(r),
-  );
-
-export const getMRLinkedPOs = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/linked-pos`).then((r) =>
-    handleResponse<MRLinkedPO[]>(r),
   );

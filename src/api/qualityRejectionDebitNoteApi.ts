@@ -88,8 +88,3 @@ export const getQualityDebitNotes = (params?: {
     handleResponse<{ data: QualityDebitNote[] }>(r),
   );
 };
-
-export const cancelQualityDebitNote = (id: number | string) =>
-  fetchWithAuth(`${BASE}/${id}/cancel`, { method: "PUT" }).then((r) =>
-    handleResponse<{ success: boolean }>(r),
-  );

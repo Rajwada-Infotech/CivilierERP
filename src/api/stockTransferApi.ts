@@ -25,27 +25,6 @@ export interface StockTransfer {
   CreatedAt: string;
 }
 
-export interface StockTransfersResponse {
-  data: StockTransfer[];
-  total: number;
-}
-
-export const getStockTransfers = async (params?: {
-  fromGodown?: number;
-  toGodown?: number;
-  page?: number;
-  limit?: number;
-}): Promise<StockTransfersResponse> => {
-  const qs = new URLSearchParams();
-  if (params?.fromGodown) qs.set("fromGodown", String(params.fromGodown));
-  if (params?.toGodown) qs.set("toGodown", String(params.toGodown));
-  if (params?.page) qs.set("page", String(params.page));
-  if (params?.limit) qs.set("limit", String(params.limit));
-  const res = await fetchWithAuth(`${BASE}?${qs}`);
-  if (!res.ok) throw new Error(`Failed to fetch transfers: ${res.status}`);
-  return res.json().catch(() => ({}));
-};
-
 export const getStockTransferById = async (
   id: number,
 ): Promise<StockTransfer> => {
