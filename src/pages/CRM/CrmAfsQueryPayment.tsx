@@ -99,18 +99,30 @@ const STEPS = [
   { id: 2, label: "Confirm Payment" },
 ];
 
-function StepTabs({ step, onChange, confirmed }: { step: number; onChange: (s: number) => void; confirmed: boolean }) {
+// infoSent: whether the server has actually recorded the fee breakdown as
+// sent (Status is InfoSent or Confirmed) — the one thing that decides
+// whether Step 1 is really done and Step 2 may be opened. It used to be
+// `step > 1`, the LOCAL tab the user happened to be viewing, so clicking
+// tab 2 before sending anything showed Step 1 as done (green check) and let
+// the user fill in Step 2 and hit Confirm — which the server then rejected,
+// since nothing had actually been sent. The tab itself is now disabled
+// until the send really happens.
+function StepTabs({ step, onChange, confirmed, infoSent }: { step: number; onChange: (s: number) => void; confirmed: boolean; infoSent: boolean }) {
   return (
     <div className="flex items-center gap-1 px-6 pt-3">
       {STEPS.map((s) => {
         const active = step === s.id;
-        const done = confirmed || (s.id === 1 && step > 1);
+        const done = confirmed || (s.id === 1 && infoSent);
+        const locked = s.id === 2 && !infoSent && !confirmed;
         return (
           <button
             key={s.id}
-            onClick={() => onChange(s.id)}
+            onClick={() => { if (!locked) onChange(s.id); }}
+            disabled={locked}
+            title={locked ? "Send the fee breakdown to the customer first" : undefined}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-t-lg border-b-2 transition-colors",
+              locked ? "opacity-40 cursor-not-allowed text-muted-foreground" :
               active ? "border-sky-500 text-sky-600 dark:text-sky-400 bg-sky-500/5" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40",
             )}
           >
@@ -282,7 +294,7 @@ function AmountEditor({
         </div>
       ) : (
         <div className="flex items-center gap-1.5 text-[0.6875rem] text-sky-700 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 rounded-lg px-3 py-2">
-          <AlertTriangle size={11} /> Amounts not set — fill before sending to customer.
+          <AlertTriangle size={11} /> No amount set yet — optional; the customer can still be sent the paperwork.
           {canEditNow && (
             <button onClick={startEdit} className="ml-auto text-sky-600 dark:text-sky-400 font-semibold hover:underline shrink-0">Set amounts</button>
           )}
@@ -748,6 +760,18 @@ const CrmAfsQueryPayment: React.FC<{
   // input focus survives re-renders like anywhere else in this file.
   const InlineDetail = () => {
     if (!detail) return <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>;
+    // Whether the server has actually recorded the fee breakdown as sent —
+    // the only thing Step 2 should ever be gated on. It used to be `step > 1`,
+    // the tab the user happened to be viewing, so opening Step 2 before
+    // sending anything showed Step 1 as falsely done.
+    const infoSent = detail.Status !== CrmStatus.PENDING;
+    // No fee on record yet - informational only, never a block (business
+    // decision 2026-10-22): staff may genuinely not know the amount yet, and
+    // forcing a number just to unblock Send would invite a placeholder figure,
+    // which is worse than sending with none. The real amount is required at
+    // confirm time (ConfirmedAmount), once the customer has actually paid.
+    const amountsMissing = detail.Status === CrmStatus.PENDING
+      && !(Number(detail.StampDuty) > 0) && !(Number(detail.RegistrationFee) > 0);
     return (
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         {/* Header */}
@@ -810,8 +834,8 @@ const CrmAfsQueryPayment: React.FC<{
             {/* Step 1: Send paperwork */}
             <div className={`px-5 py-4 space-y-3 ${step === 1 ? "" : "opacity-60 pointer-events-none"}`}>
               <div className="flex items-center gap-2">
-                <span className={`w-5 h-5 rounded-full text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step > 1 ? "bg-emerald-500 text-white" : "bg-sky-500 text-white"}`}>
-                  {step > 1 ? <Check size={10} /> : "1"}
+                <span className={`w-5 h-5 rounded-full text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${infoSent ? "bg-emerald-500 text-white" : "bg-sky-500 text-white"}`}>
+                  {infoSent ? <Check size={10} /> : "1"}
                 </span>
                 <p className="text-sm font-semibold">Send Fee Breakdown to Customer</p>
               </div>
@@ -846,10 +870,13 @@ const CrmAfsQueryPayment: React.FC<{
                     <Upload size={11} /> Attach files
                   </button>
                   {awaitingSendConfirm ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""}?</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-muted-foreground">
+                        Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""}{amountsMissing ? " without an amount" : ""}?
+                      </span>
                       <button onClick={() => setAwaitingSendConfirm(false)} disabled={sendingInfo} className="px-2.5 py-1 text-xs rounded-lg border border-border hover:bg-muted transition-colors">Cancel</button>
-                      <button onClick={handleSendInfo} disabled={sendingInfo} className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all">
+                      <button onClick={handleSendInfo} disabled={sendingInfo}
+                        className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all">
                         <Send size={10} /> {sendingInfo ? "Sending…" : "Confirm Send"}
                       </button>
                     </div>
@@ -858,6 +885,14 @@ const CrmAfsQueryPayment: React.FC<{
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all">
                       <Send size={11} /> {detail.Status === CrmStatus.PENDING ? "Send to Customer" : "Send More"}
                     </button>
+                  )}
+                  {/* Not a block — just visible, so nobody sends a placeholder
+                      number just to get past a disabled button. Staff can
+                      genuinely not know the amount yet (e.g. awaiting the
+                      Sub-Registrar's own valuation); send now, add the real
+                      figure via "Set amounts" whenever it's known. */}
+                  {amountsMissing && !awaitingSendConfirm && (
+                    <span className="text-[0.6875rem] text-amber-600 dark:text-amber-400">No amount set yet — you can still send</span>
                   )}
                 </div>
                 {detail.Status === "InfoSent" && (
@@ -876,11 +911,17 @@ const CrmAfsQueryPayment: React.FC<{
                   <span className={`w-5 h-5 rounded-full text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-sky-500 text-white" : "bg-muted text-muted-foreground"}`}>2</span>
                   <p className="text-sm font-semibold">Confirm Customer Paid the Government</p>
                 </div>
-                {step !== 2 && (
+                {step !== 2 && infoSent && (
                   <button onClick={() => setStep(2)}
                     className="text-xs px-3 py-1.5 rounded-lg border border-sky-300 dark:border-sky-800/60 text-sky-700 dark:text-sky-400 font-semibold hover:bg-sky-50 dark:hover:bg-sky-900/20 transition-colors shrink-0">
                     Open →
                   </button>
+                )}
+                {step !== 2 && !infoSent && (
+                  <span title="Send the fee breakdown to the customer first"
+                    className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-border text-muted-foreground/60 shrink-0 cursor-not-allowed">
+                    Locked
+                  </span>
                 )}
               </div>
               {step === 2 && (
@@ -1309,7 +1350,7 @@ const CrmAfsQueryPayment: React.FC<{
                       </div>
                     ) : (
                       <>
-                        <StepTabs step={step} onChange={setStep} confirmed={false} />
+                        <StepTabs step={step} onChange={setStep} confirmed={false} infoSent={detail.Status !== CrmStatus.PENDING} />
                         <div className="px-5 py-4 max-h-[45vh] overflow-y-auto thin-scroll space-y-3">
                           {step === 1 ? (
                             <>
@@ -1345,16 +1386,24 @@ const CrmAfsQueryPayment: React.FC<{
                               </button>
                               {awaitingSendConfirm ? (
                                 <div className="flex items-center gap-2">
-                                  <span className="flex-1 text-xs text-muted-foreground">Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""} to customer?</span>
+                                  <span className="flex-1 text-xs text-muted-foreground">
+                                    Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""} to customer
+                                    {detail.Status === CrmStatus.PENDING && !(Number(detail.StampDuty) > 0) && !(Number(detail.RegistrationFee) > 0) ? " without an amount" : ""}?
+                                  </span>
                                   <button onClick={() => setAwaitingSendConfirm(false)} disabled={sendingInfo} className="px-2.5 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors shrink-0">Cancel</button>
-                                  <button onClick={handleSendInfo} disabled={sendingInfo} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all shrink-0">
+                                  <button onClick={handleSendInfo} disabled={sendingInfo}
+                                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all shrink-0">
                                     <Send size={11} /> {sendingInfo ? "Sending…" : "Confirm"}
                                   </button>
                                 </div>
                               ) : (
-                                <button onClick={() => setAwaitingSendConfirm(true)} disabled={!pendingInfoFiles.length} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all">
+                                <button onClick={() => setAwaitingSendConfirm(true)} disabled={!pendingInfoFiles.length}
+                                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md disabled:opacity-40 transition-all">
                                   <Send size={12} /> Send to Customer
                                 </button>
+                              )}
+                              {detail.Status === CrmStatus.PENDING && !(Number(detail.StampDuty) > 0) && !(Number(detail.RegistrationFee) > 0) && !awaitingSendConfirm && (
+                                <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400">No amount set yet — you can still send</p>
                               )}
                             </>
                           ) : (
