@@ -1060,14 +1060,18 @@ const CrmInvoices: React.FC = () => {
   useEffect(() => {
     const invId = searchParams.get("invoiceId");
     if (!invId || invId === lastDeepLinkedInvoiceId) return;
+    if (isLoading) return;
     const pool = view === "grouped" ? groups.flatMap((g) => g.Invoices) : flatRows;
-    if (!pool.length) return;
     const match = pool.find((r) => String(r.Id) === invId);
+    setLastDeepLinkedInvoiceId(invId);
     if (match) {
-      setLastDeepLinkedInvoiceId(invId);
       setPreview(match);
+    } else {
+      // Not on the current page/filter/sort — a paginated list, not the full
+      // dataset, so a miss here doesn't mean the invoice doesn't exist.
+      toast.info("That invoice isn't on the current page — adjust filters or search to find it.");
     }
-  }, [searchParams, lastDeepLinkedInvoiceId, groups, flatRows, view]);
+  }, [searchParams, lastDeepLinkedInvoiceId, groups, flatRows, view, isLoading]);
 
   function toggleCollapsed(bookingId: number) {
     setCollapsed((c) => {

@@ -77,6 +77,7 @@ const CrmBrokerage: React.FC = () => {
   const [editingStatus, setEditingStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [notifiedMissingView, setNotifiedMissingView] = useState<string | null>(null);
   const isApprover = CRM_APPROVER_ROLES.includes(getUserRole() ?? "") || hasApprovalInboxEdit;
 
   const list = useCrmListState({ pageSize: 25, defaultSort: { key: "CreatedAt", dir: "desc" } });
@@ -128,7 +129,7 @@ const CrmBrokerage: React.FC = () => {
   // to find.
   useEffect(() => {
     const viewId = searchParams.get("view");
-    if (!viewId || !(records as any[]).length) return;
+    if (!viewId || isLoading) return;
     const row = (records as any[]).find((r) => String(r.Id) === viewId);
     if (row) {
       if (rights.canEdit) {
@@ -136,10 +137,17 @@ const CrmBrokerage: React.FC = () => {
       } else {
         toast.info("You don't have edit rights on this page — ask an admin to grant access to review this record.");
       }
+      setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
+    } else if (notifiedMissingView !== viewId) {
+      // Not on the current page/filter/sort — a paginated list, not the full
+      // dataset, so a miss here doesn't mean the record doesn't exist. Leave
+      // ?view= in the URL so clearing filters and retrying can still find it;
+      // notifiedMissingView stops the toast from refiring every render.
+      setNotifiedMissingView(viewId);
+      toast.info("That record isn't on the current page — adjust filters or search to find it.");
     }
-    setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, records]);
+  }, [searchParams, records, isLoading]);
 
   const handleApprove = async () => {
     if (editingId == null) return;

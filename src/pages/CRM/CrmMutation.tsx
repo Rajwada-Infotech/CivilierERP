@@ -465,6 +465,7 @@ const CrmMutation: React.FC = () => {
 
   const handleQuery = async () => {
     if (detailId == null || !queryRemarks.trim()) { toast.error("Remarks are required"); return; }
+    setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/query`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -476,6 +477,7 @@ const CrmMutation: React.FC = () => {
       setQueryOpen(false); setQueryRemarks("");
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
   };
 
   const handleResubmit = async () => {
@@ -492,6 +494,7 @@ const CrmMutation: React.FC = () => {
   const handleApprove = async () => {
     if (detailId == null) return;
     if (!approveForm.NewKhataNo.trim()) { toast.error("New Khata No. is required"); return; }
+    setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/approve`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -503,6 +506,7 @@ const CrmMutation: React.FC = () => {
       setApproveOpen(false);
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
   };
 
   const handleUploadDoc = async (file: File, documentType: string, label?: string) => {
@@ -747,7 +751,7 @@ const CrmMutation: React.FC = () => {
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <button onClick={() => setQueryOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleQuery} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg ">Confirm Query</button>
+              <button onClick={handleQuery} disabled={saving} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">{saving ? "Saving..." : "Confirm Query"}</button>
             </div>
           </DialogContent>
         </Dialog>
@@ -775,9 +779,9 @@ const CrmMutation: React.FC = () => {
             </div>
             <DialogFooter className="pt-3 border-t border-border">
               <button onClick={() => setApproveOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleApprove} disabled={!approveForm.NewKhataNo.trim()}
+              <button onClick={handleApprove} disabled={!approveForm.NewKhataNo.trim() || saving}
                 className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
-                Confirm Approval
+                {saving ? "Saving..." : "Confirm Approval"}
               </button>
             </DialogFooter>
           </DialogContent>
