@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useCallback } from "react";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -33,7 +35,35 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
-import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+
+
+// What the register's Export writes: the assets the page is showing (search and filters applied).
+const faDate = (d: unknown) => (d ? new Date(String(d)).toLocaleDateString("en-IN") : "");
+const FA_REGISTER_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Doc Date", accessor: (r) => faDate(r.DocDate) },
+  { header: "Fin Year", accessor: "FinYear" },
+  { header: "Asset Code", accessor: "AssetCode" },
+  { header: "FA Item Code", accessor: "FAItemCode" },
+  { header: "Asset Name", accessor: "AssetName" },
+  { header: "Category", accessor: "AssetCategory" },
+  { header: "Brand", accessor: "Brand" },
+  { header: "Model", accessor: "Model" },
+  { header: "Serial No", accessor: "SerialNumber" },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Godown", accessor: "GodownName" },
+  { header: "Location", accessor: "Location" },
+  { header: "Department", accessor: "Department" },
+  { header: "Custodian", accessor: "Custodian" },
+  { header: "Supplier", accessor: "SupplierName" },
+  { header: "Purchase Date", accessor: (r) => faDate(r.PurchaseDate) },
+  { header: "Activation Date", accessor: (r) => faDate(r.ActivationDate) },
+  { header: "Quantity", accessor: (r) => Number(r.Quantity) || 0 },
+  { header: "Purchase Cost", accessor: (r) => Number(r.PurchaseCost) || 0 },
+  { header: "Depreciation Rate %", accessor: (r) => (r.DepreciationRate == null ? "" : Number(r.DepreciationRate)) },
+  { header: "Asset Status", accessor: "AssetStatus" },
+];import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
@@ -1466,12 +1496,23 @@ export default function FixedAssetRecord() {
       icon={Cpu}
       accentColor="#eab308"
       action={
-        rights.canCreate && (
-          <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
-            <Plus size={13} /> New Asset
-          </button>
-        )
+        rights.canCreate || rights.canExport ? (
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              data={filtered as unknown as Record<string, unknown>[]}
+              columns={FA_REGISTER_EXPORT_COLUMNS}
+              title="Fixed Asset Register"
+              filename="fixed-asset-register"
+              disabled={!filtered.length || !rights.canExport}
+            />
+            {rights.canCreate && (
+              <button onClick={goToCreate}
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
+                <Plus size={13} /> New Asset
+              </button>
+            )}
+          </div>
+        ) : undefined
       }
     >
       {/* ── KPI strip — same GlassCard language as the rest of the Fixed
