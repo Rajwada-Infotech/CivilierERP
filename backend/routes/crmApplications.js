@@ -272,7 +272,7 @@ router.get("/", requirePageRight("crm-applications", "view"), async (req, res) =
     `);
 
     const countReq = pool.request();
-    const countWhere = buildApplicationFilters(countReq, req.query);
+    const countWhere = buildApplicationFilters(countReq, req.query, req.projectScope);
     let countDisplayStageWhere = "";
     if (req.query.displayStage) {
       countReq.input("dstage", sql.NVarChar(20), req.query.displayStage);

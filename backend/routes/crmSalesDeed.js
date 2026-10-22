@@ -1126,6 +1126,7 @@ router.get("/query-payment/booking/:bookingId", requirePageRight("crm-query-paym
 router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              sd.DeedNo, sd.Id AS SalesDeedId
@@ -1134,6 +1135,7 @@ router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payme
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND sd.DirectorApprovalStatus = 'Approved'
       WHERE b.Status <> 'Cancelled'
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)
       ORDER BY b.CreatedAt DESC
     `);

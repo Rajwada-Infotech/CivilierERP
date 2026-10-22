@@ -81,12 +81,16 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .query(`
+      (() => {
+        const countReq = pool.request()
+          .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
+          .input("companyId2", sql.Int, companyId)
+          .input("projectId2", sql.Int, projectId)
+          .input("blockId2", sql.Int, blockId);
+        const scopeClause = req.projectScope
+          ? ` AND EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")})`
+          : "";
+        return countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmCustomer c
           WHERE c.IsActive = 1
@@ -94,7 +98,9 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
             AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
             AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
             AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
-        `),
+            ${scopeClause}
+        `);
+      })(),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
