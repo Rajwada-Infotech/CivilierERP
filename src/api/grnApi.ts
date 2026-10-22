@@ -230,60 +230,6 @@ export const deleteGRN = async (id: string) => {
 
 // ── Attachments ────────────────────────────────────────────────────────────
 
-export interface GRNAttachment {
-  id: number;
-  filename: string;
-  mimeType: string;
-  size: number;
-  url: string;
-}
-
-/**
- * Upload one or more files for a GRN. Can be called before the GRN itself
- * is saved (GRNID is NULL on the server until linked) -- same flow as
- * Vehicle In/Out attachments. Returns the uploaded attachment records;
- * pass their `id`s back as `attachmentIds` on create/update.
- */
-export const uploadGRNAttachments = async (
-  files: File[],
-): Promise<GRNAttachment[]> => {
-  const form = new FormData();
-  files.forEach((f) => form.append("file", f));
-  const res = await fetchWithAuth(`${BASE}/upload`, {
-    method: "POST",
-    body: form,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Failed to upload attachment(s)");
-  }
-  const data = await res.json().catch(() => ({}));
-  return data.attachments as GRNAttachment[];
-};
-
-export const deleteGRNAttachment = async (attachmentId: number) => {
-  const res = await fetchWithAuth(`${BASE}/attachment/${attachmentId}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Failed to delete attachment");
-  }
-  return res.json().catch(() => ({}));
-};
-
-export const getGRNAttachments = async (
-  grnId: number | string,
-): Promise<GRNAttachment[]> => {
-  const res = await fetchWithAuth(`${BASE}/${grnId}/attachments`, {
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Failed to fetch attachments");
-  }
-  return res.json().catch(() => []);
-};
-
 export const previewNextGRNNumber = async (
   parentDocNo?: string | null,
 ): Promise<DocNumberPreview> => {

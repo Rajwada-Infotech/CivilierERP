@@ -37,7 +37,35 @@ export interface Described {
   verb: string;
   subject: string;
   where: string;
+  /** The record the write touched: "#3270 · EB-2026-0012 · ACME Traders". */
+  record?: string;
+  /** What was submitted, as the server recorded it. */
+  fields?: [string, unknown][];
+  files?: string[];
 }
+
+// Writes logged by the server (backend/middleware/activityAudit.js) carry a JSON Details:
+// { v: 2, from, record: { id, no, name }, fields, files, message }. Older rows are a plain sentence.
+interface ServerDetails {
+  v: 2;
+  from?: string;
+  record?: { id?: string; no?: string; name?: string };
+  fields?: Record<string, unknown>;
+  files?: string[];
+}
+function serverDetails(details?: string | null): ServerDetails | null {
+  if (!details || details[0] !== "{") return null;
+  try {
+    const d = JSON.parse(details);
+    return d?.v === 2 ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** "EDocNo" -> "E Doc No", "item_name" -> "Item Name". */
+export const fieldLabel = (k: string) =>
+  titleFromSlug(k.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2"));
 
 export function describeActivity(e: SessionEvent): Described {
   if (e.event === "login") return { kind: "login", verb: "Signed in", subject: "", where: "" };
@@ -55,8 +83,19 @@ export function describeActivity(e: SessionEvent): Described {
   const api = String(e.requestUrl || e.resource || "").replace(/^\/api\//, "");
   const named = api.split("?")[0].split("/").filter(Boolean).filter((seg) => !isId(seg));
   const last = (named[named.length - 1] || "").toLowerCase();
-  const done = STATUS_VERBS[last];
+  const done = STATUS_VERBS[last] || STATUS_VERBS[last.split("-")[0]];
   const subject = titleFromSlug((done ? named.slice(0, -1) : named).slice(0, 2).join(" "));
-  const from = /\(from (\S+)\)/.exec(e.details || "")?.[1];
-  return { kind, verb: done || verb, subject, where: from ? pageName(from) : "" };
+  const sd = serverDetails(e.details);
+  const from = sd ? sd.from : /\(from (\S+)\)/.exec(e.details || "")?.[1];
+  const r = sd?.record;
+  const record = r ? [r.id && `#${r.id}`, r.no, r.name].filter(Boolean).join(" · ") : undefined;
+  return {
+    kind,
+    verb: done || verb,
+    subject,
+    where: from ? pageName(from) : "",
+    record: record || undefined,
+    fields: sd?.fields ? Object.entries(sd.fields) : undefined,
+    files: sd?.files,
+  };
 }

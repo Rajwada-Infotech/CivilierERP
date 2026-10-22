@@ -66,18 +66,6 @@ export const getUomOptions = async () => {
   return Array.isArray(data) ? data : [];
 };
 
-export const getStockBalance = async (itemId: string) => {
-  const res = await fetchWithAuth(
-    `${BASE}/stock/${encodeURIComponent(itemId)}`,
-  );
-  if (!res.ok) throw new Error("Failed to fetch stock");
-  return res.json().catch(() => ({})) as Promise<{
-    stockIn: number;
-    stockOut: number;
-    balance: number;
-  }>;
-};
-
 export const getIssues = async (params: {
   page: number;
   limit: number;
@@ -98,13 +86,6 @@ export const getIssues = async (params: {
 export const getIssue = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   if (!res.ok) throw new Error("Failed to fetch issue");
-  return res.json().catch(() => ({}));
-};
-
-export const previewNextIssueNumber = async (exb = false) => {
-  const suffix = exb ? "?exb=true" : "";
-  const res = await fetchWithAuth(`${BASE}/next-number${suffix}`);
-  if (!res.ok) throw new Error("Failed to preview issue number");
   return res.json().catch(() => ({}));
 };
 

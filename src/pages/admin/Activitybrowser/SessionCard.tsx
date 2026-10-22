@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, Fingerprint, Globe, LogIn, LogOut, Monitor,
 import type { GroupedSession } from "@/contexts/ActivityBrowserContext";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { describeActivity } from "./describeActivity";
+import { ChangeDetails } from "./ChangeDetails";
 import { KindTag, LBL, RoleTag, fmtDate, fmtDuration, initials, parseUA, useUserAvatars } from "./activityShared";
 
 export const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
@@ -124,6 +125,7 @@ export const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) 
                         {d.subject ? <span className="font-semibold"> {d.subject}</span> : null}
                         {d.where ? <span className="text-muted-foreground"> · from {d.where}</span> : null}
                       </p>
+                      <ChangeDetails d={d} />
                       {action.requestUrl && (
                         <p className="truncate font-heading tabular-nums text-[0.625rem] text-muted-foreground">
                           {action.requestMethod} {action.requestUrl}

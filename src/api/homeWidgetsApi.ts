@@ -20,8 +20,11 @@ export async function getModuleRanking(modules: string[]): Promise<ModuleRanking
 }
 
 export async function recordModuleVisit(module: string): Promise<void> {
+  // Bookkeeping for the home page's module ranking, not a change anyone made: kept out of the activity log
+  // (it was logged as a "create" on every module opened, swamping each person's real changes).
   await fetchWithAuth("/api/home/usage", {
     method: "POST",
+    skipActivityLog: true,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ module }),
   });

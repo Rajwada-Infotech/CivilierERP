@@ -16,6 +16,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
+const { projectPredicate } = require("../services/projectScope");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 // Reuse Engineering permission guard — DPR is an Engineering report
@@ -23,8 +24,10 @@ router.use(checkPermissionForMethod("Engineering", "DPR"));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Returns YYYY-MM-DD string for today (server local time). */
-const todayStr = () => new Date().toISOString().slice(0, 10);
+/** Today in India (the dates below are compared in IST). */
+const todayStr = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+
+// Deleted documents are left out; rejected / cancelled ones are listed but their value is not counted (see live below).
 
 /** Validate a date string; returns normalised YYYY-MM-DD or null. */
 const parseDate = (raw) => {
@@ -58,6 +61,8 @@ router.get("/", async (req, res) => {
     const date = parseDate(req.query.date) ?? todayStr();
     const companyId = parseInt(req.query.companyId, 10) || null;
     const projectId = parseInt(req.query.projectId, 10) || null;
+    // A project-scoped user sees only their projects' documents.
+    const inScope = (col) => projectPredicate(req.projectScope, col);
 
     // ── 1. BOQ ────────────────────────────────────────────────────────────────
     const boqReq = pool
@@ -93,8 +98,10 @@ router.get("/", async (req, res) => {
       LEFT JOIN dbo.TypeOfDoc  td ON td.TypeOfDocId = b.DocTypeId
       WHERE
         CAST(DATEADD(MINUTE, 330, b.CreatedAt) AS DATE) = @Date
+        AND ISNULL(b.Status, '') <> 'Deleted'
         AND (@CompanyId IS NULL OR b.CompanyId = @CompanyId)
         AND (@ProjectId IS NULL OR b.ProjectId = @ProjectId)
+        ${inScope("b.ProjectId")}
       ORDER BY b.BoqID DESC
     `);
 
@@ -145,8 +152,10 @@ router.get("/", async (req, res) => {
       LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
       WHERE
         CAST(DATEADD(MINUTE, 330, h.CreatedAt) AS DATE) = @Date
+        AND ISNULL(h.Status, '') <> 'Deleted'
         AND (@CompanyId IS NULL OR h.CompanyId = @CompanyId)
         AND (@ProjectId IS NULL OR h.ProjectId = @ProjectId)
+        ${inScope("h.ProjectId")}
       GROUP BY
         h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
         h.CompanyId, h.ProjectId, h.ContractorId, h.SupplierId,
@@ -179,11 +188,10 @@ router.get("/", async (req, res) => {
           a.Area              AS Quantity,
           a.Rate,
           a.GrandTotal        AS Amount,
-          NULL                AS CompletionPercentage,
           a.Remarks
         FROM dbo.WorkOrderActivities a
-        LEFT JOIN dbo.ActivityMaster ag  ON ag.id  = a.ActivityGroupId
-        LEFT JOIN dbo.ActivityMaster act ON act.id = a.ActivityId
+        LEFT JOIN dbo.EngineeringActivityMaster ag  ON ag.id  = a.ActivityGroupId
+        LEFT JOIN dbo.EngineeringActivityMaster act ON act.id = a.ActivityId
         LEFT JOIN dbo.UOMMaster      uom ON uom.Id  = a.UOMId
         WHERE a.WorkOrderHeaderId IN (${actParams.join(",")})
         ORDER BY a.WorkOrderHeaderId, a.Id
@@ -272,8 +280,10 @@ router.get("/", async (req, res) => {
       ) wo_uom ON wo_uom.WorkOrderHeaderId = wd.WorkOrderID
       WHERE
         CAST(DATEADD(MINUTE, 330, wd.CreatedAt) AS DATE) = @Date
+        AND ISNULL(wd.Status, '') <> 'Deleted'
         AND (@CompanyId IS NULL OR wd.CompanyId = @CompanyId)
         AND (@ProjectId IS NULL OR wd.ProjectId = @ProjectId)
+        ${inScope("wd.ProjectId")}
       ORDER BY wd.ID DESC
     `);
 
@@ -281,9 +291,11 @@ router.get("/", async (req, res) => {
     const boqRows = boqResult.recordset;
     const wdRows = wdResult.recordset;
 
-    const boqTotal = boqRows.reduce((s, r) => s + (r.TotalAmount ?? 0), 0);
-    const woTotal = workOrders.reduce((s, r) => s + (r.TotalAmount ?? 0), 0);
-    const wdTotal = wdRows.reduce((s, r) => s + (r.CertifiedAmount ?? 0), 0);
+    const live = (r) => !["Rejected", "Cancelled", "Deleted"].includes(r.Status);
+    const total = (rows, col) => rows.filter(live).reduce((s, r) => s + (Number(r[col]) || 0), 0);
+    const boqTotal = total(boqRows, "TotalAmount");
+    const woTotal = total(workOrders, "TotalAmount");
+    const wdTotal = total(wdRows, "CertifiedAmount");
 
     res.json({
       date,
@@ -294,7 +306,6 @@ router.get("/", async (req, res) => {
         woTotal,
         wdCount: wdRows.length,
         wdTotal,
-        grandTotal: boqTotal + woTotal + wdTotal,
       },
       boq: boqRows,
       workOrders,

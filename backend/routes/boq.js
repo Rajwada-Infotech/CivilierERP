@@ -236,8 +236,13 @@ router.get("/", cache("boq", 300), async (req, res) => {
       return request;
     };
 
+    // Totals over everything the filters match, not just this page: the page's figures used to add up
+    // only the rows on screen. Rejected BOQs stay out of the value.
     const countResult = await bindFilters(pool.request()).query(`
-      SELECT COUNT(*) AS total
+      SELECT COUNT(*) AS total,
+             ISNULL(SUM(CASE WHEN ISNULL(b.Status, 'Draft') <> 'Rejected' THEN b.TotalAmount ELSE 0 END), 0) AS totalValue,
+             SUM(CASE WHEN b.Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
+             SUM(CASE WHEN b.Status = 'Approved' THEN 1 ELSE 0 END) AS approved
       FROM dbo.BOQ b
       LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
@@ -277,12 +282,18 @@ router.get("/", cache("boq", 300), async (req, res) => {
         FETCH NEXT @limit ROWS ONLY
       `);
 
+    const sums = countResult.recordset[0];
     res.json({
       data: result.recordset,
       page,
       limit,
       total,
       totalPages: Math.ceil(total / limit),
+      summary: {
+        totalValue: Number(sums.totalValue) || 0,
+        pending: Number(sums.pending) || 0,
+        approved: Number(sums.approved) || 0,
+      },
     });
   } catch (err) {
     console.error("GET BOQ error:", err);

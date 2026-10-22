@@ -25,17 +25,6 @@ export interface DebitNoteInvoiceOption {
   sourceType: string | null;
 }
 
-export interface DebitNoteHistoryEntry {
-  id: number;
-  DocNo: string;
-  DebitDate: string;
-  TotalAmount: number;
-  Reason: string | null;
-  Status: string;
-  created_by_name: string | null;
-  created_at: string;
-}
-
 export const getDebitNotePartyOptions = async (partyType: string): Promise<DebitNotePartyOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/party-options?type=${encodeURIComponent(partyType)}`);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
@@ -44,12 +33,6 @@ export const getDebitNotePartyOptions = async (partyType: string): Promise<Debit
 
 export const getInvoicesForParty = async (partyId: number): Promise<DebitNoteInvoiceOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/invoices-for-party/${partyId}`);
-  if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json().catch(() => []);
-};
-
-export const getDebitNoteHistoryForInvoice = async (billId: number): Promise<DebitNoteHistoryEntry[]> => {
-  const res = await fetchWithAuth(`${BASE_URL}/for-invoice/${billId}`);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json().catch(() => []);
 };

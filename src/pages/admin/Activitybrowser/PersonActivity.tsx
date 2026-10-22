@@ -3,6 +3,7 @@ import React from "react";
 import { Loader2 } from "lucide-react";
 import type { SessionEvent, UserActivitySummary, UserActivityType } from "@/api/userActivityApi";
 import { describeActivity } from "./describeActivity";
+import { ChangeDetails } from "./ChangeDetails";
 import { KindTag, LBL, KEY_LINE, RULE, RoleTag, chip } from "./activityShared";
 import { ago } from "./PeopleList";
 
@@ -32,6 +33,7 @@ function EventRow({ e }: { e: SessionEvent }) {
           {d.subject ? <span className="font-semibold"> {d.subject}</span> : null}
           {d.where ? <span className="text-muted-foreground"> · from {d.where}</span> : null}
         </p>
+        <ChangeDetails d={d} />
         {(e.event !== "action" || e.ipAddress) && (
           <p className="text-[0.6875rem] text-muted-foreground truncate">
             {e.ipAddress && e.ipAddress !== "unknown" ? e.ipAddress : ""}

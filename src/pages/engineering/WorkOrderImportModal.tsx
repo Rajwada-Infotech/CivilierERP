@@ -127,13 +127,13 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4" onClick={importing ? undefined : onClose}>
-      <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+      <div className="w-full max-w-3xl max-h-[90vh] flex flex-col border border-foreground/30 bg-card" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-foreground/30">
           <div className="flex items-center gap-2">
             <FileSpreadsheet size={16} className="text-primary" />
             <h2 className="text-sm font-semibold">Import Work Orders from Excel (no BOQ)</h2>
           </div>
-          <button onClick={onClose} disabled={importing} className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-40" aria-label="Close"><X size={16} /></button>
+          <button onClick={onClose} disabled={importing} className="p-1 hover:bg-primary/5 text-muted-foreground disabled:opacity-40" aria-label="Close"><X size={16} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -141,7 +141,7 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
             <input ref={inputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden"
               onChange={(e) => { choose(e.target.files?.[0] ?? null); e.target.value = ""; }} />
             <button onClick={() => inputRef.current?.click()} disabled={checking || importing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-foreground/30 hover:bg-primary/5 disabled:opacity-50">
               <Upload size={13} /> {file ? "Choose a different file" : "Choose Excel File"}
             </button>
             {file && <span className="text-xs text-muted-foreground truncate max-w-[360px]">{file.name}</span>}
@@ -149,11 +149,11 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
           </div>
 
           {result && issues.length > 0 && (
-            <section className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 dark:border-red-900 p-3">
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-red-700 dark:text-red-400 mb-2">
+            <section className="border border-destructive bg-destructive/10 dark:bg-destructive/10 dark:border-destructive p-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-destructive dark:text-destructive mb-2">
                 <AlertCircle size={14} /> {issues.length >= 300 ? "300+" : issues.length} problem{issues.length > 1 ? "s" : ""} found — nothing was imported. Fix the file and choose it again.
               </p>
-              <ul className="max-h-64 overflow-y-auto space-y-1 text-xs text-red-800 dark:text-red-300">
+              <ul className="max-h-64 overflow-y-auto space-y-1 text-xs text-destructive dark:text-destructive">
                 {issues.map((i, k) => (
                   <li key={k}><span className="font-semibold">{i.sheet}{i.row > 0 ? ` · row ${i.row}` : ""}:</span> {i.message}</li>
                 ))}
@@ -162,8 +162,8 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
           )}
 
           {plans.length > 0 && !outcomes && (
-            <section className="rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-900 p-3 space-y-2">
-              <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+            <section className="border border-foreground/40 bg-card p-3 space-y-2">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                 <CheckCircle2 size={14} /> File is valid — {plans.length} Work Order{plans.length === 1 ? "" : "s"} ready to import (no BOQ link)
               </p>
               <div className="overflow-x-auto">
@@ -174,7 +174,7 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
                   </tr></thead>
                   <tbody>
                     {plans.map((p) => (
-                      <tr key={p.ref} className="border-t border-emerald-200/60 dark:border-emerald-900/60">
+                      <tr key={p.ref} className="border-t border-foreground/40">
                         <td className="py-1.5 pr-3 font-medium">{p.ref}</td>
                         <td className="py-1.5 pr-3">{p.summary.company} / {p.summary.project}</td>
                         <td className="py-1.5 pr-3">{p.summary.contractor}</td>
@@ -192,10 +192,10 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
           )}
 
           {outcomes && (
-            <section className="rounded-lg border border-border p-3 space-y-1.5">
+            <section className="border border-foreground/30 p-3 space-y-1.5">
               <p className="text-xs font-semibold flex items-center gap-1.5">{importing && <Loader2 size={12} className="animate-spin" />} {importing ? "Importing…" : "Import finished"}</p>
               {outcomes.map((o) => (
-                <p key={o.ref} className={`text-xs flex items-start gap-1.5 ${o.ok ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
+                <p key={o.ref} className={`text-xs flex items-start gap-1.5 ${o.ok ? "text-foreground" : "text-destructive dark:text-destructive"}`}>
                   {o.ok ? <CheckCircle2 size={13} className="mt-0.5 shrink-0" /> : <XCircle size={13} className="mt-0.5 shrink-0" />}
                   <span><b>{o.ref}</b> — {o.ok ? `created as ${o.docNo}` : o.message}</span>
                 </p>
@@ -204,11 +204,11 @@ function ImportDialog({ finYears, onClose, onImported }: { finYears: FinYears; o
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
-          <button onClick={onClose} disabled={importing} className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted disabled:opacity-50">{finished ? "Close" : "Cancel"}</button>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-foreground/30">
+          <button onClick={onClose} disabled={importing} className="px-3 py-1.5 text-xs border border-foreground/30 hover:bg-primary/5 disabled:opacity-50">{finished ? "Close" : "Cancel"}</button>
           {!finished && (
             <button onClick={run} disabled={!plans.length || importing || checking}
-              className="gradient-engineering inline-flex items-center gap-1.5 text-white text-xs font-semibold px-4 py-1.5 rounded-lg disabled:opacity-50">
+              className="gradient-engineering inline-flex items-center gap-1.5 text-white text-xs font-semibold px-4 py-1.5 disabled:opacity-50">
               {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import Work Order{plans.length > 1 ? "s" : ""}
             </button>
           )}
@@ -240,12 +240,12 @@ export function WorkOrderImportButtons({ onImported }: { onImported: () => void 
   return (
     <>
       <button onClick={template} disabled={busy} title="Download the Excel template for importing Work Orders without a BOQ"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium hover:bg-muted disabled:opacity-50">
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-foreground/30 text-sm font-medium hover:bg-primary/5 disabled:opacity-50">
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
         <span className="hidden sm:inline">Download Template</span>
       </button>
       <button onClick={() => setOpen(true)} title="Import Work Orders from the filled Excel template"
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium hover:bg-muted">
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-foreground/30 text-sm font-medium hover:bg-primary/5">
         <Upload size={13} />
         <span className="hidden sm:inline">Import Work Order</span>
       </button>

@@ -116,7 +116,6 @@ export const previewInterCompanyTransfer = async (payload: {
   return handleResponse<InterCompanyTransferPreview>(res);
 };
 
-
 export const createInterCompanyTransfer = async (
   payload: InterCompanyTransferPayload,
 ): Promise<InterCompanyTransferResult> => {
@@ -173,7 +172,6 @@ export interface InterCompanyTransferDetail extends InterCompanyTransferSummary 
   items: InterCompanyTransferDetailItem[];
 }
 
-
 export const getInterCompanyTransfer = async (
   id: number,
 ): Promise<InterCompanyTransferDetail> => {
@@ -210,24 +208,6 @@ export const getInterCompanyTransferPosting = async (
   return handleResponse(res);
 };
 
-export const getInterCompanyTransfers = async (params: {
-  companyId?: string | number;
-  projectId?: string | number;
-  dateFrom?: string;
-  dateTo?: string;
-  status?: string;
-  page?: number;
-  limit?: number;
-} = {}): Promise<{ data: InterCompanyTransferSummary[]; total: number }> => {
-  const qs = new URLSearchParams();
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
-  });
-  const s = qs.toString();
-  const res = await fetchWithAuth(`${BASE}${s ? `?${s}` : ""}`);
-  return handleResponse(res);
-};
-
 // Deletes an ICT of any status — for a Completed one, the backend reverses
 // the StockLedger movement and the two-sided GL voucher first.
 export const deleteInterCompanyTransfer = async (
@@ -236,7 +216,6 @@ export const deleteInterCompanyTransfer = async (
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handleResponse(res);
 };
-
 
 // ── Fixed Asset items ─────────────────────────────────────────────────────────
 // A Fixed Asset unit is tracked individually (its own FA Item Code and
