@@ -8,6 +8,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../services/crmHoldService");
@@ -1042,7 +1043,7 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // Reason is required only when routing through the amendment queue (agreement
 // Executed/Registered). For direct releases (normal booking workflow) it is
 // optional — recorded in the audit trail when supplied, silent when not.
-router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
+router.delete("/:id", allowRoles("super_admin"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);

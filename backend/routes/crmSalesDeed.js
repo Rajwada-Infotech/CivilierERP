@@ -411,6 +411,7 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("r.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
@@ -429,13 +430,16 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY r.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
+      (() => {
+        const countReq = pool.request()
+          .input("st2", sql.NVarChar(20), status || null)
+          .input("companyId2", sql.Int, companyId)
+          .input("projectId2", sql.Int, projectId)
+          .input("blockId2", sql.Int, blockId)
+          .input("search2", sql.NVarChar(200), search ? `%${search}%` : null);
+        let scopeClause = "";
+        if (req.projectScope) scopeClause = require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId");
+        return countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmRegistry r
           JOIN dbo.CrmBooking b ON b.Id = r.BookingId
@@ -446,7 +450,9 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
             AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
             AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
+            ${scopeClause}
+        `);
+      })(),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
@@ -1083,6 +1089,7 @@ router.get("/query-payment", requirePageRight("crm-query-payment", "view"), asyn
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("qp.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     const result = await req0.query(`${QP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY qp.CreatedAt DESC`);
     res.json(result.recordset);
