@@ -11,7 +11,6 @@ export const getEntryTypes = async () => {
 export const addEntryType = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -27,7 +26,6 @@ export const updateEntryType = async (
 ) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {

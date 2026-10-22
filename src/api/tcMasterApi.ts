@@ -10,7 +10,6 @@ export const getTCRecords = async () => {
 export const addTCRecord = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -27,7 +26,6 @@ export const updateTCRecord = async (
 ) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {

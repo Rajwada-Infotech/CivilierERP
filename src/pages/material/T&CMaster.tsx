@@ -8,10 +8,8 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
-import { FileText } from "lucide-react";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import {
   getTCRecords,
   addTCRecord,
@@ -82,42 +80,14 @@ const COLUMNS: ColumnDef[] = [
 
 // ─── Column renderers ─────────────────────────────────────────────────────────
 const columnRenderers = {
-  name: (value: unknown) => (
-    <div className="flex items-center gap-2">
-      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-        <FileText size={13} />
-      </div>
-      <span className="font-heading font-semibold text-sm">
-        {String(value ?? "")}
-      </span>
-    </div>
-  ),
+  name: (value: unknown) => <span className="font-heading text-sm font-semibold text-foreground">{String(value ?? "")}</span>,
   terms: (value: unknown, row: Record<string, unknown>) => (
     <div className="max-w-xs">
-      <p className="text-xs line-clamp-2 text-foreground">
-        {String(value ?? "")}
-      </p>
-      {row.remarks && (
-        <p className="text-[0.625rem] text-muted-foreground mt-0.5 line-clamp-1">
-          {String(row.remarks)}
-        </p>
-      )}
+      <p className="text-xs line-clamp-2 text-foreground">{String(value ?? "")}</p>
+      {row.remarks && <p className="text-[0.625rem] text-muted-foreground mt-0.5 line-clamp-1">{String(row.remarks)}</p>}
     </div>
   ),
-  status: (value: unknown) => (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-heading border ${
-        value
-          ? "border-emerald-200/60 bg-emerald-50/80 text-emerald-700"
-          : "border-amber-200/60 bg-amber-50/80 text-amber-700"
-      }`}
-    >
-      <span
-        className={`mr-1 h-1.5 w-1.5 rounded-full ${value ? "bg-emerald-500" : "bg-amber-500"}`}
-      />
-      {value ? "Active" : "Inactive"}
-    </span>
-  ),
+  status: (value: unknown) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "waiting"} />,
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -129,7 +99,6 @@ export default function TCMaster() {
     data: dbData,
     isLoading,
     error,
-    isFetching,
   } = useQuery({
     queryKey: ["tc-master"],
     queryFn: getTCRecords,
@@ -137,45 +106,16 @@ export default function TCMaster() {
     refetchOnMount: true, // ← always refetch when the page mounts
   });
 
-  // Only pass real rows — never pass [] during a background refetch
-  const rows: RecordWithId[] =
-    Array.isArray(dbData) && !isFetching
-      ? dbData.map(toRow)
-      : Array.isArray(dbData)
-        ? dbData.map(toRow)
-        : [];
+  const rows: RecordWithId[] = Array.isArray(dbData) ? dbData.map(toRow) : [];
+
+  // Purchase orders, contracts and work orders read the same list (key "tc-master").
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["tc-master"] });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    if (event.action === "add") {
-      await addTCRecord(toPayload(event.record));
-      toast.success("T&C record saved!");
-      // Remove cached data entirely so MasterPage gets fresh array on refetch
-      queryClient.removeQueries({ queryKey: ["tc-master"] });
-      await queryClient.fetchQuery({
-        queryKey: ["tc-master"],
-        queryFn: getTCRecords,
-      });
-    }
-
-    if (event.action === "update") {
-      await updateTCRecord(Number(event.id), toPayload(event.record));
-      toast.success("T&C record updated!");
-      queryClient.removeQueries({ queryKey: ["tc-master"] });
-      await queryClient.fetchQuery({
-        queryKey: ["tc-master"],
-        queryFn: getTCRecords,
-      });
-    }
-
-    if (event.action === "delete") {
-      await deleteTCRecord(Number(event.id));
-      toast.success("T&C record deleted!");
-      queryClient.removeQueries({ queryKey: ["tc-master"] });
-      await queryClient.fetchQuery({
-        queryKey: ["tc-master"],
-        queryFn: getTCRecords,
-      });
-    }
+    if (event.action === "add") await addTCRecord(toPayload(event.record));
+    if (event.action === "update") await updateTCRecord(Number(event.id), toPayload(event.record));
+    if (event.action === "delete") await deleteTCRecord(Number(event.id));
+    await refresh();
   };
 
   if (isLoading)
@@ -183,19 +123,18 @@ export default function TCMaster() {
 
   if (error)
     return (
-      <div className="p-6 text-red-500">Failed to load T&amp;C records.</div>
+      <div className="p-6 text-sm text-destructive">Failed to load terms and conditions.</div>
     );
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "T&C"]} />
-      <MaterialShell
-        title="T&C Master"
-        subtitle="Manage terms and conditions for contracts and orders"
-        icon={FileText}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Terms and conditions"
+        subtitle="The clauses picked onto purchase orders, contracts and work orders; inactive ones are not offered."
       >
       <MasterPage
-        saveButtonClass="btn-module "
         title="T&C Master"
         fields={FIELDS}
         columns={COLUMNS}
@@ -207,8 +146,9 @@ export default function TCMaster() {
           filename: "tc-master",
           columns: [
             { header: "Name", accessor: "name" },
-            { header: "Terms Preview", accessor: "terms" },
-            { header: "Status", accessor: "status" },
+            { header: "Terms & Conditions", accessor: "terms" },
+            { header: "Remarks", accessor: "remarks" },
+            { header: "Status", accessor: (r) => (r.status ? "Active" : "Inactive") },
           ],
         }}
         canCreate={rights.canCreate}
@@ -216,7 +156,7 @@ export default function TCMaster() {
         canDelete={rights.canDelete}
         canExport={rights.canExport}
       />
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 }
