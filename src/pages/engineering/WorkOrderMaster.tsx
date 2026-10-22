@@ -5,14 +5,12 @@ import React, { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
-import { Plus, Save, RotateCcw, Building2, FolderPlus, Calculator, IndianRupee, FileText, Calendar, Hash, User, Layers, X, Check, Package, Hammer, Receipt, AlertCircle, PenSquare, List, ClipboardList } from "lucide-react";
+import { Plus, Save, RotateCcw, Building2, FolderPlus, Calculator, IndianRupee, FileText, Calendar, Hash, User, Layers, X, Check, Package, Hammer, Receipt, AlertCircle, ClipboardList, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { createWorkOrder, saveFullWorkOrder, fetchCompanies, fetchProjects, fetchContractors, fetchSuppliers, fetchActivityGroups, fetchActivities, fetchItems } from "@/api/workOrderApi";
-import { StatusBadge } from "@/components/StatusBadge";
-import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { useQuery } from "@tanstack/react-query";
@@ -73,7 +71,7 @@ const WorkOrderMaster: React.FC = () => {
   }, [activeFinYear, selectedFinYear]);
 
   // ── Tab state ─────────────────────────────────────────────────────────────
-  const [viewMode, setViewMode] = useState<ViewMode>("create");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [listKey, setListKey] = useState(0);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
@@ -93,9 +91,6 @@ const WorkOrderMaster: React.FC = () => {
   const [groups, setGroups] = useState<ActivityGroup[]>([EMPTY_GROUP()]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [savedId, setSavedId] = useState<number | null>(null);
-  const [savedStatus, setSavedStatus] = useState<string>("Draft");
   const [woDocTypeId, setWoDocTypeId] = useState<number | null>(null);
   const [woDocNo, setWoDocNo] = useState("");
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
@@ -286,9 +281,6 @@ const WorkOrderMaster: React.FC = () => {
     setForm({ ...EMPTY_FORM(), docNumber: nextDocNo });
     setGroups([EMPTY_GROUP()]);
     setErrors({});
-    setSaved(false);
-    setSavedId(null);
-    setSavedStatus("Draft");
     setWoDocTypeId(nextDocTypeId);
     setWoDocNo(nextDocNo);
     if (nextDocTypeId) {
@@ -392,11 +384,11 @@ const WorkOrderMaster: React.FC = () => {
         activities,
       });
       toast.success("Work order saved successfully!");
-      setSaved(true);
-      setSavedId(newHeaderId);
-      setSavedStatus("Draft");
       await resetAll(!!woDocTypeId);
-      setTimeout(() => setSaved(false), 3000);
+      // Open the saved work order, where it can be sent for approval, and refresh the list behind it.
+      setListKey((k) => k + 1);
+      setSelectedOrderId(newHeaderId);
+      setViewMode("detail");
     } catch (err: unknown) {
       const msg: string = err instanceof Error ? err.message : String(err);
       let friendly = "Something went wrong. Please try again.";
@@ -486,7 +478,7 @@ const WorkOrderMaster: React.FC = () => {
         action={
           <div className="flex items-center gap-2 shrink-0">
             {/* Excel import — Work Orders without a BOQ */}
-            {woRights.canCreate && (
+            {viewMode === "list" && woRights.canCreate && (
               <WorkOrderImportButtons
                 onImported={() => {
                   setListKey((k) => k + 1);
@@ -494,25 +486,16 @@ const WorkOrderMaster: React.FC = () => {
                 }}
               />
             )}
-            {/* Tab toggle */}
-            <div className="flex items-center gap-2">
-              {woRights.canCreate && (
-                <button
-                  onClick={() => setViewMode("create")}
-                  className={TAB(viewMode === "create")}
-                >
-                  <PenSquare size={13} />
-                  <span className="hidden sm:inline">Create</span>
-                </button>
-              )}
-              <button
-                onClick={() => setViewMode("list")}
-                className={TAB(viewMode === "list" || viewMode === "detail" || viewMode === "edit")}
-              >
-                <List size={13} />
-                <span className="hidden sm:inline">View All</span>
+            {viewMode === "list" && woRights.canCreate && (
+              <button onClick={() => setViewMode("create")} className={`${TAB(true)} px-4`}>
+                <Plus size={13} /> New work order
               </button>
-            </div>
+            )}
+            {viewMode === "create" && (
+              <button onClick={() => setViewMode("list")} className={TAB(false)}>
+                <ArrowLeft size={13} /> Back to list
+              </button>
+            )}
 
             {viewMode === "create" && (
               <>
@@ -532,11 +515,6 @@ const WorkOrderMaster: React.FC = () => {
                     <>
                       <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white animate-spin" />
                       <span>Saving…</span>
-                    </>
-                  ) : saved ? (
-                    <>
-                      <Check size={14} />
-                      <span>Saved!</span>
                     </>
                   ) : (
                     <>
@@ -601,37 +579,6 @@ const WorkOrderMaster: React.FC = () => {
                 <p className="text-sm text-foreground">
                   {dropdownError}
                 </p>
-              </div>
-            )}
-
-            {savedId && (
-              <div className="mb-5 border border-foreground/30 bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-muted-foreground">
-                    Approval Status:
-                  </span>
-                  <StatusBadge status={savedStatus} />
-                </div>
-                <ApprovalActions
-                  status={savedStatus}
-                  recordId={savedId}
-                  endpoint="/api/work-orders"
-                  onSuccess={async () => {
-                    try {
-                      const res = await fetchWithAuth(
-                        `/api/work-orders/${savedId}`,
-                      );
-                      if (res.ok) {
-                        const data = await res.json();
-                        setSavedStatus(
-                          data.Status || data.status || savedStatus,
-                        );
-                      }
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                />
               </div>
             )}
 
@@ -1209,11 +1156,6 @@ const WorkOrderMaster: React.FC = () => {
                   <>
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
                     Saving…
-                  </>
-                ) : saved ? (
-                  <>
-                    <Check size={14} />
-                    Saved!
                   </>
                 ) : (
                   <>
