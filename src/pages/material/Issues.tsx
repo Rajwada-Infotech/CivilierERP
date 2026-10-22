@@ -3,6 +3,7 @@
 //   useIssues  all state, queries, cart, mutations, CSV import
 //   list:  IssueList          form:  IssueFormHeader, IssueCart, IssueFormFooter
 //   view:  IssueViewOverlay
+import { IssueImportDialog } from "./issues/IssueImportDialog";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { Plus, ArrowDownToLine, Download, Upload, Loader2 } from "lucide-react";
@@ -81,6 +82,14 @@ export default function Issues() {
           </div>
         )}
         <IssueViewOverlay m={m} />
+        {m.importPlan && (
+          <IssueImportDialog
+            fileName={m.importPlan.fileName}
+            plan={m.importPlan.plan}
+            onClose={() => m.setImportPlan(null)}
+            onCreated={() => m.queryClient.invalidateQueries({ queryKey: ["issues-list"] })}
+          />
+        )}
       </MaterialShell>
     </>
   );

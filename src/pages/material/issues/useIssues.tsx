@@ -1,5 +1,6 @@
 // Everything the Material Issues page holds: master data, the register, the form and cart,
 // mutations and CSV import. The page and its parts read from this one object.
+import { ISSUES_TEMPLATE_COLUMNS, planImport, type PlannedIssue } from "./issueImport";
 import * as issuesApi from "@/api/issuesApi";
 import { generateUUID } from "../../../utils/cryptoPolyfill";
 import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
@@ -16,7 +17,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
-import { ISSUES_TEMPLATE_COLUMNS, CartItem, IssueHeader, defaultHeader, blankCartItem } from "./config";
+import { CartItem, IssueHeader, defaultHeader, blankCartItem } from "./config";
 
 export function useIssues() {
   const rights = usePageRights("material-issues");
@@ -24,6 +25,7 @@ export function useIssues() {
   const [searchParams, setSearchParams] = useSearchParams();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [importPlan, setImportPlan] = useState<{ fileName: string; plan: PlannedIssue[] } | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRecord, setViewingRecord] = useState<any>(null);
@@ -750,7 +752,16 @@ export function useIssues() {
       const text = await file.text();
       const rows = parseCsv(text);
       if (!rows.length) { toast.error("CSV is empty"); return; }
-      toast.success(`${rows.length} rows read — full import coming soon`);
+      const plan = await planImport(rows, {
+        companies: companies as any[],
+        projects: projects as any[],
+        godowns: godowns as any[],
+        finYears: finYears as any[],
+        uoms: uoms as any[],
+        itemsFor: (gid) => issuesApi.getItemOptions(gid).then((d: any) => (Array.isArray(d) ? d : [])),
+      });
+      if (!plan.length) { toast.error("No rows to import"); return; }
+      setImportPlan({ fileName: file.name, plan });
     } catch (err: any) {
       toast.error(err?.message || "Failed to parse CSV");
     } finally {
@@ -765,6 +776,8 @@ export function useIssues() {
     setSearchParams,
     importFileInputRef,
     importing,
+    importPlan,
+    setImportPlan,
     setImporting,
     viewMode,
     setViewMode,

@@ -20,26 +20,23 @@ export const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Status", accessor: "Status" },
 ];
 
-// ─── Template columns ─────────────────────────────────────────────────────────
-export const ISSUES_TEMPLATE_COLUMNS = [
-  { header: "Issue Date (YYYY-MM-DD)", accessor: "Issue Date (YYYY-MM-DD)" },
-  { header: "Company", accessor: "Company" },
-  { header: "Project/Site", accessor: "Project/Site" },
-  { header: "Godown", accessor: "Godown" },
-  { header: "Issued To", accessor: "Issued To" },
-  { header: "Remarks", accessor: "Remarks" },
-  { header: "Item Name", accessor: "Item Name" },
-  { header: "UOM", accessor: "UOM" },
-  { header: "Quantity", accessor: "Quantity" },
-];
-
-// ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
+// ─── Sheet styles ────────────────────────────────────────────────────────────────────────────────────────
 
 export const inputCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+  "w-full px-3 py-2.5 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground placeholder:text-muted-foreground/60 disabled:opacity-60 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:cursor-pointer";
 
 export const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+  "w-full px-3 py-2.5 pr-8 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground appearance-none disabled:opacity-60";
+
+export const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+export const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+export const RULE = "1px solid hsl(var(--foreground))";
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+export const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+export const ACT = "w-7 h-7 flex items-center justify-center border border-transparent text-muted-foreground transition-colors disabled:opacity-40";
+export const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
