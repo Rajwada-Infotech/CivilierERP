@@ -12,6 +12,8 @@
 //   node scripts/whoDidWhat.js --user sanjit         one person (name, email or id; partial match)
 //   node scripts/whoDidWhat.js --since 2026-10-01    only rows / activity from that date (where a date exists)
 //   node scripts/whoDidWhat.js --csv > who.csv       one line per person x table x action, for a spreadsheet
+//   node scripts/whoDidWhat.js --user sanjit --detail   that person's every create / update / delete in the activity log,
+//                                                       and names in the records that look like them but match no user
 // Read-only: it changes nothing.
 const { connectDB, getPool, closeDB, sql } = require("../db");
 
@@ -22,6 +24,7 @@ const arg = (name) => {
 const ONLY = (arg("--user") || "").toLowerCase();
 const SINCE = arg("--since");
 const CSV = process.argv.includes("--csv");
+const DETAIL = process.argv.includes("--detail");
 
 // Columns that say who did something, matched by pattern: tables prefix them (ECreatedBy on invoices,
 // PCreatedBy on payments, RPCreatedBy on received payments, M_CreatedBy on items, created_by_id ...).
@@ -193,6 +196,37 @@ const csvCell = (v) => {
         const parts = Object.entries(acts).map(([k, v]) => `${k} ${v.n}${v.last ? ` (last ${fmtDate(v.last)})` : ""}`);
         console.log(`    ${table.replace(/^dbo\./, "").padEnd(34)} ${parts.join(" · ")}`);
       }
+    }
+  }
+
+  // --detail (with --user): each create / update / delete the activity log holds for the person, and any
+  // name in the records that looks like them but matched no user (a first name, an old email ...).
+  if (ONLY && DETAIL) {
+    for (const u of picked) {
+      console.log("\n" + "-".repeat(78));
+      console.log(`${u.name}: every change in the activity log${SINCE ? ` since ${SINCE}` : ""}`);
+      try {
+        const req = pool.request().input("uid", sql.NVarChar(50), String(u.id));
+        if (SINCE) req.input("since", sql.DateTime2, new Date(SINCE));
+        const ev = (await req.query(`
+          SELECT CreatedAt, LOWER(ISNULL(ActionType, EventType)) AS kind, Resource, Details, RequestMethod, RequestUrl
+          FROM dbo.UserActivityLog
+          WHERE CAST(UserId AS NVARCHAR(50)) = @uid AND LOWER(ISNULL(ActionType, '')) IN ('create', 'update', 'delete')
+          ${SINCE ? "AND CreatedAt >= @since" : ""}
+          ORDER BY CreatedAt DESC
+        `)).recordset;
+        if (!ev.length) console.log("  none");
+        for (const e of ev) {
+          console.log(`  ${fmtDate(e.CreatedAt)}  ${String(e.kind).padEnd(6)} ${e.RequestMethod || ""} ${e.RequestUrl || ""}  ${e.Resource || ""}${e.Details ? ` · ${String(e.Details).slice(0, 80)}` : ""}`);
+        }
+      } catch (e) {
+        console.log(`  (activity log not read: ${e.message})`);
+      }
+      const keys = [String(u.name || "").split(/\s+/)[0], String(u.email || "").split("@")[0]].filter((k) => k && k.length >= 3).map((k) => k.toLowerCase());
+      const look = [...unmatched.entries()].filter(([raw]) => keys.some((k) => String(raw).toLowerCase().includes(k)));
+      console.log(`\n  names in the records that look like ${u.name} but match no user:`);
+      if (!look.length) console.log("    none");
+      for (const [raw, list] of look) console.log(`    "${raw}": ${list.map((z) => `${z.table.replace(/^dbo\./, "")} ${z.action} ${z.n}`).join(", ")}`);
     }
   }
 
