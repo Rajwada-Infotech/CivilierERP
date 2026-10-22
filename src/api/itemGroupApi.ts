@@ -1,24 +1,16 @@
-// FIX: updateItemGroup and deleteItemGroup were missing Authorization headers.
-// Every PUT and DELETE was getting a 401 from the backend silently.
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE_URL = "/api/item-groups";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
-
 export const getItemGroups = async () => {
-  const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json().catch(() => ({}));
 };
 
 export const addItemGroup = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -32,10 +24,8 @@ export const updateItemGroup = async (
   id: string,
   data: Record<string, unknown>,
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -46,9 +36,8 @@ export const updateItemGroup = async (
 };
 
 export const deleteItemGroup = async (id: string) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(), // was missing — caused 401
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

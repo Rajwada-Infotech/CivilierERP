@@ -65,7 +65,7 @@ export function AlternateUomTagger({
             <select
               value={r.uomCode}
               onChange={(e) => updateRow(idx, "uomCode", e.target.value)}
-              className="flex-1 px-2.5 py-1.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="flex-1 px-2.5 py-1.5 text-xs bg-card border border-foreground/30 text-foreground focus:outline-none"
             >
               {options
                 .filter((u) => u.value !== baseUomCode)
@@ -84,16 +84,16 @@ export function AlternateUomTagger({
               step="any"
               value={r.conversionFactor}
               onChange={(e) => updateRow(idx, "conversionFactor", e.target.value)}
-              className="w-24 px-2.5 py-1.5 rounded-lg text-xs font-mono bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-24 px-2.5 py-1.5 text-xs font-heading bg-card border border-foreground/30 text-foreground focus:outline-none"
               placeholder="0.3"
             />
-            <span className="text-[0.6875rem] text-muted-foreground shrink-0 font-mono">
+            <span className="text-[0.6875rem] text-muted-foreground shrink-0 font-heading">
               {baseLabel}
             </span>
             <button
               type="button"
               onClick={() => removeRow(idx)}
-              className="p-1 rounded hover:bg-destructive/10 text-destructive shrink-0"
+              className="p-1 hover:bg-destructive/10 text-destructive shrink-0"
             >
               <Trash2 size={13} />
             </button>
@@ -104,7 +104,7 @@ export function AlternateUomTagger({
         type="button"
         onClick={addRow}
         disabled={availableToAdd.length === 0}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading border border-dashed border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-heading border border-dashed border-foreground/30 text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <Plus size={12} /> Add alternate UOM
       </button>

@@ -3,11 +3,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/vehicle-in-out";
 
-const authHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** A single attachment (camera capture or file pick), stored as binary in the DB. */
@@ -195,9 +190,8 @@ export async function previewNextVEHNumber(): Promise<{ nextDocNo: string }> {
 export async function createVehicleInOut(
   payload: VehicleInOutPayload,
 ): Promise<{ vehicleInOutId: number; docNo: string }> {
-  const res = await fetch(BASE, {
+  const res = await fetchWithAuth(BASE, {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -211,9 +205,8 @@ export async function updateVehicleInOut(
   id: number,
   payload: VehicleInOutPayload,
 ): Promise<void> {
-  const res = await fetch(`${BASE}/${id}`, {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
-    headers: authHeaders(),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -223,9 +216,8 @@ export async function updateVehicleInOut(
 }
 
 export async function deleteVehicleInOut(id: number): Promise<void> {
-  const res = await fetch(`${BASE}/${id}`, {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -246,13 +238,11 @@ export async function uploadVehicleAttachments(
   attachments: VehicleAttachment[];
   ids: number[];
 }> {
-  const token = sessionStorage.getItem("token") ?? "";
   const form = new FormData();
   for (const file of files) form.append("file", file);
 
-  const res = await fetch(`${BASE}/upload`, {
+  const res = await fetchWithAuth(`${BASE}/upload`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: form,
   });
   if (!res.ok) {
@@ -266,9 +256,8 @@ export async function uploadVehicleAttachments(
 export async function deleteVehicleAttachment(
   attachmentId: number,
 ): Promise<void> {
-  const res = await fetch(`${BASE}/attachment/${attachmentId}`, {
+  const res = await fetchWithAuth(`${BASE}/attachment/${attachmentId}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));

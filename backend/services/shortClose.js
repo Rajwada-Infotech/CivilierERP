@@ -16,8 +16,11 @@
 
 const { sql } = require("../db");
 const { getMRItemFulfillment } = require("./materialRequestFulfillment");
+const { projectPredicate } = require("./projectScope");
 
-async function searchCandidates(pool, { docType, finYearId, companyId, projectId }) {
+// scope: the user's project list (null = every project), so nobody sees or closes
+// documents of projects outside their access.
+async function searchCandidates(pool, { docType, finYearId, companyId, projectId, scope = null }) {
   if (docType === "PO") {
     const request = pool.request();
     const conditions = [
@@ -25,6 +28,7 @@ async function searchCandidates(pool, { docType, finYearId, companyId, projectId
       "ia.TotalOrdered > ia.TotalReceived",
       "ia.TotalReceived > 0",
     ];
+    if (scope) conditions.push(projectPredicate(scope, "po.ProjectId", "").trim());
     if (finYearId) {
       conditions.push("po.fy_id = @finYearId");
       request.input("finYearId", sql.Int, parseInt(finYearId, 10));
@@ -73,6 +77,7 @@ async function searchCandidates(pool, { docType, finYearId, companyId, projectId
   // docType === "MR"
   const request = pool.request();
   const conditions = ["mr.Status = 'Partially Fulfilled'"];
+  if (scope) conditions.push(projectPredicate(scope, "mr.ProjectId", "").trim());
   if (finYearId) {
     conditions.push("mr.FinYearId = @finYearId");
     request.input("finYearId", sql.Int, parseInt(finYearId, 10));
@@ -124,11 +129,14 @@ async function searchCandidates(pool, { docType, finYearId, companyId, projectId
 }
 
 // Processes each id independently — a failure on one doc doesn't block the
-// rest. Re-validates the "still Partial" condition right before writing
-// (the same predicate searchCandidates used), guarding against another user
-// having changed the document in between search and confirm.
-async function processShortClose(pool, { docType, ids, remarks, userEmail }) {
+// rest. Re-validates the "still Partial" condition (the same predicate the
+// search used, within the user's projects) once before writing, guarding
+// against another user having changed a document between search and confirm.
+async function processShortClose(pool, { docType, ids, remarks, userEmail, scope = null }) {
   const results = [];
+  // One search for the whole batch — it was re-run for every selected id, and
+  // for MRs each run works out every partially fulfilled request's items.
+  const candidates = await searchCandidates(pool, { docType, finYearId: null, companyId: null, projectId: null, scope });
   for (const rawId of ids) {
     const docId = parseInt(rawId, 10);
     if (!docId) {
@@ -138,12 +146,6 @@ async function processShortClose(pool, { docType, ids, remarks, userEmail }) {
     try {
       const table = docType === "PO" ? "dbo.PurchaseOrders" : "dbo.MaterialRequests";
       const idCol = docType === "PO" ? "PurchaseOrderID" : "MRId";
-      const candidates = await searchCandidates(pool, {
-        docType,
-        finYearId: null,
-        companyId: null,
-        projectId: null,
-      });
       const match = candidates.find((c) => c.docId === docId);
       if (!match) {
         results.push({

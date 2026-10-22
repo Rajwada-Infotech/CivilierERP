@@ -16,6 +16,40 @@ router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+// A return is checked against its issue: the stock goes back into the godown the
+// issue took it from, and no line may return more than was issued less what other
+// returns of that issue (any not rejected) already take back.
+async function checkAgainstIssue(pool, issueId, items, excludeReturnId = null) {
+  if (!issueId) return { error: "Select the issue being returned" };
+  const iid = parseInt(issueId, 10);
+  const [hdr, lines] = await Promise.all([
+    pool.request().input("IssueId", sql.Int, iid)
+      .query("SELECT GodownId, Status FROM dbo.MaterialIssues WHERE IssueId = @IssueId"),
+    pool.request().input("IssueId", sql.Int, iid).input("Exclude", sql.Int, excludeReturnId)
+      .query(`
+        SELECT mii.IssueItemId, mii.Quantity,
+               ISNULL((SELECT SUM(ri.Quantity) FROM dbo.MaterialIssueReturnItems ri
+                       JOIN dbo.MaterialIssueReturn r ON r.ReturnId = ri.ReturnId
+                       WHERE ri.OrigIssueItemId = mii.IssueItemId AND r.Status <> 'Rejected'
+                         AND (@Exclude IS NULL OR r.ReturnId <> @Exclude)), 0) AS Returned
+        FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = @IssueId
+      `),
+  ]);
+  if (!hdr.recordset.length) return { error: "The issue being returned was not found" };
+  const byLine = new Map(lines.recordset.map((l) => [Number(l.IssueItemId), l]));
+  for (const item of items) {
+    const qty = parseFloat(item.Quantity ?? item.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    const line = byLine.get(Number(item.origIssueItemId));
+    const name = item.ItemName || item.itemName || item.M_Id;
+    if (!line) return { error: `"${name}" is not on this issue` };
+    const left = Number(line.Quantity) - Number(line.Returned);
+    if (qty > left + 1e-9)
+      return { error: `"${name}": ${qty} to return, but only ${Math.max(0, left)} of the ${Number(line.Quantity)} issued is still out` };
+  }
+  return { godownId: hdr.recordset[0].GodownId ?? null };
+}
+
 // ── GET / — list all issue returns ───────────────────────────────────────────
 router.get("/", requirePageRight("material-issue-return", "view"), async (req, res) => {
   try {
@@ -33,9 +67,10 @@ router.get("/", requirePageRight("material-issue-return", "view"), async (req, r
              ir.IssueId, mi.DocNo AS IssueDocNo,
              ir.Reason, ir.Remarks, ir.CreatedAt,
              co.name AS CompanyName, pr.name AS ProjectName,
-             u.name AS CreatedByName
+             u.name AS CreatedByName, g.GodownName
       FROM dbo.MaterialIssueReturn ir
       LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
+      LEFT JOIN dbo.Godowns g ON g.GodownID = COALESCE(ir.GodownId, mi.GodownId)
       LEFT JOIN dbo.enterprise co ON co.id = ir.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = ir.ProjectId
       LEFT JOIN dbo.users u ON u.id = ir.CreatedBy
@@ -82,13 +117,19 @@ router.get("/issues/:id/items", requirePageRight("material-issue-return", "view"
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-    const result = await pool.request().input("IssueId", sql.Int, id).query(`
+    const exclude = parseInt(req.query.excludeReturnId, 10);
+    const result = await pool.request().input("IssueId", sql.Int, id)
+      .input("Exclude", sql.Int, Number.isFinite(exclude) ? exclude : null).query(`
       SELECT
         mii.IssueItemId AS ItemId,
         mii.ItemId      AS M_Id,
         img.M_Name      AS ItemName,
         mii.Quantity,
-        uom.Symbol      AS UOMSymbol
+        uom.Symbol      AS UOMSymbol,
+        ISNULL((SELECT SUM(ri.Quantity) FROM dbo.MaterialIssueReturnItems ri
+                JOIN dbo.MaterialIssueReturn r ON r.ReturnId = ri.ReturnId
+                WHERE ri.OrigIssueItemId = mii.IssueItemId AND r.Status <> 'Rejected'
+                  AND (@Exclude IS NULL OR r.ReturnId <> @Exclude)), 0) AS Returned
       FROM dbo.MaterialIssueItems mii
       LEFT JOIN dbo.Item_Master_Group img
         ON CONVERT(NVARCHAR(100), img.M_Id) = mii.ItemId
@@ -112,10 +153,11 @@ router.get("/:id", requirePageRight("material-issue-return", "view"), async (req
       pool.request().input("ReturnId", sql.Int, id).query(`
         SELECT ir.*, mi.DocNo AS IssueDocNo,
                co.name AS CompanyName, pr.name AS ProjectName,
-               cu.name AS CreatedByName
+               cu.name AS CreatedByName, g.GodownName
         FROM dbo.MaterialIssueReturn ir
         LEFT JOIN dbo.users cu ON cu.id = ir.CreatedBy
         LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
+        LEFT JOIN dbo.Godowns g ON g.GodownID = COALESCE(ir.GodownId, mi.GodownId)
         LEFT JOIN dbo.enterprise co ON co.id = ir.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = ir.ProjectId
         WHERE ir.ReturnId = @ReturnId
@@ -141,6 +183,9 @@ router.post("/", requirePageRight("material-issue-return", "create"), async (req
 
   try {
     const pool = getPool();
+    const chk = await checkAgainstIssue(pool, IssueId, items);
+    if (chk.error) return res.status(400).json({ error: chk.error });
+    const godownId = GodownId ? parseInt(GodownId) : chk.godownId;
 
     // Generate next doc number
     const lastResult = await pool.request().query(`
@@ -165,7 +210,7 @@ router.post("/", requirePageRight("material-issue-return", "create"), async (req
         .input("IssueId", sql.Int, IssueId ? parseInt(IssueId) : null)
         .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId) : null)
         .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId) : null)
-        .input("GodownId", sql.Int, GodownId ? parseInt(GodownId) : null)
+        .input("GodownId", sql.Int, godownId)
         .input("Reason", sql.NVarChar(500), Reason || null)
         .input("Remarks", sql.NVarChar(1000), Remarks || null)
         .input("CreatedBy", sql.Int, req.user?.userId || null)
@@ -241,6 +286,9 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
     const currentStatus = existing.recordset[0].Status;
     if (!["Draft", "Approved", "Rejected"].includes(currentStatus))
       return res.status(400).json({ error: "Only Draft, Approved, or Rejected returns can be edited" });
+    const chk = await checkAgainstIssue(pool, IssueId, items, id);
+    if (chk.error) return res.status(400).json({ error: chk.error });
+    const godownId = GodownId ? parseInt(GodownId) : chk.godownId;
     const wasApproved = currentStatus === "Approved";
     const wasRejected = currentStatus === "Rejected";
     const beforeSnapshot = wasApproved
@@ -268,7 +316,7 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
         .input("IssueId", sql.Int, IssueId ? parseInt(IssueId) : null)
         .input("CompanyId", sql.Int, CompanyId ? parseInt(CompanyId) : null)
         .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId) : null)
-        .input("GodownId", sql.Int, GodownId ? parseInt(GodownId) : null)
+        .input("GodownId", sql.Int, godownId)
         .input("Reason", sql.NVarChar(500), Reason || null)
         .input("Remarks", sql.NVarChar(1000), Remarks || null)
         .query(`

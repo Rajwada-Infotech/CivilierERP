@@ -85,6 +85,8 @@ const PartnerMaster: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "Finance", "Partner Master"]} />
       <SheetShell eyebrow="CivilierERP · Masters" title="Partners" subtitle="The firm's partners. Each gets a Capital ledger and a Current Account ledger, created together.">
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
           title="Partner"
           fields={[
             { name: "partnerName", label: "Partner Name", type: "text", required: true, placeholder: "e.g. Rajesh Sharma" },

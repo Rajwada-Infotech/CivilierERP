@@ -389,6 +389,9 @@ const NamedEntryTypeMaster: React.FC = () => {
       )}
 
       <MasterPage
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         title="Named Entry Type"
         fields={[
           {

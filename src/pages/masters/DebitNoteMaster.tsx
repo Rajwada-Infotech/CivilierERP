@@ -12,7 +12,6 @@ import {
   RecordWithId,
 } from "@/components/MasterPage";
 import {
-  FileWarning,
   ChevronDown,
   Users,
   Receipt,
@@ -20,7 +19,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -35,7 +34,7 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { getQualityDebitNotes, type QualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
-import { AlertTriangle, Eye, X } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import { useState } from "react";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
@@ -116,52 +115,52 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
   };
 
   const total = items.reduce((s, it) => s + (parseFloat(it.Amount) || 0), 0);
-  const thCls = "text-left text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground px-2 py-1.5";
-  const inp = "w-full text-xs rounded border border-border px-2 py-1 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/30";
+  const thCls = "text-left font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground px-2 py-1.5";
+  const inp = "w-full text-xs border border-foreground/40 px-2 py-1 bg-card text-foreground focus:outline-none focus:border-foreground";
 
   return (
     <div className="space-y-2">
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto border border-foreground">
         <table className="w-full text-xs">
-          <thead className="bg-muted/40 border-b border-border">
+          <thead className="bg-card border-b border-foreground">
             <tr>
-              <th className={thCls + " w-6 hidden sm:table-cell"}>#</th>
+              <th className={`${thCls} w-6 hidden sm:table-cell`}>#</th>
               <th className={thCls}>Description *</th>
-              <th className={thCls + " w-16"}>Qty</th>
-              <th className={thCls + " w-14 hidden sm:table-cell"}>UOM</th>
-              <th className={thCls + " w-20"}>Rate</th>
-              <th className={thCls + " w-20"}>Amount</th>
-              <th className={thCls + " w-6"}></th>
+              <th className={`${thCls} w-16`}>Qty</th>
+              <th className={`${thCls} w-14 hidden sm:table-cell`}>UOM</th>
+              <th className={`${thCls} w-20`}>Rate</th>
+              <th className={`${thCls} w-20`}>Amount</th>
+              <th className={`${thCls} w-6`}></th>
             </tr>
           </thead>
           <tbody>
             {items.map((it, idx) => (
-              <tr key={idx} className="border-b border-border/50">
+              <tr key={idx} className="border-b border-foreground/10">
                 <td className="px-2 py-1 text-muted-foreground text-center hidden sm:table-cell">{idx + 1}</td>
                 <td className="px-2 py-1">
                   <input className={inp} value={it.Description} onChange={(e) => update(idx, "Description", e.target.value)} placeholder="Item / description" />
                 </td>
                 <td className="px-2 py-1">
-                  <input className={inp + " text-right"} type="number" value={it.Quantity} onChange={(e) => update(idx, "Quantity", e.target.value)} placeholder="0" step="any" min={0} />
+                  <input className={`${inp} text-right`} type="number" value={it.Quantity} onChange={(e) => update(idx, "Quantity", e.target.value)} placeholder="0" step="any" min={0} />
                 </td>
                 <td className="px-2 py-1 hidden sm:table-cell">
                   <input className={inp} value={it.UOMSymbol} onChange={(e) => update(idx, "UOMSymbol", e.target.value)} placeholder="Nos" />
                 </td>
                 <td className="px-2 py-1">
-                  <input className={inp + " text-right"} type="number" value={it.Rate} onChange={(e) => update(idx, "Rate", e.target.value)} placeholder="0.00" step="any" min={0} />
+                  <input className={`${inp} text-right`} type="number" value={it.Rate} onChange={(e) => update(idx, "Rate", e.target.value)} placeholder="0.00" step="any" min={0} />
                 </td>
                 <td className="px-2 py-1">
-                  <input className={inp + " text-right bg-muted/30"} value={it.Amount} onChange={(e) => update(idx, "Amount", e.target.value)} placeholder="0.00" />
+                  <input className={`${inp} text-right bg-card`} value={it.Amount} onChange={(e) => update(idx, "Amount", e.target.value)} placeholder="0.00" />
                 </td>
                 <td className="px-2 py-1 text-center">
-                  <button type="button" onClick={() => removeRow(idx)} className="p-1 rounded text-red-400 hover:bg-red-500/10">
+                  <button type="button" onClick={() => removeRow(idx)} className="p-1 text-destructive hover:bg-destructive/10">
                     <Trash2 size={11} />
                   </button>
                 </td>
               </tr>
             ))}
           </tbody>
-          <tfoot className="border-t border-border bg-muted/20">
+          <tfoot className="border-t border-foreground bg-card">
             <tr>
               <td colSpan={4} className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Total</td>
               <td className="hidden sm:table-cell" />
@@ -173,7 +172,7 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
           </tfoot>
         </table>
       </div>
-      <button type="button" onClick={addRow} className="flex items-center gap-1.5 text-xs text-emerald-600 hover:text-emerald-700 font-medium">
+      <button type="button" onClick={addRow} className="flex items-center gap-1.5 text-xs text-foreground hover:text-foreground font-medium">
         <Plus size={13} /> Add Row
       </button>
     </div>
@@ -255,13 +254,13 @@ function PartyInvoiceRenderer({
   const invoiceValue = selectedInvoice?.invoiceAmount ?? null;
   const adjustedValue = invoiceValue != null ? invoiceValue + previousDebit + enteredAmount : null;
 
-  const selectCls = "w-full appearance-none pl-9 pr-8 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground disabled:opacity-50 disabled:cursor-not-allowed";
+  const selectCls = "w-full appearance-none pl-9 pr-8 py-2 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+          <label className="block text-[0.6875rem] uppercase tracking-[0.12em] font-heading text-muted-foreground mb-1.5">
             Party Type <span className="text-destructive">*</span>
           </label>
           <div className="relative">
@@ -281,7 +280,7 @@ function PartyInvoiceRenderer({
         </div>
 
         <div>
-          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+          <label className="block text-[0.6875rem] uppercase tracking-[0.12em] font-heading text-muted-foreground mb-1.5">
             Party <span className="text-destructive">*</span>
           </label>
           <div className="relative">
@@ -308,7 +307,7 @@ function PartyInvoiceRenderer({
       </div>
 
       <div>
-        <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+        <label className="block text-[0.6875rem] uppercase tracking-[0.12em] font-heading text-muted-foreground mb-1.5">
           Invoice <span className="text-destructive">*</span>
         </label>
         <div className="relative">
@@ -346,20 +345,20 @@ function PartyInvoiceRenderer({
       </div>
 
       {selectedInvoice && (
-        <div className="rounded-xl border border-border bg-muted/40 p-4 grid grid-cols-3 gap-3">
+        <div className="border border-foreground bg-card p-4 grid grid-cols-3 gap-3">
           <div>
-            <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Invoice Value</p>
-            <p className="text-sm font-mono font-semibold text-foreground">{formatINR(invoiceValue)}</p>
+            <p className="text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Invoice Value</p>
+            <p className="text-sm font-heading font-semibold text-foreground">{formatINR(invoiceValue)}</p>
           </div>
           <div>
-            <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Previous Debit</p>
-            <p className="text-sm font-mono font-semibold text-foreground">{formatINR(previousDebit)}</p>
+            <p className="text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Previous Debit</p>
+            <p className="text-sm font-heading font-semibold text-foreground">{formatINR(previousDebit)}</p>
           </div>
-          <div className="rounded-lg bg-primary/5 -m-1 p-1">
-            <p className="text-[0.625rem] uppercase tracking-widest text-primary/80 mb-0.5 flex items-center gap-1">
+          <div className="bg-primary/5 -m-1 p-1">
+            <p className="text-[0.625rem] uppercase tracking-[0.12em] text-primary/80 mb-0.5 flex items-center gap-1">
               <IndianRupee size={9} /> Adjusted Value
             </p>
-            <p className="text-sm font-mono font-bold text-primary">{formatINR(adjustedValue)}</p>
+            <p className="text-sm font-heading font-bold text-primary">{formatINR(adjustedValue)}</p>
           </div>
         </div>
       )}
@@ -614,7 +613,7 @@ const DebitNoteMaster: React.FC = () => {
             type="number"
             value={value != null ? (value as string | number) : ""}
             onChange={(e) => onChange(e.target.value)}
-            className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${error ? "border-destructive" : "border-border"}`}
+            className={`w-full px-3 py-2 text-sm font-body bg-card border transition-all focus:outline-none text-foreground ${error ? "border-destructive" : "border-foreground/30"}`}
           />
         );
       }) as FieldDef["render"],
@@ -651,18 +650,10 @@ const DebitNoteMaster: React.FC = () => {
     { key: "approvalStatus", label: "Status" },
   ];
 
-  const APPROVAL_STATUS_BADGE: Record<string, string> = {
-    Draft: "bg-muted text-muted-foreground border-border",
-    Pending: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
-    Approved: "bg-green-500/10 border-green-500/20 text-green-600",
-    Rejected: "bg-red-500/10 border-red-500/20 text-red-600",
-    Cancelled: "bg-muted text-muted-foreground border-border line-through",
-  };
-
   const columnRenderers: Record<string, any> = {
     docNo: (value: unknown) =>
       value ? (
-        <span className="font-mono text-xs text-primary">{String(value)}</span>
+        <span className="font-heading text-xs text-primary">{String(value)}</span>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),
@@ -679,30 +670,26 @@ const DebitNoteMaster: React.FC = () => {
     invoiceDisplay: (_value: unknown, row: RecordWithId) => {
       const g = row.partyInvoiceGroup as PartyInvoiceGroup | undefined;
       return g?.invoiceDocNo ? (
-        <span className="text-xs font-mono text-foreground">{g.invoiceDocNo}</span>
+        <span className="text-xs font-heading text-foreground">{g.invoiceDocNo}</span>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       );
     },
     debitAmount: (value: unknown) => (
-      <span className="text-xs font-mono font-semibold text-foreground">{formatINR(value as number)}</span>
+      <span className="text-xs font-heading font-semibold text-foreground">{formatINR(value as number)}</span>
     ),
     createdBy: (value: unknown) =>
       value ? <span className="text-xs text-foreground font-body">{String(value)}</span> : <span className="text-muted-foreground text-xs">—</span>,
     approvalStatus: (value: unknown, row: RecordWithId) => {
       const status = row.status === false ? "Cancelled" : String(value ?? "Draft");
-      return (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${APPROVAL_STATUS_BADGE[status] ?? APPROVAL_STATUS_BADGE.Draft}`}>
-          {status}
-        </span>
-      );
+      return <SheetMark text={status} tone={statusTone(status)} />;
     },
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
     return (
-      <div className="p-6 text-red-500">
+      <div className="p-6 text-sm text-destructive">
         Failed to load debit notes. Check backend connection.
       </div>
     );
@@ -710,8 +697,11 @@ const DebitNoteMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Debit Note"]} />
-      <MaterialShell title="Debit Note" subtitle="Value adjustments against Supplier, Contractor, Customer & Broker invoices" icon={FileWarning}>
+      <SheetShell eyebrow="CivilierERP · Material" title="Debit notes" subtitle="Value adjustments against supplier, contractor, customer and broker invoices, plus the quality rejections raised at the gate.">
       <MasterPage
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         title="Debit Note"
         gridCols={2}
         fields={fields}
@@ -796,19 +786,12 @@ const DebitNoteMaster: React.FC = () => {
           found below the ordered grade on inspection. Read-only here;
           create/manage them from the originating Vehicle In/Out or GRN
           entry's "Received Items" list. */}
-      <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20 shrink-0">
-            <AlertTriangle size={14} className="text-rose-500" />
-          </div>
-          <div>
-            <h2 className="font-heading font-semibold text-foreground text-sm">
-              Quality Rejection Debit Notes
-            </h2>
-            <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
-              Raised from Vehicle In/Out & GRN entries when part of a delivery is below the ordered grade
-            </p>
-          </div>
+      <div className="bg-card mt-5" style={{ border: "1px solid hsl(var(--foreground))" }}>
+        <div className="px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Quality rejection debit notes</h2>
+          <p className="text-[0.6875rem] text-muted-foreground mt-1">
+            Raised from Vehicle In/Out and GRN entries when part of a delivery is below the ordered grade
+          </p>
         </div>
 
         {qualityDebitNotes.length === 0 ? (
@@ -818,28 +801,28 @@ const DebitNoteMaster: React.FC = () => {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40">
+              <thead className="bg-card border-b border-foreground">
                 <tr>
-                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Doc No</th>
-                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Date</th>
-                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Source</th>
-                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Supplier</th>
-                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Item</th>
-                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">% Bad</th>
-                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Amount</th>
-                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Status</th>
-                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">Actions</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Doc No</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Source</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Supplier</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Item</th>
+                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">% Bad</th>
+                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Amount</th>
+                  <th className="text-left px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status</th>
+                  <th className="text-right px-4 py-2.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/60">
+              <tbody className="divide-y divide-foreground/10">
                 {qualityDebitNotes.map((n) => (
-                  <tr key={n.DebitNoteId} className="hover:bg-muted/20 transition-colors">
-                    <td className="px-4 py-2.5 font-mono text-xs text-foreground">{n.DocNo}</td>
-                    <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono whitespace-nowrap">
+                  <tr key={n.DebitNoteId} className="hover:bg-primary/5 transition-colors">
+                    <td className="px-4 py-2.5 font-heading text-xs text-foreground">{n.DocNo}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground font-heading whitespace-nowrap">
                       {n.DebitDate ? String(n.DebitDate).slice(0, 10) : "—"}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className="text-xs font-mono text-foreground">
+                      <span className="text-xs font-heading text-foreground">
                         {n.VehicleInOutDocNo ?? n.GRNDocNo ?? "—"}
                       </span>
                     </td>
@@ -851,19 +834,19 @@ const DebitNoteMaster: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      <span className="inline-flex items-center text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600">
+                      <span className="inline-flex items-center text-[0.6875rem] font-semibold px-2 py-0.5 bg-card text-foreground">
                         {Number(n.PercentBad).toFixed(1)}%
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right font-mono font-semibold text-rose-600">
+                    <td className="px-4 py-2.5 text-right font-heading font-semibold text-foreground">
                       ₹{Number(n.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-4 py-2.5">
                       <span
-                        className={`inline-block text-[0.625rem] font-medium px-1.5 py-0.5 rounded ${
+                        className={`inline-block text-[0.625rem] font-medium px-1.5 py-0.5 ${
                           n.Status === "Cancelled"
-                            ? "bg-muted text-muted-foreground line-through"
-                            : "bg-emerald-500/10 text-emerald-600"
+                            ? "bg-card text-muted-foreground line-through"
+                            : "bg-card text-foreground"
                         }`}
                       >
                         {n.Status}
@@ -873,7 +856,7 @@ const DebitNoteMaster: React.FC = () => {
                       <button data-row-view
                         onClick={() => setViewingQDN(n)}
                         title="View details"
-                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors"
                       >
                         <Eye size={14} />
                       </button>
@@ -893,23 +876,16 @@ const DebitNoteMaster: React.FC = () => {
           `position: fixed` a transformed containing block instead of the
           viewport. */}
       {viewingQDN && createPortal(
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-rose-500/10 border border-rose-500/20 shrink-0">
-                  <AlertTriangle size={13} className="text-rose-500" />
-                </div>
-                <div>
-                  <h2 className="font-heading font-bold text-sm">{viewingQDN.DocNo}</h2>
-                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
-                    Quality Rejection Debit Note
-                  </p>
-                </div>
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && setViewingQDN(null)}>
+          <div className="sheet-frame bg-card w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true">
+            <div className="sticky top-0 bg-card z-10 flex items-start justify-between px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <div>
+                <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Quality rejection debit note</p>
+                <h2 className="font-heading font-bold text-lg tracking-tight mt-1">{viewingQDN.DocNo}</h2>
               </div>
               <button
                 onClick={() => setViewingQDN(null)}
-                className="p-2 hover:bg-muted rounded-lg transition-colors"
+                className="p-2 hover:bg-primary/5 transition-colors"
               >
                 <X size={16} />
               </button>
@@ -925,44 +901,44 @@ const DebitNoteMaster: React.FC = () => {
                   { label: "Supplier", value: viewingQDN.SupplierName ?? "—" },
                   { label: "Item", value: viewingQDN.ItemName ?? "—" },
                 ].map(({ label, value, mono }: any) => (
-                  <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
-                    <p className={`text-xs font-semibold ${mono ? "font-mono" : ""} text-foreground`}>{value}</p>
+                  <div key={label} className="px-3 py-2.5 bg-card border border-foreground/40">
+                    <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">{label}</p>
+                    <p className={`text-xs font-semibold ${mono ? "font-heading" : ""} text-foreground`}>{value}</p>
                   </div>
                 ))}
               </div>
 
               <div className="grid grid-cols-3 gap-3">
-                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Received</p>
-                  <p className="text-xs font-semibold font-mono text-foreground">
+                <div className="px-3 py-2.5 bg-card border border-foreground/40">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Received</p>
+                  <p className="text-xs font-semibold font-heading text-foreground">
                     {viewingQDN.ReceivedQty} {viewingQDN.UomName ?? ""}
                   </p>
                 </div>
-                <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Rejected</p>
-                  <p className="text-xs font-semibold font-mono text-rose-600">
+                <div className="px-3 py-2.5 bg-card border border-foreground/40">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Rejected</p>
+                  <p className="text-xs font-semibold font-heading text-foreground">
                     {viewingQDN.RejectedQty} {viewingQDN.UomName ?? ""}
                   </p>
                 </div>
-                <div className="px-3 py-2.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">% Bad</p>
-                  <p className="text-xs font-semibold font-mono text-rose-600">
+                <div className="px-3 py-2.5 bg-card border border-foreground/40">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">% Bad</p>
+                  <p className="text-xs font-semibold font-heading text-foreground">
                     {Number(viewingQDN.PercentBad).toFixed(1)}%
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Rate</p>
-                  <p className="text-xs font-semibold font-mono text-foreground">
+                <div className="px-3 py-2.5 bg-card border border-foreground/40">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Rate</p>
+                  <p className="text-xs font-semibold font-heading text-foreground">
                     ₹{Number(viewingQDN.Rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
-                <div className="px-3 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Debit Amount</p>
-                  <p className="text-sm font-bold font-mono text-rose-600">
+                <div className="px-3 py-2.5 bg-card border border-foreground/40">
+                  <p className="text-[0.5625rem] uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Debit Amount</p>
+                  <p className="text-sm font-bold font-heading text-foreground">
                     ₹{Number(viewingQDN.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </p>
                 </div>
@@ -970,10 +946,10 @@ const DebitNoteMaster: React.FC = () => {
 
               {viewingQDN.Reason && (
                 <div>
-                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                  <p className="text-[0.625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">
                     Reason
                   </p>
-                  <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
+                  <p className="text-sm text-foreground bg-card px-4 py-3 border border-foreground/30">
                     {viewingQDN.Reason}
                   </p>
                 </div>
@@ -983,7 +959,7 @@ const DebitNoteMaster: React.FC = () => {
         </div>,
         document.body,
       )}
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 };

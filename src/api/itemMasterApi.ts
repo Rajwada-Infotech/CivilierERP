@@ -1,9 +1,8 @@
-﻿const BASE_URL = "/api/item-master";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
+// Through fetchWithAuth like the rest of the app: API base, session-expiry redirect and the
+// Activity Browser's record of item creates / edits / deletes.
+const BASE_URL = "/api/item-master";
 
 export interface DbItem {
   M_Id: string;
@@ -34,15 +33,14 @@ export interface DbItem {
 }
 
 export const getItems = async (): Promise<DbItem[]> => {
-  const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json().catch(() => []);
 };
 
 export const addItem = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -53,9 +51,8 @@ export const addItem = async (data: Record<string, unknown>) => {
 };
 
 export const updateItem = async (id: string, data: Record<string, unknown>) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -66,9 +63,8 @@ export const updateItem = async (id: string, data: Record<string, unknown>) => {
 };
 
 export const deleteItem = async (id: string) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

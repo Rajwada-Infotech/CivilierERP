@@ -134,6 +134,9 @@ const FinancialYearMaster: React.FC = () => {
         </div>
 
         <MasterPage
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           title="Financial Year"
           fields={[
             {

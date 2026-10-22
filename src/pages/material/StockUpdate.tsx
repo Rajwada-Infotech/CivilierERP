@@ -3,9 +3,9 @@ import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongs
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { PackagePlus, Plus, Trash2, Eye, Pencil, Loader2 } from "lucide-react";
+import { Plus, Trash2, Eye, Pencil, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { SearchableSelect } from "@/components/SearchableSelect";
@@ -25,16 +25,30 @@ import { DateInput } from "@/components/ui/date-input";
 type Line = { key: number; itemId: string; uom: string; qty: string };
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const ACT = "w-7 h-7 inline-flex items-center justify-center border border-transparent text-muted-foreground transition-colors disabled:opacity-30";
+const TH_ROW = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 const inp =
-  "w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50";
+  "w-full px-3 py-2 text-sm font-body bg-card border border-foreground/40 text-foreground transition-colors focus:outline-none focus:border-foreground disabled:opacity-50";
 const fmtNum = (n: number) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(n ?? 0);
 const fmtDate = (d: string) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+
+// The Stock page's figures and item movements, refreshed after any change here.
+const invalidateStock = (qc: ReturnType<typeof useQueryClient>) => {
+  qc.invalidateQueries({ queryKey: ["inventory-master"] });
+  qc.invalidateQueries({ queryKey: ["item-stock-ledger"] });
+};
 
 let lineKey = 0;
 const newLine = (): Line => ({ key: ++lineKey, itemId: "", uom: "", qty: "" });
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <label className="block text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground mb-1.5">{children}</label>;
+  return <label className={`block ${LBL} mb-1.5`}>{children}</label>;
 }
 
 // Company/Project/Godown are locked once saved (see stockUpdates.js's own
@@ -115,7 +129,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
       qc.invalidateQueries({ queryKey: ["stock-updates"] });
       qc.invalidateQueries({ queryKey: ["stock-update", id] });
       qc.invalidateQueries({ queryKey: ["su-items"] });
-      qc.invalidateQueries({ queryKey: ["stock-ledger"] });
+      invalidateStock(qc);
       onClose();
     },
     onError: (e: any) => toast.error(e?.message || "Failed to save stock update"),
@@ -132,22 +146,22 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Edit Stock Update {data?.DocNo ? `— ${data.DocNo}` : ""}</DialogTitle>
+      <DialogContent className="sheet-frame max-w-2xl max-h-[90vh] overflow-y-auto p-0 gap-0" style={{ margin: 0 }}>
+        <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: RULE }}>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight">Edit Stock Update {data?.DocNo ? `— ${data.DocNo}` : ""}</DialogTitle>
         </DialogHeader>
         {isLoading || !data ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
+          <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 p-5">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
               {[
                 ["Company", data.CompanyName || "—"],
                 ["Project", data.ProjectName || "—"],
                 ["Godown", data.GodownName || "—"],
               ].map(([k, v]) => (
-                <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{k} (locked)</p>
+                <div key={k} className="px-3 py-2 border border-foreground/40">
+                  <p className={LBL}>{k} (locked)</p>
                   <p className="font-semibold text-foreground">{v}</p>
                 </div>
               ))}
@@ -170,14 +184,14 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                 <button
                   type="button"
                   onClick={() => setLines((ls) => [...ls, newLine()])}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted/60 transition-colors"
+                  className={`${KEY_LINE} h-8 px-3`}
                 >
                   <Plus size={12} /> Add Item
                 </button>
               </div>
-              <div className="rounded-xl border border-border overflow-x-auto">
+              <div className="overflow-x-auto" style={{ border: RULE }}>
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
+                  <thead className={TH_ROW} style={{ borderBottom: RULE }}>
                     <tr>
                       <th className="px-3 py-2 text-left">Item</th>
                       <th className="px-3 py-2 text-left w-40">UOM</th>
@@ -185,7 +199,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                       <th className="w-10" />
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/50">
+                  <tbody className="divide-y divide-foreground/10">
                     {lines.map((l, i) => (
                       <tr key={l.key} ref={i === lines.length - 1 ? lastRowRef : undefined}>
                         <td className="px-3 py-2">
@@ -213,7 +227,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                             type="number"
                             min="0"
                             step="any"
-                            className={inp + " text-right"}
+                            className={`${inp} text-right`}
                             value={l.qty}
                             disabled={!l.itemId}
                             onChange={(e) => setLine(l.key, { qty: e.target.value })}
@@ -224,7 +238,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                             type="button"
                             disabled={lines.length === 1}
                             onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 transition-colors"
+                            className={`${ACT} hover:text-destructive hover:border-destructive`}
                             title="Remove row"
                           >
                             <Trash2 size={13} />
@@ -238,14 +252,14 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+              <button type="button" onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSave}
                 disabled={save.isPending}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white btn-module disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
+                className={`${KEY_INK} h-9 px-5`}
               >
                 {save.isPending && <Loader2 size={14} className="animate-spin" />}
                 Save Changes
@@ -324,9 +338,11 @@ export default function StockUpdate() {
       .filter((id) => id !== String(companyId))
       .map((id) => companyById.get(id)?.label ?? companyById.get(id)?.name)
       .filter(Boolean);
+  // The project's godowns for this company — a project shared with other companies
+  // has their godowns too, which aren't this company's to stock.
   const projectGodowns = useMemo(
-    () => (godowns as any[]).filter((g) => String(g.projectId) === projectId),
-    [godowns, projectId],
+    () => (godowns as any[]).filter((g) => String(g.projectId) === projectId && (g.companyId == null || String(g.companyId) === companyId)),
+    [godowns, projectId, companyId],
   );
   const itemById = useMemo(() => {
     const m = new Map<string, any>();
@@ -371,7 +387,7 @@ export default function StockUpdate() {
       reset();
       qc.invalidateQueries({ queryKey: ["stock-updates"] });
       qc.invalidateQueries({ queryKey: ["su-items"] });
-      qc.invalidateQueries({ queryKey: ["stock-ledger"] });
+      invalidateStock(qc);
     },
     onError: (e: any) => toast.error(e?.message || "Failed to save stock update"),
   });
@@ -383,7 +399,7 @@ export default function StockUpdate() {
       setDeleteConfirmId(null);
       qc.invalidateQueries({ queryKey: ["stock-updates"] });
       qc.invalidateQueries({ queryKey: ["su-items"] });
-      qc.invalidateQueries({ queryKey: ["stock-ledger"] });
+      invalidateStock(qc);
     },
     onError: (e: any) => toast.error(e?.message || "Failed to delete stock update"),
   });
@@ -405,11 +421,11 @@ export default function StockUpdate() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Stock Update"]} />
-      <MaterialShell title="Stock Update" subtitle="Add items to a project godown and update its stock" icon={PackagePlus}>
+      <SheetShell eyebrow="CivilierERP · Material" title="Stock update" subtitle="Add items to a project godown and raise its stock, for opening counts and corrections.">
         {rights.canCreate && (
-          <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden mb-6">
-            <div className="px-5 py-3 border-b border-border/60">
-              <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">New Stock Update</h3>
+          <div className="bg-card mb-6" style={{ border: RULE }}>
+            <div className="px-5 py-3" style={{ borderBottom: RULE }}>
+              <h3 className={HEAD}>New stock update</h3>
             </div>
             <div className="p-5 space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -476,7 +492,7 @@ export default function StockUpdate() {
                     ))}
                   </select>
                   {projectId && projectGodowns.length === 0 && (
-                    <p className="text-[0.6875rem] text-amber-600 mt-1">This project has no godown yet. Add one in Godown Master.</p>
+                    <p className="text-[0.6875rem] text-destructive mt-1">This company has no godown on this project yet. Add one in Godown Master.</p>
                   )}
                 </div>
               </div>
@@ -488,14 +504,14 @@ export default function StockUpdate() {
                     type="button"
                     disabled={!godownId}
                     onClick={() => setLines((ls) => [...ls, newLine()])}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted/60 disabled:opacity-50 transition-colors"
+                    className={`${KEY_LINE} h-8 px-3`}
                   >
                     <Plus size={12} /> Add Item
                   </button>
                 </div>
-                <div className="rounded-xl border border-border overflow-x-auto">
+                <div className="overflow-x-auto" style={{ border: RULE }}>
                   <table className="w-full text-sm">
-                    <thead className="bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
+                    <thead className={TH_ROW} style={{ borderBottom: RULE }}>
                       <tr>
                         <th className="px-3 py-2 text-left">Item</th>
                         <th className="px-3 py-2 text-left w-40">UOM</th>
@@ -504,7 +520,7 @@ export default function StockUpdate() {
                         <th className="w-10" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-border/50">
+                    <tbody className="divide-y divide-foreground/10">
                       {lines.map((l) => {
                         const it = itemById.get(l.itemId);
                         return (
@@ -538,7 +554,7 @@ export default function StockUpdate() {
                                 type="number"
                                 min="0"
                                 step="any"
-                                className={inp + " text-right"}
+                                className={`${inp} text-right`}
                                 value={l.qty}
                                 disabled={!l.itemId}
                                 onChange={(e) => setLine(l.key, { qty: e.target.value })}
@@ -549,7 +565,7 @@ export default function StockUpdate() {
                                 type="button"
                                 disabled={lines.length === 1}
                                 onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 transition-colors"
+                                className={`${ACT} hover:text-destructive hover:border-destructive`}
                                 title="Remove row"
                               >
                                 <Trash2 size={13} />
@@ -569,14 +585,14 @@ export default function StockUpdate() {
               </div>
 
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={reset} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+                <button type="button" onClick={reset} className={`${KEY_LINE} h-9 px-4`}>
                   Reset
                 </button>
                 <button
                   type="button"
                   onClick={handleSave}
                   disabled={save.isPending}
-                  className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white btn-module disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
+                  className={`${KEY_INK} h-9 px-5`}
                 >
                   {save.isPending && <Loader2 size={14} className="animate-spin" />}
                   Save &amp; Update Stock
@@ -586,14 +602,14 @@ export default function StockUpdate() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-border/60 flex items-center justify-between">
-            <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">Previous Stock Updates</h3>
-            <span className="text-[0.6875rem] text-muted-foreground">{history.length} record{history.length === 1 ? "" : "s"}</span>
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: RULE }}>
+            <h3 className={HEAD}>Previous stock updates</h3>
+            <span className={`${LBL} tabular-nums`}>{history.length} record{history.length === 1 ? "" : "s"}</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
+              <thead className={TH_ROW} style={{ borderBottom: RULE }}>
                 <tr>
                   <th className="px-4 py-2 text-left">Doc No</th>
                   <th className="px-4 py-2 text-left">Date</th>
@@ -605,15 +621,15 @@ export default function StockUpdate() {
                   <th className="w-20" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/50">
+              <tbody className="divide-y divide-foreground/10">
                 {historyLoading ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
                 ) : history.length === 0 ? (
                   <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No stock updates yet.</td></tr>
                 ) : (
                   history.map((h) => (
-                    <tr key={h.StockUpdateId} className="hover:bg-muted/20">
-                      <td className="px-4 py-2.5 font-mono text-xs text-emerald-600 dark:text-emerald-400">{h.DocNo || `#${h.StockUpdateId}`}</td>
+                    <tr key={h.StockUpdateId} className="hover:bg-primary/5">
+                      <td className="px-4 py-2.5 font-heading text-xs text-foreground">{h.DocNo || `#${h.StockUpdateId}`}</td>
                       <td className="px-4 py-2.5">{fmtDate(h.UpdateDate)}</td>
                       <td className="px-4 py-2.5">{h.CompanyName || "—"}</td>
                       <td className="px-4 py-2.5">{h.ProjectName || "—"}</td>
@@ -622,18 +638,18 @@ export default function StockUpdate() {
                       <td className="px-4 py-2.5 text-muted-foreground">{h.CreatedByName || h.CreatedBy || "—"}</td>
                       <td className="px-2 py-2.5 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <button data-row-view onClick={() => setViewId(h.StockUpdateId)} className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View">
+                          <button data-row-view onClick={() => setViewId(h.StockUpdateId)} className={`${ACT} hover:text-foreground hover:border-foreground`} title="View">
                             <Eye size={13} />
                           </button>
                           {rights.canEdit && (
-                            <button onClick={() => setEditId(h.StockUpdateId)} className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors" title="Edit">
+                            <button onClick={() => setEditId(h.StockUpdateId)} className={`${ACT} hover:text-foreground hover:border-foreground`} title="Edit">
                               <Pencil size={13} />
                             </button>
                           )}
                           {isSuperAdmin && (
                             <button
                               onClick={() => setDeleteConfirmId(h.StockUpdateId)}
-                              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                              className={`${ACT} hover:text-destructive hover:border-destructive`}
                               title="Delete (super admin only)"
                             >
                               <Trash2 size={13} />
@@ -648,17 +664,17 @@ export default function StockUpdate() {
             </table>
           </div>
         </div>
-      </MaterialShell>
+      </SheetShell>
 
       <Dialog open={viewId != null} onOpenChange={(o) => !o && setViewId(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Stock Update {viewing?.DocNo ? `— ${viewing.DocNo}` : ""}</DialogTitle>
+        <DialogContent className="sheet-frame max-w-2xl max-h-[90vh] overflow-y-auto p-0 gap-0" style={{ margin: 0 }}>
+          <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: RULE }}>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight">Stock Update {viewing?.DocNo ? `— ${viewing.DocNo}` : ""}</DialogTitle>
           </DialogHeader>
           {viewLoading || !viewing ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
+            <p className="text-sm text-muted-foreground py-10 text-center">Loading…</p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4 p-5">
               <div className="grid grid-cols-2 gap-3 text-xs">
                 {[
                   ["Date", fmtDate(viewing.UpdateDate)],
@@ -668,22 +684,22 @@ export default function StockUpdate() {
                   ["Created By", viewing.CreatedByName || viewing.CreatedBy || "—"],
                   ["Remarks", viewing.Remarks || "—"],
                 ].map(([k, v]) => (
-                  <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{k}</p>
+                  <div key={k} className="px-3 py-2 border border-foreground/40">
+                    <p className={LBL}>{k}</p>
                     <p className="font-semibold text-foreground">{v}</p>
                   </div>
                 ))}
               </div>
-              <div className="rounded-xl border border-border overflow-hidden">
+              <div className="overflow-x-auto" style={{ border: RULE }}>
                 <table className="w-full text-xs">
-                  <thead className="bg-muted/40 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground">
+                  <thead className={TH_ROW} style={{ borderBottom: RULE }}>
                     <tr>
                       <th className="px-3 py-2 text-left">Item</th>
                       <th className="px-3 py-2 text-left">UOM</th>
                       <th className="px-3 py-2 text-right">Qty Added</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/50">
+                  <tbody className="divide-y divide-foreground/10">
                     {viewing.items.map((i) => (
                       <tr key={i.StockUpdateItemId}>
                         <td className="px-3 py-2 font-medium">{i.ItemName || i.ItemId}</td>
@@ -702,18 +718,18 @@ export default function StockUpdate() {
       {editId != null && <EditStockUpdateDialog id={editId} onClose={() => setEditId(null)} />}
 
       <Dialog open={deleteConfirmId != null} onOpenChange={(o) => !o && setDeleteConfirmId(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete this stock update?</DialogTitle>
+        <DialogContent className="sheet-frame max-w-sm p-0 gap-0" style={{ margin: 0 }}>
+          <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: RULE }}>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight">Delete this stock update?</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground px-5 pt-4">
             This removes the stock it added from the godown's balance. If any of that quantity has since been used elsewhere, the delete will be blocked.
           </p>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 px-5 py-4">
             <button
               type="button"
               onClick={() => setDeleteConfirmId(null)}
-              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-9 px-4`}
             >
               Cancel
             </button>
@@ -721,7 +737,7 @@ export default function StockUpdate() {
               type="button"
               disabled={removeUpdate.isPending}
               onClick={() => deleteConfirmId != null && removeUpdate.mutate(deleteConfirmId)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-destructive hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+              className={`${KEY} h-9 px-4 bg-destructive text-destructive-foreground border border-destructive`}
             >
               {removeUpdate.isPending && <Loader2 size={14} className="animate-spin" />}
               Delete

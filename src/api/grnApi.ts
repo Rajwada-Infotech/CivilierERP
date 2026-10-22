@@ -3,11 +3,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/grns";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
-
 export interface Supplier {
   LHeadId: number;
   LHeadName: string;
@@ -193,15 +188,14 @@ const normalizePaginated = <T>(payload: any): PaginatedResponse<T> => {
 export const getGRNs = async (
   query: PaginationQuery = {},
 ): Promise<PaginatedResponse<any>> => {
-  const res = await fetch(buildUrl(BASE, query), { headers: getAuthHeaders() });
+  const res = await fetchWithAuth(buildUrl(BASE, query));
   if (!res.ok) throw new Error("Failed to fetch GRNs");
   return normalizePaginated(await res.json().catch(() => ({})));
 };
 
 export const addGRN = async (data: GRNFormDataPayload) => {
-  const res = await fetch(BASE, {
+  const res = await fetchWithAuth(BASE, {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ ...data, grnItems: data.grnItems }),
   });
   if (!res.ok) {
@@ -212,9 +206,8 @@ export const addGRN = async (data: GRNFormDataPayload) => {
 };
 
 export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
-  const res = await fetch(`${BASE}/${id}`, {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ ...data, grnItems: data.grnItems }),
   });
   if (!res.ok) {
@@ -225,9 +218,8 @@ export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
 };
 
 export const deleteGRN = async (id: string) => {
-  const res = await fetch(`${BASE}/${id}`, {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -257,12 +249,8 @@ export const uploadGRNAttachments = async (
 ): Promise<GRNAttachment[]> => {
   const form = new FormData();
   files.forEach((f) => form.append("file", f));
-  const res = await fetch(`${BASE}/upload`, {
+  const res = await fetchWithAuth(`${BASE}/upload`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-      // NOTE: do NOT set Content-Type -- the browser sets the multipart boundary
-    },
     body: form,
   });
   if (!res.ok) {
@@ -274,9 +262,8 @@ export const uploadGRNAttachments = async (
 };
 
 export const deleteGRNAttachment = async (attachmentId: number) => {
-  const res = await fetch(`${BASE}/attachment/${attachmentId}`, {
+  const res = await fetchWithAuth(`${BASE}/attachment/${attachmentId}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -288,8 +275,7 @@ export const deleteGRNAttachment = async (attachmentId: number) => {
 export const getGRNAttachments = async (
   grnId: number | string,
 ): Promise<GRNAttachment[]> => {
-  const res = await fetch(`${BASE}/${grnId}/attachments`, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(`${BASE}/${grnId}/attachments`, {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -301,8 +287,7 @@ export const getGRNAttachments = async (
 export const previewNextGRNNumber = async (
   parentDocNo?: string | null,
 ): Promise<DocNumberPreview> => {
-  const res = await fetch(buildUrl(`${BASE}/next-number`, { parentDocNo }), {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(buildUrl(`${BASE}/next-number`, { parentDocNo }), {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -315,8 +300,7 @@ export const previewNextGRNNumber = async (
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
   // Vendors and Suppliers, not Landlords — see purchaseOrdersApi.ts's getSuppliers.
-  const res = await fetch("/api/account-head?type=S,V&excludeCategory=Landlord", {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth("/api/account-head?type=S,V&excludeCategory=Landlord", {
   });
   if (!res.ok) throw new Error("Failed to fetch suppliers");
   const data = await res.json().catch(() => ({}));
@@ -328,8 +312,7 @@ export const getPurchaseOrders = async (
 ): Promise<PurchaseOrder[]> => {
   const params: Record<string, string> = { limit: "500" };
   if (fyId) params.fyId = String(fyId);
-  const res = await fetch(buildUrl("/api/grns/po-list", params), {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(buildUrl("/api/grns/po-list", params), {
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
   return normalizeArray<PurchaseOrder>(await res.json().catch(() => ({})));
@@ -338,16 +321,14 @@ export const getPurchaseOrders = async (
 export const getPurchaseOrderById = async (
   id: number | string,
 ): Promise<PurchaseOrder> => {
-  const res = await fetch(`/api/grns/po/${id}`, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(`/api/grns/po/${id}`, {
   });
   if (!res.ok) throw new Error("Failed to fetch PO details");
   return res.json().catch(() => ({}));
 };
 
 export const getItems = async (): Promise<Item[]> => {
-  const res = await fetch("/api/item-master", {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth("/api/item-master", {
   });
   if (!res.ok) throw new Error("Failed to fetch Items");
   const data = await res.json().catch(() => ({}));
@@ -355,7 +336,7 @@ export const getItems = async (): Promise<Item[]> => {
 };
 
 export const getUoms = async (): Promise<UOM[]> => {
-  const res = await fetch("/api/uom-master", { headers: getAuthHeaders() });
+  const res = await fetchWithAuth("/api/uom-master");
   if (!res.ok) throw new Error("Failed to fetch UOMs");
   const data = await res.json().catch(() => ({}));
   return Array.isArray(data)
