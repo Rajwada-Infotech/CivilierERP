@@ -1,7 +1,7 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React, { useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -10,7 +10,7 @@ import {
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Hash, Download, Upload, Loader2, Check, X } from "lucide-react";
+import { Download, Upload, Loader2, Check, X } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
@@ -31,7 +31,11 @@ async function readError(res: Response, fallback: string): Promise<Error> {
   return new Error(body?.error || body?.message || fallback);
 }
 
-const getHsn = () => fetchWithAuth(BASE).then((r) => r.json().catch(() => ({})));
+const getHsn = async () => {
+  const res = await fetchWithAuth(BASE);
+  if (!res.ok) throw await readError(res, "Failed to load HSN codes");
+  return res.json().catch(() => []);
+};
 const addHsn = async (data: object) => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
@@ -114,6 +118,10 @@ interface ImportRowResult {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+
 const HsnMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("hsn-master");
@@ -220,6 +228,10 @@ const HsnMaster: React.FC = () => {
           const cgstRate = parseRate("CGST Rate", cgstRaw);
           const sgstRate = parseRate("SGST Rate", sgstRaw);
           const igstRate = parseRate("IGST Rate", igstRaw);
+          if (Math.abs(cgstRate - sgstRate) > 0.001)
+            throw new Error(`CGST (${cgstRate}%) and SGST (${sgstRate}%) must be the same`);
+          if (Math.abs(cgstRate + sgstRate - igstRate) > 0.001)
+            throw new Error(`IGST must equal CGST + SGST (${cgstRate + sgstRate}%), not ${igstRate}%`);
 
           // Status defaults to Active when left blank, matching the form's default.
           const isActive =
@@ -293,75 +305,75 @@ const HsnMaster: React.FC = () => {
     }
   };
 
+  // Other pages hold the same HSN list under their own keys (activities, fixed assets); refresh them all.
+  const refreshHsnEverywhere = () => {
+    for (const key of ["hsn", "hsn-master", "hsn-sac-codes"]) queryClient.invalidateQueries({ queryKey: [key] });
+  };
+
+  // GST splits evenly: CGST = SGST, and together they make IGST. Items copy these rates, so a mismatch
+  // here would put wrong tax on every bill that uses the code.
+  const checkGstRates = (form: Record<string, unknown>) => {
+    const n = (v: unknown) => (v === "" || v == null ? 0 : Number(v));
+    const c = n(form.cgstRate), s = n(form.sgstRate), i = n(form.igstRate);
+    if ([c, s, i].some((x) => !Number.isFinite(x) || x < 0 || x > 100)) {
+      toast.error("GST rates must be between 0 and 100.");
+      return null;
+    }
+    if (Math.abs(c - s) > 0.001) {
+      toast.error(`CGST (${c}%) and SGST (${s}%) must be the same.`);
+      return null;
+    }
+    if (Math.abs(c + s - i) > 0.001) {
+      toast.error(`IGST must equal CGST + SGST (${c + s}%), not ${i}%.`);
+      return null;
+    }
+    return form;
+  };
+
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       await addHsn(toPayload(event.record));
-      toast.success("HSN saved!");
-      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
+      refreshHsnEverywhere();
     }
     if (event.action === "update") {
       await updateHsn(event.id, toPayload(event.record));
-      toast.success("HSN updated!");
-      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
+      refreshHsnEverywhere();
     }
     if (event.action === "delete") {
       await deleteHsn(event.id);
-      toast.success("HSN deleted!");
-      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
+      refreshHsnEverywhere();
     }
   };
 
+  const pct = (value: unknown) =>
+    value !== "" && value != null ? <span className="font-heading text-xs tabular-nums">{Number(value)}%</span> : <span className="text-muted-foreground text-xs">—</span>;
   const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
-    status: (value) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${value ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-emerald-500" : "bg-red-500"}`}
-        />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
-    igstRate: (value) =>
-      value !== "" ? (
-        <span className="font-mono text-sm">{Number(value)}%</span>
-      ) : (
-        "—"
-      ),
-    cgstRate: (value) =>
-      value !== "" ? (
-        <span className="font-mono text-sm">{Number(value)}%</span>
-      ) : (
-        "—"
-      ),
-    sgstRate: (value) =>
-      value !== "" ? (
-        <span className="font-mono text-sm">{Number(value)}%</span>
-      ) : (
-        "—"
-      ),
+    code: (value) => <span className="font-heading text-xs font-semibold tracking-wide text-foreground">{String(value ?? "")}</span>,
+    status: (value) => <SheetMark text={value ? "Active" : "Inactive"} tone={value ? "done" : "waiting"} />,
+    igstRate: pct,
+    cgstRate: pct,
+    sgstRate: pct,
     isSac: (value) =>
       value ? (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border bg-violet-500/10 border-violet-500/20 text-violet-600">
-          SAC
-        </span>
+        <span className="inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-foreground text-foreground">SAC</span>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),
   };
 
+
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
-    return <div className="p-6 text-red-500">Failed to load HSN records.</div>;
+    return <div className="p-6 text-sm text-destructive">Failed to load HSN codes.</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "HSN Master"]} />
-      <MaterialShell
-        title="HSN Master"
-        subtitle="HSN codes and GST rate configuration"
-        icon={Hash}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="HSN / SAC codes"
+        subtitle="Goods (HSN) and services (SAC) codes with their GST rates; items take their tax rates from here."
         action={
           <div className="flex items-center gap-2">
             <input
@@ -374,26 +386,28 @@ const HsnMaster: React.FC = () => {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all HSN fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY_LINE} h-9 px-3`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
-            <button
-              onClick={handleImportClick}
-              disabled={importing}
-              title="Import HSN codes from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import HSN codes from a filled-in CSV"
+                className={`${KEY_LINE} h-9 px-3`}
+              >
+                {importing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing…" : "Import CSV"}
+                </span>
+              </button>
+            )}
           </div>
         }
       >
@@ -413,7 +427,7 @@ const HsnMaster: React.FC = () => {
                 const isSac = !!formData.isSac;
                 return (
                   <div>
-                    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                    <label className="block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
                       {isSac ? "SAC Code" : "HSN Code"}
                       <span className="text-destructive ml-0.5">*</span>
                     </label>
@@ -422,7 +436,7 @@ const HsnMaster: React.FC = () => {
                       value={(value as string) || ""}
                       onChange={(e) => onChange(e.target.value.toUpperCase())}
                       placeholder={isSac ? "Enter SAC code…" : "Enter HSN code…"}
-                      className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${error ? "border-destructive" : "border-border"}`}
+                      className={`w-full px-3 py-2 text-sm font-body bg-card border transition-colors focus:outline-none focus:border-foreground text-foreground ${error ? "border-destructive" : "border-foreground/40"}`}
                     />
                   </div>
                 );
@@ -468,6 +482,7 @@ const HsnMaster: React.FC = () => {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          onCustomSave={checkGstRates}
           exportConfig={rights.canExport ? {
             title: "HSN Master",
             filename: "hsn-master",
@@ -477,8 +492,8 @@ const HsnMaster: React.FC = () => {
               { header: "IGST %", accessor: "igstRate" },
               { header: "CGST %", accessor: "cgstRate" },
               { header: "SGST %", accessor: "sgstRate" },
-              { header: "Is SAC Code", accessor: "isSac" },
-              { header: "Status", accessor: "status" },
+              { header: "Is SAC Code", accessor: (r) => (r.isSac ? "Yes" : "No") },
+              { header: "Status", accessor: (r) => (r.status ? "Active" : "Inactive") },
             ],
           } : undefined}
         />
@@ -488,16 +503,15 @@ const HsnMaster: React.FC = () => {
           open={!!importResults}
           onOpenChange={(open) => !open && setImportResults(null)}
         >
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle className="font-heading text-base">
-                Import Results
-              </DialogTitle>
+          <DialogContent className="sheet-frame max-w-lg p-0 gap-0" style={{ margin: 0 }}>
+            <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+              <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">HSN / SAC codes</p>
+              <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Import results</DialogTitle>
             </DialogHeader>
             {importResults && (
-              <div className="space-y-3 pt-1">
+              <div className="space-y-3 px-5 pt-4">
                 <div className="flex items-center gap-3 text-sm">
-                  <span className="flex items-center gap-1.5 text-green-600">
+                  <span className="flex items-center gap-1.5 text-foreground">
                     <Check size={14} />
                     {
                       importResults.filter((r) => r.status === "success").length
@@ -514,7 +528,7 @@ const HsnMaster: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                <div className="max-h-72 overflow-y-auto border border-foreground divide-y divide-foreground/10">
                   {importResults.map((r, i) => (
                     <div
                       key={i}
@@ -525,7 +539,7 @@ const HsnMaster: React.FC = () => {
                       {r.status === "success" ? (
                         <Check
                           size={14}
-                          className="text-green-600 shrink-0 mt-0.5"
+                          className="text-foreground shrink-0 mt-0.5"
                         />
                       ) : (
                         <X
@@ -548,17 +562,17 @@ const HsnMaster: React.FC = () => {
                 </div>
               </div>
             )}
-            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            <div className="flex justify-end gap-2 px-5 py-4">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
+                className={`${KEY_INK} h-9 px-4`}
               >
                 Close
               </button>
             </div>
           </DialogContent>
         </Dialog>
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 };
