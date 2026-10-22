@@ -502,6 +502,30 @@ async function buildApprovalTrail(pool, module, recordId) {
       }
     }
 
+    // The other way round: the record is Pending again but every level still
+    // reads Approved. That's a document amended after approval — the edit
+    // routes put Status back to Pending directly, so no new cycle marker has
+    // been written yet and the old cycle's sign-offs are still the latest
+    // rows. The approval engine restarts such a record at level 1 the moment
+    // anyone acts on it (approvalService.resolveCurrentLevel), so show it that
+    // way now instead of "Final level · Approved" beside a Pending status.
+    const amendedAfterApproval =
+      !approvedOutcome &&
+      actualStatus === "Pending" &&
+      steps.length > 0 &&
+      steps.every((s) => s.status === "Approved");
+    if (amendedAfterApproval) {
+      for (const s of steps) {
+        s.status = "Pending";
+        s.approverEmail = null;
+        s.approverName = null;
+        s.role = null;
+        s.actionAt = null;
+        if (Array.isArray(s.approvers)) s.approvers = [];
+        s.note = "Amended after approval — waiting for approval again";
+      }
+    }
+
     const fullSteps = [...submittedMarkers, ...steps, ...rejectedMarkers];
 
     const currentLevel =
