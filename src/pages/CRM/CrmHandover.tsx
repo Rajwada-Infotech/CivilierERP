@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -12,12 +12,14 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Plus, Key, AlertTriangle, CheckCircle2, User } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
+import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
+import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const API        = "/api/crm/handover";
 const SA_LEADS_API = "/api/sa/leads";
@@ -35,12 +37,12 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
 
 const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
 
-const statusColor: Record<string, string> = {
-  Scheduled:      "text-blue-600 bg-blue-50 border-blue-200",
-  SnagInspection: "text-purple-600 bg-purple-50 border-purple-200",
-  SnagPending:    "text-orange-600 bg-orange-50 border-orange-200",
-  Completed:      "text-green-600 bg-green-50 border-green-200",
-  Cancelled:      "text-red-600 bg-red-50 border-red-200",
+const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: string; dot: string }> = {
+  Scheduled:      { label: "Scheduled",       badgeCls: "text-blue-600 bg-blue-50 border-blue-200",     accent: "border-l-blue-400",   dot: "bg-blue-500" },
+  SnagInspection: { label: "Snag Inspection",  badgeCls: "text-purple-600 bg-purple-50 border-purple-200", accent: "border-l-purple-400", dot: "bg-purple-500" },
+  SnagPending:    { label: "Snag Pending",     badgeCls: "text-orange-600 bg-orange-50 border-orange-200", accent: "border-l-orange-400", dot: "bg-orange-400" },
+  Completed:      { label: "Completed",        badgeCls: "text-green-600 bg-green-50 border-green-200",   accent: "border-l-green-500",  dot: "bg-green-500" },
+  Cancelled:      { label: "Cancelled",        badgeCls: "text-red-600 bg-red-50 border-red-200",         accent: "border-l-red-500",    dot: "bg-red-500" },
 };
 
 const statusLabel: Record<string, string> = {
@@ -51,8 +53,12 @@ const statusLabel: Record<string, string> = {
 };
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
-async function fetchHandovers(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+interface ListPage { rows: any[]; total: number; counts: Record<string, number> }
+async function fetchHandoversList(q: CrmListQuery): Promise<ListPage> {
+  const r = await fetchWithAuth(`${API}?${listParams(q)}`);
+  if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
+  const d = await r.json();
+  return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
 async function fetchHandoverByBooking(bookingId: string): Promise<any | null> {
   try {
@@ -61,27 +67,6 @@ async function fetchHandoverByBooking(bookingId: string): Promise<any | null> {
     const rows = await r.json();
     return Array.isArray(rows) && rows.length ? rows[0] : null;
   } catch { return null; }
-}
-
-const PAGE_SIZE = 20;
-interface HandoverListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchHandoversList(filters: HandoverListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
@@ -107,16 +92,16 @@ const CrmHandover: React.FC = () => {
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
 
-  const [selectedId, setSelectedId]     = useState<number | null>(null);
-  const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch] = useState("");
-  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [page, setPage] = useState(1);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const list = useCrmListState({ pageSize: 25, defaultSort: { key: "ScheduledDate", dir: "asc" } });
+  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } =
+    useQuery({ queryKey: ["crm-handovers", list.query], queryFn: () => fetchHandoversList(list.query), staleTime: 30_000 });
+  const pageData = useSticky(data);
+  const handovers = pageData?.rows ?? [];
+  const total = pageData?.total ?? 0;
+  const counts = pageData?.counts ?? {};
+  const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters;
+
   const [newDialog, setNewDialog]       = useState(false);
   const [snagDialog, setSnagDialog]     = useState(false);
   const [completeDialog, setCompleteDialog] = useState(false);
@@ -134,17 +119,6 @@ const CrmHandover: React.FC = () => {
     CustomerAcknowledged: false,
   });
 
-  const listFilters: HandoverListFilters = useMemo(
-    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, cpb]
-  );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-handovers", listFilters, page],
-    queryFn: () => fetchHandoversList(listFilters, page),
-    staleTime: 30_000,
-  });
-  const handovers = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
   const { data: detail } = useQuery({
     queryKey: ["crm-handover-detail", selectedId],
     queryFn: () => fetchDetail(selectedId!),
@@ -333,302 +307,321 @@ const CrmHandover: React.FC = () => {
 
   const rights = usePageRights("crm-handover");
 
+  const tabs: CrmStatusTab[] = [
+    { key: "All",            label: "All",             count: counts.All ?? 0 },
+    { key: "Scheduled",      label: "Scheduled",       count: counts.Scheduled ?? 0,      dot: STATUS_CONFIG.Scheduled.dot },
+    { key: "SnagInspection", label: "Snag Inspection",  count: counts.SnagInspection ?? 0, dot: STATUS_CONFIG.SnagInspection.dot },
+    { key: "SnagPending",    label: "Snag Pending",     count: counts.SnagPending ?? 0,    dot: STATUS_CONFIG.SnagPending.dot },
+    { key: "Completed",      label: "Completed",        count: counts.Completed ?? 0,      dot: STATUS_CONFIG.Completed.dot },
+    { key: "Cancelled",      label: "Cancelled",        count: counts.Cancelled ?? 0,      dot: STATUS_CONFIG.Cancelled.dot },
+  ];
+
+  const columns: CrmColumn<any>[] = [
+    { key: "applicant", header: "Applicant", sortKey: "ApplicantName", cell: (h) => (
+      <span className="font-medium block truncate max-w-[220px]" title={h.ApplicantName}><ApplicantNames name={h.ApplicantName} bookingId={h.BookingId} applicationId={h.ApplicationId} /></span>
+    ) },
+    { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
+      cell: (h) => <span className="text-xs text-muted-foreground whitespace-nowrap">{h.BookingNo}</span> },
+    { key: "unit", header: "Unit", className: "hidden md:table-cell",
+      cell: (h) => <span className="text-xs whitespace-nowrap">{h.UnitNo}</span> },
+    { key: "status", header: "Status", sortKey: "Status", cell: (h) => {
+      const cfg = STATUS_CONFIG[h.Status] ?? STATUS_CONFIG.Scheduled;
+      return <span className={`text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${cfg.badgeCls}`}>{cfg.label}</span>;
+    } },
+    { key: "scheduled", header: "Scheduled", sortKey: "ScheduledDate", className: "hidden lg:table-cell",
+      cell: (h) => <span className="text-xs whitespace-nowrap">{h.ScheduledDate ? String(h.ScheduledDate).slice(0, 10) : "—"}</span> },
+    { key: "snags", header: "Open Snags", align: "right", cell: (h) => h.OpenSnagCount > 0 ? (
+      <span className="inline-flex items-center gap-1 text-xs text-sky-600 font-medium whitespace-nowrap"><AlertTriangle size={11} /> {h.OpenSnagCount}</span>
+    ) : (
+      <span className="text-xs text-muted-foreground">—</span>
+    ) },
+  ];
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Handover"]} />
       <CrmShell
         title="CRM — Possession & Handover"
-      subtitle="Snag inspection and key handover workflow"
-      action={
+        subtitle="Snag inspection and key handover workflow"
+        action={
           <div className="flex items-center gap-3">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          {rights.canCreate && (
-            <button onClick={() => setNewDialog(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
-            <Key size={14} /> Schedule Handover
-          </button>
-          )}
-        </div>
-      }
-    >
-      <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-220px)]">
-        {/* ── List panel ─────────────────────────────────────────────────── */}
-        <div className="w-full md:w-80 shrink-0 flex flex-col gap-2">
-        <div className="relative">
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search customer, booking..."
-            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
-        <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[45vh] md:max-h-none">
-          {isLoading ? (
-            <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
-          ) : (handovers as any[]).length === 0 ? (
-            <div className="p-5 rounded-xl border border-dashed border-border bg-muted/20 space-y-2 text-center">
-              <div className="text-2xl">🔑</div>
-              <p className="text-sm font-medium text-foreground">No handovers scheduled</p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
+            <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+            {rights.canCreate && (
+              <button onClick={() => setNewDialog(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
+                <Key size={14} /> Schedule Handover
+              </button>
+            )}
+          </div>
+        }
+      >
+        {!showOnboarding && (
+          <div className="space-y-3">
+            <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
+              searchValue={list.searchInput} onSearch={list.setSearchInput}
+              placeholder="Search applicant, booking, unit…">
+              <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+            </CrmListToolbar>
+
+            <CrmDataTable
+              columns={columns} rows={handovers} rowKey={(h) => h.Id}
+              loading={isLoading} fetching={isFetching}
+              error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
+              sort={list.sort} onSort={list.toggleSort}
+              onRowClick={(h) => setSelectedId(h.Id)} activeKey={selectedId}
+              rowAccent={(h) => (STATUS_CONFIG[h.Status] ?? STATUS_CONFIG.Scheduled).accent}
+              empty={<>No handovers match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
+              page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+            />
+          </div>
+        )}
+
+        {showOnboarding && (
+          <div className="p-8 rounded-xl border-2 border-dashed border-border bg-muted/10 text-center space-y-3">
+            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+              <Key size={26} className="text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">No handovers scheduled</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
                 Handover can be scheduled once the Sales Deed is approved by both the customer and the Director, and all NOCs have been issued.
               </p>
-              {rights.canCreate && (
-                <button onClick={() => setNewDialog(true)}
-                  className="mt-1 text-xs text-primary hover:underline font-medium">
-                  Schedule First Handover →
-                </button>
-              )}
             </div>
-          ) : (handovers as any[]).map((h: any) => (
-            <button key={h.Id} onClick={() => setSelectedId(h.Id)}
-              className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedId === h.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium truncate"><ApplicantNames name={h.ApplicantName} bookingId={h.BookingId} applicationId={h.ApplicationId} /></span>
-                <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${statusColor[h.Status] || ""}`}>{h.Status}</span>
-              </div>
-              <div className="text-xs text-muted-foreground mt-0.5">{h.BookingNo} · {h.UnitNo}</div>
-              {h.OpenSnagCount > 0 && (
-                <div className="text-xs text-sky-600 flex items-center gap-1 mt-1">
-                  <AlertTriangle size={10} /> {h.OpenSnagCount} open snag(s)
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
-        </div>
+            {rights.canCreate && (
+              <button onClick={() => setNewDialog(true)}
+                className="flex items-center gap-1.5 text-sm px-4 py-2 btn-module text-white rounded-lg font-semibold mx-auto">
+                <Key size={13} /> Schedule Handover
+              </button>
+            )}
+          </div>
+        )}
 
-        {/* ── Detail panel ───────────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0 min-h-[50vh] md:min-h-0 overflow-y-auto space-y-4">
-          {selectedId == null ? (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Select a handover</div>
-          ) : !detail ? (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
-          ) : (
-            <>
-              {/* Handover header card */}
-              <div className="rounded-xl border border-border p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h2 className="font-bold"><ApplicantNames name={detail.handover.ApplicantName} bookingId={detail.handover.BookingId} applicationId={detail.handover.ApplicationId} /></h2>
-                    <p className="text-xs text-muted-foreground">{detail.handover.BookingNo} · {detail.handover.UnitNo}</p>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[detail.handover.Status] || ""}`}>
-                    {detail.handover.Status}
+        {/* ── Schedule Handover dialog ─────────────────────────────────────── */}
+        <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
+          <DialogContent accent="crm" className="max-w-md">
+            <DialogHeader><DialogTitle className="font-heading">Schedule Handover</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">
+                  Booking *{" "}
+                  <span className="text-[0.625rem] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
+                </label>
+                <SearchableNativeSelect value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">Select booking</option>
+                  {(eligibleBookings as any[]).length === 0 && (
+                    <option disabled value="">— No eligible bookings —</option>
+                  )}
+                  {(eligibleBookings as any[]).map((b: any) => (
+                    <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
+                  ))}
+                </SearchableNativeSelect>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Scheduled Date</label>
+                <DateInput value={newForm.ScheduledDate}
+                  onChange={(e) => setNewForm((f) => ({ ...f, ScheduledDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+                <textarea value={newForm.Notes} onChange={(e) => setNewForm((f) => ({ ...f, Notes: e.target.value }))}
+                  rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+            </div>
+            <DialogFooter>
+              <button onClick={() => setNewDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleSchedule} disabled={saving}
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+                {saving ? "Scheduling..." : "Schedule"}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Raise Snag dialog ────────────────────────────────────────────── */}
+        <Dialog open={snagDialog} onOpenChange={(o) => { if (!o) setSnagDialog(false); }}>
+          <DialogContent accent="crm" className="max-w-sm">
+            <DialogHeader><DialogTitle className="font-heading">Raise Snag Item</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Category</label>
+                <select value={snagForm.Category} onChange={(e) => setSnagForm((f) => ({ ...f, Category: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  {SNAG_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Description *</label>
+                <textarea value={snagForm.Description} onChange={(e) => setSnagForm((f) => ({ ...f, Description: e.target.value }))}
+                  rows={3} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              </div>
+            </div>
+            <DialogFooter>
+              <button onClick={() => setSnagDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleAddSnag} disabled={saving}
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+                {saving ? "Adding..." : "Raise Snag"}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Complete Handover dialog ─────────────────────────────────────── */}
+        {/* Collecting all 4 mandatory fields the backend requires for Completed:
+            ActualHandoverDate, KeyHandoverBy, FinalDuesCleared, CustomerAcknowledged */}
+        <Dialog open={completeDialog} onOpenChange={(o) => { if (!o) setCompleteDialog(false); }}>
+          <DialogContent accent="crm" className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-heading">Complete Handover</DialogTitle>
+            </DialogHeader>
+            <p className="text-xs text-muted-foreground -mt-2">
+              All fields below are mandatory — they form the permanent record of the physical key handover event.
+            </p>
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="text-xs font-medium block mb-1">Actual Handover Date *</label>
+                <DateInput value={completeForm.ActualHandoverDate}
+                  onChange={(e) => setCompleteForm((f) => ({ ...f, ActualHandoverDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Key Handed Over By (Staff Member) *</label>
+                <SearchableNativeSelect value={completeForm.KeyHandoverBy}
+                  onChange={(e) => setCompleteForm((f) => ({ ...f, KeyHandoverBy: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <option value="">— Select staff member —</option>
+                  {(users as any[]).map((u: any) => (
+                    <option key={u.value} value={u.value}>{u.label}</option>
+                  ))}
+                </SearchableNativeSelect>
+              </div>
+              <div className="rounded-lg border border-border p-3 space-y-2.5">
+                <p className="text-xs font-semibold text-foreground">Handover Confirmations *</p>
+                <label className="flex items-start gap-2.5 cursor-pointer group">
+                  <input type="checkbox" checked={completeForm.FinalDuesCleared}
+                    onChange={(e) => setCompleteForm((f) => ({ ...f, FinalDuesCleared: e.target.checked }))}
+                    className="mt-0.5 w-4 h-4 rounded accent-primary" />
+                  <span className="text-sm text-foreground">
+                    All final dues have been cleared — no outstanding payment demands remain against this booking.
                   </span>
-                </div>
+                </label>
+                <label className="flex items-start gap-2.5 cursor-pointer group">
+                  <input type="checkbox" checked={completeForm.CustomerAcknowledged}
+                    onChange={(e) => setCompleteForm((f) => ({ ...f, CustomerAcknowledged: e.target.checked }))}
+                    className="mt-0.5 w-4 h-4 rounded accent-primary" />
+                  <span className="text-sm text-foreground">
+                    Customer has physically acknowledged possession and received the keys.
+                  </span>
+                </label>
+              </div>
+            </div>
+            <DialogFooter>
+              <button onClick={() => setCompleteDialog(false)}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+                Cancel
+              </button>
+              <button onClick={handleComplete} disabled={saving}
+                className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">
+                {saving ? "Completing..." : "Confirm & Complete"}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CrmShell>
 
-                {/* Dates & flags */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mb-3">
-                  <div><span className="text-xs text-muted-foreground">Scheduled: </span>{detail.handover.ScheduledDate ? String(detail.handover.ScheduledDate).slice(0, 10) : "—"}</div>
-                  <div><span className="text-xs text-muted-foreground">Actual: </span>{detail.handover.ActualHandoverDate ? String(detail.handover.ActualHandoverDate).slice(0, 10) : "—"}</div>
-                  <div>
-                    <span className="text-xs text-muted-foreground">Dues Cleared: </span>
-                    {detail.handover.FinalDuesCleared
-                      ? <span className="text-green-600 font-medium">✓ Yes</span>
-                      : <span className="text-muted-foreground">No</span>}
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground">Customer Ack: </span>
-                    {detail.handover.CustomerAcknowledged
-                      ? <span className="text-green-600 font-medium">✓ Yes</span>
-                      : <span className="text-muted-foreground">No</span>}
-                  </div>
-                  {detail.handover.KeyHandoverByName && (
-                    <div className="col-span-2 flex items-center gap-1">
-                      <User size={12} className="text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Key handed by: </span>
-                      <span className="text-xs font-medium">{detail.handover.KeyHandoverByName}</span>
-                    </div>
-                  )}
+      {/* ── Detail drawer ─────────────────────────────────────────────── */}
+      <CrmSideDrawer
+        open={selectedId != null}
+        onClose={() => setSelectedId(null)}
+        title={detail ? <ApplicantNames name={detail.handover.ApplicantName} bookingId={detail.handover.BookingId} applicationId={detail.handover.ApplicationId} /> : ""}
+        subtitle={detail ? `${detail.handover.BookingNo} · ${detail.handover.UnitNo}` : undefined}
+        badge={detail && (
+          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${(STATUS_CONFIG[detail.handover.Status] ?? STATUS_CONFIG.Scheduled).badgeCls}`}>
+            {(STATUS_CONFIG[detail.handover.Status] ?? STATUS_CONFIG.Scheduled).label}
+          </span>
+        )}
+      >
+        {selectedId != null && !detail ? (
+          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
+        ) : detail && (
+          <div className="space-y-4">
+            {/* Dates & flags */}
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div><span className="text-xs text-muted-foreground">Scheduled: </span>{detail.handover.ScheduledDate ? String(detail.handover.ScheduledDate).slice(0, 10) : "—"}</div>
+              <div><span className="text-xs text-muted-foreground">Actual: </span>{detail.handover.ActualHandoverDate ? String(detail.handover.ActualHandoverDate).slice(0, 10) : "—"}</div>
+              <div>
+                <span className="text-xs text-muted-foreground">Dues Cleared: </span>
+                {detail.handover.FinalDuesCleared
+                  ? <span className="text-green-600 font-medium">✓ Yes</span>
+                  : <span className="text-muted-foreground">No</span>}
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">Customer Ack: </span>
+                {detail.handover.CustomerAcknowledged
+                  ? <span className="text-green-600 font-medium">✓ Yes</span>
+                  : <span className="text-muted-foreground">No</span>}
+              </div>
+              {detail.handover.KeyHandoverByName && (
+                <div className="col-span-2 flex items-center gap-1">
+                  <User size={12} className="text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">Key handed by: </span>
+                  <span className="text-xs font-medium">{detail.handover.KeyHandoverByName}</span>
                 </div>
+              )}
+            </div>
 
-                {/* State-machine-aware transition buttons */}
-                {rights.canEdit && allowedNextStatuses.length > 0 && (
-                  <div className="flex gap-2 flex-wrap pt-2 border-t border-border">
-                    {allowedNextStatuses.map((s) => (
-                      <button key={s} onClick={() => handleTransition(s)}
-                        className={`text-xs px-3 py-1.5 border rounded-lg font-medium transition-colors ${
-                          s === "Completed"
-                            ? "border-green-300 text-green-700 hover:bg-green-50"
-                            : s === CrmStatus.CANCELLED
-                            ? "border-red-200 text-red-600 hover:bg-red-50"
-                            : "border-border hover:bg-muted"
-                        }`}>
-                        → {statusLabel[s] ?? s}
-                      </button>
-                    ))}
-                  </div>
+            {/* State-machine-aware transition buttons */}
+            {rights.canEdit && allowedNextStatuses.length > 0 && (
+              <div className="flex gap-2 flex-wrap pt-2 border-t border-border">
+                {allowedNextStatuses.map((s) => (
+                  <button key={s} onClick={() => handleTransition(s)}
+                    className={`text-xs px-3 py-1.5 border rounded-lg font-medium transition-colors ${
+                      s === "Completed"
+                        ? "border-green-300 text-green-700 hover:bg-green-50"
+                        : s === CrmStatus.CANCELLED
+                        ? "border-red-200 text-red-600 hover:bg-red-50"
+                        : "border-border hover:bg-muted"
+                    }`}>
+                    → {statusLabel[s] ?? s}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Snag list */}
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Snag / Defect List ({detail.snags?.length || 0})</h3>
+                {rights.canEdit && !["Completed", "Cancelled"].includes(currentStatus) && (
+                  <button onClick={() => setSnagDialog(true)} className="flex items-center gap-1 text-xs text-primary hover:underline">
+                    <Plus size={12} /> Raise Snag
+                  </button>
                 )}
               </div>
-
-              {/* Snag list */}
-              <div className="rounded-xl border border-border overflow-hidden">
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                  <h3 className="text-sm font-semibold">Snag / Defect List ({detail.snags?.length || 0})</h3>
-                  {rights.canEdit && !["Completed", "Cancelled"].includes(currentStatus) && (
-                    <button onClick={() => setSnagDialog(true)} className="flex items-center gap-1 text-xs text-primary hover:underline">
-                      <Plus size={12} /> Raise Snag
+              {!detail.snags?.length ? (
+                <div className="p-4 text-center text-muted-foreground text-sm">No snag items</div>
+              ) : (detail.snags as any[]).map((s: any) => (
+                <div key={s.Id} className="px-4 py-3 border-b border-border last:border-0 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{s.Category}</div>
+                    <div className="text-xs text-muted-foreground">{s.Description}</div>
+                    {s.RaisedByName && <div className="text-xs text-muted-foreground">Raised by {s.RaisedByName}</div>}
+                    {s.ResolvedByName && <div className="text-xs text-muted-foreground">Resolved by {s.ResolvedByName}</div>}
+                  </div>
+                  {s.Status === CrmStatus.RESOLVED ? (
+                    <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Resolved</span>
+                  ) : rights.canEdit ? (
+                    <button onClick={() => handleResolveSnag(s.Id)} className="text-xs text-primary hover:underline whitespace-nowrap">
+                      Mark Resolved
                     </button>
-                  )}
+                  ) : null}
                 </div>
-                {!detail.snags?.length ? (
-                  <div className="p-4 text-center text-muted-foreground text-sm">No snag items</div>
-                ) : (detail.snags as any[]).map((s: any) => (
-                  <div key={s.Id} className="px-4 py-3 border-b border-border last:border-0 flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium">{s.Category}</div>
-                      <div className="text-xs text-muted-foreground">{s.Description}</div>
-                      {s.RaisedByName && <div className="text-xs text-muted-foreground">Raised by {s.RaisedByName}</div>}
-                      {s.ResolvedByName && <div className="text-xs text-muted-foreground">Resolved by {s.ResolvedByName}</div>}
-                    </div>
-                    {s.Status === CrmStatus.RESOLVED ? (
-                      <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Resolved</span>
-                    ) : rights.canEdit ? (
-                      <button onClick={() => handleResolveSnag(s.Id)} className="text-xs text-primary hover:underline whitespace-nowrap">
-                        Mark Resolved
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* ── Schedule Handover dialog ─────────────────────────────────────── */}
-      <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">Schedule Handover</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">
-                Booking *{" "}
-                <span className="text-[0.625rem] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
-              </label>
-              <SearchableNativeSelect value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select booking</option>
-                {(eligibleBookings as any[]).length === 0 && (
-                  <option disabled value="">— No eligible bookings —</option>
-                )}
-                {(eligibleBookings as any[]).map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
-                ))}
-              </SearchableNativeSelect>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Scheduled Date</label>
-              <DateInput value={newForm.ScheduledDate}
-                onChange={(e) => setNewForm((f) => ({ ...f, ScheduledDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={newForm.Notes} onChange={(e) => setNewForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              ))}
             </div>
           </div>
-          <DialogFooter>
-            <button onClick={() => setNewDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSchedule} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Scheduling..." : "Schedule"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Raise Snag dialog ────────────────────────────────────────────── */}
-      <Dialog open={snagDialog} onOpenChange={(o) => { if (!o) setSnagDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading">Raise Snag Item</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Category</label>
-              <select value={snagForm.Category} onChange={(e) => setSnagForm((f) => ({ ...f, Category: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                {SNAG_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Description *</label>
-              <textarea value={snagForm.Description} onChange={(e) => setSnagForm((f) => ({ ...f, Description: e.target.value }))}
-                rows={3} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-            </div>
-          </div>
-          <DialogFooter>
-            <button onClick={() => setSnagDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleAddSnag} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Adding..." : "Raise Snag"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Complete Handover dialog ─────────────────────────────────────── */}
-      {/* Collecting all 4 mandatory fields the backend requires for Completed:
-          ActualHandoverDate, KeyHandoverBy, FinalDuesCleared, CustomerAcknowledged */}
-      <Dialog open={completeDialog} onOpenChange={(o) => { if (!o) setCompleteDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Complete Handover</DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-2">
-            All fields below are mandatory — they form the permanent record of the physical key handover event.
-          </p>
-          <div className="space-y-3 pt-1">
-            <div>
-              <label className="text-xs font-medium block mb-1">Actual Handover Date *</label>
-              <DateInput value={completeForm.ActualHandoverDate}
-                onChange={(e) => setCompleteForm((f) => ({ ...f, ActualHandoverDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs font-medium block mb-1">Key Handed Over By (Staff Member) *</label>
-              <SearchableNativeSelect value={completeForm.KeyHandoverBy}
-                onChange={(e) => setCompleteForm((f) => ({ ...f, KeyHandoverBy: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">— Select staff member —</option>
-                {(users as any[]).map((u: any) => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
-                ))}
-              </SearchableNativeSelect>
-            </div>
-            <div className="rounded-lg border border-border p-3 space-y-2.5">
-              <p className="text-xs font-semibold text-foreground">Handover Confirmations *</p>
-              <label className="flex items-start gap-2.5 cursor-pointer group">
-                <input type="checkbox" checked={completeForm.FinalDuesCleared}
-                  onChange={(e) => setCompleteForm((f) => ({ ...f, FinalDuesCleared: e.target.checked }))}
-                  className="mt-0.5 w-4 h-4 rounded accent-primary" />
-                <span className="text-sm text-foreground">
-                  All final dues have been cleared — no outstanding payment demands remain against this booking.
-                </span>
-              </label>
-              <label className="flex items-start gap-2.5 cursor-pointer group">
-                <input type="checkbox" checked={completeForm.CustomerAcknowledged}
-                  onChange={(e) => setCompleteForm((f) => ({ ...f, CustomerAcknowledged: e.target.checked }))}
-                  className="mt-0.5 w-4 h-4 rounded accent-primary" />
-                <span className="text-sm text-foreground">
-                  Customer has physically acknowledged possession and received the keys.
-                </span>
-              </label>
-            </div>
-          </div>
-          <DialogFooter>
-            <button onClick={() => setCompleteDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-              Cancel
-            </button>
-            <button onClick={handleComplete} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">
-              {saving ? "Completing..." : "Confirm & Complete"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </CrmShell>
+        )}
+      </CrmSideDrawer>
     </>
   );
 };

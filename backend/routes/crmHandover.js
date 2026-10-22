@@ -11,7 +11,6 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
-const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -37,64 +36,98 @@ const HANDOVER_SELECT = `
   LEFT JOIN dbo.Users kh     ON kh.id = h.KeyHandoverBy
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmPossessionNotice / CrmMutation / CrmNoc:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Scheduled, SnagInspection, SnagPending, Completed, Cancelled } }
+// `counts` honours search + company/project/block but NOT status, so the
+// tabs always show what each status would contain. `?bookingId=` is a
+// separate deep-link lookup mode that always returns the small bare-array
+// result, bypassing pagination entirely. Without `page` the legacy
+// full-array response is returned so existing callers keep working.
+const HO_STATUSES = ["Scheduled", "SnagInspection", "SnagPending", "Completed", "Cancelled"];
+const HO_SORT = {
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Status: "h.Status",
+  ScheduledDate: "h.ScheduledDate",
+  ActualHandoverDate: "h.ActualHandoverDate",
+  CreatedAt: "h.CreatedAt",
+};
+function buildHoWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
+  }
+  if (includeStatus && HO_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("h.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all handovers
 router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search, bookingId } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
-    const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("h.Status = @st"); }
+    const { bookingId } = req.query;
+    const SELECT_WITH_BLOCK = `${HANDOVER_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const ORDER = "ORDER BY h.ScheduledDate ASC, h.CreatedAt DESC";
+
     // Deep-link lookup mode ("does this one booking already have a
     // handover?") — always returns the small bare-array result, bypassing
     // pagination entirely, same convention as crmBookings.js's applicationId
     // scope and crmMoneyReceipts.js's bookingId scope.
-    if (bookingId) { req0.input("bid", sql.Int, parseInt(bookingId, 10)); conds.push("h.BookingId = @bid"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const SELECT_WITH_BLOCK = `${HANDOVER_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const ORDER = "ORDER BY h.ScheduledDate ASC, h.CreatedAt DESC";
-
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+    if (bookingId) {
+      const r0 = pool.request().input("bid", sql.Int, parseInt(bookingId, 10));
+      const scope = req.projectScope ? `AND ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : "";
+      const result = await r0.query(`${SELECT_WITH_BLOCK} WHERE h.BookingId = @bid ${scope} ${ORDER}`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(30), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmHandover h
-          JOIN dbo.CrmBooking b ON b.Id = h.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR h.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
-    ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildHoWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+      return res.json(result.recordset);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(HO_SORT, req.query.sortKey) ? HO_SORT[req.query.sortKey] : HO_SORT.ScheduledDate;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildHoWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT h.Status, COUNT(*) AS C FROM dbo.CrmHandover h
+       JOIN dbo.CrmBooking b ON b.Id = h.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${countWhere} GROUP BY h.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = HO_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildHoWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, h.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    res.json({ rows: rowsRes.recordset, total, counts });
   } catch (e) {
     console.error("[crm-handover] GET error:", e.message);
     res.status(500).json({ error: e.message });
