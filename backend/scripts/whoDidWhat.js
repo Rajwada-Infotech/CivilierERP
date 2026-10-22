@@ -92,7 +92,7 @@ const csvCell = (v) => {
     for (const [action, names] of Object.entries(ACTION_COLS)) {
       const col = names.find((n) => set.has(n));
       if (!col) continue;
-      const dateCol = DATE_COLS[action].find((n) => set.has(n)) || (action !== "created" ? null : null);
+      const dateCol = DATE_COLS[action].find((n) => set.has(n)) || null;
       const [s, t] = table.split(".");
       const ref = `[${s}].[${t}]`;
       const where = SINCE && dateCol ? `WHERE [${dateCol}] >= @since` : "";
@@ -167,6 +167,7 @@ const csvCell = (v) => {
   }
 
   console.log(`WHO DID WHAT${SINCE ? ` since ${SINCE}` : ""}   (${tables.size} tables record a person; ${users.length} users)\n`);
+  if (ONLY && !picked.length) console.log(`No user's name, email or id contains "${ONLY}".`);
   for (const u of picked) {
     const t = tally.get(String(u.id));
     const a = activity.get(String(u.id));
