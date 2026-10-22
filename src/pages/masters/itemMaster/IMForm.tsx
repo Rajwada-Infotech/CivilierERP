@@ -11,9 +11,10 @@ export function IMForm({ m }: { m: ItemMasterState }) {
   return (
     <>
       {/* ── Form ── */}
-      {rights.canCreate && (
-      <div className="rounded-xl border border-border bg-card p-6 mb-6">
-        <h2 className="text-base font-heading font-semibold mb-4">
+      {/* Shown to add (create rights) or to edit an item opened from the list (edit rights). */}
+      {(rights.canCreate || (rights.canEdit && editingId)) && (
+      <div className="border border-foreground bg-card p-6 mb-6">
+        <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground mb-4">
           {editingId ? "Edit Item" : "Add Item"}
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -64,7 +65,7 @@ export function IMForm({ m }: { m: ItemMasterState }) {
               <select
                 value={form.uomCode}
                 onChange={(e) => set("uomCode", e.target.value)}
-                className={inputCls() + " flex-1"}
+                className={`${inputCls()} flex-1`}
               >
                 <option value="">Select UOM...</option>
                 {uomOptions.map((u) => (
@@ -82,10 +83,10 @@ export function IMForm({ m }: { m: ItemMasterState }) {
                     ? "Tag alternate UOMs for this item"
                     : "Select this item's own UOM first"
                 }
-                className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`shrink-0 w-9 h-9 flex items-center justify-center border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   showAlternateUoms
-                    ? "btn-module text-white border-primary"
-                    : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                    ? "bg-foreground text-card border border-foreground border-primary"
+                    : "border-foreground/30 text-muted-foreground hover:text-foreground hover:bg-primary/5"
                 }`}
               >
                 {alternateUoms.length > 0 && !showAlternateUoms ? (
@@ -103,7 +104,7 @@ export function IMForm({ m }: { m: ItemMasterState }) {
               saved. Spans the full row so it isn't cramped next to the
               other 3-column fields. */}
           {showAlternateUoms && form.uomCode && (
-            <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-border bg-muted/20 p-4">
+            <div className="sm:col-span-2 lg:col-span-3 border border-foreground/30 bg-card p-4">
               <p className="text-xs font-heading font-semibold text-foreground flex items-center gap-1.5 mb-1">
                 <Ruler size={13} className="text-primary" />
                 Alternate UOMs
@@ -111,7 +112,7 @@ export function IMForm({ m }: { m: ItemMasterState }) {
               <p className="text-[0.6875rem] text-muted-foreground mb-3">
                 Tag other units this item can also be requested/ordered in,
                 with how many{" "}
-                <span className="font-mono">
+                <span className="font-heading">
                   {uomOptions.find((u) => u.value === form.uomCode)?.label ||
                     form.uomCode}
                 </span>{" "}
@@ -241,7 +242,7 @@ export function IMForm({ m }: { m: ItemMasterState }) {
                     set("cgst", parseFloat(e.target.value) || 0)
                   }
                   placeholder="0"
-                  className={inputCls() + " pr-8"}
+                  className={`${inputCls()} pr-8`}
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
                   %
@@ -260,7 +261,7 @@ export function IMForm({ m }: { m: ItemMasterState }) {
                     set("sgst", parseFloat(e.target.value) || 0)
                   }
                   placeholder="0"
-                  className={inputCls() + " pr-8"}
+                  className={`${inputCls()} pr-8`}
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
                   %
@@ -279,7 +280,7 @@ export function IMForm({ m }: { m: ItemMasterState }) {
                     set("igst", parseFloat(e.target.value) || 0)
                   }
                   placeholder="0"
-                  className={inputCls() + " pr-8"}
+                  className={`${inputCls()} pr-8`}
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
                   %
@@ -289,24 +290,24 @@ export function IMForm({ m }: { m: ItemMasterState }) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-foreground/30 bg-card overflow-hidden mt-2">
           <p className="hidden sm:block text-[0.6875rem] text-muted-foreground">
             Ready to save
           </p>
           <div className="flex items-center gap-2 sm:ml-auto">
             <button
               onClick={handleReset}
-              className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+              className="flex-1 sm:flex-none px-4 py-1.5 text-xs font-heading border border-foreground/30 text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
             >
               <RotateCcw size={12} /> Reset
             </button>
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+              className="flex-1 sm:flex-none px-5 py-2 text-sm font-heading font-semibold bg-foreground text-card border border-foreground disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
             >
               {saving ? (
-                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
               ) : editingId ? (
                 <Check size={14} />
               ) : (

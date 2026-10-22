@@ -3,8 +3,8 @@
 //   useItemMaster  all state, masters, form, save / delete, short-code fixes, CSV import
 //   IMForm · IMTable · IMViewDialog · IMImportDialog
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MaterialShell } from "@/components/material/MaterialShell";
-import { Check, Loader2, Package, Download, Upload } from "lucide-react";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { Check, Loader2, Download, Upload } from "lucide-react";
 import { DuplicateShortCodesPanel } from "./DuplicateShortCodesPanel";
 import { Item } from "./itemMaster/config";
 import { useItemMaster } from "./itemMaster/useItemMaster";
@@ -12,6 +12,9 @@ import { IMForm } from "./itemMaster/IMForm";
 import { IMTable } from "./itemMaster/IMTable";
 import { IMViewDialog } from "./itemMaster/IMViewDialog";
 import { IMImportDialog } from "./itemMaster/IMImportDialog";
+
+const KEY_LINE =
+  "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 export default function ItemMaster() {
   const m = useItemMaster();
@@ -33,10 +36,10 @@ export default function ItemMaster() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Item Master"]} />
-      <MaterialShell
-        title="Item Master"
-        subtitle="Manage your item catalog"
-        icon={Package}
+      <SheetShell
+        eyebrow="CivilierERP · Masters"
+        title="Items"
+        subtitle="The item catalogue: group, units, HSN and tax, accounts and suppliers for everything bought, stocked and issued."
         action={
           <div className="flex items-center gap-2">
             <input
@@ -49,26 +52,28 @@ export default function ItemMaster() {
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all Item Master fields"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              className={`${KEY_LINE} h-9 px-3`}
             >
               <Download size={13} />
-              <span className="hidden sm:inline">Download Template</span>
+              <span className="hidden sm:inline">Template</span>
             </button>
-            <button
-              onClick={handleImportClick}
-              disabled={importing}
-              title="Import items from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {importing ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              <span className="hidden sm:inline">
-                {importing ? "Importing..." : "Import CSV"}
-              </span>
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import items from a filled-in CSV"
+                className={`${KEY_LINE} h-9 px-3`}
+              >
+                {importing ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                <span className="hidden sm:inline">
+                  {importing ? "Importing…" : "Import CSV"}
+                </span>
+              </button>
+            )}
           </div>
         }
       >
@@ -82,7 +87,7 @@ export default function ItemMaster() {
         <IMViewDialog m={m} />
 
         <IMImportDialog m={m} />
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 }

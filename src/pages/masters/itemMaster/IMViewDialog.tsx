@@ -13,7 +13,7 @@ export function IMViewDialog({ m }: { m: ItemMasterState }) {
         open={!!viewRow}
         onOpenChange={(open) => !open && setViewRow(null)}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
           <DialogHeader>
             <DialogTitle className="font-heading text-base">
               Item Details
@@ -57,11 +57,11 @@ export function IMViewDialog({ m }: { m: ItemMasterState }) {
                     { label: "Description", value: viewRow.description },
                   ].map(({ label, value, mono }) => (
                     <div key={label}>
-                      <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                      <p className="text-[0.625rem] uppercase tracking-[0.12em] font-heading text-muted-foreground mb-0.5">
                         {label}
                       </p>
                       <p
-                        className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                        className={`text-sm text-foreground break-words ${mono ? "font-heading" : "font-body"}`}
                       >
                         {value || "—"}
                       </p>
@@ -70,18 +70,18 @@ export function IMViewDialog({ m }: { m: ItemMasterState }) {
                 </div>
               );
             })()}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t border-foreground/30 mt-2">
             {viewRow && (
               <button
                 onClick={() => handleItemPrint(viewRow)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading border border-foreground/30 text-muted-foreground hover:bg-primary/5 transition-all"
               >
                 <Printer size={13} /> Print
               </button>
             )}
             <button
               onClick={() => setViewRow(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading bg-foreground text-card border border-foreground transition-all"
             >
               Close
             </button>

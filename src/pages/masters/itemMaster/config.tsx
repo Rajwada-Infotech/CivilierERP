@@ -175,11 +175,11 @@ export const HsnDropdown: React.FC<{
           setQuery("");
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
-        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-body bg-card border border-foreground/30 text-foreground focus:outline-none transition-all"
       >
         {selected ? (
           <span className="flex items-center gap-2 truncate">
-            <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+            <span className="font-heading text-xs bg-primary/10 text-primary px-1.5 py-0.5">
               {selected.code}
             </span>
             <span className="truncate text-muted-foreground">
@@ -209,7 +209,7 @@ export const HsnDropdown: React.FC<{
         </span>
       </button>
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-background shadow-lg">
+        <div className="absolute z-50 mt-1 w-full border border-foreground/30 bg-card">
           <div className="p-2 relative">
             <Search
               size={13}
@@ -221,7 +221,7 @@ export const HsnDropdown: React.FC<{
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by code or description..."
-              className="w-full pl-8 pr-3 py-1.5 rounded-md text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full pl-8 pr-3 py-1.5 text-sm font-body bg-card border border-foreground/30 text-foreground focus:outline-none"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
@@ -243,11 +243,11 @@ export const HsnDropdown: React.FC<{
                     setOpen(false);
                     setQuery("");
                   }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors ${
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-primary/5 transition-colors ${
                     h.code === value ? "bg-primary/10" : ""
                   }`}
                 >
-                  <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded shrink-0">
+                  <span className="font-heading text-xs bg-primary/10 text-primary px-1.5 py-0.5 shrink-0">
                     {h.code}
                   </span>
                   <span className="text-sm text-muted-foreground truncate">
@@ -287,6 +287,6 @@ export const Field = ({
 );
 
 export const inputCls = (err?: boolean) =>
-  `w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${
-    err ? "border-destructive" : "border-border"
+  `w-full px-3 py-2 text-sm font-body bg-card border transition-colors focus:outline-none focus:border-foreground text-foreground ${
+    err ? "border-destructive" : "border-foreground/40"
   }`;

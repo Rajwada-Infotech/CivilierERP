@@ -12,7 +12,7 @@ export function IMImportDialog({ m }: { m: ItemMasterState }) {
         open={!!importResults}
         onOpenChange={(open) => !open && setImportResults(null)}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="sheet-frame max-w-lg" style={{ margin: 0 }}>
           <DialogHeader>
             <DialogTitle className="font-heading text-base">
               Import Results
@@ -21,7 +21,7 @@ export function IMImportDialog({ m }: { m: ItemMasterState }) {
           {importResults && (
             <div className="space-y-3 pt-1">
               <div className="flex items-center gap-3 text-sm">
-                <span className="flex items-center gap-1.5 text-green-600">
+                <span className="flex items-center gap-1.5 text-foreground">
                   <Check size={14} />
                   {
                     importResults.filter((r) => r.status === "success").length
@@ -38,7 +38,7 @@ export function IMImportDialog({ m }: { m: ItemMasterState }) {
                   </span>
                 )}
               </div>
-              <div className="max-h-72 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+              <div className="max-h-72 overflow-y-auto border border-foreground/30 divide-y divide-foreground/10">
                 {importResults.map((r, i) => (
                   <div
                     key={i}
@@ -49,7 +49,7 @@ export function IMImportDialog({ m }: { m: ItemMasterState }) {
                     {r.status === "success" ? (
                       <Check
                         size={14}
-                        className="text-green-600 shrink-0 mt-0.5"
+                        className="text-foreground shrink-0 mt-0.5"
                       />
                     ) : (
                       <X
@@ -72,10 +72,10 @@ export function IMImportDialog({ m }: { m: ItemMasterState }) {
               </div>
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+          <div className="flex justify-end gap-2 pt-2 border-t border-foreground/30 mt-2">
             <button
               onClick={() => setImportResults(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading bg-foreground text-card border border-foreground transition-all"
             >
               Close
             </button>

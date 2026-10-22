@@ -700,7 +700,7 @@ export function useItemMaster() {
       header: "Short Code",
       size: 100,
       cell: ({ row }) => (
-        <span className="font-mono font-medium text-primary">
+        <span className="font-heading font-medium text-primary">
           {row.original.shortCode}
         </span>
       ),
@@ -732,12 +732,12 @@ export function useItemMaster() {
         if (!type) return <span className="text-muted-foreground">-</span>;
         return (
           <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+            className={`inline-flex items-center px-2 py-0.5 text-xs font-medium ${
               type === "Service"
-                ? "bg-blue-500/10 text-blue-600"
+                ? "bg-card text-foreground"
                 : type === "Fixed Asset"
-                  ? "bg-violet-500/10 text-violet-600"
-                  : "bg-green-500/10 text-green-600"
+                  ? "bg-card text-foreground"
+                  : "bg-card text-foreground"
             }`}
           >
             {type}
@@ -829,7 +829,7 @@ export function useItemMaster() {
       header: "HSN",
       size: 90,
       cell: ({ row }) => (
-        <span className="font-mono text-sm">{row.original.hsnCode || "-"}</span>
+        <span className="font-heading text-sm">{row.original.hsnCode || "-"}</span>
       ),
     },
     {
@@ -841,7 +841,7 @@ export function useItemMaster() {
         const hasRate = cgst > 0 || sgst > 0 || igst > 0;
         return (
           <span
-            className={`text-sm font-mono ${hasRate ? "" : "text-muted-foreground"}`}
+            className={`text-sm font-heading ${hasRate ? "" : "text-muted-foreground"}`}
           >
             {hasRate ? `${cgst}% / ${sgst}% / ${igst}%` : "-"}
           </span>
@@ -865,14 +865,14 @@ export function useItemMaster() {
                 <button
                   title="Confirm delete"
                   onClick={() => handleDelete(id)}
-                  className="p-1 rounded hover:bg-destructive/10 text-destructive transition-colors"
+                  className="p-1 hover:bg-destructive/10 text-destructive transition-colors"
                 >
                   <Check size={15} />
                 </button>
                 <button
                   title="Cancel"
                   onClick={() => setDeleteConfirmId(null)}
-                  className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors"
+                  className="p-1 hover:bg-primary/5 text-muted-foreground transition-colors"
                 >
                   <X size={15} />
                 </button>
@@ -882,7 +882,7 @@ export function useItemMaster() {
                 <button data-row-view
                   title="View details"
                   onClick={() => setViewRow(row.original)}
-                  className="p-1 rounded hover:bg-sky-500/10 text-sky-500 transition-colors"
+                  className="p-1 hover:bg-primary/5 text-foreground transition-colors"
                 >
                   <Eye size={15} />
                 </button>
@@ -890,7 +890,7 @@ export function useItemMaster() {
                   <button
                     title="Print"
                     onClick={() => handleItemPrint(row.original)}
-                    className="p-1 rounded hover:bg-[#ffe2021a] text-amber-500 transition-colors"
+                    className="p-1 hover:bg-primary/5 text-foreground transition-colors"
                   >
                     <Printer size={15} />
                   </button>
@@ -899,7 +899,7 @@ export function useItemMaster() {
                   <button
                     title="Edit"
                     onClick={() => handleEdit(id)}
-                    className="p-1 rounded hover:bg-primary/10 text-primary transition-colors"
+                    className="p-1 hover:bg-primary/10 text-primary transition-colors"
                   >
                     <Edit2 size={15} />
                   </button>
@@ -908,7 +908,7 @@ export function useItemMaster() {
                   <button
                     title="Delete"
                     onClick={() => setDeleteConfirmId(id)}
-                    className="p-1 rounded hover:bg-destructive/10 text-destructive transition-colors"
+                    className="p-1 hover:bg-destructive/10 text-destructive transition-colors"
                   >
                     <Trash2 size={15} />
                   </button>

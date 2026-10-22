@@ -8,7 +8,7 @@ export function IMTable({ m }: { m: ItemMasterState }) {
   return (
     <>
       {/* ── Table ── */}
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="border border-foreground bg-card p-4">
         <div className="relative mb-4">
           <Search
             size={14}
@@ -19,13 +19,13 @@ export function IMTable({ m }: { m: ItemMasterState }) {
             placeholder="Search items..."
             value={search}
             onChange={(e) => handleSearchChange(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full pl-9 pr-3 py-2 text-sm font-body bg-card border border-foreground/30 text-foreground focus:outline-none"
           />
         </div>
 
         {/* Bulk actions — only appears once something's checked */}
         {rights.canDelete && selectedIds.size > 0 && (
-          <div className="flex items-center gap-3 mb-4 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/5">
+          <div className="flex items-center gap-3 mb-4 px-3 py-2 border border-destructive/30 bg-destructive/5">
             <span className="text-xs font-heading font-medium text-foreground">
               {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
             </span>
@@ -38,7 +38,7 @@ export function IMTable({ m }: { m: ItemMasterState }) {
                   <button
                     onClick={handleBulkDelete}
                     disabled={bulkDeleting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
                   >
                     {bulkDeleting ? (
                       <Loader2 size={12} className="animate-spin" />
@@ -50,7 +50,7 @@ export function IMTable({ m }: { m: ItemMasterState }) {
                   <button
                     onClick={() => setConfirmingBulkDelete(false)}
                     disabled={bulkDeleting}
-                    className="px-3 py-1.5 rounded-lg text-xs font-heading text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    className="px-3 py-1.5 text-xs font-heading text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors"
                   >
                     Cancel
                   </button>
@@ -59,13 +59,13 @@ export function IMTable({ m }: { m: ItemMasterState }) {
                 <>
                   <button
                     onClick={() => setSelectedIds(new Set())}
-                    className="px-3 py-1.5 rounded-lg text-xs font-heading text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    className="px-3 py-1.5 text-xs font-heading text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors"
                   >
                     Clear
                   </button>
                   <button
                     onClick={() => setConfirmingBulkDelete(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-semibold border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors"
                   >
                     <Trash2 size={12} /> Delete Selected
                   </button>
