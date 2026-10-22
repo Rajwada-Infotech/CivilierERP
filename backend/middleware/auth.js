@@ -181,6 +181,11 @@ module.exports = async (req, res, next) => {
     next();
   } catch (err) {
     console.error("Auth error:", err.message);
-    return res.status(401).json({ error: "Invalid token" });
+    // Only a bad, expired or not-yet-valid token means the session is over. Anything else is a fault
+    // on our side, and answering 401 for it signed people out in the middle of entering data.
+    if (err instanceof jwt.JsonWebTokenError) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    return res.status(500).json({ error: "Could not check your session. Please try again." });
   }
 };

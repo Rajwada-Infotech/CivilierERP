@@ -101,6 +101,20 @@ export function logMutationActivity(method: string, url: string) {
   }).catch(() => {});
 }
 
+// True when `token` is still this tab's session and the server rejects it on a plain authenticated
+// read as well. A network failure or any other answer leaves the user signed in.
+async function sessionIsDead(token: string | null): Promise<boolean> {
+  if (!token || sessionStorage.getItem("token") !== token) return false;
+  try {
+    const res = await fetch(apiUrl("/api/user-rights/my"), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.status === 401 && sessionStorage.getItem("token") === token;
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchWithAuth(
   url: string,
   options: FetchWithAuthOptions = {},
@@ -168,9 +182,14 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 401) {
+    // Sign out only when the session this request carried is the one still in use and the server
+    // confirms it is dead. A 401 for a request sent before login (no token) or with a token since
+    // replaced by a fresh login used to wipe the new session too, bouncing the user back to the login
+    // page several times; a one-off 401 mid-entry no longer throws away their work either.
     if (
       typeof window !== "undefined" &&
-      !sessionStorage.getItem(REDIRECTING_KEY)
+      !sessionStorage.getItem(REDIRECTING_KEY) &&
+      (await sessionIsDead(token))
     ) {
       sessionStorage.setItem(REDIRECTING_KEY, "1");
       // The account may have been deleted/discontinued while the user was
