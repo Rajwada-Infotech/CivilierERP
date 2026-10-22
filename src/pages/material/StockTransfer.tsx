@@ -38,7 +38,7 @@ export default function StockTransfer() {
           ))}
         </div>
 
-        {activeTab === "history" && <TransferHistory />}
+        {activeTab === "history" && <TransferHistory openId={m.openTransferId} onOpened={() => m.setOpenTransferId(null)} />}
 
         {activeTab === "transfer" && (
           <div className="space-y-4">

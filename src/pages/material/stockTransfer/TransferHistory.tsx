@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw, CheckCircle2, Trash2, X, FileText, Eye } from "lucide-react";
 import { ServerPager } from "@/components/ServerPager";
-import { getTransferHistory, type StockTransfer } from "@/api/stockTransferApi";
+import { getTransferHistory, type StockTransfer, getStockTransferById } from "@/api/stockTransferApi";
 import { deleteInterCompanyTransfer, type InterCompanyTransferSummary } from "@/api/interCompanyTransferApi";
 import { getGRNsByTransfer, type TransferGRNSummary } from "@/api/grnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
@@ -16,7 +16,8 @@ import { TransferPreviewModal } from "./TransferPreviewModal";
 import { ICTPreviewModal } from "./ICTPreviewModal";
 
 // ─── Transfer History ─────────────────────────────────────────────────────────
-export function TransferHistory() {
+// openId: a transfer to open on arrival (from a ?view= link); onOpened clears it once shown.
+export function TransferHistory({ openId = null, onOpened }: { openId?: number | null; onOpened?: () => void } = {}) {
   const rights = usePageRights("stock-transfers");
   // Server-paged: both kinds of transfer come back together, already in date order, one page per request.
   const [page, setPage] = useState(1);
@@ -56,6 +57,14 @@ export function TransferHistory() {
     useState<StockTransfer | null>(null);
   const [previewTransfer, setPreviewTransfer] =
     useState<StockTransfer | null>(null);
+  useEffect(() => {
+    if (!openId) return;
+    getStockTransferById(openId)
+      .then((tr) => tr && tr.TransferID && setPreviewTransfer(tr))
+      .catch(() => {})
+      .finally(() => onOpened?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
   const [previewIctId, setPreviewIctId] = useState<number | null>(null);
   const [successGrnNo, setSuccessGrnNo] = useState<string | null>(null);
   // Inter-Company Transfer amounts include GST by default — the actual

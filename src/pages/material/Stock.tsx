@@ -19,7 +19,7 @@ const REF_TYPE_META: Record<string, { label: string; route?: string }> = {
   GRN: { label: "GRN", route: "/material/grn" },
   ISS: { label: "Material Issue", route: "/material/issues" },
   IRN: { label: "Issue Return", route: "/material/issue-return" },
-  TRF: { label: "Stock Transfer" },
+  TRF: { label: "Stock Transfer", route: "/material/stock-transfer" },
   STKUPD: { label: "Stock Update", route: "/material/stock-update" },
   ICT: { label: "Inter-Company Transfer" },
   SO: { label: "Sale Order" },

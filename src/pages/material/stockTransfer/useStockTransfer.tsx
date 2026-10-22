@@ -1,5 +1,6 @@
 // Everything the Stock Transfer page holds: godowns and companies, the route, the lines and their
 // stock, the source material request, inter-company pricing and the two transfer mutations.
+import { useSearchParams } from "react-router-dom";
 import { useState, useMemo, useEffect } from "react";
 import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
@@ -17,9 +18,20 @@ export function useStockTransfer() {
   const qc = useQueryClient();
   const today = new Date().toISOString().slice(0, 10);
 
-  const [activeTab, setActiveTab] = useState<"transfer" | "history">(
-    "transfer",
-  );
+  // Deep-link support — the Stock drill-down navigates here as
+  // /material/stock-transfer?view=<TransferID> to open that transfer in History.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [openTransferId, setOpenTransferId] = useState<number | null>(() => {
+    const id = Number(searchParams.get("view"));
+    return Number.isInteger(id) && id > 0 ? id : null;
+  });
+  useEffect(() => {
+    if (!searchParams.get("view")) return;
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [activeTab, setActiveTab] = useState<"transfer" | "history">(openTransferId ? "history" : "transfer");
   const [transferMode, setTransferMode] = useState<"intra" | "inter">("intra");
   const [filterCompanyId, setFilterCompanyId] = useState("");
   const [filterProjectId, setFilterProjectId] = useState("");
@@ -548,6 +560,8 @@ export function useStockTransfer() {
 
 
   return {
+    openTransferId,
+    setOpenTransferId,
     rights,
     qc,
     today,
