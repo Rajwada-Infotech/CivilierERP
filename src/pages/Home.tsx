@@ -856,7 +856,8 @@ function ProjectNetworkMap({
 // Seven days: bars for how many documents were made, a line for their rupee value.
 function WeekPlot({ rows }: { rows: Array<{ day: string; count: number; amount: number }> }) {
   const [hover, setHover] = useState<number | null>(null);
-  const W = 760, H = 220, pad = 8, top = 22, base = 178;
+  // The scale label sits in its own band above the plot (y 12), clear of the tallest bar's count (top - 9).
+  const W = 760, H = 220, pad = 8, top = 40, base = 178;
   const n = Math.max(1, rows.length);
   const slot = (W - pad * 2) / n;
   const maxCount = Math.max(1, ...rows.map((r) => r.count));
@@ -877,7 +878,7 @@ function WeekPlot({ rows }: { rows: Array<{ day: string; count: number; amount: 
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Documents created and their value, last seven days" onMouseLeave={() => setHover(null)}>
         <line x1={pad} x2={W - pad} y1={base} y2={base} stroke="var(--rule)" />
         <line x1={pad} x2={W - pad} y1={top} y2={top} stroke="var(--rule)" strokeDasharray="2 5" />
-        <text x={pad + 2} y={top - 6} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{maxCount.toLocaleString("en-IN")} documents · {compactINR(maxAmount)}</text>
+        <text x={pad + 2} y={12} fontFamily="DM Sans, sans-serif" fontSize="10" fill="var(--graphite)">{maxCount.toLocaleString("en-IN")} documents · {compactINR(maxAmount)}</text>
         {rows.map((r, i) => {
           const h = base - y(r.count, maxCount);
           const w = Math.min(46, slot * 0.5);
@@ -885,7 +886,7 @@ function WeekPlot({ rows }: { rows: Array<{ day: string; count: number; amount: 
             <g key={i} onMouseEnter={() => setHover(i)}>
               <rect x={pad + slot * i} y={0} width={slot} height={H} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
               <rect x={cx(i) - w / 2} y={base - h} width={w} height={Math.max(0, h)} fill="var(--blue)" fillOpacity={hover == null || hover === i ? 0.9 : 0.4} />
-              {r.count > 0 && <text x={cx(i)} y={base - h - 6} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="11" fill="var(--ink)">{r.count}</text>}
+              {r.count > 0 && <text x={cx(i)} y={base - h - 9} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="11" fill="var(--ink)">{r.count}</text>}
               <text x={cx(i)} y={base + 20} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" letterSpacing="1" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{r.day.toUpperCase()}</text>
             </g>
           );
