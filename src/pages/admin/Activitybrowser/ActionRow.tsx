@@ -2,6 +2,7 @@
 import React from "react";
 import type { SessionEvent } from "@/api/userActivityApi";
 import { describeActivity } from "./describeActivity";
+import { ChangeDetails } from "./ChangeDetails";
 import { KindTag, fmtDate, parseUA } from "./activityShared";
 
 export const ActionRow: React.FC<{ event: SessionEvent }> = ({ event }) => {
@@ -21,6 +22,7 @@ export const ActionRow: React.FC<{ event: SessionEvent }> = ({ event }) => {
           </span>
           {d.where ? <span className="text-muted-foreground"> · from {d.where}</span> : null}
         </p>
+        <ChangeDetails d={d} />
         <p className="flex gap-3 text-[0.625rem] text-muted-foreground flex-wrap">
           <span className="font-heading tabular-nums">{event.ipAddress || "—"}</span>
           <span>{browser} · {os}</span>

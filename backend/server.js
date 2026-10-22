@@ -430,6 +430,8 @@ async function createApp() {
   // Any successful write anywhere (staff or customer portal) drops every { dropOnAnyWrite } cache — see
   // middleware/writeInvalidator.js.
   app.use("/api", require("./middleware/writeInvalidator").writeInvalidator);
+  // Every successful write by a signed-in user, with the record and the values, into the Activity Browser.
+  app.use("/api", require("./middleware/activityAudit").activityAudit);
 
   app.use(helmet());
   app.use(
@@ -449,6 +451,9 @@ async function createApp() {
         "Authorization",
         "X-Requested-With",
         "X-Request-Id",
+        "X-Page",
+        "X-Session-Id",
+        "X-Skip-Activity-Log",
       ],
       optionsSuccessStatus: 204,
     }),

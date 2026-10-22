@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getToken } from "../utils/tokenStorage";
+import { activityHeaders } from "@/lib/fetchWithAuth";
 
 // Use relative /api path — the Vite dev proxy forwards to localhost:5000
 // and production nginx rewrites /api → backend. Never rely on VITE_API_URL.
@@ -13,6 +14,7 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  Object.assign(config.headers, activityHeaders());
   return config;
 });
 

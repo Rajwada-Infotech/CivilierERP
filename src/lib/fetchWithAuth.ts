@@ -15,10 +15,8 @@ export class ApiError extends Error {
 // Extended options understood by fetchWithAuth itself.
 // All standard RequestInit fields are still forwarded to fetch().
 export interface FetchWithAuthOptions extends RequestInit {
-  // When true, the request must not trigger activity logging on the server
-  // or the client. Used by the activity-log read routes to prevent infinite
-  // self-logging loops. fetchWithAuth forwards an X-Skip-Activity-Log header
-  // so future server-side middleware can also honour the flag.
+  // When true, the server leaves this request out of the Activity Browser (fetchWithAuth sends an
+  // X-Skip-Activity-Log header that backend/middleware/activityAudit.js honours).
   skipActivityLog?: boolean;
 }
 
@@ -32,42 +30,14 @@ export { STABILISING_MESSAGE };
 // shared across tabs.
 const REDIRECTING_KEY = "__auth_redirecting";
 
-// ── Mutation activity logging ───────────────────────────────────────────────
-// The Activity Browser previously only ever logged page navigations (GET,
-// actionType "read" — see AppLayout.tsx's useModuleActivityLogger), because
-// nothing hooked into actual data-changing requests. Every write in the app
-// already flows through this one function, so logging it here covers every
-// page automatically instead of needing a manual call added to each of the
-// ~150 mutating call sites individually.
-const MUTATION_ACTION_TYPE: Record<string, "create" | "update" | "delete"> = {
-  POST: "create",
-  PUT: "update",
-  PATCH: "update",
-  DELETE: "delete",
-};
-
-function getStoredUserForLogging(): { id?: string; name?: string; email?: string; role?: string } {
-  try {
-    return JSON.parse(sessionStorage.getItem("user") || "{}");
-  } catch {
-    return {};
-  }
-}
-
-// Fire-and-forget — a logging failure must never affect the actual request.
-// Uses a raw fetch() rather than calling fetchWithAuth recursively.
-// Exported for the few writes that deliberately skip fetchWithAuth (ApprovalActions keeps the backend's own
-// 403 wording), so they still reach the Activity Browser.
-export function logMutationActivity(method: string, url: string) {
-  if (typeof window === "undefined") return;
-  const actionType = MUTATION_ACTION_TYPE[method.toUpperCase()];
-  if (!actionType) return;
-
-  const user = getStoredUserForLogging();
-  if (!user?.id) return;
-
+// ── Activity logging ────────────────────────────────────────────────────────
+// The server writes every successful write into the Activity Browser itself (backend/middleware/activityAudit.js),
+// with the record it touched and the values submitted. The browser only says which page the write came from
+// and which sign-in session it belongs to.
+export function activityHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
   let sessionId = sessionStorage.getItem("currentSessionId");
-  if (!sessionId) {
+  if (!sessionId && sessionStorage.getItem("token")) {
     sessionId =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
@@ -75,30 +45,10 @@ export function logMutationActivity(method: string, url: string) {
     sessionStorage.setItem("currentSessionId", sessionId);
     sessionStorage.setItem("sessionLoginTime", String(Date.now()));
   }
-
-  const token = sessionStorage.getItem("token");
-  fetch(apiUrl("/api/user-activity"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Skip-Activity-Log": "1",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      userId: user.id,
-      userName: user.name || "",
-      userEmail: user.email || "",
-      userRole: user.role || "",
-      event: "action",
-      timestamp: new Date().toISOString(),
-      actionType,
-      resource: url,
-      details: `${method.toUpperCase()} ${url} (from ${window.location.pathname})`,
-      requestMethod: method.toUpperCase(),
-      requestUrl: url,
-      sessionId,
-    }),
-  }).catch(() => {});
+  return {
+    "X-Page": window.location.pathname,
+    ...(sessionId ? { "X-Session-Id": sessionId } : {}),
+  };
 }
 
 // True when `token` is still this tab's session and the server rejects it on a plain authenticated
@@ -152,6 +102,7 @@ export async function fetchWithAuth(
         ...(!isFormData ? { "Content-Type": "application/json" } : {}),
         ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...activityHeaders(),
         ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
       },
     });
@@ -233,14 +184,6 @@ export async function fetchWithAuth(
         : "You do not have permission to perform this action.",
       response.status,
     );
-  }
-
-  if (
-    !skipActivityLog &&
-    response.ok &&
-    url !== "/api/user-activity"
-  ) {
-    logMutationActivity(fetchOptions.method || "GET", url);
   }
 
   return response;
