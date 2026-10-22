@@ -1,42 +1,43 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import * as qtApi from "@/api/quotationApi";
 import { getSuppliers } from "@/api/purchaseOrdersApi";
-import {
-  BarChart3,
-  ChevronDown,
-  Plus,
-  ShoppingCart,
-  Trophy,
-  RefreshCw,
-  CheckCircle2,
-  Clock,
-  X,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { ChevronDown, Plus, ShoppingCart, RefreshCw, X } from "lucide-react";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
-
-const selectCls =
-  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const fmtDate = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 const fmtAmt = (n: number) =>
-  n > 0
-    ? `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : "—";
+  n > 0 ? `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+
+// Sheet styles
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+const SEL = "w-full px-3 py-2.5 pr-8 text-sm font-body bg-card border border-foreground/40 transition-colors focus:outline-none focus:border-foreground text-foreground appearance-none disabled:opacity-60";
+const TAG = "inline-flex items-center font-heading text-[0.5rem] font-bold uppercase tracking-[0.1em] px-1 py-px border whitespace-nowrap";
+const TH = "px-4 py-3 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 
 export default function L1Chart() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // Adding / removing suppliers is a quotation edit; awarding raises a purchase order.
+  const qtRights = usePageRights("quotation");
+  const poRights = usePageRights("purchase-orders");
   const [quotationId, setQuotationId] = useState<string>("");
   const [addSupplierId, setAddSupplierId] = useState("");
   const [winningSupplierId, setWinningSupplierId] = useState<string>("");
+  const [removing, setRemoving] = useState<{ id: number; name: string; submitted: boolean } | null>(null);
 
   const { data: quotations = [], isLoading: loadingQuotations } = useQuery({
     queryKey: ["l1-quotation-list"],
@@ -70,32 +71,41 @@ export default function L1Chart() {
       let best: { supplierId: number; rate: number } | null = null;
       for (const s of chart?.suppliers || []) {
         const p = priceMap[`${item.QuotationItemId}:${s.SupplierLHeadId}`];
-        if (p && p.Rate > 0 && (!best || p.Rate < best.rate))
-          best = { supplierId: s.SupplierLHeadId, rate: p.Rate };
+        if (p && p.Rate > 0 && (!best || p.Rate < best.rate)) best = { supplierId: s.SupplierLHeadId, rate: p.Rate };
       }
       m[item.QuotationItemId] = best?.supplierId ?? null;
     }
     return m;
   }, [chart, priceMap]);
 
-  const supplierTotals = useMemo(() => {
+  // Each supplier's total and how many of the items they priced.
+  const { supplierTotals, quotedCount } = useMemo(() => {
     const t: Record<number, number> = {};
+    const q: Record<number, number> = {};
     for (const s of chart?.suppliers || []) {
       let sum = 0;
-      for (const item of chart?.items || [])
-        sum += (priceMap[`${item.QuotationItemId}:${s.SupplierLHeadId}`]?.Rate || 0) * (item.Quantity || 0);
+      let n = 0;
+      for (const item of chart?.items || []) {
+        const rate = priceMap[`${item.QuotationItemId}:${s.SupplierLHeadId}`]?.Rate || 0;
+        if (rate > 0) n++;
+        sum += rate * (item.Quantity || 0);
+      }
       t[s.SupplierLHeadId] = sum;
+      q[s.SupplierLHeadId] = n;
     }
-    return t;
+    return { supplierTotals: t, quotedCount: q };
   }, [chart, priceMap]);
 
+  const itemCount = chart?.items.length ?? 0;
+  const isComplete = (id: number) => itemCount > 0 && quotedCount[id] === itemCount;
+
+  // Lowest overall is only among suppliers who priced every item — a partial quote's
+  // total is low because it leaves items out, not because it is cheaper.
   const cheapestSupplierId = useMemo(() => {
-    const submitted = (chart?.suppliers || []).filter((s) => s.Status === "Submitted");
-    if (!submitted.length) return null;
-    return submitted.reduce((best, s) =>
-      (supplierTotals[s.SupplierLHeadId] ?? Infinity) < (supplierTotals[best.SupplierLHeadId] ?? Infinity) ? s : best
-    ).SupplierLHeadId;
-  }, [chart, supplierTotals]);
+    const complete = (chart?.suppliers || []).filter((s) => s.Status === "Submitted" && isComplete(s.SupplierLHeadId));
+    if (!complete.length) return null;
+    return complete.reduce((best, s) => (supplierTotals[s.SupplierLHeadId] < supplierTotals[best.SupplierLHeadId] ? s : best)).SupplierLHeadId;
+  }, [chart, supplierTotals, quotedCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addSupplierMutation = useMutation({
     mutationFn: (id: string) => qtApi.addQuotationSuppliers(quotationId, [id]),
@@ -109,8 +119,9 @@ export default function L1Chart() {
 
   const removeSupplierMutation = useMutation({
     mutationFn: (supplierId: number) => qtApi.removeQuotationSupplier(quotationId, supplierId),
-    onSuccess: () => {
+    onSuccess: (_d, supplierId) => {
       toast.success("Supplier removed");
+      if (winningSupplierId === String(supplierId)) setWinningSupplierId("");
       queryClient.invalidateQueries({ queryKey: ["l1-chart", quotationId] });
     },
     onError: (err: any) => toast.error(err.message || "Failed to remove supplier"),
@@ -118,12 +129,13 @@ export default function L1Chart() {
 
   const createPO = async () => {
     const supplierId = winningSupplierId || String(cheapestSupplierId || "");
-    if (!supplierId) { toast.error("Select a winning supplier first"); return; }
+    if (!supplierId) {
+      toast.error("Select a winning supplier first");
+      return;
+    }
     try {
       const prefill = await qtApi.getQTPOPrefill(quotationId, supplierId);
-      navigate(`/material/purchase-order?sourceQT=${quotationId}&supplierId=${supplierId}`, {
-        state: { qtPrefill: prefill },
-      });
+      navigate(`/material/purchase-order?sourceQT=${quotationId}&supplierId=${supplierId}`, { state: { qtPrefill: prefill } });
     } catch (err: any) {
       toast.error(err.message || "Failed to prepare PO");
     }
@@ -132,338 +144,270 @@ export default function L1Chart() {
   const taggedSupplierIds = new Set((chart?.suppliers || []).map((s) => s.SupplierLHeadId));
   const submittedSuppliers = (chart?.suppliers || []).filter((s) => s.Status === "Submitted");
   const hasChart = chart && chart.suppliers.length > 0;
+  const selected = comparableQuotations.find((q) => String(q.QuotationId) === quotationId);
 
   const effectiveWinner = winningSupplierId
     ? chart?.suppliers.find((s) => String(s.SupplierLHeadId) === winningSupplierId)
     : chart?.suppliers.find((s) => s.SupplierLHeadId === cheapestSupplierId);
 
   return (
-    <MaterialShell
-      title="L1 Price Comparative Chart"
-      subtitle="Side-by-side supplier price comparison — pick the winner and raise a PO"
-      icon={BarChart3}
-    >
+    <>
       <Breadcrumbs items={[{ label: "Material", path: "/material" }, { label: "L1 Chart" }]} />
-
-      {/* ── Toolbar ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-3 bg-card border border-border rounded-xl px-4 py-3">
-        {/* Quotation picker */}
-        <div className="flex flex-col gap-1">
-          <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground/60 px-0.5">
-            Select Quotation
-          </span>
-          <div className="relative">
-            {/* Left icon */}
-            <BarChart3
-              size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-500/70 pointer-events-none z-10"
-            />
-            <select
-              value={quotationId}
-              onChange={(e) => { setQuotationId(e.target.value); setWinningSupplierId(""); }}
-              disabled={loadingQuotations}
-              style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}
-              className="w-full pl-9 pr-10 py-2.5 text-sm rounded-xl border-2 border-emerald-500/25 bg-emerald-500/5 text-foreground focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/15 transition appearance-none font-heading cursor-pointer disabled:opacity-50"
-            >
-              <option value="" style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}>
-                {loadingQuotations ? "Loading quotations…" : comparableQuotations.length === 0 ? "No submitted quotations found" : "— Pick a quotation —"}
-              </option>
-              {comparableQuotations.map((q) => (
-                <option
-                  key={q.QuotationId}
-                  value={String(q.QuotationId)}
-                  style={{ backgroundColor: "hsl(var(--card))", color: "hsl(var(--foreground))" }}
+      <SheetShell
+        eyebrow="CivilierERP · Material"
+        title="L1 comparative chart"
+        subtitle="Supplier prices side by side, the lowest (L1) on each item marked; pick the winner and raise a purchase order."
+      >
+        {/* ── Quotation + suppliers ── */}
+        <div className="bg-card mb-5" style={{ border: RULE }}>
+          <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <label className={`block ${LBL} mb-1.5`}>Quotation</label>
+              <div className="relative">
+                <select
+                  value={quotationId}
+                  onChange={(e) => {
+                    setQuotationId(e.target.value);
+                    setWinningSupplierId("");
+                  }}
+                  disabled={loadingQuotations}
+                  className={`${SEL} font-heading`}
                 >
-                  {q.DocNo}  ·  {q.ProjectName ?? q.CompanyName}  [{q.Status}]
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500/60 pointer-events-none" />
-            {/* Selected indicator */}
-            {quotationId && (
-              <span className="absolute right-8 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-emerald-500 pointer-events-none" />
-            )}
-          </div>
-          {quotationId && (() => {
-            const sel = comparableQuotations.find((q) => String(q.QuotationId) === quotationId);
-            return sel ? (
-              <div className="flex items-center gap-2 px-1 pt-0.5">
-                <span className="text-[0.6875rem] text-muted-foreground">
-                  {sel.ProjectName ?? sel.CompanyName}
-                </span>
-                <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-heading font-medium">
-                  {sel.Status}
-                </span>
-                {sel.DocNo && (
-                  <span className="text-[0.625rem] font-mono text-muted-foreground/50 ml-auto">{sel.DocNo}</span>
-                )}
-              </div>
-            ) : null;
-          })()}
-        </div>
-
-        {/* Add supplier */}
-        {quotationId && (
-          <div className="flex items-center gap-2 pt-1 border-t border-border/50">
-            <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap shrink-0">
-              Add Supplier
-            </span>
-            <div className="relative flex-1 min-w-0">
-              <SearchableNativeSelect
-                value={addSupplierId}
-                onChange={(e) => setAddSupplierId(e.target.value)}
-                className="text-sm rounded-lg border border-border px-3 py-2.5 pr-7 bg-background appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full"
-              >
-                <option value="">Select supplier…</option>
-                {(suppliers as any[])
-                  .filter((s) => !taggedSupplierIds.has(Number(s.LHeadId ?? s.id)))
-                  .map((s) => (
-                    <option key={s.LHeadId ?? s.id} value={String(s.LHeadId ?? s.id)}>
-                      {s.LHeadName ?? s.label ?? s.name}
+                  <option value="">
+                    {loadingQuotations ? "Loading quotations…" : comparableQuotations.length === 0 ? "No sent quotations found" : "— Pick a quotation —"}
+                  </option>
+                  {comparableQuotations.map((q) => (
+                    <option key={q.QuotationId} value={String(q.QuotationId)}>
+                      {q.DocNo} · {q.ProjectName ?? q.CompanyName} [{q.Status}]
                     </option>
                   ))}
-              </SearchableNativeSelect>
-              <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              className="gap-1 btn-module text-white hover:opacity-90 border-0 shrink-0 h-[42px] px-3"
-              disabled={!addSupplierId || addSupplierMutation.isPending}
-              onClick={() => addSupplierMutation.mutate(addSupplierId)}
-            >
-              <Plus size={13} /><span className="hidden sm:inline">Add</span>
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {/* ── No quotation selected ────────────────────────────────────────── */}
-      {!quotationId && (
-        <div className="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-          <BarChart3 size={36} className="opacity-20" />
-          <p className="text-sm">Select a quotation above to load the comparison chart.</p>
-        </div>
-      )}
-
-      {/* ── Loading ──────────────────────────────────────────────────────── */}
-      {quotationId && loadingChart && (
-        <div className="flex items-center justify-center py-24 text-muted-foreground gap-2">
-          <RefreshCw size={16} className="animate-spin" />
-          <span className="text-sm">Loading chart…</span>
-        </div>
-      )}
-
-      {/* ── Chart ────────────────────────────────────────────────────────── */}
-      {quotationId && !loadingChart && (
-        <>
-          {!hasChart ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
-              <p className="text-sm">No suppliers tagged to this quotation yet.</p>
-            </div>
-          ) : (
-            <>
-              {/* Supplier pills */}
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Suppliers:</span>
-                {chart!.suppliers.map((s) => (
-                  <span
-                    key={s.SupplierLHeadId}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                      s.SupplierLHeadId === cheapestSupplierId
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                        : s.Status === "Submitted"
-                        ? "border-border bg-muted/40 text-foreground"
-                        : "border-border bg-muted/20 text-muted-foreground"
-                    }`}
-                  >
-                    {s.Status === "Submitted" ? (
-                      <CheckCircle2 size={11} className={s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-500" : "text-emerald-400"} />
-                    ) : (
-                      <Clock size={11} className="text-amber-400" />
-                    )}
-                    <span className="max-w-[120px] truncate">{s.SupplierName}</span>
-                    {s.SupplierLHeadId === cheapestSupplierId && <Trophy size={10} className="text-amber-400 shrink-0" />}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm(`Remove ${s.SupplierName} from this quotation?`))
-                          removeSupplierMutation.mutate(s.SupplierLHeadId);
-                      }}
-                      disabled={removeSupplierMutation.isPending}
-                      className="ml-0.5 hover:text-destructive transition-colors disabled:opacity-40 shrink-0"
-                      title="Remove supplier"
-                    >
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
+                </select>
+                <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               </div>
-
-              {/* Comparison table — horizontal scroll on mobile, sticky item column */}
-              <div className="rounded-xl border border-border overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" } as any}>
-                  <table className="text-sm border-collapse" style={{ minWidth: `${180 + 90 + chart!.suppliers.length * 140}px` }}>
-                    <thead>
-                      <tr className="bg-muted/50 border-b border-border">
-                        {/* Sticky item header */}
-                        <th className="px-4 py-3 text-left text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground sticky left-0 z-20 bg-muted/50 w-[150px] sm:w-[200px]">
-                          Item
-                        </th>
-                        <th className="px-3 py-3 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground text-center whitespace-nowrap w-[80px]">
-                          Qty
-                        </th>
-                        {chart!.suppliers.map((s) => (
-                          <th
-                            key={s.SupplierLHeadId}
-                            className={`px-4 py-3 text-left w-[140px] ${
-                              s.SupplierLHeadId === cheapestSupplierId ? "bg-emerald-500/[0.08]" : ""
-                            }`}
-                          >
-                            <div className="flex items-center gap-1">
-                              {s.Status === "Submitted" ? (
-                                <CheckCircle2 size={11} className="text-emerald-500 shrink-0" />
-                              ) : (
-                                <Clock size={11} className="text-amber-400 shrink-0" />
-                              )}
-                              <span className={`text-[0.625rem] font-semibold leading-tight ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
-                                {s.SupplierName}
-                              </span>
-                              {s.SupplierLHeadId === cheapestSupplierId && (
-                                <Trophy size={9} className="text-amber-400 shrink-0" />
-                              )}
-                            </div>
-                            {supplierTotals[s.SupplierLHeadId] > 0 && (
-                              <div className={`text-[0.625rem] mt-0.5 font-semibold ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-500" : "text-muted-foreground"}`}>
-                                {fmtAmt(supplierTotals[s.SupplierLHeadId])}
-                              </div>
-                            )}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {chart!.items.map((item, idx) => (
-                        <tr
-                          key={item.QuotationItemId}
-                          className={`border-b border-border/40 last:border-0 ${idx % 2 === 0 ? "" : "bg-muted/[0.03]"}`}
-                        >
-                          {/* Sticky item name */}
-                          <td className={`px-4 py-3 font-medium sticky left-0 z-10 text-xs sm:text-sm ${idx % 2 === 0 ? "bg-card" : "bg-muted/[0.03]"}`}>
-                            <div className="max-w-[140px] sm:max-w-[190px] truncate" title={item.ItemName}>
-                              {item.ItemName}
-                            </div>
-                            <div className="text-[0.625rem] text-muted-foreground mt-0.5">{item.UOMName || item.UOMCode}</div>
-                          </td>
-                          <td className="px-3 py-3 text-center text-xs text-muted-foreground whitespace-nowrap">
-                            <span className="font-semibold text-foreground">{item.Quantity}</span>
-                          </td>
-                          {chart!.suppliers.map((s) => {
-                            const p = priceMap[`${item.QuotationItemId}:${s.SupplierLHeadId}`];
-                            const isL1 = l1BySupplierId[item.QuotationItemId] === s.SupplierLHeadId;
-                            return (
-                              <td
-                                key={s.SupplierLHeadId}
-                                className={`px-4 py-3 ${isL1 ? "bg-emerald-500/[0.07]" : ""}`}
-                              >
-                                {p ? (
-                                  <div>
-                                    <div className={`font-semibold flex items-center gap-1 text-xs sm:text-sm ${isL1 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
-                                      {isL1 && <Trophy size={9} className="text-amber-400 shrink-0" />}
-                                      {fmtAmt(p.Rate)}
-                                    </div>
-                                    {p.SupplyDate && (
-                                      <div className="text-[0.625rem] text-muted-foreground mt-0.5">
-                                        {fmtDate(p.SupplyDate)}
-                                      </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground/40 text-xs">—</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-
-                    {/* Totals footer */}
-                    <tfoot>
-                      <tr className="bg-muted/60 border-t-2 border-border">
-                        <td className="px-4 py-3 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground sticky left-0 z-10 bg-muted/60">
-                          Grand Total
-                        </td>
-                        <td />
-                        {chart!.suppliers.map((s) => (
-                          <td
-                            key={s.SupplierLHeadId}
-                            className={`px-4 py-3 ${s.SupplierLHeadId === cheapestSupplierId ? "bg-emerald-500/10" : ""}`}
-                          >
-                            <div className={`font-bold text-xs sm:text-sm ${s.SupplierLHeadId === cheapestSupplierId ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
-                              {fmtAmt(supplierTotals[s.SupplierLHeadId] ?? 0)}
-                            </div>
-                            {s.SupplierLHeadId === cheapestSupplierId && (
-                              <div className="text-[0.625rem] text-emerald-500 font-semibold flex items-center gap-0.5 mt-0.5">
-                                <Trophy size={9} /> Lowest
-                              </div>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    </tfoot>
-                  </table>
-              </div>
-
-              {/* ── Award bar ──────────────────────────────────────────────── */}
-              {submittedSuppliers.length > 0 && (
-                <div className="flex flex-col gap-3 bg-card border border-border rounded-xl px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Trophy size={14} className="text-amber-400 shrink-0" />
-                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Award to</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <SearchableNativeSelect
-                        value={winningSupplierId || String(cheapestSupplierId || "")}
-                        onChange={(e) => setWinningSupplierId(e.target.value)}
-                        className={selectCls}
-                      >
-                        <option value="">Select winner…</option>
-                        {submittedSuppliers.map((s) => (
-                          <option key={s.SupplierLHeadId} value={String(s.SupplierLHeadId)}>
-                            {s.SupplierName}
-                            {supplierTotals[s.SupplierLHeadId] > 0 ? ` — ${fmtAmt(supplierTotals[s.SupplierLHeadId])}` : ""}
-                            {s.SupplierLHeadId === cheapestSupplierId ? " · Lowest" : ""}
-                          </option>
-                        ))}
-                      </SearchableNativeSelect>
-                      <ChevronDown size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    </div>
-                    {effectiveWinner && (
-                      <span className="text-xs text-muted-foreground hidden sm:block whitespace-nowrap shrink-0">
-                        Total: <span className="font-semibold text-foreground">{fmtAmt(supplierTotals[effectiveWinner.SupplierLHeadId] ?? 0)}</span>
-                      </span>
-                    )}
-                  </div>
-                  {effectiveWinner && (
-                    <div className="text-xs text-muted-foreground sm:hidden">
-                      Total: <span className="font-semibold text-foreground">{fmtAmt(supplierTotals[effectiveWinner.SupplierLHeadId] ?? 0)}</span>
-                    </div>
-                  )}
-                  <Button
-                    type="button"
-                    onClick={createPO}
-                    className="gap-1.5 w-full sm:w-auto btn-module text-white hover:opacity-90 border-0"
-                  >
-                    <ShoppingCart size={14} /> Create Purchase Order
-                  </Button>
+              {selected && (
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <span className="text-xs text-muted-foreground">{selected.ProjectName ?? selected.CompanyName}</span>
+                  <SheetMark text={selected.Status} tone={statusTone(selected.Status)} />
+                  {selected.DueDate && <span className="text-xs text-muted-foreground">· due {fmtDate(selected.DueDate)}</span>}
                 </div>
               )}
-            </>
-          )}
-        </>
-      )}
-    </MaterialShell>
+            </div>
+
+            {quotationId && qtRights.canEdit && (
+              <div>
+                <label className={`block ${LBL} mb-1.5`}>Add supplier</label>
+                <div className="flex items-stretch gap-2">
+                  <div className="relative flex-1 min-w-0">
+                    <SearchableNativeSelect value={addSupplierId} onChange={(e) => setAddSupplierId(e.target.value)} className={SEL}>
+                      <option value="">Select supplier…</option>
+                      {(suppliers as any[])
+                        .filter((s) => !taggedSupplierIds.has(Number(s.LHeadId ?? s.id)))
+                        .map((s) => (
+                          <option key={s.LHeadId ?? s.id} value={String(s.LHeadId ?? s.id)}>
+                            {s.LHeadName ?? s.label ?? s.name}
+                          </option>
+                        ))}
+                    </SearchableNativeSelect>
+                  </div>
+                  <button
+                    type="button"
+                    className={`${KEY_INK} px-4 shrink-0`}
+                    disabled={!addSupplierId || addSupplierMutation.isPending}
+                    onClick={() => addSupplierMutation.mutate(addSupplierId)}
+                  >
+                    <Plus size={13} />
+                    <span className="hidden sm:inline">Add</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!quotationId && (
+          <div className="bg-card py-20 text-center text-sm text-muted-foreground" style={{ border: RULE }}>
+            Pick a quotation above to load its comparison.
+          </div>
+        )}
+
+        {quotationId && loadingChart && (
+          <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
+            <RefreshCw size={16} className="animate-spin" />
+            <span className="text-sm">Loading chart…</span>
+          </div>
+        )}
+
+        {quotationId && !loadingChart && !hasChart && (
+          <div className="bg-card py-20 text-center text-sm text-muted-foreground" style={{ border: RULE }}>
+            No suppliers tagged to this quotation yet.
+          </div>
+        )}
+
+        {quotationId && !loadingChart && hasChart && (
+          <div className="space-y-5">
+            {/* ── Comparison ── */}
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-2" style={{ borderBottom: RULE }}>
+                <h3 className={HEAD}>
+                  Comparison <span className="ml-1 font-normal tabular-nums text-muted-foreground">{itemCount} items · {chart!.suppliers.length} suppliers</span>
+                </h3>
+                <p className={LBL}>
+                  <span className={`${TAG} border-foreground text-foreground mr-1`}>L1</span> lowest rate on the item
+                </p>
+              </div>
+              <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" } as any}>
+                <table className="text-sm border-collapse w-full" style={{ minWidth: `${200 + 80 + chart!.suppliers.length * 160}px` }}>
+                  <thead>
+                    <tr style={{ borderBottom: RULE }}>
+                      <th className={`${TH} text-left sticky left-0 z-20 bg-card w-[150px] sm:w-[200px]`}>Item</th>
+                      <th className={`${TH} text-right w-[80px]`}>Qty</th>
+                      {chart!.suppliers.map((s) => {
+                        const low = s.SupplierLHeadId === cheapestSupplierId;
+                        const partial = s.Status === "Submitted" && !isComplete(s.SupplierLHeadId);
+                        return (
+                          <th key={s.SupplierLHeadId} className={`px-4 py-3 text-left align-top w-[160px] ${low ? "bg-primary/10" : ""}`}>
+                            <div className="flex items-start justify-between gap-1">
+                              <span className="font-heading text-[0.6875rem] font-semibold leading-tight text-foreground">{s.SupplierName}</span>
+                              {qtRights.canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => setRemoving({ id: s.SupplierLHeadId, name: s.SupplierName, submitted: s.Status === "Submitted" })}
+                                  className="text-muted-foreground hover:text-destructive shrink-0"
+                                  title="Remove supplier from this quotation"
+                                  aria-label={`Remove ${s.SupplierName}`}
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1 mt-1">
+                              <SheetMark text={s.Status === "Submitted" ? "Quoted" : "Waiting"} tone={s.Status === "Submitted" ? "done" : "waiting"} />
+                              {low && <span className={`${TAG} border-foreground text-foreground`}>Lowest</span>}
+                            </div>
+                            {partial && <p className="text-[0.625rem] text-muted-foreground mt-1">{quotedCount[s.SupplierLHeadId]} of {itemCount} items quoted</p>}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-foreground/10">
+                    {chart!.items.map((item) => (
+                      <tr key={item.QuotationItemId}>
+                        <td className="px-4 py-3 font-medium sticky left-0 z-10 bg-card text-xs sm:text-sm">
+                          <div className="max-w-[140px] sm:max-w-[190px] truncate" title={item.ItemName}>
+                            {item.ItemName}
+                          </div>
+                          <div className="text-[0.625rem] text-muted-foreground mt-0.5">{item.UOMName || item.UOMCode}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-semibold tabular-nums whitespace-nowrap">{item.Quantity}</td>
+                        {chart!.suppliers.map((s) => {
+                          const p = priceMap[`${item.QuotationItemId}:${s.SupplierLHeadId}`];
+                          const isL1 = l1BySupplierId[item.QuotationItemId] === s.SupplierLHeadId;
+                          return (
+                            <td key={s.SupplierLHeadId} className={`px-4 py-3 ${isL1 ? "bg-primary/10" : ""}`}>
+                              {p && p.Rate > 0 ? (
+                                <div>
+                                  <div className="flex items-center gap-1.5 text-xs sm:text-sm tabular-nums">
+                                    <span className={isL1 ? "font-bold" : "font-medium"}>{fmtAmt(p.Rate)}</span>
+                                    {isL1 && <span className={`${TAG} border-foreground text-foreground`}>L1</span>}
+                                  </div>
+                                  {p.SupplyDate && <div className="text-[0.625rem] text-muted-foreground mt-0.5">by {fmtDate(p.SupplyDate)}</div>}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground/50 text-xs">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+
+                  <tfoot>
+                    <tr style={{ borderTop: RULE }}>
+                      <td className={`${TH} text-left sticky left-0 z-10 bg-card`}>Grand total</td>
+                      <td />
+                      {chart!.suppliers.map((s) => (
+                        <td key={s.SupplierLHeadId} className={`px-4 py-3 ${s.SupplierLHeadId === cheapestSupplierId ? "bg-primary/10" : ""}`}>
+                          <div className="font-heading font-bold text-xs sm:text-sm tabular-nums">{fmtAmt(supplierTotals[s.SupplierLHeadId] ?? 0)}</div>
+                          {s.Status === "Submitted" && !isComplete(s.SupplierLHeadId) && supplierTotals[s.SupplierLHeadId] > 0 && (
+                            <div className="text-[0.625rem] text-muted-foreground mt-0.5">partial</div>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* ── Award ── */}
+            {submittedSuppliers.length > 0 && poRights.canCreate && (
+              <div className="bg-card" style={{ border: RULE }}>
+                <div className="px-5 py-3" style={{ borderBottom: RULE }}>
+                  <h3 className={HEAD}>Award</h3>
+                </div>
+                <div className="p-5 flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="flex-1 min-w-0">
+                    <label className={`block ${LBL} mb-1.5`}>Winning supplier</label>
+                    <SearchableNativeSelect value={winningSupplierId || String(cheapestSupplierId || "")} onChange={(e) => setWinningSupplierId(e.target.value)} className={SEL}>
+                      <option value="">Select winner…</option>
+                      {submittedSuppliers.map((s) => (
+                        <option key={s.SupplierLHeadId} value={String(s.SupplierLHeadId)}>
+                          {s.SupplierName}
+                          {supplierTotals[s.SupplierLHeadId] > 0 ? ` — ${fmtAmt(supplierTotals[s.SupplierLHeadId])}` : ""}
+                          {s.SupplierLHeadId === cheapestSupplierId ? " · Lowest" : !isComplete(s.SupplierLHeadId) ? ` · ${quotedCount[s.SupplierLHeadId]} of ${itemCount} items` : ""}
+                        </option>
+                      ))}
+                    </SearchableNativeSelect>
+                  </div>
+                  {effectiveWinner && (
+                    <div className="sm:px-2 pb-1">
+                      <p className={LBL}>Total</p>
+                      <p className="font-heading text-base font-bold tabular-nums">{fmtAmt(supplierTotals[effectiveWinner.SupplierLHeadId] ?? 0)}</p>
+                    </div>
+                  )}
+                  <button type="button" onClick={createPO} disabled={!effectiveWinner} className={`${KEY_INK} h-10 px-5`}>
+                    <ShoppingCart size={13} /> Create purchase order
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </SheetShell>
+
+      {/* ── Remove supplier ── */}
+      <Dialog open={!!removing} onOpenChange={(v) => !v && setRemoving(null)}>
+        <DialogContent className="sheet-frame max-w-sm p-0 gap-0" style={{ margin: 0 }}>
+          <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: RULE }}>
+            <p className={LBL}>Quotation {selected?.DocNo}</p>
+            <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Remove {removing?.name}?</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground mt-1">
+              {removing?.submitted
+                ? "They have already quoted; their prices drop out of this comparison."
+                : "They have not quoted yet and will no longer be asked to."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 px-5 py-4">
+            <button type="button" onClick={() => setRemoving(null)} className={`${KEY_LINE} h-9 px-4`}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={removeSupplierMutation.isPending}
+              onClick={() => {
+                removeSupplierMutation.mutate(removing!.id);
+                setRemoving(null);
+              }}
+              className={`${KEY} h-9 px-4 bg-destructive text-destructive-foreground border border-destructive`}
+            >
+              Remove
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
