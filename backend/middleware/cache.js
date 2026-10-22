@@ -156,8 +156,10 @@ async function computeDynamicTtl(fallback = 300) {
 function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnAnyWrite = false } = {}) {
   return async (req, res, next) => {
     try {
-      // Fast-exit: Redis is down, skip all cache logic
-      if (circuitIsOpen()) {
+      // Fast-exit: Redis is down, skip all cache logic. Also skipped when the browser asks for fresh data:
+      // it does for a minute after the person saves something (lib/queryClient.ts), so a list that save
+      // touched shows it even if the route that wrote it did not refresh this list's cache.
+      if (circuitIsOpen() || req.headers["x-fresh"]) {
         res.setHeader("X-Cache", "BYPASS");
         return next();
       }

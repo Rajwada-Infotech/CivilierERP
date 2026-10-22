@@ -5,11 +5,21 @@
 const { bumpCacheVersion } = require("../redis");
 const { ANY_WRITE_NAMESPACE } = require("./cache");
 
+const HOUSEKEEPING = /^\/api\/(user-activity|home\/usage|users\/(login|logout|refresh))/;
+
 function writeInvalidator(req, res, next) {
   if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return next();
   res.on("finish", () => {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       Promise.resolve(bumpCacheVersion(ANY_WRITE_NAMESPACE)).catch(() => {});
+      // Open pages mark what they hold as out of date and read it again the next time it is shown
+      // (not for housekeeping writes: activity log lines, page-visit counts, sign-in / out).
+      if (HOUSEKEEPING.test(req.originalUrl || req.url)) return;
+      try {
+        require("../services/realtime").emitDataChanged("any");
+      } catch {
+        /* sockets unavailable */
+      }
     }
   });
   next();
