@@ -1,0 +1,287 @@
+// Constants, types, small parts (field, godown badge, work-order comparison) shared by the Material Issues page and its parts.
+import * as issuesApi from "@/api/issuesApi";
+import { generateUUID } from "../../../utils/cryptoPolyfill";
+import React, { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Warehouse, ClipboardList } from "lucide-react";
+import { type ExportColumn } from "@/lib/export";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  // The issues list sends the date as "Date" (the page's own table reads that too); "IssueDate" is kept as a fallback.
+  { header: "Date", accessor: (r) => {
+    const d = (r.Date ?? r.IssueDate) as string | null | undefined;
+    return d ? new Date(d).toLocaleDateString("en-IN") : "";
+  } },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Godown", accessor: "GodownName" },
+  { header: "Status", accessor: "Status" },
+];
+
+// ─── Template columns ─────────────────────────────────────────────────────────
+export const ISSUES_TEMPLATE_COLUMNS = [
+  { header: "Issue Date (YYYY-MM-DD)", accessor: "Issue Date (YYYY-MM-DD)" },
+  { header: "Company", accessor: "Company" },
+  { header: "Project/Site", accessor: "Project/Site" },
+  { header: "Godown", accessor: "Godown" },
+  { header: "Issued To", accessor: "Issued To" },
+  { header: "Remarks", accessor: "Remarks" },
+  { header: "Item Name", accessor: "Item Name" },
+  { header: "UOM", accessor: "UOM" },
+  { header: "Quantity", accessor: "Quantity" },
+];
+
+// ─── Shared styles (matching PurchaseOrderMaster) ────────────────────────────
+
+export const inputCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer";
+
+export const selectCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 pr-8 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition appearance-none";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface CartItem {
+  _key: string;
+  ItemId: string;
+  UOMCode: string;
+  Quantity: string;
+  Remarks: string;
+  ItemName?: string;
+  AvailableStock?: number;
+  DefaultUOM?: string;
+  // From the selected item's own Item Master tag (M_CostCenterId) — same
+  // auto-fill convention Purchase Order's line items already use.
+  CostCenterId?: string;
+}
+
+export interface IssueHeader {
+  companyId: string;
+  projectId: string;
+  finYearId: string;
+  date: string;
+  reason: string;
+  remarks: string;
+  godownId: string;
+  docTypeId: number | null;
+  docNoPreview: string;
+  issuedTo: string;
+  costCenter: string;
+  blockId: string;
+  floorNo: string;
+  /** Work order this issue is tagged to ("" = none), and its number for display. */
+  workOrderId: string;
+  workOrderDocNo: string;
+}
+
+export const defaultHeader: IssueHeader = {
+  companyId: "",
+  projectId: "",
+  finYearId: "",
+  date: new Date().toISOString().slice(0, 10),
+  reason: "",
+  remarks: "",
+  godownId: "",
+  docTypeId: null,
+  docNoPreview: "",
+  issuedTo: "",
+  costCenter: "",
+  blockId: "",
+  floorNo: "",
+  workOrderId: "",
+  workOrderDocNo: "",
+};
+
+export const blankCartItem = (): CartItem => ({
+  _key: generateUUID(),
+  ItemId: "",
+  UOMCode: "",
+  Quantity: "",
+  Remarks: "",
+});
+
+// ─── Small sub-components ─────────────────────────────────────────────────────
+
+export const Field = ({
+  label,
+  required,
+  children,
+  className = "",
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+  className?: string;
+}) => (
+  <div className={className}>
+    <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+      {label}
+      {required && <span className="text-destructive ml-0.5">*</span>}
+    </label>
+    {children}
+  </div>
+);
+
+// ─── Godown stock badge shown in the header ───────────────────────────────────
+
+export function GodownBadge({
+  name,
+  code,
+  isMain,
+}: {
+  name: string;
+  code?: string;
+  isMain?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold border border-emerald-500/20">
+      <Warehouse size={11} />
+      {name}
+      {code && (
+        <span className="font-mono text-[0.625rem] text-emerald-600/70 dark:text-emerald-400/70">({code})</span>
+      )}
+      {isMain && (
+        <span className="px-1 py-0 rounded bg-emerald-500/20 text-[0.5625rem] font-bold uppercase tracking-wider">
+          Main
+        </span>
+      )}
+    </span>
+  );
+}
+
+// What the tagged work order listed against what is being issued: the work order's quantity, what other
+// issues tagged to it have already issued, what is in this issue's cart, and what is left. Informational —
+// it never blocks saving.
+export const fmtQty = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+export function WorkOrderComparePanel({
+  woId,
+  docNo,
+  excludeIssueId,
+  cart,
+}: {
+  woId: number;
+  docNo: string;
+  excludeIssueId: number | null;
+  cart: CartItem[];
+}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["issue-work-order-compare", woId, excludeIssueId],
+    queryFn: () => issuesApi.getWorkOrderCompare(woId, excludeIssueId),
+    staleTime: 30_000,
+  });
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    const keyOf = (id: string, uom: string | null | undefined) => `${String(id).toLowerCase()}|${uom || ""}`;
+    type Row = { key: string; itemId: string; name: string; uom: string; woQty: number; issuedQty: number; thisQty: number };
+    const map = new Map<string, Row>();
+    for (const i of data.items) {
+      map.set(keyOf(i.itemId, i.uomCode), {
+        key: keyOf(i.itemId, i.uomCode),
+        itemId: i.itemId,
+        name: i.itemName || i.itemId,
+        uom: i.uomName || i.uomCode || "—",
+        woQty: i.woQty,
+        issuedQty: i.issuedQty,
+        thisQty: 0,
+      });
+    }
+    for (const ci of cart) {
+      const qty = Number(ci.Quantity);
+      if (!ci.ItemId || !(qty > 0)) continue;
+      const k = keyOf(ci.ItemId, ci.UOMCode);
+      const row = map.get(k) ?? {
+        key: k,
+        itemId: ci.ItemId,
+        name: ci.ItemName || ci.ItemId,
+        uom: ci.UOMCode || "—",
+        woQty: 0,
+        issuedQty: 0,
+        thisQty: 0,
+      };
+      row.thisQty += qty;
+      map.set(k, row);
+    }
+    const listedItems = new Set(data.items.filter((i) => i.woQty > 0).map((i) => String(i.itemId).toLowerCase()));
+    return [...map.values()]
+      .map((r) => {
+        const balance = r.woQty - r.issuedQty - r.thisQty;
+        let state: "over" | "done" | "left" | "unit" | "extra";
+        if (r.woQty === 0) state = listedItems.has(r.itemId.toLowerCase()) ? "unit" : "extra";
+        else state = balance < 0 ? "over" : balance === 0 ? "done" : "left";
+        return { ...r, balance, state };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [data, cart]);
+
+  const listed = rows.filter((r) => r.woQty > 0);
+  const covered = listed.filter((r) => r.issuedQty + r.thisQty > 0).length;
+
+  return (
+    <Card className="border-border shadow-sm">
+      <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <ClipboardList size={15} className="text-orange-600 dark:text-orange-400" />
+          <CardTitle className="text-base font-semibold">Work order comparison</CardTitle>
+          <span className="px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700 dark:text-orange-400 text-xs font-semibold">{docNo}</span>
+        </div>
+        {!isLoading && !error && listed.length > 0 && (
+          <span className="text-[0.6875rem] text-muted-foreground">
+            {covered} of {listed.length} work order items issued so far
+          </span>
+        )}
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <p className="px-5 py-4 text-sm text-muted-foreground">Loading the work order's items…</p>
+        ) : error ? (
+          <p className="px-5 py-4 text-sm text-destructive">{(error as Error).message}</p>
+        ) : rows.length === 0 ? (
+          <p className="px-5 py-4 text-sm text-muted-foreground">This work order lists no material items.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-[0.625rem] uppercase tracking-widest text-muted-foreground bg-muted/30">
+                <tr>
+                  <th className="px-4 py-2 text-left font-semibold">Item</th>
+                  <th className="px-4 py-2 text-left font-semibold">Unit</th>
+                  <th className="px-4 py-2 text-right font-semibold">Work order</th>
+                  <th className="px-4 py-2 text-right font-semibold">Issued earlier</th>
+                  <th className="px-4 py-2 text-right font-semibold">This issue</th>
+                  <th className="px-4 py-2 text-right font-semibold">Balance</th>
+                  <th className="px-4 py-2 text-left font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {rows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="px-4 py-2.5 font-medium text-foreground">{r.name}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{r.uom}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{r.woQty > 0 ? fmtQty(r.woQty) : "—"}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtQty(r.issuedQty)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{fmtQty(r.thisQty)}</td>
+                    <td className={`px-4 py-2.5 text-right tabular-nums font-semibold ${r.balance < 0 ? "text-destructive" : ""}`}>
+                      {r.woQty > 0 ? fmtQty(r.balance) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {r.state === "over" && <span className="text-xs font-medium text-destructive">Over by {fmtQty(-r.balance)}</span>}
+                      {r.state === "done" && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Fully issued</span>}
+                      {r.state === "left" && <span className="text-xs text-muted-foreground">{fmtQty(r.balance)} still to issue</span>}
+                      {r.state === "unit" && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Different unit from the work order</span>}
+                      {r.state === "extra" && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Not in the work order</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
