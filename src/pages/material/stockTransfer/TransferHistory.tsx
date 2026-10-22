@@ -1,3 +1,5 @@
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw, CheckCircle2, Trash2, X, FileText, Eye } from "lucide-react";
@@ -6,7 +8,6 @@ import { getTransferHistory, type StockTransfer } from "@/api/stockTransferApi";
 import { deleteInterCompanyTransfer, type InterCompanyTransferSummary } from "@/api/interCompanyTransferApi";
 import { getGRNsByTransfer, type TransferGRNSummary } from "@/api/grnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
-import { StatusBadge } from "@/components/StatusBadge";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fmtNum, fmtDate } from "./config";
@@ -64,6 +65,8 @@ export function TransferHistory() {
   const [ictDeleteError, setIctDeleteError] = useState("");
 
   const qc = useQueryClient();
+  // The inter-company transfer waiting for its delete to be confirmed.
+  const [confirmIct, setConfirmIct] = useState<{ id: number; docNo: string; note: string } | null>(null);
   const deleteIctMut = useMutation({
     mutationFn: deleteInterCompanyTransfer,
     onSuccess: () => {
@@ -142,7 +145,7 @@ export function TransferHistory() {
       )}
 
       {ictDeleteError && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+        <div className="mb-3 flex items-center gap-2 border border-destructive bg-destructive/10 px-4 py-3 text-sm text-destructive dark:text-destructive">
           <X size={15} />
           {ictDeleteError}
           <button
@@ -155,7 +158,7 @@ export function TransferHistory() {
       )}
 
       {successGrnNo && (
-        <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400">
+        <div className="mb-3 flex items-center gap-2 border border-foreground/40 bg-card px-4 py-3 text-sm text-foreground">
           <CheckCircle2 size={15} />
           GRN <strong>{successGrnNo}</strong> created successfully from
           transfer.
@@ -168,8 +171,8 @@ export function TransferHistory() {
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+      <div className="border border-foreground bg-card overflow-hidden">
+        <div className="px-5 py-3 border-b border-foreground flex items-center justify-between">
           <div>
             <p className="text-sm font-heading font-semibold text-foreground">
               Transfer History
@@ -180,14 +183,14 @@ export function TransferHistory() {
           </div>
           <div className="flex items-center gap-2">
             {hasIct && (
-              <div className="flex items-center rounded-lg border border-border p-0.5 text-[0.625rem] font-medium">
+              <div className="flex items-center border border-foreground/30 p-0.5 text-[0.625rem] font-medium">
                 <button
                   onClick={() => setIctGstMode("excl")}
                   title="Show Inter-Company amounts excl. GST"
-                  className={`px-2 py-1 rounded-md transition-colors ${
+                  className={`px-2 py-1 transition-colors ${
                     ictGstMode === "excl"
-                      ? "btn-module text-white"
-                      : "text-muted-foreground hover:bg-muted"
+                      ? "bg-foreground text-card border border-foreground"
+                      : "text-muted-foreground hover:bg-primary/5"
                   }`}
                 >
                   Excl. GST
@@ -195,10 +198,10 @@ export function TransferHistory() {
                 <button
                   onClick={() => setIctGstMode("incl")}
                   title="Show Inter-Company amounts incl. GST"
-                  className={`px-2 py-1 rounded-md transition-colors ${
+                  className={`px-2 py-1 transition-colors ${
                     ictGstMode === "incl"
-                      ? "btn-module text-white"
-                      : "text-muted-foreground hover:bg-muted"
+                      ? "bg-foreground text-card border border-foreground"
+                      : "text-muted-foreground hover:bg-primary/5"
                   }`}
                 >
                   Incl. GST
@@ -211,7 +214,7 @@ export function TransferHistory() {
                 refetchIct();
               }}
               disabled={isFetching || isFetchingIct}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-foreground/30 hover:bg-primary/5 transition-colors disabled:opacity-50"
             >
               <RefreshCw size={12} className={isFetching || isFetchingIct ? "animate-spin" : ""} />{" "}
               Refresh
@@ -220,7 +223,7 @@ export function TransferHistory() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead className="border-b border-border bg-muted/40">
+            <thead className="border-b border-foreground bg-card">
               <tr>
                 {[
                   { label: "Doc No", cls: "" },
@@ -245,10 +248,10 @@ export function TransferHistory() {
             <tbody>
               {isLoading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border">
+                  <tr key={i} className="border-b border-foreground">
                     {Array.from({ length: 6 }).map((_, j) => (
                       <td key={j} className="px-3 py-2.5">
-                        <div className="h-3 bg-muted rounded animate-pulse" />
+                        <div className="h-3 bg-card animate-pulse" />
                       </td>
                     ))}
                   </tr>
@@ -269,9 +272,9 @@ export function TransferHistory() {
                     return (
                       <tr
                         key={`ict-${t.ICTId}`}
-                        className="border-b border-border hover:bg-muted/20 transition-colors"
+                        className="border-b border-foreground hover:bg-primary/5 transition-colors"
                       >
-                        <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
+                        <td className="px-3 py-2.5 font-heading text-foreground font-semibold whitespace-nowrap">
                           <div>{t.DocNo}</div>
                           <div className="text-[0.625rem] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                         </td>
@@ -280,14 +283,14 @@ export function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5 hidden sm:table-cell">
                           <div className="flex items-center gap-1 whitespace-nowrap">
-                            <span className="text-orange-600 dark:text-orange-400">
+                            <span className="text-foreground">
                               {t.SenderProjectName}
                             </span>
                             <ArrowRight size={10} className="text-muted-foreground shrink-0" />
-                            <span className="text-emerald-600 dark:text-emerald-400">
+                            <span className="text-foreground">
                               {t.ReceiverProjectName}
                             </span>
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] bg-muted text-muted-foreground border border-border ml-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[0.5625rem] bg-card text-muted-foreground border border-foreground/30 ml-1">
                               Inter-Company
                             </span>
                           </div>
@@ -301,23 +304,23 @@ export function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5">
                           {t.Status === "Completed" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[0.625rem] font-medium bg-card text-foreground border border-foreground/40">
                               <CheckCircle2 size={10} /> Completed (auto)
                             </span>
                           ) : t.Status === "Approved" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[0.625rem] font-medium bg-card text-foreground border border-foreground/40">
                               <CheckCircle2 size={10} /> Approved
                             </span>
                           ) : t.Status === "Pending" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border border-amber-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[0.625rem] font-medium bg-card text-foreground border border-foreground/40">
                               Pending approval
                             </span>
                           ) : t.Status === "Rejected" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-red-500/10 text-red-700 dark:text-red-400 border border-red-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[0.625rem] font-medium bg-destructive/10 text-destructive dark:text-destructive border border-destructive">
                               Rejected
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-muted text-muted-foreground border border-border">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[0.625rem] font-medium bg-card text-muted-foreground border border-foreground/30">
                               {t.Status}
                             </span>
                           )}
@@ -327,23 +330,25 @@ export function TransferHistory() {
                             <button data-row-view
                               onClick={() => setPreviewIctId(t.ICTId)}
                               title="Preview"
-                              className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
+                              className="p-1.5 border border-foreground/30 hover:bg-primary/5 transition-colors"
                             >
                               <Eye size={12} />
                             </button>
                             {rights.canDelete && (
                               <button
-                                onClick={() => {
-                                  const msg =
-                                    t.Status === "Completed"
-                                      ? `Delete ${t.DocNo}? This reverses the stock movement (${t.SenderProjectName} → ${t.ReceiverProjectName}) and the two-sided GL voucher it posted. This cannot be undone.`
-                                      : `Delete ${t.DocNo}? This request never moved stock or posted to GL, so nothing to reverse — it will just be removed.`;
-                                  if (!window.confirm(msg)) return;
-                                  deleteIctMut.mutate(t.ICTId);
-                                }}
+                                onClick={() =>
+                                  setConfirmIct({
+                                    id: t.ICTId,
+                                    docNo: t.DocNo,
+                                    note:
+                                      t.Status === "Completed"
+                                        ? `This reverses the stock movement (${t.SenderProjectName} → ${t.ReceiverProjectName}) and the two-sided GL voucher it posted. It cannot be undone.`
+                                        : "This request never moved stock or posted to GL, so there is nothing to reverse; it is just removed.",
+                                  })
+                                }
                                 disabled={deleteIctMut.isPending}
                                 title={t.Status === "Completed" ? "Delete — reverses stock & GL" : "Delete"}
-                                className="p-1.5 rounded-lg border border-border hover:bg-red-500/10 hover:text-red-500 hover:border-red-400/40 transition-colors disabled:opacity-50"
+                                className="p-1.5 border border-foreground/30 hover:bg-destructive/10 hover:text-destructive hover:border-destructive transition-colors disabled:opacity-50"
                               >
                                 <Trash2 size={12} />
                               </button>
@@ -360,9 +365,9 @@ export function TransferHistory() {
                   return (
                     <tr
                       key={t.TransferID}
-                      className="border-b border-border hover:bg-muted/20 transition-colors"
+                      className="border-b border-foreground hover:bg-primary/5 transition-colors"
                     >
-                      <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
+                      <td className="px-3 py-2.5 font-heading text-foreground font-semibold whitespace-nowrap">
                         <div>{t.DocNo}</div>
                         <div className="text-[0.625rem] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                       </td>
@@ -371,11 +376,11 @@ export function TransferHistory() {
                       </td>
                       <td className="px-3 py-2.5 hidden sm:table-cell">
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <span className="text-orange-600 dark:text-orange-400">
+                          <span className="text-foreground">
                             {t.FromGodownName}
                           </span>
                           <ArrowRight size={10} className="text-muted-foreground shrink-0" />
-                          <span className="text-emerald-600 dark:text-emerald-400">
+                          <span className="text-foreground">
                             {t.ToGodownName}
                           </span>
                         </div>
@@ -388,7 +393,7 @@ export function TransferHistory() {
                         <ApprovalStatusChain
                           table="StockTransfers"
                           recordId={t.TransferID}
-                          fallback={<StatusBadge status={t.Status} />}
+                          fallback={<SheetMark text={t.Status || "Draft"} tone={statusTone(t.Status || "Draft")} />}
                           preloaded={transferApprovalTrails.get(String(t.TransferID)) ?? null}
                           preloadedLoading={transferApprovalTrailsLoading}
                         />
@@ -398,14 +403,14 @@ export function TransferHistory() {
                           <button data-row-view
                             onClick={() => setPreviewTransfer(t)}
                             title="Preview"
-                            className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
+                            className="p-1.5 border border-foreground/30 hover:bg-primary/5 transition-colors"
                           >
                             <Eye size={12} />
                           </button>
                           {hasGRN ? (
                             <span
                               title={linkedGRNs.map((g) => g.GRNNo || g.DocNo).join(", ")}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.625rem] bg-muted text-muted-foreground border border-border font-mono whitespace-nowrap"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[0.625rem] bg-card text-muted-foreground border border-foreground/30 font-heading whitespace-nowrap"
                             >
                               <FileText size={9} /> {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo}
                             </span>
@@ -414,7 +419,7 @@ export function TransferHistory() {
                             <button
                               onClick={() => setGrnModalTransfer(t)}
                               title="Make GRN"
-                              className="p-1.5 rounded-lg border border-emerald-400/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/15 transition-colors"
+                              className="p-1.5 border border-foreground/40 text-foreground bg-card hover:bg-primary/5 transition-colors"
                             >
                               <FileText size={12} />
                             </button>
@@ -431,6 +436,31 @@ export function TransferHistory() {
         </div>
         <ServerPager page={page} pageSize={pageSize} total={historyTotal} onPageChange={setPage} onPageSizeChange={setPageSize} />
       </div>
+    <Dialog open={!!confirmIct} onOpenChange={(v) => !v && setConfirmIct(null)}>
+      <DialogContent className="sheet-frame max-w-sm p-0 gap-0" style={{ margin: 0 }}>
+        <DialogHeader className="px-5 pt-5 pb-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+          <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Inter-company transfer</p>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Delete {confirmIct?.docNo}?</DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground mt-1">{confirmIct?.note}</DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2 px-5 py-4">
+          <button type="button" onClick={() => setConfirmIct(null)} className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] h-9 px-4 border border-foreground hover:bg-primary/10">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={deleteIctMut.isPending}
+            onClick={() => {
+              deleteIctMut.mutate(confirmIct!.id);
+              setConfirmIct(null);
+            }}
+            className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] h-9 px-4 bg-destructive text-destructive-foreground border border-destructive disabled:opacity-40"
+          >
+            Delete
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

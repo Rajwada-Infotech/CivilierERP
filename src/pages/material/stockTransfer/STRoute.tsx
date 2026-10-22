@@ -11,7 +11,7 @@ export function STRoute({ m }: { m: StockTransferState }) {
   return (
     <>
       {/* ── Filters + Transfer Route ──────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+      <div className="border border-foreground bg-card p-5 space-y-4">
         <div className="flex items-center gap-2">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Filters
@@ -28,7 +28,7 @@ export function STRoute({ m }: { m: StockTransferState }) {
                 setToGodownId(null);
                 setItems([emptyItem()]);
               }}
-              className="ml-auto text-[0.625rem] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors"
+              className="ml-auto text-[0.625rem] text-muted-foreground hover:text-destructive flex items-center gap-1 transition-colors"
             >
               <X size={10} /> Clear filters
             </button>
@@ -102,7 +102,7 @@ export function STRoute({ m }: { m: StockTransferState }) {
                   <ClipboardList size={13} /> Raise from Material Request (optional)
                 </label>
                 {sourceMR ? (
-                  <div className="flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between gap-2 border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
                     <span className="flex items-center gap-1.5 font-medium">
                       <ClipboardList size={14} className="text-primary" />
                       From MR: {sourceMR.docNo}
@@ -118,7 +118,7 @@ export function STRoute({ m }: { m: StockTransferState }) {
                 ) : (
                   <>
                     <select
-                      className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60"
+                      className="w-full border bg-card px-3 py-2 text-sm disabled:opacity-60"
                       value={mrDropdownValue}
                       onChange={(e) => handleMRDropdownSelect(e.target.value)}
                       disabled={mrDropdownLoading || !toProjectId || loadingApprovedMRs}
@@ -214,7 +214,7 @@ export function STRoute({ m }: { m: StockTransferState }) {
         {(filterCompanyId || filterProjectId) && (
           <div className="flex flex-wrap gap-2 pt-1">
             {filterCompanyId && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] bg-muted text-foreground border border-border font-medium">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[0.6875rem] bg-card text-foreground border border-foreground/30 font-medium">
                 <Building2 size={10} />
                 {
                   companyOptions.find((o) => o.value === filterCompanyId)
@@ -235,7 +235,7 @@ export function STRoute({ m }: { m: StockTransferState }) {
               </span>
             )}
             {filterProjectId && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] bg-muted text-foreground border border-border font-medium">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[0.6875rem] bg-card text-foreground border border-foreground/30 font-medium">
                 <FolderKanban size={10} />
                 {
                   projectSelectOptions.find(
@@ -263,19 +263,19 @@ export function STRoute({ m }: { m: StockTransferState }) {
         )}
 
         {fromGodownId && toGodownId && fromGodownId === toGodownId && (
-          <p className="text-xs text-red-500 flex items-center gap-1">
+          <p className="text-xs text-destructive flex items-center gap-1">
             <AlertCircle size={11} /> Source and destination must be
             different.
           </p>
         )}
 
         {fromGodown && toGodown && fromGodownId !== toGodownId && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground">
-            <span className="font-medium text-orange-600">
+          <div className="flex items-center gap-2 px-3 py-2 bg-card border border-foreground text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
               {fromGodown.GodownName}
             </span>
             <ArrowRight size={12} />
-            <span className="font-medium text-emerald-600">
+            <span className="font-medium text-foreground">
               {toGodown.GodownName}
             </span>
           </div>

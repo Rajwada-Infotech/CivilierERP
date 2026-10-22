@@ -27,8 +27,8 @@ export function GodownSelect({
       <p
         className={`text-xs font-semibold uppercase tracking-wider ${
           isFrom
-            ? "text-orange-600 dark:text-orange-400"
-            : "text-emerald-600 dark:text-emerald-400"
+            ? "text-foreground"
+            : "text-foreground"
         }`}
       >
         {label}
@@ -42,7 +42,7 @@ export function GodownSelect({
           onChange={(e) =>
             onChange(e.target.value === "" ? null : Number(e.target.value))
           }
-          className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none appearance-none transition-colors focus:border-primary/60"
+          className="w-full pl-9 pr-8 py-2.5 border border-foreground bg-card text-sm text-foreground outline-none appearance-none transition-colors focus:border-primary/60"
           style={{ colorScheme: "dark" }}
         >
           <option value="" className="bg-popover text-foreground">
@@ -66,13 +66,13 @@ export function GodownSelect({
         />
       </div>
       {selected && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-muted/30">
+        <div className="flex items-center gap-2 px-3 py-2 border border-foreground bg-card">
           <Warehouse size={12} className="text-muted-foreground shrink-0" />
           <p
             className={`text-xs font-semibold truncate ${
               isFrom
-                ? "text-orange-700 dark:text-orange-400"
-                : "text-emerald-700 dark:text-emerald-400"
+                ? "text-foreground"
+                : "text-foreground"
             }`}
           >
             {selected.GodownName}

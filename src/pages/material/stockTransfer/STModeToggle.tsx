@@ -1,14 +1,17 @@
 
 import type { StockTransferState } from "./useStockTransfer";
 
+const MODE = (on: boolean) =>
+  `font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] h-8 px-3 border transition-colors ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
+
 // Within a company or between companies, and the source material request.
 export function STModeToggle({ m }: { m: StockTransferState }) {
   const { transferMode, setTransferMode, setToCompanyId, setToProjectId, setToGodownId, items } = m;
   return (
     <>
       {/* ── Transfer Mode Toggle ─────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+      <div className="border border-foreground bg-card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="flex items-center gap-2 w-fit">
           <button
             onClick={() => {
               setTransferMode("intra");
@@ -16,11 +19,7 @@ export function STModeToggle({ m }: { m: StockTransferState }) {
               setToProjectId("");
               setToGodownId(null);
             }}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              transferMode === "intra"
-                ? "bg-card shadow text-foreground border border-border"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={MODE(transferMode === "intra")}
           >
             Intra-Company
           </button>
@@ -29,16 +28,12 @@ export function STModeToggle({ m }: { m: StockTransferState }) {
               setTransferMode("inter");
               setToGodownId(null);
             }}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-              transferMode === "inter"
-                ? "bg-card shadow text-foreground border border-border"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+            className={MODE(transferMode === "inter")}
           >
             Inter-Company
           </button>
         </div>
-        <span className="text-xs text-muted-foreground/60 sm:ml-auto">
+        <span className="text-xs text-muted-foreground sm:ml-auto">
           {transferMode === "intra"
             ? "Transfer between godowns within the same company"
             : "Transfer stock between different companies"}

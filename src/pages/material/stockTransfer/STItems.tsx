@@ -12,8 +12,8 @@ export function STItems({ m }: { m: StockTransferState }) {
     <>
       {/* ── Items Table ───────────────────────────────────────────────────── */}
       {fromGodownId && (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+        <div className="border border-foreground bg-card overflow-hidden">
+          <div className="px-5 py-3 border-b border-foreground flex items-center justify-between">
             <div>
               <p className="text-sm font-heading font-semibold text-foreground">
                 Items to Transfer
@@ -30,14 +30,14 @@ export function STItems({ m }: { m: StockTransferState }) {
                 </span>
               ) : fromStockData ? (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Package size={11} className="text-emerald-600" />
+                  <Package size={11} className="text-foreground" />
                   {availableItems.length} items in stock
                 </span>
               ) : null}
               {rights.canCreate && (
               <button
                 onClick={addItem}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-foreground text-card text-xs font-medium transition-colors border border-foreground"
               >
                 <Plus size={12} /> Add Item
               </button>
@@ -48,15 +48,15 @@ export function STItems({ m }: { m: StockTransferState }) {
           <div className="p-4 space-y-2">
             {liveItems.some((it) => it.itemId) && (
               !fromGodownId ? (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                <div className="border border-foreground/40 bg-card px-3 py-2 text-xs text-foreground">
                   Pick the source godown to check stock for these items.
                 </div>
               ) : isLoadingStock ? (
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground flex items-center gap-1.5">
+                <div className="border border-foreground bg-card px-3 py-2 text-xs text-muted-foreground flex items-center gap-1.5">
                   <RefreshCw size={11} className="animate-spin" /> Checking stock in the source godown…
                 </div>
               ) : hasInsufficientStock ? (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+                <div className="border border-destructive bg-destructive/10 px-3 py-2 text-xs text-destructive dark:text-destructive">
                   <p className="font-semibold">
                     Stock is not enough for {shortLines.length} item{shortLines.length !== 1 ? "s" : ""} — the transfer is blocked until it is fixed.
                   </p>
@@ -70,7 +70,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                   <p className="mt-1 opacity-80">Reduce the quantity, remove the item, or choose another source godown.</p>
                 </div>
               ) : (
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+                <div className="border border-foreground/40 bg-card px-3 py-2 text-xs text-foreground">
                   Stock check passed — every item is available in the source godown.
                 </div>
               )
@@ -129,7 +129,7 @@ export function STItems({ m }: { m: StockTransferState }) {
             </div>{/* overflow-x-auto */}
           </div>
 
-          <div className="px-5 py-4 border-t border-border space-y-3">
+          <div className="px-5 py-4 border-t border-foreground space-y-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-1.5">
                 Transfer Remarks
@@ -139,11 +139,11 @@ export function STItems({ m }: { m: StockTransferState }) {
                 onChange={(e) => setRemarks(e.target.value)}
                 rows={2}
                 placeholder="Reason for transfer, project reference, etc."
-                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-emerald-500/30"
+                className="w-full px-3 py-2 border border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none"
               />
             </div>
             {transferMode === "inter" && (
-              <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-xs space-y-2">
+              <div className="border border-foreground bg-card px-3 py-3 text-xs space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[0.625rem]">
                     Posting Preview
@@ -153,7 +153,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                       type="checkbox"
                       checked={applyGst}
                       onChange={(e) => setApplyGst(e.target.checked)}
-                      className="rounded border-border accent-emerald-600"
+                      className="border-foreground/30 accent-foreground"
                     />
                     Apply GST
                   </label>
@@ -163,7 +163,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                     <RefreshCw size={11} className="animate-spin" /> Pricing items…
                   </p>
                 ) : interPreviewError ? (
-                  <p className="text-red-600 dark:text-red-400">
+                  <p className="text-destructive dark:text-destructive">
                     {(interPreviewError as Error).message}
                   </p>
                 ) : interPreview && interPreview.items.length > 0 ? (
@@ -176,13 +176,13 @@ export function STItems({ m }: { m: StockTransferState }) {
                         const inclAmt = it.amountInclGst ?? it.amount;
                         if (it.needsManualRate) {
                           return (
-                            <div key={it.itemId} className="rounded-md bg-amber-500/5 border border-amber-400/30 px-3 py-2 space-y-1.5">
+                            <div key={it.itemId} className="bg-card border border-foreground/40 px-3 py-2 space-y-1.5">
                               <div className="flex items-center justify-between gap-3 text-[0.6875rem] font-medium">
                                 <span className="text-foreground truncate">
                                   {it.itemName || it.itemId} — {it.qty} {it.unit}
                                 </span>
                               </div>
-                              <p className="text-[0.625rem] text-amber-600 dark:text-amber-400">
+                              <p className="text-[0.625rem] text-foreground">
                                 No purchase history found under this company — enter a rate to price this item.
                               </p>
                               <div className="flex items-center gap-1.5">
@@ -196,7 +196,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                                     setManualRates((prev) => ({ ...prev, [it.itemId]: e.target.value }))
                                   }
                                   placeholder="Rate per unit"
-                                  className="w-32 px-2 py-1 rounded-md border border-amber-400/40 bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-amber-500/30"
+                                  className="w-32 px-2 py-1 border border-foreground/40 bg-card text-xs text-foreground outline-none"
                                 />
                                 <span className="text-[0.625rem] text-muted-foreground">per {it.unit}</span>
                               </div>
@@ -204,7 +204,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                           );
                         }
                         return (
-                          <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
+                          <div key={it.itemId} className="bg-card border border-foreground px-3 py-2 space-y-0.5">
                             <div className="flex items-center justify-between gap-3 text-[0.6875rem] font-medium">
                               <span className="text-foreground truncate">
                                 {it.itemName || it.itemId} — {it.qty} {it.unit}
@@ -217,7 +217,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                               <span>Excl. GST: ₹{fmtRate(it.rate)}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
                             </div>
                             {gstPct > 0 ? (
-                              <div className="flex items-center justify-between text-[0.625rem] text-amber-600 dark:text-amber-400">
+                              <div className="flex items-center justify-between text-[0.625rem] text-foreground">
                                 <span>GST @ {gstPct}%</span>
                                 <span>+ ₹{gstAmt.toLocaleString("en-IN")}</span>
                               </div>
@@ -230,20 +230,20 @@ export function STItems({ m }: { m: StockTransferState }) {
                     </div>
 
                     {/* Totals summary */}
-                    <div className="border-t border-border/60 pt-2 space-y-1 text-[0.6875rem]">
+                    <div className="border-t border-foreground pt-2 space-y-1 text-[0.6875rem]">
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Subtotal (excl. GST)</span>
-                        <span className="font-mono">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                        <span className="font-heading">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
                       </div>
                       {(interPreview.totalGstAmount ?? 0) > 0 && (
                         <div className="flex items-center justify-between">
-                          <span className="text-amber-600 dark:text-amber-400">GST</span>
-                          <span className="font-mono text-amber-600 dark:text-amber-400">
+                          <span className="text-foreground">GST</span>
+                          <span className="font-heading text-foreground">
                             + ₹{(interPreview.totalGstAmount!).toLocaleString("en-IN")}
                           </span>
                         </div>
                       )}
-                      <div className="flex items-center justify-between font-semibold border-t border-border/40 pt-1">
+                      <div className="flex items-center justify-between font-semibold border-t border-foreground pt-1">
                         <span className="text-foreground">Total (incl. GST)</span>
                         <span className="text-foreground">
                           ₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}
@@ -252,7 +252,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                     </div>
 
                     {/* GL posting lines */}
-                    <div className="border-t border-border/60 pt-2 space-y-1 text-[0.625rem]">
+                    <div className="border-t border-foreground pt-2 space-y-1 text-[0.625rem]">
                       <p className="text-muted-foreground/60 uppercase tracking-wider text-[0.5625rem] font-semibold">GL Posting</p>
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">
@@ -282,7 +282,7 @@ export function STItems({ m }: { m: StockTransferState }) {
               <div className="flex gap-2 sm:ml-auto">
                 <button
                   onClick={handleReset}
-                  className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                  className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 border border-foreground/30 text-sm hover:bg-primary/5 transition-colors"
                 >
                   Reset
                 </button>
@@ -290,7 +290,7 @@ export function STItems({ m }: { m: StockTransferState }) {
                 <button
                   onClick={handleTransfer}
                   disabled={!canTransfer || hasUnpricedItems}
-                  className="flex-1 sm:flex-none whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
+                  className="flex-1 sm:flex-none whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2.5 bg-foreground text-card text-sm font-semibold disabled:opacity-50 transition-colors border border-foreground"
                 >
                   {transferMut.isPending || interTransferMut.isPending ? (
                     <>

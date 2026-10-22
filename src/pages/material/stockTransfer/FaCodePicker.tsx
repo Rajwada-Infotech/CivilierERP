@@ -30,14 +30,14 @@ export function FaCodePicker({
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
 
   return (
-    <div className="ml-10 mr-3 -mt-1 mb-1 rounded-xl border border-dashed border-teal-500/40 bg-teal-500/5 px-3 py-2.5">
+    <div className="ml-10 mr-3 -mt-1 mb-1 border border-dashed border-foreground/40 bg-card px-3 py-2.5">
       <div className="flex items-center justify-between gap-2 mb-1.5">
-        <p className="text-[0.625rem] font-semibold uppercase tracking-wider text-teal-700 dark:text-teal-400">
+        <p className="text-[0.625rem] font-semibold uppercase tracking-wider text-foreground">
           Fixed Asset — select the FA Item Code of each unit being transferred
         </p>
         <span
-          className={`text-[0.625rem] font-semibold px-2 py-0.5 rounded-full ${
-            selected.length > 0 ? "bg-teal-500/15 text-teal-700 dark:text-teal-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+          className={`text-[0.625rem] font-semibold px-2 py-0.5 ${
+            selected.length > 0 ? "bg-card text-foreground" : "bg-card text-foreground"
           }`}
         >
           {selected.length} selected
@@ -48,9 +48,9 @@ export function FaCodePicker({
       ) : isLoading ? (
         <p className="text-[0.6875rem] text-muted-foreground">Loading FA Item Codes…</p>
       ) : isError ? (
-        <p className="text-[0.6875rem] text-red-500">Couldn't load the FA Item Codes.</p>
+        <p className="text-[0.6875rem] text-destructive">Couldn't load the FA Item Codes.</p>
       ) : codes.length === 0 ? (
-        <p className="text-[0.6875rem] text-amber-700 dark:text-amber-400">
+        <p className="text-[0.6875rem] text-foreground">
           No active FA Item Codes for this item in the sending project — tag the stock in FA Inventory first, or the codes are already on another transfer.
         </p>
       ) : (
@@ -69,12 +69,12 @@ export function FaCodePicker({
                   c.Custodian ? `Held by ${c.Custodian}` : "",
                   blocked ? "Selected on another line" : "",
                 ].filter(Boolean).join(" · ")}
-                className={`px-2 py-1 rounded-lg border text-[0.6875rem] font-mono transition-colors ${
+                className={`px-2 py-1 border text-[0.6875rem] font-heading transition-colors ${
                   on
-                    ? "border-teal-500 bg-teal-500/20 text-teal-800 dark:text-teal-200 font-semibold"
+                    ? "border-foreground/40 bg-card text-foreground font-semibold"
                     : blocked
-                      ? "border-border bg-muted/40 text-muted-foreground/50 cursor-not-allowed"
-                      : "border-border bg-background text-foreground hover:border-teal-500/60"
+                      ? "border-foreground/30 bg-card text-muted-foreground/50 cursor-not-allowed"
+                      : "border-foreground/30 bg-card text-foreground hover:border-foreground/40"
                 }`}
               >
                 {on ? "✓ " : ""}{c.FAItemCode}

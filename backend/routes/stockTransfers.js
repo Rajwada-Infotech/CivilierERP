@@ -202,6 +202,19 @@ router.get("/history", cache("stock-transfer-history", 60, { dropOnAnyWrite: tru
 // transfer is fully approved (see PUT /:id/approve below), so an approval
 // workflow configured for it genuinely gates the stock movement instead of
 // the movement already having happened before anyone could approve it.
+// One entry per item with its quantities added up — the same item on two lines must be
+// checked against the godown's stock as one demand, not line by line.
+function demandByItem(items) {
+  const m = new Map();
+  for (const it of items) {
+    const key = String(it.itemId);
+    const cur = m.get(key);
+    if (cur) cur.qty += Number(it.qty) || 0;
+    else m.set(key, { itemId: it.itemId, itemName: it.itemName, qty: Number(it.qty) || 0 });
+  }
+  return [...m.values()];
+}
+
 router.post("/", requirePageRight("stock-transfers", "create"), async (req, res) => {
   const pool = getPool();
   try {
@@ -242,12 +255,13 @@ router.post("/", requirePageRight("stock-transfers", "create"), async (req, res)
     // Informational at this stage — the authoritative check happens again at
     // approval time, since availability can change while this is Pending.
     for (const item of items) {
-      const { itemId, qty } = item;
-      if (!itemId || !(Number(qty) > 0))
+      if (!item.itemId || !(Number(item.qty) > 0))
         return res
           .status(400)
-          .json({ error: `Invalid item entry: itemId=${itemId} qty=${qty}` });
-
+          .json({ error: `Invalid item entry: itemId=${item.itemId} qty=${item.qty}` });
+    }
+    for (const item of demandByItem(items)) {
+      const { itemId, qty } = item;
       const avail = await pool
         .request()
         .input("itemId", sql.NVarChar(100), String(itemId))
@@ -365,7 +379,7 @@ router.put("/:id/approve", async (req, res) => {
 
           // Re-validate availability — time has passed since submission and
           // stock could have moved elsewhere in the meantime.
-          for (const item of items) {
+          for (const item of demandByItem(items)) {
             const { itemId, qty } = item;
             const avail = await transaction
               .request()

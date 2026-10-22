@@ -29,7 +29,7 @@ export function FilterSelect({
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none appearance-none transition-colors focus:border-primary/60"
+          className="w-full pl-9 pr-8 py-2.5 border border-foreground bg-card text-sm text-foreground outline-none appearance-none transition-colors focus:border-primary/60"
           style={{ colorScheme: "dark" }}
         >
           <option value="" className="bg-popover text-foreground">

@@ -85,14 +85,14 @@ export function ItemSearchRow({
 
   return (
     <div
-      className={`grid grid-cols-12 gap-2 items-start p-3 rounded-xl border transition-colors ${
+      className={`grid grid-cols-12 gap-2 items-start p-3 border transition-colors ${
         overLimit
-          ? "border-red-400/40 bg-red-500/5"
-          : "border-border bg-muted/20"
+          ? "border-destructive bg-destructive/10"
+          : "border-foreground/30 bg-card"
       }`}
     >
       {/* # */}
-      <div className="col-span-1 flex items-center h-9 text-xs font-mono text-muted-foreground">
+      <div className="col-span-1 flex items-center h-9 text-xs font-heading text-muted-foreground">
         {idx + 1}
       </div>
 
@@ -121,7 +121,7 @@ export function ItemSearchRow({
             onFocus={() => setOpen(true)}
             placeholder={isLoadingStock ? "Loading items…" : "Search item…"}
             disabled={isLoadingStock}
-            className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/50 disabled:opacity-60"
+            className="w-full pl-8 pr-3 py-2 border border-foreground bg-card text-xs text-foreground outline-none focus:border-foreground/40 disabled:opacity-60"
           />
         </div>
 
@@ -129,7 +129,7 @@ export function ItemSearchRow({
           <div
             ref={menuRef}
             style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: menuPos.width }}
-            className="z-[100] rounded-lg border border-border bg-popover shadow-lg overflow-hidden"
+            className="z-[100] border border-foreground/30 bg-popover overflow-hidden"
           >
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-xs text-muted-foreground text-center">
@@ -146,7 +146,7 @@ export function ItemSearchRow({
                       e.preventDefault();
                       selectItem(a);
                     }}
-                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/60 text-left transition-colors border-b border-border/40 last:border-0"
+                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-primary/5 text-left transition-colors border-b border-foreground last:border-0"
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-medium text-foreground truncate">
@@ -157,10 +157,10 @@ export function ItemSearchRow({
                       </p>
                     </div>
                     <span
-                      className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
+                      className={`text-[0.625rem] font-semibold px-1.5 py-0.5 shrink-0 ml-2 ${
                         a.available > 0
-                          ? "bg-emerald-500/10 text-emerald-600"
-                          : "bg-red-500/10 text-red-500"
+                          ? "bg-card text-foreground"
+                          : "bg-destructive/10 text-destructive"
                       }`}
                     >
                       {fmtNum(a.available)} {a.uom}
@@ -178,10 +178,10 @@ export function ItemSearchRow({
       <div className="col-span-1 flex items-center h-9">
         {item.itemId && (
           <span
-            className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap ${
+            className={`text-[0.625rem] px-1.5 py-0.5 font-semibold whitespace-nowrap ${
               item.stockKnown && (item.availableQty <= 0 || item.stockShort)
-                ? "text-red-600 bg-red-500/10"
-                : "text-emerald-600 bg-emerald-500/10"
+                ? "text-destructive bg-destructive/10"
+                : "text-foreground bg-card"
             }`}
           >
             {fmtNum(item.availableQty)}
@@ -201,19 +201,19 @@ export function ItemSearchRow({
           readOnly={!!item.isFa}
           title={item.isFa ? "Quantity follows the FA Item Codes selected below" : undefined}
           disabled={!item.itemId}
-          className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none disabled:opacity-50 ${
-            overLimit || overMrPending ? "border-red-400" : "border-border"
+          className={`w-full px-2 py-2 border text-xs text-foreground bg-card outline-none disabled:opacity-50 ${
+            overLimit || overMrPending ? "border-destructive" : "border-foreground/30"
           }`}
         />
         {overLimit && (
-          <p className="text-[0.625rem] text-red-500 mt-0.5">
+          <p className="text-[0.625rem] text-destructive mt-0.5">
             {item.stockKnown && item.availableQty <= 0
               ? "Out of stock in source godown"
               : `Only ${fmtNum(item.availableQty)} in stock — short by ${fmtNum(Math.max(0, qtyNum - item.availableQty))}`}
           </p>
         )}
         {overMrPending && (
-          <p className="text-[0.625rem] text-red-500 mt-0.5">
+          <p className="text-[0.625rem] text-destructive mt-0.5">
             Max: {fmtNum(item.mrPendingQty!)} (MR pending)
           </p>
         )}
@@ -225,7 +225,7 @@ export function ItemSearchRow({
           value={item.uom}
           readOnly
           placeholder="UOM"
-          className="w-full px-2 py-2 rounded-lg border border-border bg-muted text-xs text-muted-foreground outline-none"
+          className="w-full px-2 py-2 border border-foreground bg-card text-xs text-muted-foreground outline-none"
         />
       </div>
 
@@ -233,7 +233,7 @@ export function ItemSearchRow({
       <div className="col-span-1 flex items-center justify-center h-9">
         <button
           onClick={() => onRemove(idx)}
-          className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
+          className="p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
         >
           <Trash2 size={12} />
         </button>
