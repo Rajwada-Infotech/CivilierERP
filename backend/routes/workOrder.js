@@ -316,7 +316,8 @@ router.get(
         // Summary figures over every work order in scope (not the filtered list), as the page always showed them.
         bind(pool.request()).query(`
         SELECT COUNT(*) AS count,
-          ISNULL(SUM(h.TotalAmount), 0) AS totalAmount,
+          -- rejected / cancelled work orders are not work in hand: they stay out of the value
+          ISNULL(SUM(CASE WHEN LOWER(ISNULL(h.Status, '')) NOT IN ('rejected', 'cancelled') THEN h.TotalAmount ELSE 0 END), 0) AS totalAmount,
           SUM(CASE WHEN LOWER(ISNULL(h.Status, '')) = 'approved' THEN 1 ELSE 0 END) AS approved,
           SUM(CASE WHEN LOWER(ISNULL(h.Status, '')) = 'pending'  THEN 1 ELSE 0 END) AS pending
         FROM dbo.WorkOrderHeader h

@@ -68,11 +68,11 @@ export const HsnPopover: React.FC<{
       <PopoverContent
         align="end"
         sideOffset={6}
-        className="w-72 p-0 rounded-xl overflow-hidden"
+        className="w-72 p-0 overflow-hidden"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         {/* Header */}
-        <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+        <div className="px-3 py-2 border-b border-foreground/30 flex items-center justify-between">
           <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
             Select SAC Code
           </p>
@@ -86,18 +86,18 @@ export const HsnPopover: React.FC<{
         </div>
 
         {/* Search */}
-        <div className="px-3 py-2 border-b border-border">
+        <div className="px-3 py-2 border-b border-foreground/30">
           <input
             autoFocus
             value={hsnSearch}
             onChange={(e) => setHsnSearch(e.target.value)}
             placeholder="Search code or description…"
-            className="w-full text-xs rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            className="w-full text-xs border border-foreground/30 px-2.5 py-1.5 bg-card text-foreground focus:outline-none"
           />
         </div>
 
         {/* List */}
-        <div className="max-h-56 overflow-y-auto divide-y divide-border/50">
+        <div className="max-h-56 overflow-y-auto divide-y divide-foreground/10">
           {hasHsn && (
             <button
               type="button"
@@ -109,7 +109,7 @@ export const HsnPopover: React.FC<{
                 });
                 setHsnOpen(false);
               }}
-              className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
+              className="w-full text-left px-3 py-2 text-xs text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/10 transition"
             >
               ✕ Remove SAC
             </button>
@@ -135,21 +135,21 @@ export const HsnPopover: React.FC<{
                     });
                     setHsnOpen(false);
                   }}
-                  className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-muted/40 transition text-xs ${
+                  className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-primary/5 transition text-xs ${
                     activity.hsnCode === h.code
-                      ? "bg-violet-50 dark:bg-violet-950/20"
+                      ? "bg-card"
                       : ""
                   }`}
                 >
                   <span>
-                    <span className="font-mono font-semibold text-foreground">
+                    <span className="font-heading font-semibold text-foreground">
                       {h.code}
                     </span>
                     <span className="text-muted-foreground ml-1.5">
                       {h.shortDesc}
                     </span>
                   </span>
-                  <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-400">
+                  <span className="shrink-0 font-semibold text-foreground">
                     {gstRate}%
                   </span>
                 </button>

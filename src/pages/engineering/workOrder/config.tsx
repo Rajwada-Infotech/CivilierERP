@@ -415,12 +415,12 @@ export const FieldLabel: React.FC<{
 }> = ({ children, required }) => (
   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-0.5 mb-1.5">
     {children}
-    {required && <span className="text-red-500 leading-none">*</span>}
+    {required && <span className="text-destructive leading-none">*</span>}
   </label>
 );
 
 export const SelectSkeleton: React.FC = () => (
-  <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
+  <div className="w-full h-10 border border-foreground/30 bg-card animate-pulse" />
 );
 
 // ─── Status helpers ───────────────────────────────────────────────────────────

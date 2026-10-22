@@ -75,17 +75,16 @@ export const MaterialBreakdownModal: React.FC<{
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors whitespace-nowrap
-          ${
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 border text-xs font-medium transition-colors whitespace-nowrap ${
             activity.materials.length > 0
               ? "border-primary/30 bg-primary/8 text-primary"
-              : "border-border bg-background text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-primary/5"
+              : "border-foreground/30 bg-card text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-primary/5"
           }`}
       >
         <Package size={12} />
         <span className="hidden md:inline">Materials</span>
         {activity.materials.length > 0 ? (
-          <span className="bg-primary text-primary-foreground rounded-full w-4 h-4 flex items-center justify-center text-[0.625rem] font-bold leading-none">
+          <span className="bg-primary text-primary-foreground w-4 h-4 flex items-center justify-center text-[0.625rem] font-bold leading-none">
             {activity.materials.length}
           </span>
         ) : (
@@ -96,14 +95,14 @@ export const MaterialBreakdownModal: React.FC<{
       {open && (
         <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/50"
             onClick={() => setOpen(false)}
           />
-          <div className="relative z-10 w-full sm:w-[640px] sm:max-w-[calc(100vw-2rem)] bg-card rounded-t-2xl sm:rounded-2xl border border-border shadow-2xl flex flex-col max-h-[88vh]">
+          <div className="relative z-10 w-full sm:w-[640px] sm:max-w-[calc(100vw-2rem)] bg-card border border-foreground/30 flex flex-col max-h-[88vh]">
             <div className="flex justify-center pt-2.5 pb-0 sm:hidden shrink-0">
-              <div className="w-9 h-1 rounded-full bg-muted-foreground/20" />
+              <div className="w-9 h-1 bg-muted-foreground/20" />
             </div>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/30 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <Package size={14} className="text-primary shrink-0" />
                 <div className="min-w-0">
@@ -119,21 +118,20 @@ export const MaterialBreakdownModal: React.FC<{
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 ml-3"
+                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors shrink-0 ml-3"
               >
                 <X size={14} />
               </button>
             </div>
             {/* Activity area multiplier info bar */}
-            <div className="px-4 py-2.5 bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-800 shrink-0">
+            <div className="px-4 py-2.5 bg-card border-b border-foreground/40 shrink-0">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <div
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold
-                    ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 border text-xs font-semibold ${
                       activity.area > 0
-                        ? "bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
-                        : "bg-muted/50 border-border text-muted-foreground"
+                        ? "bg-card border-foreground/40 text-foreground"
+                        : "bg-card border-foreground/30 text-muted-foreground"
                     }`}
                   >
                     <Layers size={11} className="shrink-0" />
@@ -148,30 +146,30 @@ export const MaterialBreakdownModal: React.FC<{
                       </span>
                     )}
                   </div>
-                  <span className="text-[0.625rem] text-blue-600 dark:text-blue-400 font-medium hidden sm:block">
+                  <span className="text-[0.625rem] text-foreground font-medium hidden sm:block">
                     Per-unit qty = Item Qty ÷ Area
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5 text-[0.625rem] text-blue-700 dark:text-blue-300 font-medium bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
+                <div className="flex items-center gap-1.5 text-[0.625rem] text-foreground font-medium bg-card px-2 py-1">
                   <Calculator size={10} />
                   Item Qty × Price
                 </div>
               </div>
               {activity.area === 0 && (
-                <p className="text-[0.625rem] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
+                <p className="text-[0.625rem] text-foreground mt-1.5 flex items-center gap-1">
                   <AlertCircle size={10} className="shrink-0" />
                   Set the Activity Area in the activity row first — the per-unit
                   quantities need it.
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-4 px-4 py-2 bg-muted/30 border-b border-border text-xs shrink-0 flex-wrap gap-y-1">
+            <div className="flex items-center gap-4 px-4 py-2 bg-card border-b border-foreground/30 text-xs shrink-0 flex-wrap gap-y-1">
               {materialsTotal > 0 && (
                 <span className="flex items-center gap-1.5 text-muted-foreground ml-auto">
                   <span className="text-foreground font-medium">
                     Materials Total:
                   </span>
-                  <span className="font-semibold text-amber-600 dark:text-amber-400">
+                  <span className="font-semibold text-foreground">
                     {fmt(materialsTotal)}
                   </span>
                 </span>
@@ -180,7 +178,7 @@ export const MaterialBreakdownModal: React.FC<{
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {activity.materials.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
-                  <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-3">
+                  <div className="w-12 h-12 bg-card flex items-center justify-center mb-3">
                     <Package size={22} className="text-muted-foreground/40" />
                   </div>
                   <p className="text-sm text-muted-foreground font-medium">
@@ -199,11 +197,11 @@ export const MaterialBreakdownModal: React.FC<{
                     return (
                       <div
                         key={mat.id}
-                        className="rounded-lg border border-border bg-muted/10 p-3 space-y-2.5"
+                        className="border border-foreground/30 bg-card p-3 space-y-2.5"
                       >
                         <div className="flex items-center gap-2">
                           {loadingItems ? (
-                            <div className="flex-1 h-[34px] rounded-md border border-border bg-muted/30 animate-pulse" />
+                            <div className="flex-1 h-[34px] border border-foreground/30 bg-card animate-pulse" />
                           ) : (
                             <SearchableNativeSelect
                               value={mat.itemId}
@@ -226,7 +224,7 @@ export const MaterialBreakdownModal: React.FC<{
                           )}
                           <button
                             onClick={() => deleteMaterial(idx)}
-                            className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                            className="w-7 h-7 shrink-0 flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors"
                           >
                             <X size={13} />
                           </button>
@@ -301,7 +299,7 @@ export const MaterialBreakdownModal: React.FC<{
                                 onChange={(e) =>
                                   handleMatUomChange(idx, e.target.value)
                                 }
-                                className="w-full text-sm rounded-md border border-border pl-2 pr-7 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow"
+                                className="w-full text-sm border border-foreground/30 pl-2 pr-7 py-1.5 bg-card text-foreground focus:outline-none transition wo-select-arrow"
                               >
                                 <option value="">Select unit…</option>
                                 {uomOptions.map((u) => (
@@ -345,17 +343,17 @@ export const MaterialBreakdownModal: React.FC<{
                           </div>
                         </div>
                         {mat.gstRate > 0 && (
-                          <div className="mt-1 text-[0.6875rem] text-violet-600 dark:text-violet-400 font-medium">
+                          <div className="mt-1 text-[0.6875rem] text-foreground font-medium">
                             GST {mat.gstRate}% (from SAC) ={" "}
                             {fmt((lineTotal * mat.gstRate) / 100)}
                           </div>
                         )}
                         {lineTotal > 0 && (
-                          <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                          <div className="flex items-center justify-between pt-1 border-t border-foreground/30">
                             <span className="text-xs text-muted-foreground">
                               {fmtQ(matQty(mat, activity))} × ₹{mat.price}
                             </span>
-                            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                            <span className="text-xs font-semibold text-foreground">
                               {fmt(
                                 lineTotal +
                                   (lineTotal * (mat.gstRate || 0)) / 100,
@@ -369,14 +367,14 @@ export const MaterialBreakdownModal: React.FC<{
                 </div>
               )}
               {activity.materials.length > 0 && (
-                <div className="rounded-lg border border-border overflow-hidden">
-                  <div className="bg-muted/40 px-3 py-2 border-b border-border flex items-center gap-1.5">
+                <div className="border border-foreground/30 overflow-hidden">
+                  <div className="bg-card px-3 py-2 border-b border-foreground/30 flex items-center gap-1.5">
                     <Package size={11} className="text-muted-foreground" />
                     <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       Material Cost Breakdown
                     </span>
                   </div>
-                  <div className="divide-y divide-border/50">
+                  <div className="divide-y divide-foreground/10">
                     {activity.materials.map((mat) => {
                       const lt =
                         matCost(mat, activity);
@@ -401,7 +399,7 @@ export const MaterialBreakdownModal: React.FC<{
                             {mat.price > 0 ? `× ₹${mat.price}` : "—"}
                           </span>
                           <span
-                            className={`font-semibold shrink-0 w-24 text-right ${lt > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                            className={`font-semibold shrink-0 w-24 text-right ${lt > 0 ? "text-foreground" : "text-muted-foreground"}`}
                           >
                             {lt > 0 ? fmt(lt) : "—"}
                           </span>
@@ -409,26 +407,26 @@ export const MaterialBreakdownModal: React.FC<{
                       );
                     })}
                   </div>
-                  <div className="border-t border-border bg-muted/20 divide-y divide-border/40">
+                  <div className="border-t border-foreground/30 bg-card divide-y divide-foreground/10">
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Package size={11} className="text-amber-500" />
+                        <Package size={11} className="text-foreground" />
                         Materials (Item Qty × Price)
                       </span>
-                      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      <span className="text-xs font-semibold text-foreground">
                         {fmt(materialsTotal)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Hammer size={11} className="text-blue-500" />
+                        <Hammer size={11} className="text-foreground" />
                         Labour (Total Rate)
                       </span>
-                      <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                      <span className="text-xs font-semibold text-foreground">
                         {labourTotal > 0 ? fmt(labourTotal) : "—"}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between px-3 py-2.5 bg-muted/30">
+                    <div className="flex items-center justify-between px-3 py-2.5 bg-card">
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                         <Receipt size={11} className="text-primary" />
                         Activity Total
@@ -441,17 +439,17 @@ export const MaterialBreakdownModal: React.FC<{
                 </div>
               )}
             </div>
-            <div className="px-4 py-3 border-t border-border flex items-center justify-between shrink-0 bg-card">
+            <div className="px-4 py-3 border-t border-foreground/30 flex items-center justify-between shrink-0 bg-card">
               <button
                 onClick={addMaterial}
-                className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium px-3 py-2 rounded-lg hover:bg-primary/5 transition-colors"
+                className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium px-3 py-2 hover:bg-primary/5 transition-colors"
               >
                 <Plus size={14} />
                 Add Material
               </button>
               <button
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-1.5 text-sm font-semibold px-5 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity"
+                className="flex items-center gap-1.5 text-sm font-semibold px-5 py-2 bg-foreground text-card border border-foreground hover:opacity-90 transition-opacity"
               >
                 <Check size={13} />
                 Done

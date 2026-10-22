@@ -412,7 +412,7 @@ export const WorkOrderEditPanel: React.FC<{
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`${selectCls} ${hasError ? "border-red-400" : ""}`}
+        className={`${selectCls} ${hasError ? "border-destructive" : ""}`}
       >
         <option value="">
           {options.length === 0
@@ -434,12 +434,12 @@ export const WorkOrderEditPanel: React.FC<{
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="rounded-xl border border-border bg-card p-5 animate-pulse"
+            className="border border-foreground/30 bg-card p-5 animate-pulse"
           >
-            <div className="h-4 bg-muted rounded w-1/3 mb-3" />
+            <div className="h-4 bg-card w-1/3 mb-3" />
             <div className="grid grid-cols-3 gap-4">
               {[1, 2, 3].map((j) => (
-                <div key={j} className="h-10 bg-muted rounded" />
+                <div key={j} className="h-10 bg-card" />
               ))}
             </div>
           </div>
@@ -450,9 +450,9 @@ export const WorkOrderEditPanel: React.FC<{
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-6 text-center">
-        <AlertCircle size={24} className="text-red-500 mx-auto mb-2" />
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+      <div className="border border-destructive dark:border-destructive bg-destructive/10 dark:bg-destructive/10 p-6 text-center">
+        <AlertCircle size={24} className="text-destructive mx-auto mb-2" />
+        <p className="text-sm text-destructive dark:text-destructive">{error}</p>
         <button
           onClick={onBack}
           className="mt-3 text-xs text-primary underline"
@@ -477,7 +477,7 @@ export const WorkOrderEditPanel: React.FC<{
         <div className="flex items-center gap-2">
           <button
             onClick={onBack}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+            className="flex items-center gap-2 px-4 py-2 border border-foreground/30 text-sm text-muted-foreground hover:bg-primary/5 transition-colors"
           >
             <X size={13} />
             Cancel
@@ -485,11 +485,11 @@ export const WorkOrderEditPanel: React.FC<{
           <button
             onClick={() => void handleConfirm()}
             disabled={confirming || saving}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500 text-emerald-600 dark:text-emerald-400 text-sm font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-60 transition-colors"
+            className="flex items-center gap-2 px-3 py-2 border border-foreground/40 text-foreground text-sm font-semibold hover:bg-primary/5 disabled:opacity-60 transition-colors"
           >
             {confirming ? (
               <>
-                <span className="w-3.5 h-3.5 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                <span className="w-3.5 h-3.5 border-2 border-foreground/40 border-t-emerald-500 animate-spin" />
                 <span>Confirming…</span>
               </>
             ) : (
@@ -502,11 +502,11 @@ export const WorkOrderEditPanel: React.FC<{
           <button
             onClick={handleSave}
             disabled={saving || loadingDropdowns}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg btn-module text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
+            className="flex items-center gap-2 px-4 py-2 bg-foreground text-card border border-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
           >
             {saving ? (
               <>
-                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white animate-spin" />
                 <span>Saving…</span>
               </>
             ) : saved ? (
@@ -525,31 +525,31 @@ export const WorkOrderEditPanel: React.FC<{
       </div>
 
       {dropdownError && (
-        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
-          <AlertCircle size={15} className="text-amber-500 shrink-0 mt-0.5" />
-          <p className="text-sm text-amber-700 dark:text-amber-400">
+        <div className="mb-4 flex items-start gap-2 border border-foreground/40 bg-card px-4 py-3">
+          <AlertCircle size={15} className="text-foreground shrink-0 mt-0.5" />
+          <p className="text-sm text-foreground">
             {dropdownError}
           </p>
         </div>
       )}
 
       {/* Header card */}
-      <div className="rounded-xl border border-border bg-card mb-5">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center gap-2">
+      <div className="border border-foreground/30 bg-card mb-5">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-foreground/30 flex items-center gap-2">
           <PenSquare size={15} className="text-primary shrink-0" />
           <h2 className="text-sm font-semibold text-foreground">
             Edit Work Order
           </h2>
-          <span className="ml-auto font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded shrink-0">
+          <span className="ml-auto font-heading text-xs text-muted-foreground bg-card px-2 py-0.5 shrink-0">
             {form.docNumber}
           </span>
         </div>
-        <div className="divide-y divide-border/60">
+        <div className="divide-y divide-foreground/10">
           {/* ── Section 1: Project Configuration ── */}
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
-              <div className="w-1 h-4 rounded-full bg-primary/60 shrink-0" />
-              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
+              <div className="w-1 h-4 bg-primary/60 shrink-0" />
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-[0.12em]">
                 Project Configuration
               </span>
             </div>
@@ -561,7 +561,7 @@ export const WorkOrderEditPanel: React.FC<{
                     <FileText size={11} />
                     Linked BOQ
                   </span>
-                  <span className="invisible text-red-500 ml-0.5">*</span>
+                  <span className="invisible text-destructive ml-0.5">*</span>
                 </FieldLabel>
                 <select
                   value={form.boqId}
@@ -590,7 +590,7 @@ export const WorkOrderEditPanel: React.FC<{
                       }
                     }
                   }}
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full border border-input bg-card px-3 py-1.5 text-sm focus:outline-none"
                 >
                   <option value="">— None —</option>
                   {approvedBoqs.map((b) => (
@@ -624,7 +624,7 @@ export const WorkOrderEditPanel: React.FC<{
                   errors.companyId ?? false,
                 )}
                 {errors.companyId && (
-                  <p className="text-xs text-red-500 mt-1">Required</p>
+                  <p className="text-xs text-destructive mt-1">Required</p>
                 )}
               </div>
               <div>
@@ -643,7 +643,7 @@ export const WorkOrderEditPanel: React.FC<{
                   errors.projectId ?? false,
                 )}
                 {errors.projectId && (
-                  <p className="text-xs text-red-500 mt-1">Required</p>
+                  <p className="text-xs text-destructive mt-1">Required</p>
                 )}
               </div>
             </div>
@@ -652,8 +652,8 @@ export const WorkOrderEditPanel: React.FC<{
           {/* ── Section 2: Document Configuration ── */}
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
-              <div className="w-1 h-4 rounded-full bg-indigo-400/70 shrink-0" />
-              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
+              <div className="w-1 h-4 bg-card shrink-0" />
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-[0.12em]">
                 Document Configuration
               </span>
             </div>
@@ -668,7 +668,7 @@ export const WorkOrderEditPanel: React.FC<{
                 <input
                   value={form.docNumber}
                   readOnly
-                  className={`${inputCls} bg-muted/50 text-muted-foreground font-mono cursor-not-allowed`}
+                  className={`${inputCls} bg-card text-muted-foreground font-heading cursor-not-allowed`}
                 />
                 <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   Auto-generated
@@ -689,7 +689,7 @@ export const WorkOrderEditPanel: React.FC<{
                   <DateInput
                     value={form.docDate}
                     onChange={(e) => setField("docDate", e.target.value)}
-                    className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-red-400" : "border-border"}`}
+                    className={`w-full pl-8 pr-3 py-2 text-sm bg-card border text-foreground focus:outline-none transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.docDate ? "border-destructive" : "border-foreground/30"}`}
                   />
                 </div>
               </div>
@@ -699,8 +699,8 @@ export const WorkOrderEditPanel: React.FC<{
           {/* ── Section 3: Parties & Amount ── */}
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
-              <div className="w-1 h-4 rounded-full bg-emerald-400/70 shrink-0" />
-              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
+              <div className="w-1 h-4 bg-card shrink-0" />
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-[0.12em]">
                 Parties &amp; Amount
               </span>
             </div>
@@ -721,7 +721,7 @@ export const WorkOrderEditPanel: React.FC<{
                   errors.contractorId ?? false,
                 )}
                 {errors.contractorId && (
-                  <p className="text-xs text-red-500 mt-1">Required</p>
+                  <p className="text-xs text-destructive mt-1">Required</p>
                 )}
               </div>
               <div>
@@ -730,7 +730,7 @@ export const WorkOrderEditPanel: React.FC<{
                     <User size={11} />
                     Supplier
                   </span>
-                  <span className="invisible text-red-500 ml-0.5">*</span>
+                  <span className="invisible text-destructive ml-0.5">*</span>
                 </FieldLabel>
                 {renderSelect(
                   "supplierId",
@@ -747,7 +747,7 @@ export const WorkOrderEditPanel: React.FC<{
                     <IndianRupee size={11} />
                     Total Amount
                   </span>
-                  <span className="invisible text-red-500 ml-0.5">*</span>
+                  <span className="invisible text-destructive ml-0.5">*</span>
                 </FieldLabel>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
@@ -757,7 +757,7 @@ export const WorkOrderEditPanel: React.FC<{
                     readOnly
                     value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
                     placeholder="Calculated from activities"
-                    className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
+                    className={`${inputCls} pl-7 bg-card text-muted-foreground cursor-not-allowed`}
                   />
                 </div>
                 <p className="text-[0.6875rem] text-muted-foreground mt-1">
@@ -770,8 +770,8 @@ export const WorkOrderEditPanel: React.FC<{
           {/* ── Section 4: Notes & Terms ── */}
           <div className="px-4 sm:px-5 py-4">
             <div className="flex items-center gap-2 mb-3.5">
-              <div className="w-1 h-4 rounded-full bg-amber-400/70 shrink-0" />
-              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-widest">
+              <div className="w-1 h-4 bg-card shrink-0" />
+              <span className="text-[0.6875rem] font-bold text-muted-foreground uppercase tracking-[0.12em]">
                 Notes &amp; Terms
               </span>
             </div>
@@ -791,7 +791,7 @@ export const WorkOrderEditPanel: React.FC<{
                 <button
                   type="button"
                   onClick={() => setTcDropdownOpen((o) => !o)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
                 >
                   <Plus size={13} />
                   Add T&amp;C
@@ -802,13 +802,13 @@ export const WorkOrderEditPanel: React.FC<{
                       className="fixed inset-0 z-[99]"
                       onClick={() => setTcDropdownOpen(false)}
                     /></BodyPortal>
-                    <div className="absolute left-0 top-full mt-1 z-[100] w-80 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
-                      <div className="px-3 py-2 border-b border-border">
+                    <div className="absolute left-0 top-full mt-1 z-[100] w-80 border border-foreground/30 bg-card overflow-hidden">
+                      <div className="px-3 py-2 border-b border-foreground/30">
                         <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wider">
                           Select Terms &amp; Conditions
                         </p>
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                      <div className="max-h-56 overflow-y-auto divide-y divide-foreground/10">
                         {tcRecords.length === 0 ? (
                           <p className="px-4 py-6 text-xs text-center text-muted-foreground">
                             No T&amp;C records found
@@ -829,10 +829,10 @@ export const WorkOrderEditPanel: React.FC<{
                                       : [...prev, tc],
                                   )
                                 }
-                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
+                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-primary/5 transition ${isSelected ? "bg-primary/5" : ""}`}
                               >
                                 <span
-                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-foreground/30"}`}
                                 >
                                   {isSelected && (
                                     <Check
@@ -854,7 +854,7 @@ export const WorkOrderEditPanel: React.FC<{
                           })
                         )}
                       </div>
-                      <div className="px-3 py-2 border-t border-border">
+                      <div className="px-3 py-2 border-t border-foreground/30">
                         <button
                           type="button"
                           onClick={() => setTcDropdownOpen(false)}
@@ -873,9 +873,9 @@ export const WorkOrderEditPanel: React.FC<{
                   {selectedTCs.map((tc, idx) => (
                     <div
                       key={tc.id}
-                      className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
+                      className="flex items-start gap-3 border border-foreground/30 bg-card px-4 py-3"
                     >
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
+                      <span className="flex-shrink-0 w-5 h-5 bg-primary/10 text-primary text-[0.625rem] font-bold flex items-center justify-center mt-0.5">
                         {idx + 1}
                       </span>
                       <div className="flex-1 min-w-0">
@@ -893,7 +893,7 @@ export const WorkOrderEditPanel: React.FC<{
                             prev.filter((s) => s.id !== tc.id),
                           )
                         }
-                        className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                        className="flex-shrink-0 p-1 hover:bg-destructive/10 dark:hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition"
                       >
                         <X size={13} />
                       </button>
@@ -910,21 +910,21 @@ export const WorkOrderEditPanel: React.FC<{
           </div>
         </div>
       </div>
-      <div className="rounded-xl border border-border bg-card mb-5">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center justify-between gap-3">
+      <div className="border border-foreground/30 bg-card mb-5">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-foreground/30 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <Calculator size={15} className="text-primary shrink-0" />
             <h2 className="text-sm font-semibold text-foreground">
               Activity Details
             </h2>
-            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full hidden sm:block">
+            <span className="text-xs text-muted-foreground bg-card px-2 py-0.5 hidden sm:block">
               {groups.length}g ·{" "}
               {groups.reduce((s, g) => s + g.activities.length, 0)}a
             </span>
           </div>
           <button
             onClick={addGroup}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors shrink-0"
+            className="flex items-center gap-1.5 px-3 py-2 bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors shrink-0"
           >
             <FolderPlus size={13} />
             <span className="hidden sm:inline">Add Group</span>
@@ -951,36 +951,36 @@ export const WorkOrderEditPanel: React.FC<{
             />
           ))}
         </div>
-        <div className="border-t border-border bg-muted/10">
-          <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+        <div className="border-t border-foreground/30 bg-card">
+          <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-foreground/10">
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Package size={11} className="text-amber-500" />
+                <Package size={11} className="text-foreground" />
                 Raw Materials
               </span>
-              <span className="text-base font-bold text-amber-600 dark:text-amber-400">
+              <span className="text-base font-bold text-foreground">
                 {fmt(grandMaterialsTotal)}
               </span>
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Hammer size={11} className="text-blue-500" />
+                <Hammer size={11} className="text-foreground" />
                 Labour
               </span>
-              <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+              <span className="text-base font-bold text-foreground">
                 {fmt(grandLabourTotal)}
               </span>
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Receipt size={11} className="text-violet-500" />
+                <Receipt size={11} className="text-foreground" />
                 SAC GST
               </span>
-              <span className="text-base font-bold text-violet-600 dark:text-violet-400">
+              <span className="text-base font-bold text-foreground">
                 {fmt(grandHsnGst)}
               </span>
             </div>
-            <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
+            <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-card">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <Receipt size={11} className="text-primary" />
                 Grand Total (incl. GST)
@@ -997,7 +997,7 @@ export const WorkOrderEditPanel: React.FC<{
       <div className="flex items-center justify-end gap-3 pb-8">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 border border-foreground/30 text-sm text-muted-foreground hover:bg-primary/5 transition-colors"
         >
           <X size={13} />
           Cancel
@@ -1005,11 +1005,11 @@ export const WorkOrderEditPanel: React.FC<{
         <button
           onClick={() => void handleConfirm()}
           disabled={confirming || saving}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-emerald-500 text-emerald-600 dark:text-emerald-400 text-sm font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-60 transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 border border-foreground/40 text-foreground text-sm font-semibold hover:bg-primary/5 disabled:opacity-60 transition-colors"
         >
           {confirming ? (
             <>
-              <span className="w-4 h-4 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+              <span className="w-4 h-4 border-2 border-foreground/40 border-t-emerald-500 animate-spin" />
               Confirming…
             </>
           ) : (
@@ -1022,11 +1022,11 @@ export const WorkOrderEditPanel: React.FC<{
         <button
           onClick={handleSave}
           disabled={saving || loadingDropdowns}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-lg btn-module text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
+          className="flex items-center gap-2 px-5 py-2.5 bg-foreground text-card border border-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
         >
           {saving ? (
             <>
-              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white animate-spin" />
               Saving…
             </>
           ) : saved ? (

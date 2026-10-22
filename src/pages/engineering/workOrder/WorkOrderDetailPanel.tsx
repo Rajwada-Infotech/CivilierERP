@@ -161,12 +161,12 @@ export const WorkOrderDetailPanel: React.FC<{
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="rounded-xl border border-border bg-card p-5 animate-pulse"
+            className="border border-foreground/30 bg-card p-5 animate-pulse"
           >
-            <div className="h-4 bg-muted rounded w-1/3 mb-3" />
+            <div className="h-4 bg-card w-1/3 mb-3" />
             <div className="grid grid-cols-3 gap-4">
               {[1, 2, 3].map((j) => (
-                <div key={j} className="h-10 bg-muted rounded" />
+                <div key={j} className="h-10 bg-card" />
               ))}
             </div>
           </div>
@@ -177,9 +177,9 @@ export const WorkOrderDetailPanel: React.FC<{
 
   if (error || !detail) {
     return (
-      <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-6 text-center">
-        <AlertCircle size={24} className="text-red-500 mx-auto mb-2" />
-        <p className="text-sm text-red-600 dark:text-red-400">
+      <div className="border border-destructive dark:border-destructive bg-destructive/10 dark:bg-destructive/10 p-6 text-center">
+        <AlertCircle size={24} className="text-destructive mx-auto mb-2" />
+        <p className="text-sm text-destructive dark:text-destructive">
           {error || "Work order not found"}
         </p>
         <button
@@ -225,16 +225,16 @@ export const WorkOrderDetailPanel: React.FC<{
         <div className="flex items-center gap-2">
           {confirmDelete && rights.canDelete ? (
             <>
-              <span className="text-xs text-red-500 font-medium">
+              <span className="text-xs text-destructive font-medium">
                 Delete this work order?
               </span>
               <button
                 onClick={handleDelete}
                 disabled={deleting}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors disabled:opacity-60"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive/10 text-white text-xs font-semibold hover:bg-destructive/10 transition-colors disabled:opacity-60"
               >
                 {deleting ? (
-                  <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="w-3 h-3 border border-white/30 border-t-white animate-spin" />
                 ) : (
                   <Trash2 size={12} />
                 )}
@@ -242,7 +242,7 @@ export const WorkOrderDetailPanel: React.FC<{
               </button>
               <button
                 onClick={() => setConfirmDelete(false)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted transition-colors"
+                className="flex items-center gap-1 px-3 py-1.5 border border-foreground/30 text-xs text-muted-foreground hover:bg-primary/5 transition-colors"
               >
                 Cancel
               </button>
@@ -263,7 +263,7 @@ export const WorkOrderDetailPanel: React.FC<{
               {rights.canEdit && (
                 <button
                   onClick={() => onEdit(workOrderId)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
                 >
                   <PenSquare size={12} />
                   Edit
@@ -273,10 +273,10 @@ export const WorkOrderDetailPanel: React.FC<{
                 <button
                   onClick={() => (existingMR ? openMaterialRequest(existingMR.id) : void handleCreateMaterialRequest())}
                   disabled={creatingMR}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-medium hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors disabled:opacity-60"
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-foreground text-xs font-medium hover:bg-primary/5 transition-colors disabled:opacity-60"
                 >
                   {creatingMR ? (
-                    <span className="w-3 h-3 border border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                    <span className="w-3 h-3 border border-foreground/40 border-t-emerald-500 animate-spin" />
                   ) : (
                     <ShoppingCart size={12} />
                   )}
@@ -286,7 +286,7 @@ export const WorkOrderDetailPanel: React.FC<{
               {rights.canDelete && (
                 <button
                   onClick={() => setConfirmDelete(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-800 text-red-500 text-xs font-medium hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-destructive dark:border-destructive text-destructive text-xs font-medium hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors"
                 >
                   <Trash2 size={12} />
                   Delete
@@ -298,8 +298,8 @@ export const WorkOrderDetailPanel: React.FC<{
       </div>
 
       {/* Header card */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+      <div className="border border-foreground/30 bg-card overflow-hidden">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-foreground/30 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <FileText size={15} className="text-primary shrink-0" />
             <h2 className="text-sm font-semibold text-foreground">
@@ -308,12 +308,12 @@ export const WorkOrderDetailPanel: React.FC<{
           </div>
           <div className="flex items-center gap-2">
             <span
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusCfg.cls}`}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold border ${statusCfg.cls}`}
             >
               {statusCfg.icon}
               {detail.Status || "Draft"}
             </span>
-            <span className="font-mono text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+            <span className="font-heading text-xs text-muted-foreground bg-card px-2 py-1">
               {detail.DocumentNumber}
             </span>
           </div>
@@ -387,7 +387,7 @@ export const WorkOrderDetailPanel: React.FC<{
                 <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                   Remarks
                 </p>
-                <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2">
+                <p className="text-sm text-foreground bg-card px-3 py-2">
                   {detail.Remarks}
                 </p>
               </div>
@@ -397,7 +397,7 @@ export const WorkOrderDetailPanel: React.FC<{
                 <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                   Terms & Conditions
                 </p>
-                <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2 whitespace-pre-line">
+                <p className="text-sm text-foreground bg-card px-3 py-2 whitespace-pre-line">
                   {detail.TermsAndConditions}
                 </p>
               </div>
@@ -408,7 +408,7 @@ export const WorkOrderDetailPanel: React.FC<{
 
       {/* Procurement progress of this work order's materials */}
       {detail.Status === "Approved" && procurement && (
-        <div className="rounded-xl border border-border bg-card px-4 sm:px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="border border-foreground/30 bg-card px-4 sm:px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
           <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">Materials</span>
           {procurement.mr ? (
             <>
@@ -419,7 +419,7 @@ export const WorkOrderDetailPanel: React.FC<{
               >
                 {procurement.mr.docNo ?? `MR #${procurement.mr.id}`}
               </button>
-              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${mrStatusTone(procurement.mr.status)}`}>
+              <span className={`inline-flex px-2.5 py-0.5 text-xs font-medium ${mrStatusTone(procurement.mr.status)}`}>
                 {mrStatusLabel(procurement.mr.status)}
               </span>
               <span className="text-xs text-muted-foreground">
@@ -435,14 +435,14 @@ export const WorkOrderDetailPanel: React.FC<{
       )}
 
       {/* Linked documents: Work Order → Material Request → Quotation → PO → GRN → Invoice */}
-      <div className="rounded-xl border border-border bg-card px-4 sm:px-5 pb-4 sm:pb-5">
+      <div className="border border-foreground/30 bg-card px-4 sm:px-5 pb-4 sm:pb-5">
         <DocumentChainPanel docType="wo" id={workOrderId} />
       </div>
 
       {/* Chain Status — Expense & Payment trail */}
       {chainStatus && (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="px-4 sm:px-5 py-3 border-b border-border flex items-center gap-2">
+        <div className="border border-foreground/30 bg-card overflow-hidden">
+          <div className="px-4 sm:px-5 py-3 border-b border-foreground/30 flex items-center gap-2">
             <BadgeCheck size={15} className="text-primary shrink-0" />
             <h2 className="text-sm font-semibold text-foreground">
               Financial Progress
@@ -480,7 +480,7 @@ export const WorkOrderDetailPanel: React.FC<{
               ].map(({ label, value, cls }) => (
                 <div
                   key={label}
-                  className="rounded-lg bg-muted/40 px-3 py-2.5 border border-border/60"
+                  className="bg-card px-3 py-2.5 border border-foreground/30"
                 >
                   <p className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                     {label}
@@ -491,10 +491,10 @@ export const WorkOrderDetailPanel: React.FC<{
             </div>
             <div className="flex flex-wrap gap-2 text-xs">
               <span
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-medium ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 border font-medium ${
                   chainStatus.expenseCount > 0
-                    ? "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
-                    : "bg-muted border-border text-muted-foreground"
+                    ? "bg-card border-foreground/40 text-foreground"
+                    : "bg-card border-foreground/30 text-muted-foreground"
                 }`}
               >
                 <BadgeCheck size={11} />
@@ -503,10 +503,10 @@ export const WorkOrderDetailPanel: React.FC<{
                   : "Not Booked"}
               </span>
               <span
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border font-medium ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 border font-medium ${
                   chainStatus.isPaid
-                    ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
-                    : "bg-muted border-border text-muted-foreground"
+                    ? "bg-card border-foreground/40 text-foreground"
+                    : "bg-card border-foreground/30 text-muted-foreground"
                 }`}
               >
                 <BadgeCheck size={11} />
@@ -520,13 +520,13 @@ export const WorkOrderDetailPanel: React.FC<{
       )}
 
       {/* Activity Details */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center gap-2">
+      <div className="border border-foreground/30 bg-card overflow-hidden">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-foreground/30 flex items-center gap-2">
           <Calculator size={15} className="text-primary shrink-0" />
           <h2 className="text-sm font-semibold text-foreground">
             Activity Details
           </h2>
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full ml-1">
+          <span className="text-xs text-muted-foreground bg-card px-2 py-0.5 ml-1">
             {detail.activities?.length || 0} activities
           </span>
         </div>
@@ -534,7 +534,7 @@ export const WorkOrderDetailPanel: React.FC<{
         <div className="p-3 space-y-3">
           {!detail.activities || detail.activities.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
-              <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-3">
+              <div className="w-12 h-12 bg-card flex items-center justify-center mb-3">
                 <ClipboardList size={22} className="text-muted-foreground/40" />
               </div>
               <p className="text-sm text-muted-foreground">
@@ -557,12 +557,12 @@ export const WorkOrderDetailPanel: React.FC<{
               return (
                 <div
                   key={groupName}
-                  className="rounded-xl border border-border bg-card overflow-hidden"
+                  className="border border-foreground/30 bg-card overflow-hidden"
                 >
                   {/* Group header */}
                   <button
                     onClick={() => toggleGroup(groupIdx)}
-                    className="w-full flex items-center gap-2 px-3 sm:px-4 py-3 bg-muted/30 border-b border-border text-left hover:bg-muted/40 transition-colors"
+                    className="w-full flex items-center gap-2 px-3 sm:px-4 py-3 bg-card border-b border-foreground/30 text-left hover:bg-primary/5 transition-colors"
                   >
                     {isExpanded ? (
                       <ChevronDown
@@ -575,7 +575,7 @@ export const WorkOrderDetailPanel: React.FC<{
                         className="text-muted-foreground shrink-0"
                       />
                     )}
-                    <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0">
+                    <span className="text-xs font-heading font-bold text-primary bg-primary/10 px-2 py-0.5 shrink-0">
                       {groupIdx + 1}
                     </span>
                     <span className="flex-1 text-sm font-semibold text-foreground text-left">
@@ -586,7 +586,7 @@ export const WorkOrderDetailPanel: React.FC<{
                       {acts.length === 1 ? "activity" : "activities"}
                     </span>
                     <span
-                      className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
+                      className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-foreground" : "text-muted-foreground"}`}
                     >
                       {fmt(groupTotal)}
                     </span>
@@ -624,12 +624,12 @@ export const WorkOrderDetailPanel: React.FC<{
                         return (
                           <div
                             key={act.Id}
-                            className="rounded-lg border border-border/60 overflow-hidden"
+                            className="border border-foreground/30 overflow-hidden"
                           >
                             {/* Mobile activity card */}
-                            <div className="sm:hidden p-3 bg-muted/10 space-y-2">
+                            <div className="sm:hidden p-3 bg-card space-y-2">
                               <div className="flex items-center gap-2">
-                                <span className="text-xs font-mono text-primary font-bold shrink-0">
+                                <span className="text-xs font-heading text-primary font-bold shrink-0">
                                   {groupIdx + 1}.{actIdx + 1}
                                 </span>
                                 <span className="text-sm font-medium text-foreground flex-1">
@@ -665,26 +665,26 @@ export const WorkOrderDetailPanel: React.FC<{
                                   <span className="text-muted-foreground">
                                     Labour:
                                   </span>{" "}
-                                  <span className="font-medium text-blue-600 dark:text-blue-400">
+                                  <span className="font-medium text-foreground">
                                     {act.LabourAmount
                                       ? fmt(act.LabourAmount)
                                       : "—"}
                                   </span>
                                 </div>
                               </div>
-                              <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                              <div className="flex items-center justify-between pt-1 border-t border-foreground/30">
                                 <span className="text-xs text-muted-foreground">
                                   Activity Total
                                 </span>
-                                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                <span className="text-sm font-bold text-foreground">
                                   {fmt(act.GrandTotal || 0)}
                                 </span>
                               </div>
                             </div>
 
                             {/* Desktop activity row */}
-                            <div className="hidden sm:grid grid-cols-[32px_1fr_80px_110px_80px_110px_110px_110px] gap-2 items-center px-3 py-2.5 bg-muted/10">
-                              <span className="text-xs font-mono text-primary font-semibold">
+                            <div className="hidden sm:grid grid-cols-[32px_1fr_80px_110px_80px_110px_110px_110px] gap-2 items-center px-3 py-2.5 bg-card">
+                              <span className="text-xs font-heading text-primary font-semibold">
                                 {groupIdx + 1}.{actIdx + 1}
                               </span>
                               <span
@@ -702,15 +702,15 @@ export const WorkOrderDetailPanel: React.FC<{
                               <span className="text-xs font-medium">
                                 {act.Area ?? "—"}
                               </span>
-                              <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                              <span className="text-xs font-semibold text-foreground">
                                 {act.LabourAmount ? fmt(act.LabourAmount) : "—"}
                               </span>
-                              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                              <span className="text-xs font-semibold text-foreground">
                                 {act.MaterialAmount
                                   ? fmt(act.MaterialAmount)
                                   : "—"}
                               </span>
-                              <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                              <span className="text-sm font-bold text-foreground">
                                 {fmt(act.GrandTotal || 0)}
                               </span>
                             </div>
@@ -720,22 +720,22 @@ export const WorkOrderDetailPanel: React.FC<{
                               <>
                                 <button
                                   onClick={() => toggleMaterials(act.Id)}
-                                  className="w-full flex items-center gap-2 px-4 py-2 bg-muted/10 border-t border-border/40 text-xs text-muted-foreground hover:bg-muted/30 transition-colors"
+                                  className="w-full flex items-center gap-2 px-4 py-2 bg-card border-t border-foreground/30 text-xs text-muted-foreground hover:bg-primary/5 transition-colors"
                                 >
                                   <Package
                                     size={11}
-                                    className="text-orange-500 shrink-0"
+                                    className="text-foreground shrink-0"
                                   />
                                   <span className="font-medium">
                                     {act.materials.length} Material
                                     {act.materials.length !== 1 ? "s" : ""}
                                   </span>
                                   {detail.SupplierName && (
-                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[0.625rem] font-semibold">
+                                    <span className="flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary text-[0.625rem] font-semibold">
                                       {detail.SupplierName}
                                     </span>
                                   )}
-                                  <span className="ml-auto font-semibold text-orange-500 dark:text-orange-400">
+                                  <span className="ml-auto font-semibold text-foreground">
                                     {fmt(act.MaterialAmount || 0)}
                                   </span>
                                   {matExpanded ? (
@@ -746,9 +746,9 @@ export const WorkOrderDetailPanel: React.FC<{
                                 </button>
 
                                 {matExpanded && (
-                                  <div className="border-t border-border/40 bg-muted/20 dark:bg-muted/10">
+                                  <div className="border-t border-foreground/30 bg-card dark:bg-primary/5">
                                     {/* Desktop material header */}
-                                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 px-6 py-1.5 border-b border-border/30 bg-muted/30">
+                                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 px-6 py-1.5 border-b border-foreground/30 bg-card">
                                       {[
                                         "Item Name",
                                         "Ratio",
@@ -773,7 +773,7 @@ export const WorkOrderDetailPanel: React.FC<{
                                       return (
                                         <div key={mat.Id}>
                                           {/* Mobile material */}
-                                          <div className="sm:hidden flex items-center justify-between px-4 py-2 border-b border-border/20 last:border-0">
+                                          <div className="sm:hidden flex items-center justify-between px-4 py-2 border-b border-foreground/30 last:border-0">
                                             <div>
                                               <p className="text-xs font-medium text-foreground">
                                                 {mat.ItemName || "—"}
@@ -783,21 +783,21 @@ export const WorkOrderDetailPanel: React.FC<{
                                                 {act.UOMName} × ₹{mat.Rate}
                                               </p>
                                             </div>
-                                            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                            <span className="text-xs font-semibold text-foreground">
                                               {lineTotal > 0
                                                 ? fmt(lineTotal)
                                                 : "—"}
                                             </span>
                                           </div>
                                           {/* Desktop material */}
-                                          <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 items-center px-6 py-2 border-b border-border/20 last:border-0">
+                                          <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 items-center px-6 py-2 border-b border-foreground/30 last:border-0">
                                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                                              <span className="w-4 h-4 rounded flex items-center justify-center bg-primary/10 text-primary text-[0.625rem] font-bold shrink-0">
+                                              <span className="w-4 h-4 flex items-center justify-center bg-primary/10 text-primary text-[0.625rem] font-bold shrink-0">
                                                 {matIdx + 1}
                                               </span>
                                               {mat.ItemName || "—"}
                                             </span>
-                                            <span className="text-xs text-muted-foreground font-mono">
+                                            <span className="text-xs text-muted-foreground font-heading">
                                               {mat.Quantity != null
                                                 ? `${mat.Quantity} × ${act.Area}`
                                                 : "—"}
@@ -805,10 +805,10 @@ export const WorkOrderDetailPanel: React.FC<{
                                             <span className="text-xs text-muted-foreground">
                                               {mat.UOMName || "—"}
                                             </span>
-                                            <span className="text-xs text-muted-foreground font-mono">
+                                            <span className="text-xs text-muted-foreground font-heading">
                                               {mat.Rate ? `₹${mat.Rate}` : "—"}
                                             </span>
-                                            <span className="text-xs font-semibold text-orange-500 dark:text-orange-400">
+                                            <span className="text-xs font-semibold text-foreground">
                                               {lineTotal > 0
                                                 ? fmt(lineTotal)
                                                 : "—"}
@@ -818,11 +818,11 @@ export const WorkOrderDetailPanel: React.FC<{
                                       );
                                     })}
                                     {/* Material subtotal */}
-                                    <div className="flex items-center justify-between px-6 py-2 bg-muted/40 border-t border-border/50">
+                                    <div className="flex items-center justify-between px-6 py-2 bg-card border-t border-foreground/30">
                                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                                         Materials Subtotal
                                       </span>
-                                      <span className="text-sm font-bold text-orange-500 dark:text-orange-400">
+                                      <span className="text-sm font-bold text-foreground">
                                         {fmt(act.MaterialAmount || 0)}
                                       </span>
                                     </div>
@@ -833,7 +833,7 @@ export const WorkOrderDetailPanel: React.FC<{
 
                             {/* Remarks */}
                             {act.Remarks && (
-                              <div className="px-4 py-2 border-t border-border/30 bg-muted/5">
+                              <div className="px-4 py-2 border-t border-foreground/30 bg-card">
                                 <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-semibold">
                                   Remarks:{" "}
                                 </span>
@@ -854,27 +854,27 @@ export const WorkOrderDetailPanel: React.FC<{
         </div>
 
         {/* Grand total */}
-        <div className="border-t border-border bg-muted/10">
-          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+        <div className="border-t border-foreground/30 bg-card">
+          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-foreground/10">
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Package size={11} className="text-amber-500" />
+                <Package size={11} className="text-foreground" />
                 Raw Materials
               </span>
-              <span className="text-base font-bold text-amber-600 dark:text-amber-400">
+              <span className="text-base font-bold text-foreground">
                 {fmt(grandMaterials)}
               </span>
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Hammer size={11} className="text-blue-500" />
+                <Hammer size={11} className="text-foreground" />
                 Labour
               </span>
-              <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+              <span className="text-base font-bold text-foreground">
                 {fmt(grandLabour)}
               </span>
             </div>
-            <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
+            <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-card">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <Receipt size={11} className="text-primary" />
                 Grand Total

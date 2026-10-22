@@ -90,7 +90,7 @@ export const ActivityRow: React.FC<{
   };
 
   const activitySelectJSX = loadingActivities ? (
-    <div className={`${cellSelect} bg-muted/30 animate-pulse h-[34px]`} />
+    <div className={`${cellSelect} bg-card animate-pulse h-[34px]`} />
   ) : (
     <select
       value={activity.activityId !== null ? String(activity.activityId) : ""}
@@ -111,12 +111,12 @@ export const ActivityRow: React.FC<{
   );
 
   const uomSelectJSX = loadingActivities ? (
-    <div className={`${cellSelect} bg-muted/30 animate-pulse h-[34px]`} />
+    <div className={`${cellSelect} bg-card animate-pulse h-[34px]`} />
   ) : (
     <select
       value={activity.uomId !== null ? String(activity.uomId) : ""}
       onChange={(e) => handleUomChange(e.target.value)}
-      className="w-full text-sm rounded-md border border-border pl-2 pr-7 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow"
+      className="w-full text-sm border border-foreground/30 pl-2 pr-7 py-1.5 bg-card text-foreground focus:outline-none transition wo-select-arrow"
     >
       <option value="">
         {safeUomOptions.length === 0 ? "No UOMs" : "Select unit…"}
@@ -132,16 +132,16 @@ export const ActivityRow: React.FC<{
   return (
     <>
       {/* Mobile */}
-      <div className="sm:hidden rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2.5">
+      <div className="sm:hidden border border-foreground/30 bg-card p-3 space-y-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-primary font-bold shrink-0 w-8">
+          <span className="text-xs font-heading text-primary font-bold shrink-0 w-8">
             {label}
           </span>
           <div className="flex-1">{activitySelectJSX}</div>
           <button
             onClick={onDelete}
             disabled={!canDelete}
-            className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-20"
+            className="w-7 h-7 shrink-0 flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors disabled:opacity-20"
           >
             <X size={13} />
           </button>
@@ -196,7 +196,7 @@ export const ActivityRow: React.FC<{
             </p>
             <div className="flex items-center h-[34px]">
               <span
-                className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
+                className={`text-sm font-semibold ${activityTotal > 0 ? "text-foreground" : "text-muted-foreground"}`}
               >
                 {activityTotal > 0 ? fmt(activityTotal) : "—"}
               </span>
@@ -206,24 +206,24 @@ export const ActivityRow: React.FC<{
         {(labourTotal > 0 || materialsTotal > 0 || activityGstAmount > 0) && (
           <div className="flex items-center gap-2 flex-wrap">
             {labourTotal > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 bg-card text-foreground border border-foreground/40">
                 <Hammer size={9} />
                 Labour: {fmt(labourTotal)}
               </span>
             )}
             {labourTotal > 0 && activity.area > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 bg-card text-foreground border border-foreground/40">
                 Per Activity Price: {fmt(labourTotal / activity.area)} / area
               </span>
             )}
             {materialsTotal > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 bg-card text-foreground border border-foreground/40">
                 <Package size={9} />
                 Materials: {fmt(materialsTotal)}
               </span>
             )}
             {activityGstAmount > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 bg-card text-foreground border border-foreground/40">
                 <Receipt size={9} />
                 GST {activity.hsnCode} ({activity.hsnGstRate}%):{" "}
                 {fmt(activityGstAmount)}
@@ -249,9 +249,9 @@ export const ActivityRow: React.FC<{
       </div>
 
       {/* Desktop */}
-      <div className="hidden sm:block rounded-lg border border-border/50 sm:min-w-[960px]">
-        <div className="grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
-          <div className="text-xs font-mono text-primary font-semibold">
+      <div className="hidden sm:block border border-foreground/30 sm:min-w-[960px]">
+        <div className="grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 items-center px-3 py-2.5 bg-card">
+          <div className="text-xs font-heading text-primary font-semibold">
             {label}
           </div>
           {activitySelectJSX}
@@ -298,7 +298,7 @@ export const ActivityRow: React.FC<{
           />
           <div className="text-right">
             <span
-              className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
+              className={`text-sm font-semibold ${activityTotal > 0 ? "text-foreground" : "text-muted-foreground"}`}
             >
               {activityTotal > 0 ? fmt(activityTotal) : "—"}
             </span>
@@ -306,35 +306,35 @@ export const ActivityRow: React.FC<{
           <button
             onClick={onDelete}
             disabled={!canDelete}
-            className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
+            className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
           >
             <X size={13} />
           </button>
         </div>
         {(labourTotal > 0 || materialsTotal > 0 || activityGstAmount > 0) && (
-          <div className="flex items-center gap-3 px-3 py-1.5 bg-muted/10 border-t border-border/40 flex-wrap">
+          <div className="flex items-center gap-3 px-3 py-1.5 bg-card border-t border-foreground/30 flex-wrap">
             <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide mr-1">
               Breakdown:
             </span>
             {labourTotal > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 bg-card text-foreground border border-foreground/40">
                 <Hammer size={9} />
                 Labour: {fmt(labourTotal)}
               </span>
             )}
             {labourTotal > 0 && activity.area > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 bg-card text-foreground border border-foreground/40">
                 Per Activity Price: {fmt(labourTotal / activity.area)} / area
               </span>
             )}
             {materialsTotal > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 bg-card text-foreground border border-foreground/40">
                 <Package size={9} />
                 Materials: {fmt(materialsTotal)}
               </span>
             )}
             {activityGstAmount > 0 && (
-              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
+              <span className="flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 bg-card text-foreground border border-foreground/40">
                 <Receipt size={9} />
                 GST {activity.hsnCode} ({activity.hsnGstRate}%):{" "}
                 {fmt(activityGstAmount)}

@@ -97,11 +97,11 @@ export const ActivityGroupCard: React.FC<{
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-muted/30 border-b border-border rounded-t-xl">
+    <div className="border border-foreground/30 bg-card">
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-card border-b border-foreground/30">
         <button
           onClick={toggleExpand}
-          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+          className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/5 transition-colors shrink-0"
         >
           {group.expanded ? (
             <ChevronDown size={14} />
@@ -109,16 +109,16 @@ export const ActivityGroupCard: React.FC<{
             <ChevronRight size={14} />
           )}
         </button>
-        <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0">
+        <span className="text-xs font-heading font-bold text-primary bg-primary/10 px-2 py-0.5 shrink-0">
           {index + 1}
         </span>
         {loadingDropdowns ? (
-          <div className="flex-1 h-8 rounded-md bg-muted/50 animate-pulse" />
+          <div className="flex-1 h-8 bg-card animate-pulse" />
         ) : (
           <select
             value={group.groupId !== null ? String(group.groupId) : ""}
             onChange={(e) => handleGroupChange(e.target.value)}
-            className="flex-1 min-w-0 text-sm font-semibold bg-background border border-border rounded-md pl-2 pr-7 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition wo-select-arrow cursor-pointer"
+            className="flex-1 min-w-0 text-sm font-semibold bg-card border border-foreground/30 pl-2 pr-7 py-1 text-foreground focus:outline-none transition wo-select-arrow cursor-pointer"
           >
             <option value="">
               {safeGroupOptions.length === 0
@@ -133,14 +133,14 @@ export const ActivityGroupCard: React.FC<{
           </select>
         )}
         <span
-          className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
+          className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-foreground" : "text-muted-foreground"}`}
         >
           {groupTotal > 0 ? fmt(groupTotal) : "₹0"}
         </span>
         <button
           onClick={onDelete}
           disabled={!canDelete}
-          className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-20 disabled:cursor-not-allowed shrink-0"
+          className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 dark:hover:bg-destructive/10 transition-colors disabled:opacity-20 disabled:cursor-not-allowed shrink-0"
         >
           <Trash2 size={13} />
         </button>
@@ -202,16 +202,16 @@ export const ActivityGroupCard: React.FC<{
           {group.groupId !== null &&
             filteredActivities.length === 0 &&
             !loadingDropdowns && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
-                <AlertCircle size={13} className="text-amber-500 shrink-0" />
-                <span className="text-xs text-amber-700 dark:text-amber-400">
+              <div className="flex items-center gap-2 px-3 py-2 bg-card border border-foreground/40">
+                <AlertCircle size={13} className="text-foreground shrink-0" />
+                <span className="text-xs text-foreground">
                   No activities found for this group.
                 </span>
               </div>
             )}
           <button
             onClick={addActivity}
-            className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-3 py-2 rounded-lg hover:bg-primary/5 transition-colors font-medium"
+            className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-3 py-2 hover:bg-primary/5 transition-colors font-medium"
           >
             <FilePlus size={13} />
             Add Activity {index + 1}.{group.activities.length + 1}
