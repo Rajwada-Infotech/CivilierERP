@@ -333,7 +333,8 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         (SELECT ISNULL(SUM(oa.Amount),0)
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
-          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart) ${scopeCond}
+          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart)
+            AND oa.Status <> 'Bounced' ${scopeCond}
         ) AS Collected
       FROM Months mo ORDER BY mo.MonthStart
     `);

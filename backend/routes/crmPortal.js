@@ -1441,7 +1441,7 @@ router.get("/tickets", async (req, res) => {
              t.RaisedByCustomer, t.CreatedAt
       FROM dbo.CrmServiceTicket t
       JOIN dbo.CrmBooking b ON b.Id = t.BookingId
-      WHERE b.ApplicationId = @aid
+      WHERE b.ApplicationId = @aid AND b.IsActive = 1 AND b.Status <> 'Cancelled'
       ORDER BY t.CreatedAt DESC
     `);
     res.json(result.recordset);
