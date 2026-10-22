@@ -174,7 +174,25 @@ function computeBrokerageAmount(rateType, rateValue, baseAmount) {
   return Math.round(base * rate) / 100;
 }
 
+// One voucher per tranche: approve and "retry hand-off" racing each other
+// both passed the "no voucher yet" check and raised two. The check and the
+// insert now run in one transaction behind a lock on the brokerage row.
 async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request().input("id", sql.Int, brokerageId)
+      .query("SELECT Id FROM dbo.CrmBrokerageMaster WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id");
+    const out = await createFinancePaymentForBrokerageLocked(tx, brokerageId, req);
+    await tx.commit();
+    return out;
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    throw e;
+  }
+}
+
+async function createFinancePaymentForBrokerageLocked(pool, brokerageId, req) {
   const existing = await pool.request().input("id", sql.Int, brokerageId).query(`
     SELECT TOP 1 PPaymentID, DocNo, Status
     FROM dbo.NewPayment

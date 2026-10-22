@@ -383,7 +383,9 @@ router.get("/gst-notes/:noteId", requirePageRight("crm-refunds", "view"), async 
     if (!n) return res.status(404).json({ error: "Credit note not found" });
     const { CompanyLogo, ...rest } = n;
     // The other documents of the same refund (a split into voucher + credit notes).
-    const siblings = (await gst.list(getPool(), { refundId: n.RefundId })).filter((x) => x.Id !== id)
+    // A note with no refund (an invoice adjustment) has none - without the
+    // refund filter this listed every note in the system.
+    const siblings = (n.RefundId == null ? [] : await gst.list(getPool(), { refundId: n.RefundId })).filter((x) => x.Id !== id)
       .map((x) => ({ Id: x.Id, DocNo: x.DocNo, DocType: x.DocType, Status: x.Status, TotalAmount: x.TotalAmount, AgainstRef: x.AgainstRef }));
     res.json({ ...rest, siblings });
   } catch (e) { gstFail(res, e, "GET /gst-notes/:noteId"); }
@@ -856,7 +858,9 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     `);
     if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ error: "Refund not found" }); }
     const rf = cur.recordset[0];
-    if (rf.Status !== "FinancePending") {
+    // "Approved" with no voucher = approval recorded, then the server stopped
+    // before the voucher step; Finance raises it here instead of it sticking.
+    if (rf.Status !== "FinancePending" && !(rf.Status === "Approved" && !rf.FinanceNewPaymentId)) {
       await tx.rollback();
       return res.status(400).json({ error: `Cannot finance-approve — status must be FinancePending (currently '${rf.Status}')` });
     }
@@ -947,6 +951,15 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Lock the refund and re-read it: the voucher-approval hook and the
+    // Refunds list's self-repair can both get here for the same refund; the
+    // second must stop, or it would use up the source credit twice.
+    const live = (await tx.request().input("id", sql.Int, refundId)
+      .query("SELECT Status FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id")).recordset[0];
+    if (!live || live.Status === "Paid" || !["FinanceApproved", "FinancePending"].includes(live.Status)) {
+      await tx.rollback();
+      return live?.Status === "Paid" ? { ok: true, reason: "already paid (idempotent)" } : { ok: false, reason: `refund not in a payable state (${live?.Status})` };
+    }
     // Re-check under lock: by the time the payout voucher is actually
     // approved (funds already moved to the customer's bank), a Rebooking
     // Transfer may have consumed the same source credit. This can no longer
@@ -988,6 +1001,8 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
             Notes = ISNULL(Notes,'') + char(10) + 'Refunded via CrmRefund #' + CAST(@rid AS NVARCHAR(20))
           WHERE Id = @oid
         `);
+      // The refunded part leaves the customer's on-account figure in Finance too.
+      await require("../services/crmLedger").syncCrmOnAccountLedger(tx, rf.SourceOnAccountId, userEmail, `Refunded via CrmRefund #${refundId}`);
     }
     await tx.commit();
   } catch (txErr) {
@@ -1093,6 +1108,7 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
           Notes = ISNULL(Notes,'') + char(10) + 'Transferred to a re-booking.'
         WHERE Id = @hid
       `);
+    await require("../services/crmLedger").syncCrmOnAccountLedger(tx, rt.HeldOnAccountId, userEmail, "Transferred to a re-booking");
 
     await tx.request().input("id", sql.Int, rebookingTransferId).input("noa", sql.Int, newOaId)
       .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Applied', NewOnAccountId = @noa, UpdatedAt = SYSDATETIME() WHERE Id = @id");
@@ -1192,7 +1208,18 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
           VALUES (@hid, @fc, @tb, @tc, @amt, 0, 'Draft', @cb, SYSDATETIME())
         `);
       const rtId = rtIns.recordset[0].Id;
-      const outcome = await applyRebookingTransferToBooking(pool, rtId, userEmail);
+      let outcome;
+      try {
+        outcome = await applyRebookingTransferToBooking(pool, rtId, userEmail);
+        if (outcome && outcome.ok === false) throw Object.assign(new Error(`The credit couldn't be moved: ${outcome.reason}`), { status: 409 });
+      } catch (applyErr) {
+        // Left Draft, it reserved the held credit for good (a live claim) with
+        // no way to retry or cancel - release it, as the cross-company path does.
+        await pool.request().input("id", sql.Int, rtId).input("n", sql.NVarChar(500), `Could not be applied: ${String(applyErr.message).slice(0, 400)}`)
+          .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = 'Draft'");
+        if (applyErr.status === 409) return res.status(409).json({ error: applyErr.message });
+        throw applyErr;
+      }
       await bumpCacheVersion("crm-refunds");
       return res.status(201).json({ success: true, id: rtId, crossCompany: false, ...outcome });
     }

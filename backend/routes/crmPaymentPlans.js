@@ -390,6 +390,19 @@ router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (re
     if (bookingUsage.recordset[0].Cnt > 0) {
       return res.status(409).json({ error: "This plan is applied to one or more active bookings — deactivate it instead of deleting." });
     }
+    // Any booking at all (cancelled too) holds a database key to the plan -
+    // the delete failed with a raw key error; an open application would be
+    // left pointing at a plan that no longer exists.
+    const [anyBooking, openApps] = await Promise.all([
+      pool.request().input("id", sql.Int, id).query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id"),
+      pool.request().input("id", sql.Int, id).query("SELECT COUNT(*) AS Cnt FROM dbo.CrmApplication WHERE PaymentPlanId = @id AND Status NOT IN ('Cancelled', 'Converted', 'Expired', 'Rejected')"),
+    ]);
+    if (anyBooking.recordset[0].Cnt > 0) {
+      return res.status(409).json({ error: "Past bookings (cancelled or closed) used this plan — deactivate it instead of deleting." });
+    }
+    if (openApps.recordset[0].Cnt > 0) {
+      return res.status(409).json({ error: "An open application uses this plan — deactivate it instead of deleting." });
+    }
     if (projectUsage.recordset[0].Cnt > 0) {
       return res.status(409).json({ error: "This plan is tagged to one or more active Projects — untag it or deactivate it instead of deleting." });
     }
@@ -399,6 +412,9 @@ router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (re
     try {
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanTemplateItem WHERE PlanTemplateId = @id");
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanProject WHERE PlanId = @id");
+      // Unit / block tags of a plan that no longer exists.
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmUnitPaymentPlan WHERE PlanId = @id");
+      await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBlockPaymentPlan WHERE PlanId = @id");
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmPaymentPlanTemplate WHERE Id = @id");
       await tx.commit();
     } catch (txErr) {

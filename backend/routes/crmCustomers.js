@@ -41,7 +41,13 @@ const CUSTOMER_SELECT = `
     c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
     cu.name AS CreatedByName,
     l.LeadUid, l.Classification AS LeadClassification,
-    (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount
+    (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount,
+    -- Every project the customer is linked to through an application (and so
+    -- its booking), distinct, by name; '|'-separated for the list page.
+    (SELECT STRING_AGG(px.name, '|') WITHIN GROUP (ORDER BY px.name)
+       FROM (SELECT DISTINCT e.name FROM dbo.CrmApplication pa
+             JOIN dbo.enterprise e ON e.id = pa.ProjectId
+             WHERE pa.CustomerId = c.Id) px) AS ProjectNames
   FROM dbo.CrmCustomer c
   LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
   LEFT JOIN dbo.SaLead l ON l.Id = c.LeadId

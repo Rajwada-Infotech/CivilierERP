@@ -159,6 +159,8 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
                b.TotalValue, b.Status,
                b.ParkingTotal, b.ExtraChargesTotal, b.GrandTotal,
                b.BookingDate, a.ApplicationNo,
+               -- the page's timeline reads these (Booking / Cancellation events)
+               b.ApplicationId, b.CreatedAt, b.UpdatedAt,
                ag.Status AS AgreementStatus,
                h.Status AS HandoverStatus, h.ActualHandoverDate,
                lm.OverallStatus AS LegalMilestoneStatus,
