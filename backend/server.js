@@ -454,6 +454,7 @@ async function createApp() {
         "X-Page",
         "X-Session-Id",
         "X-Skip-Activity-Log",
+        "X-Fresh",
       ],
       optionsSuccessStatus: 204,
     }),

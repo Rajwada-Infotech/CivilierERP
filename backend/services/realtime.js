@@ -12,6 +12,7 @@
  *
  * Topics:
  *   "ledgers" - any ledger / vendor / contractor / customer / partner / bank account head was added, changed or removed
+ *   "any"     - some write succeeded somewhere (middleware/writeInvalidator.js); pages mark their cached lists stale
  */
 
 const EVENT = "data:changed";
