@@ -31,11 +31,8 @@ export function DeleteDialog({
   if (!godown) return null;
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
-        <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center mx-auto">
-          <Trash2 size={20} className="text-red-500" />
-        </div>
+    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="sheet-frame bg-card w-full max-w-sm p-6 space-y-4" style={{ margin: 0 }} role="dialog" aria-modal="true">
         <div className="text-center space-y-1">
           <h2 className="text-sm font-heading font-bold text-foreground">
             Delete Godown?
@@ -48,21 +45,21 @@ export function DeleteDialog({
           </p>
         </div>
         {mut.error && (
-          <p className="text-xs text-red-600 text-center">
+          <p className="text-xs text-destructive text-center">
             {(mut.error as Error).message}
           </p>
         )}
         <div className="flex gap-2 pt-1">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+            className="flex-1 px-4 py-2 border border-foreground/30 text-sm hover:bg-primary/5 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={() => mut.mutate(godown.GodownID)}
             disabled={mut.isPending}
-            className="flex-1 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2 bg-destructive/10 text-white text-sm font-semibold hover:bg-destructive/10 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
           >
             {mut.isPending ? (
               <RefreshCw size={13} className="animate-spin" />

@@ -1,3 +1,4 @@
+import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Warehouse, X, Check, AlertCircle, RefreshCw } from "lucide-react";
@@ -46,10 +47,9 @@ export function GodownDrawer({
     label: string;
     belongs_to: string | null;
   }[];
+  // A project shows under every company it is tagged to, not only the one it belongs to.
   const filteredProjects = form.EnterpriseID
-    ? allProjects.filter(
-        (p) => String(p.belongs_to) === String(form.EnterpriseID),
-      )
+    ? allProjects.filter((p) => projectBelongsToCompany(p, form.EnterpriseID as number))
     : allProjects;
 
   React.useEffect(() => {
@@ -123,16 +123,13 @@ export function GodownDrawer({
   return (
     <BodyPortal><div className="fixed inset-0 z-[60] flex">
       {/* Backdrop */}
-      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="flex-1 bg-black/40" onClick={onClose} />
 
       {/* Drawer */}
-      <div className="w-full max-w-md bg-card border-l border-border flex flex-col h-full shadow-2xl">
+      <div className="w-full max-w-md bg-card flex flex-col h-full" style={{ borderLeft: "1px solid hsl(var(--foreground))" }} role="dialog" aria-modal="true">
         {/* Header */}
-        <div className="px-6 py-5 border-b border-border flex items-center justify-between shrink-0">
+        <div className="px-6 py-5 border-b border-foreground/30 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-              <Warehouse size={17} className="text-emerald-600" />
-            </div>
             <div>
               <p className="text-sm font-heading font-bold text-foreground">
                 {editing ? "Edit Godown" : "New Godown"}
@@ -146,7 +143,7 @@ export function GodownDrawer({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+            className="p-1.5 hover:bg-primary/5 transition-colors"
           >
             <X size={15} className="text-muted-foreground" />
           </button>
@@ -155,7 +152,7 @@ export function GodownDrawer({
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {err && (
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-xs">
+            <div className="flex items-center gap-2 px-3 py-2.5 bg-destructive/10 border border-destructive text-destructive text-xs">
               <AlertCircle size={13} /> {err}
             </div>
           )}
@@ -180,7 +177,7 @@ export function GodownDrawer({
                   setForm((f) => ({ ...f, GodownCode: e.target.value }))
                 }
                 placeholder="e.g. SITE-A"
-                className={`${inputCls} font-mono`}
+                className={`${inputCls} font-heading`}
               />
             </Field>
             <Field label="Short Label">
@@ -272,21 +269,21 @@ export function GodownDrawer({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between shrink-0">
+        <div className="px-6 py-4 border-t border-foreground/30 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between shrink-0">
           <p className="hidden sm:block text-xs text-muted-foreground">
             {editing ? "Update godown details" : "Fill required fields to create"}
           </p>
           <div className="flex gap-2 sm:ml-auto">
             <button
               onClick={onClose}
-              className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+              className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 border border-foreground/30 text-sm hover:bg-primary/5 transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleSubmit}
               disabled={isPending || !form.GodownName?.trim()}
-              className="flex-1 sm:flex-none whitespace-nowrap px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none whitespace-nowrap px-4 py-2 bg-foreground text-card text-sm font-semibold disabled:opacity-50 transition-colors flex items-center justify-center gap-2 border border-foreground"
             >
               {isPending ? (
                 <RefreshCw size={13} className="animate-spin" />

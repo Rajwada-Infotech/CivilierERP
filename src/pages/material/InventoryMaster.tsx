@@ -3,9 +3,9 @@
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Warehouse, Plus, X, Check, AlertCircle, RefreshCw, Search } from "lucide-react";
+import { Plus, X, Check, AlertCircle, RefreshCw, Search } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
-import { MaterialShell } from "@/components/material/MaterialShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { GodownDrawer } from "./inventoryMaster/GodownDrawer";
 import { DeleteDialog } from "./inventoryMaster/DeleteDialog";
@@ -75,18 +75,17 @@ export default function InventoryMaster() {
         onClose={() => setDeletingGodown(null)}
       />
 
-      <MaterialShell
-        title="Inventory Master"
-        subtitle="Manage godowns and stock locations"
-        icon={Warehouse}
+      <SheetShell
+        eyebrow="CivilierERP · Material"
+        title="Godowns and stock"
+        subtitle="Every godown with what it holds; open one to see its items, closing stock and value."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => refetch()}
               disabled={isLoading}
-              className="p-2 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/10 transition-colors"
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 border border-foreground text-foreground hover:bg-primary/10 transition-colors disabled:opacity-40 h-9 w-9"
               title="Refresh"
-              style={{ color: "#34d399" }}
             >
               <RefreshCw
                 size={14}
@@ -96,8 +95,7 @@ export default function InventoryMaster() {
             {rights.canCreate && (
             <button
               onClick={handleAdd}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-500/30 hover:bg-emerald-500/10 text-sm font-semibold transition-colors"
-              style={{ color: "#34d399" }}
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 bg-foreground text-card border border-foreground transition-colors disabled:opacity-40 h-9 px-4"
             >
               <Plus size={14} /> New Godown
             </button>
@@ -108,8 +106,8 @@ export default function InventoryMaster() {
         {/* ── Stats strip ── */}
         {!isLoading && godowns.length > 0 && (
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card text-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <div className="flex items-center gap-2 px-4 py-2 border border-foreground/30 bg-card text-sm">
+              <span className="w-2 h-2 bg-card" />
               <span className="font-heading font-bold text-foreground">
                 {godowns.length}
               </span>
@@ -117,16 +115,16 @@ export default function InventoryMaster() {
                 Project Godowns
               </span>
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card text-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <div className="flex items-center gap-2 px-4 py-2 border border-foreground/30 bg-card text-sm">
+              <span className="w-2 h-2 bg-card" />
               <span className="font-heading font-bold text-foreground">
                 {godowns.filter((g) => g.IsActive).length}
               </span>
               <span className="text-muted-foreground text-xs">Active</span>
             </div>
             {godowns.some((g) => g.EnterpriseName) && (
-              <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border bg-card text-sm">
-                <span className="w-2 h-2 rounded-full bg-violet-500" />
+              <div className="flex items-center gap-2 px-4 py-2 border border-foreground/30 bg-card text-sm">
+                <span className="w-2 h-2 bg-card" />
                 <span className="font-heading font-bold text-foreground">
                   {
                     new Set(
@@ -142,7 +140,7 @@ export default function InventoryMaster() {
 
         {/* ── Search ── */}
         {godowns.length > 0 && (
-          <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-border bg-card w-full max-w-sm">
+          <div className="flex items-center gap-2 px-3.5 py-2.5 border border-foreground/30 bg-card w-full max-w-sm">
             <Search size={14} className="text-muted-foreground shrink-0" />
             <input
               type="text"
@@ -164,7 +162,7 @@ export default function InventoryMaster() {
 
         {/* ── Error ── */}
         {isError && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 text-sm">
+          <div className="flex items-center gap-2 px-4 py-3 bg-destructive/10 border border-destructive text-destructive text-sm">
             <AlertCircle size={15} />
             Failed to load godowns. Check your connection and try again.
           </div>
@@ -176,20 +174,20 @@ export default function InventoryMaster() {
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-2xl border border-border bg-card overflow-hidden"
+                className="border border-foreground/30 bg-card overflow-hidden"
               >
-                <div className="h-1 bg-muted animate-pulse" />
+                <div className="h-1 bg-card animate-pulse" />
                 <div className="p-5 space-y-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl bg-muted animate-pulse shrink-0" />
+                    <div className="w-11 h-11 bg-card animate-pulse shrink-0" />
                     <div className="space-y-2 flex-1">
-                      <div className="h-3 bg-muted rounded animate-pulse w-3/4" />
-                      <div className="h-2.5 bg-muted rounded animate-pulse w-1/3" />
+                      <div className="h-3 bg-card animate-pulse w-3/4" />
+                      <div className="h-2.5 bg-card animate-pulse w-1/3" />
                     </div>
                   </div>
                   <div className="flex gap-1.5">
-                    <div className="h-6 w-16 bg-muted rounded-lg animate-pulse" />
-                    <div className="h-6 w-20 bg-muted rounded-lg animate-pulse" />
+                    <div className="h-6 w-16 bg-card animate-pulse" />
+                    <div className="h-6 w-20 bg-card animate-pulse" />
                   </div>
                 </div>
               </div>
@@ -237,13 +235,13 @@ export default function InventoryMaster() {
             </p>
             <button
               onClick={() => setSearch("")}
-              className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
+              className="mt-2 text-xs text-foreground hover:underline"
             >
               Clear search
             </button>
           </div>
         )}
-      </MaterialShell>
+      </SheetShell>
     </>
   );
 }

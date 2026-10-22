@@ -28,16 +28,16 @@ export function GodownStockPanel({
   const totalOut = allItems.reduce((s, r) => s + (r.StockOut ?? 0), 0);
 
   return (
-    <div className="col-span-full rounded-2xl border border-emerald-500/30 bg-card shadow-lg overflow-hidden">
+    <div className="col-span-full border border-foreground/40 bg-card overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-border flex items-center justify-between bg-emerald-500/5">
+      <div className="px-5 py-4 border-b border-foreground/30 flex items-center justify-between bg-card">
         <div className="flex items-center gap-2.5">
-          <Warehouse size={15} className="text-emerald-600" />
+          <Warehouse size={15} className="text-foreground" />
           <span className="text-sm font-heading font-bold text-foreground">
             {godown.GodownName}
           </span>
           {godown.GodownCode && (
-            <span className="text-[0.625rem] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-[0.625rem] font-heading text-muted-foreground bg-card px-1.5 py-0.5">
               {godown.GodownCode}
             </span>
           )}
@@ -47,7 +47,7 @@ export function GodownStockPanel({
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+          className="p-1.5 hover:bg-primary/5 transition-colors"
         >
           <X size={14} className="text-muted-foreground" />
         </button>
@@ -55,23 +55,23 @@ export function GodownStockPanel({
 
       {/* Summary strip */}
       {!isLoading && !isError && (
-        <div className="px-5 py-2.5 border-b border-border flex gap-5 bg-muted/5">
+        <div className="px-5 py-2.5 border-b border-foreground/30 flex gap-5 bg-card">
           <div className="flex items-center gap-1.5">
-            <Boxes size={12} className="text-emerald-500" />
+            <Boxes size={12} className="text-foreground" />
             <span className="text-xs font-bold text-foreground">
               {items.length}
             </span>
             <span className="text-[0.6875rem] text-muted-foreground">in stock</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <TrendingUp size={12} className="text-emerald-500" />
+            <TrendingUp size={12} className="text-foreground" />
             <span className="text-xs font-bold text-foreground">
               {totalIn.toLocaleString()}
             </span>
             <span className="text-[0.6875rem] text-muted-foreground">in</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <TrendingDown size={12} className="text-orange-500" />
+            <TrendingDown size={12} className="text-foreground" />
             <span className="text-xs font-bold text-foreground">
               {totalOut.toLocaleString()}
             </span>
@@ -86,21 +86,21 @@ export function GodownStockPanel({
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl border border-border animate-pulse"
+              className="flex items-center gap-3 px-4 py-3 border border-foreground/30 animate-pulse"
             >
-              <div className="w-7 h-7 rounded-lg bg-muted shrink-0" />
+              <div className="w-7 h-7 bg-card shrink-0" />
               <div className="flex-1 space-y-1.5">
-                <div className="h-2.5 bg-muted rounded w-2/3" />
-                <div className="h-2 bg-muted rounded w-1/4" />
+                <div className="h-2.5 bg-card w-2/3" />
+                <div className="h-2 bg-card w-1/4" />
               </div>
-              <div className="h-5 w-12 bg-muted rounded" />
+              <div className="h-5 w-12 bg-card" />
             </div>
           ))}
         </div>
       )}
 
       {isError && (
-        <div className="m-5 flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 text-xs">
+        <div className="m-5 flex items-center gap-2 px-4 py-3 bg-destructive/10 border border-destructive text-destructive text-xs">
           <AlertCircle size={13} /> Failed to load stock data.
         </div>
       )}
@@ -127,10 +127,10 @@ export function GodownStockPanel({
             return (
               <div
                 key={item.ItemID}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-background hover:border-emerald-500/30 transition-all"
+                className="flex items-center gap-3 px-4 py-3 border border-foreground/30 bg-card hover:border-foreground/40 transition-all"
               >
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                  <Archive size={12} className="text-emerald-600" />
+                <div className="w-7 h-7 bg-card flex items-center justify-center shrink-0">
+                  <Archive size={12} className="text-foreground" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-semibold text-foreground truncate">
@@ -141,15 +141,15 @@ export function GodownStockPanel({
                       {item.ItemGroupName}
                     </p>
                   )}
-                  <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden">
+                  <div className="mt-1 h-1 border border-foreground/30 overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-emerald-500/60"
+                      className="h-full bg-foreground"
                       style={{ width: `${utilPct}%` }}
                     />
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-xs font-bold font-mono text-emerald-600">
+                  <p className="text-xs font-bold font-heading text-foreground">
                     {item.ClosingStock.toLocaleString()}
                   </p>
                   <p className="text-[0.625rem] text-muted-foreground">
