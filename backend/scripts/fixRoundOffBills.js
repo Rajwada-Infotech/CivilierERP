@@ -36,7 +36,12 @@ const apply = process.argv.includes("--apply");
 
   let fixed = 0;
   for (const r of rows) {
+    // Recompute from the payments first (a real payment change since is picked up), then apply the round-off
+    // rule here too, so this works on a server still running the old syncBillStatus.
     await syncBillStatus(pool, sql, r.EDocNo);
+    await pool.request().input("id", sql.Int, r.Eid).query(`
+      UPDATE dbo.ExpenseBooking SET EBillStatus = 'Paid', ERemainingAmount = 0
+      WHERE Eid = @id AND ERemainingAmount > 0 AND ERemainingAmount < 1 AND ISNULL(ETotalPaid, 0) > 0`);
     const after = (await pool.request().input("id", sql.Int, r.Eid)
       .query("SELECT EBillStatus, ERemainingAmount FROM dbo.ExpenseBooking WHERE Eid = @id")).recordset[0];
     if (after && after.EBillStatus === "Paid") fixed++;
