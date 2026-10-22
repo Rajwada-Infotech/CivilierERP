@@ -1,52 +1,44 @@
 import { CalendarDays, FileText, Building2, AlertTriangle, Warehouse, ArrowDownToLine, User, Layers, ArrowLeft, ChevronDown, ClipboardList } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent } from "@/components/ui/card";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
-import { inputCls, selectCls, Field } from "./config";
+import { inputCls, selectCls, Field, RULE, LBL, KEY_LINE } from "./config";
 import type { IssuesState } from "./useIssues";
 
 // The issue header: number, date, company, project, godown, block / floor, work order, issued to, remarks.
 export function IssueFormHeader({ m }: { m: IssuesState }) {
-  const { editingId, viewingRecord, header, setHeader, finYears, finYearStr, cart, setH, companies, loadingCompanies, loadingProjects, godowns, loadingGodowns, blocks, loadingBlocks, blockFloors, loadingFloors, contractors, itemOptions, loadingItems, issDocTypes, issDocTypesLoading, selectedGodown, filteredProjects, filteredGodowns, filteredBlocks, issueWorkOrders, handleCompanyChange, handleProjectChange, handleBlockChange, handleGodownChange, goToList, lowStockItems } = m;
+  const { issueCostCenters, glHeads, editingId, viewingRecord, header, setHeader, finYears, finYearStr, cart, setH, companies, loadingCompanies, loadingProjects, godowns, loadingGodowns, blocks, loadingBlocks, blockFloors, loadingFloors, contractors, itemOptions, loadingItems, issDocTypes, issDocTypesLoading, selectedGodown, filteredProjects, filteredGodowns, filteredBlocks, issueWorkOrders, handleCompanyChange, handleProjectChange, handleBlockChange, handleGodownChange, goToList, lowStockItems } = m;
   return (
     <>
       {/* ── Header card ── */}
-      <Card className="border-border shadow-sm">
-        <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
-          <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
-          <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={goToList}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            >
-              <ArrowLeft size={15} />
-              <span className="hidden sm:inline">Back</span>
-            </button>
-            <span className="text-emerald-500/40">|</span>
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
-                <ArrowDownToLine size={12} className="text-emerald-400" />
-              </div>
-              <h2 className="text-sm font-heading font-bold text-foreground truncate">
-                {editingId ? "Edit Material Issue" : "New Material Issue"}
-              </h2>
-            </div>
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="flex items-center gap-3 px-5 py-3.5" style={{ borderBottom: RULE }}>
+          <button
+            type="button"
+            onClick={goToList}
+            className={`${KEY_LINE} h-8 px-3 shrink-0`}
+          >
+            <ArrowLeft size={13} />
+            <span className="hidden sm:inline">Back</span>
+          </button>
+          <div className="min-w-0">
+            <p className={LBL}>Material issue</p>
+            <h2 className="font-heading text-base font-bold tracking-tight text-foreground truncate">
+              {editingId ? "Edit issue" : "New issue"}
+            </h2>
           </div>
         </div>
 
-        <CardContent className="p-5 space-y-4">
+        <div className="p-5 space-y-4">
           {/* Doc number */}
-          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
+          <div className="flex items-center gap-3 border border-dashed border-foreground/30 bg-card px-4 py-3">
             <FileText size={13} className="text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
+            <span className="text-xs text-muted-foreground font-medium uppercase tracking-[0.12em] mr-2 whitespace-nowrap">
               Issue No:
             </span>
             {editingId ? (
-              <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+              <span className="font-heading font-bold text-foreground text-sm">
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
             ) : (
@@ -87,7 +79,7 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
                   />
                 </div>
                 {header.docNoPreview && (
-                  <span className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400 tracking-wider whitespace-nowrap">
+                  <span className="font-heading text-sm font-bold text-foreground tracking-wider whitespace-nowrap">
                     {header.docNoPreview}
                   </span>
                 )}
@@ -187,9 +179,9 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
           {/* ── Godown selector — prominent, full-width banner. Only opens
               once Company + Project are both picked, scoped to the godown
               tagged to that exact company + project. ── */}
-          <div className="rounded-xl border-2 border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.05] to-emerald-500/10 p-4">
+          <div className="border-2 border-foreground/40 p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Warehouse size={16} className="text-emerald-600 dark:text-emerald-400" />
+              <Warehouse size={16} className="text-foreground" />
               <span className="text-sm font-semibold text-foreground">
                 Source Godown
               </span>
@@ -208,7 +200,7 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
                     value={header.godownId}
                     onChange={(e) => handleGodownChange(e.target.value)}
                     disabled={!header.companyId || !header.projectId}
-                    className={`appearance-none ${selectCls} border-emerald-500/30 focus:ring-emerald-500/30 disabled:opacity-60 disabled:cursor-not-allowed`}
+                    className={`appearance-none ${selectCls} border-foreground/40 disabled:opacity-60 disabled:cursor-not-allowed`}
                   >
                     <option value="">
                       {!header.companyId || !header.projectId
@@ -237,7 +229,7 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
               {/* Stock summary for selected godown */}
               {selectedGodown && !loadingItems && (
                 <div className="flex items-center gap-3 shrink-0 text-xs">
-                  <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-background border border-border">
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-card border border-foreground/30">
                     <Layers size={12} className="text-muted-foreground" />
                     <span className="text-muted-foreground">Items:</span>
                     <span className="font-semibold text-foreground">
@@ -245,12 +237,12 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
                     </span>
                   </div>
                   {lowStockItems > 0 && (
-                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                    <div className="flex items-center gap-1.5 px-3 py-2 bg-card border border-foreground/40">
                       <AlertTriangle
                         size={12}
-                        className="text-amber-600 dark:text-amber-400"
+                        className="text-foreground"
                       />
-                      <span className="text-amber-700 dark:text-amber-400 font-medium">
+                      <span className="text-foreground font-medium">
                         {lowStockItems} out of stock
                       </span>
                     </div>
@@ -261,7 +253,7 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
 
             {/* Hint: changing godown resets cart */}
             {cart.some((ci) => ci.ItemId) && (
-              <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
+              <p className="text-[0.6875rem] text-foreground mt-2 flex items-center gap-1">
                 <AlertTriangle size={10} />
                 Changing the godown will reset all added items
               </p>
@@ -357,12 +349,35 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
             </Field>
 
             <Field label="Cost Center / GL Account">
-              <Input
-                value={header.costCenter}
-                onChange={(e) => setH("costCenter", e.target.value)}
-                className="h-9 text-sm"
-                placeholder="Cost centre or GL code…"
-              />
+              <div className="relative">
+                <SearchableNativeSelect
+                  value={header.costCenter}
+                  onChange={(e) => setH("costCenter", e.target.value)}
+                  className={selectCls}
+                >
+                  <option value="">— Select cost centre or GL account —</option>
+                  {/* An older issue may hold a typed value that is in neither list; keep it selectable. */}
+                  {header.costCenter &&
+                    !issueCostCenters.some((c) => c.label === header.costCenter) &&
+                    !glHeads.some((g) => g.label === header.costCenter) && (
+                      <option value={header.costCenter}>{header.costCenter}</option>
+                    )}
+                  {issueCostCenters.length > 0 && (
+                    <optgroup label="Cost centres">
+                      {issueCostCenters.map((c) => (
+                        <option key={`cc-${c.id}`} value={c.label}>{c.label}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {glHeads.length > 0 && (
+                    <optgroup label="GL accounts">
+                      {glHeads.map((g) => (
+                        <option key={`gl-${g.id}`} value={g.label}>{g.label}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </SearchableNativeSelect>
+              </div>
             </Field>
           </div>
 
@@ -430,8 +445,8 @@ export function IssueFormHeader({ m }: { m: IssuesState }) {
               />
             </Field>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </>
   );
 }

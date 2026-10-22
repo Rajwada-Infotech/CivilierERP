@@ -1,9 +1,7 @@
-import { Search, Plus, RefreshCw, X, Hash, AlertTriangle, BarChart3, ShoppingCart, Package, CheckCircle2, Warehouse, ChevronDown } from "lucide-react";
+import { Search, Plus, RefreshCw, X, Hash, AlertTriangle, BarChart3, Package, CheckCircle2, Warehouse, ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SearchableSelect } from "@/components/SearchableSelect";
-import { selectCls, GodownBadge } from "./config";
+import { selectCls, GodownBadge, RULE, HEAD, KEY_LINE } from "./config";
 import type { IssuesState } from "./useIssues";
 
 // The items being issued, checked against the godown's stock.
@@ -12,12 +10,11 @@ export function IssueCart({ m }: { m: IssuesState }) {
   return (
     <>
       {/* ── Items cart card ── */}
-      <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <ShoppingCart size={15} className="text-emerald-600 dark:text-emerald-400" />
-            <CardTitle className="text-base font-semibold">Items</CardTitle>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="px-5 py-4 flex flex-row flex-wrap items-center justify-between gap-2" style={{ borderBottom: RULE }}>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className={HEAD}>Items</h3>
+            <span className="font-heading text-xs tabular-nums text-muted-foreground">
               {cart.length}
             </span>
             {/* Godown pill — reminds user which godown stock is from */}
@@ -29,25 +26,23 @@ export function IssueCart({ m }: { m: IssuesState }) {
               />
             )}
             {hasStockError && (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-destructive/10 text-destructive text-xs font-semibold">
+              <span className="inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-destructive text-destructive">
                 <AlertTriangle size={10} /> Stock exceeded
               </span>
             )}
           </div>
-          <Button
+          <button
             type="button"
-            variant="outline"
-            size="sm"
             onClick={addCartRow}
             disabled={!header.godownId}
-            className="gap-1.5 h-8 text-xs"
+            className={`${KEY_LINE} h-8 px-3`}
             title={!header.godownId ? "Select a godown first" : undefined}
           >
-            <Plus size={13} /> Add Item
-          </Button>
-        </CardHeader>
+            <Plus size={13} /> Add item
+          </button>
+        </div>
 
-        <CardContent className="p-4 space-y-3">
+        <div className="p-4 space-y-3">
           {/* Prompt if no godown selected */}
           {!header.godownId && (
             <div className="flex flex-col items-center justify-center py-10 gap-3 text-center">
@@ -80,15 +75,15 @@ export function IssueCart({ m }: { m: IssuesState }) {
               return (
                 <div
                   key={ci._key}
-                  className={`rounded-lg border transition-colors ${
+                  className={`border transition-colors ${
                     isOver
                       ? "border-destructive/50 bg-destructive/5"
-                      : "border-border bg-muted/10 hover:bg-muted/20"
+                      : "border-foreground/30 bg-card hover:bg-primary/5"
                   }`}
                 >
                   {/* Row top: index + item select + remove */}
                   <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-                    <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[0.625rem] font-bold text-muted-foreground shrink-0">
+                    <span className="w-5 h-5 bg-card flex items-center justify-center text-[0.625rem] font-bold text-muted-foreground shrink-0">
                       {idx + 1}
                     </span>
 
@@ -111,7 +106,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
                       onClick={() => removeCartRow(ci._key)}
                       disabled={cart.length === 1}
                       title="Remove"
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30"
+                      className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30"
                     >
                       <X size={14} />
                     </button>
@@ -120,7 +115,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
                   {/* Row bottom: UOM + Qty */}
                   <div className="grid grid-cols-2 gap-3 px-3 pb-3">
                     <div className="space-y-1">
-                      <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                      <label className="text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         Unit (UOM) *
                       </label>
                       <div className="relative">
@@ -149,7 +144,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                      <label className="text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         Quantity *
                       </label>
                       <div className="relative">
@@ -169,9 +164,9 @@ export function IssueCart({ m }: { m: IssuesState }) {
                               e.target.value,
                             )
                           }
-                          className={`pl-8 h-9 font-mono text-sm ${
+                          className={`pl-8 h-9 font-heading text-sm ${
                             isOver
-                              ? "border-destructive text-destructive focus-visible:ring-destructive"
+                              ? "border-destructive text-destructive"
                               : ""
                           }`}
                           placeholder="0.00"
@@ -182,7 +177,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
 
                   {/* Stock bar + remarks — only when item selected */}
                   {ci.ItemId && (
-                    <div className="border-t border-border/60 mx-3 pt-2.5 pb-3 space-y-2">
+                    <div className="border-t border-foreground/30 mx-3 pt-2.5 pb-3 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-muted-foreground flex items-center gap-1">
                           <BarChart3 size={10} />
@@ -208,20 +203,20 @@ export function IssueCart({ m }: { m: IssuesState }) {
                             <AlertTriangle size={10} /> Exceeds stock
                           </span>
                         ) : reqQty > 0 ? (
-                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                          <span className="font-semibold text-foreground">
                             Remaining: {(availStock - reqQty).toFixed(2)}{" "}
                             {uomObj?.Symbol || ci.UOMCode}
                           </span>
                         ) : null}
                       </div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-1.5 bg-card overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${
+                          className={`h-full transition-all ${
                             isOver
                               ? "bg-destructive"
                               : stockPct > 80
-                                ? "bg-amber-500"
-                                : "bg-emerald-500"
+                                ? "bg-card"
+                                : "bg-card"
                           }`}
                           style={{ width: `${isOver ? 100 : stockPct}%` }}
                         />
@@ -244,7 +239,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
           {header.godownId &&
             !loadingItems &&
             cart.some((ci) => ci.ItemId && ci.Quantity) && (
-              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-2.5 text-sm">
+              <div className="flex items-center justify-between border border-foreground/30 bg-card px-4 py-2.5 text-sm">
                 <div className="flex items-center gap-3 text-muted-foreground">
                   <Package size={13} />
                   <span>
@@ -255,7 +250,7 @@ export function IssueCart({ m }: { m: IssuesState }) {
                     {cart.filter((ci) => ci.ItemId).length !== 1
                       ? "s"
                       : ""} ·{" "}
-                    <span className="font-semibold text-foreground font-mono">
+                    <span className="font-semibold text-foreground font-heading">
                       {totalCartQty.toFixed(2)}
                     </span>{" "}
                     units total
@@ -266,14 +261,14 @@ export function IssueCart({ m }: { m: IssuesState }) {
                     <AlertTriangle size={13} /> Stock limit exceeded
                   </span>
                 ) : (
-                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                  <span className="flex items-center gap-1.5 text-foreground font-medium">
                     <CheckCircle2 size={13} /> Within stock limits
                   </span>
                 )}
               </div>
             )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </>
   );
 }

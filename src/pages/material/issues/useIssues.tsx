@@ -1,5 +1,7 @@
 // Everything the Material Issues page holds: master data, the register, the form and cart,
 // mutations and CSV import. The page and its parts read from this one object.
+import { getCostCenterOptions } from "@/api/costCenterApi";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { ISSUES_TEMPLATE_COLUMNS, planImport, type PlannedIssue } from "./issueImport";
 import * as issuesApi from "@/api/issuesApi";
 import { generateUUID } from "../../../utils/cryptoPolyfill";
@@ -8,16 +10,15 @@ import React, { useMemo, useState, useCallback, useEffect, useRef } from "react"
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Eye, Trash2, Building2, FolderOpen, ShoppingCart, Warehouse } from "lucide-react";
+import { Eye, Trash2, ShoppingCart, Warehouse } from "lucide-react";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import { type ColumnDef } from "@/components/ui/DataTable";
-import { StatusBadge } from "@/components/StatusBadge";
 import { fetchNextDocNumber, fetchDocTypes, type DocType } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
-import { CartItem, IssueHeader, defaultHeader, blankCartItem } from "./config";
+import { CartItem, IssueHeader, defaultHeader, blankCartItem, ACT } from "./config";
 
 export function useIssues() {
   const rights = usePageRights("material-issues");
@@ -29,6 +30,8 @@ export function useIssues() {
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [viewingRecord, setViewingRecord] = useState<any>(null);
+  // The issue whose delete is waiting for confirmation.
+  const [deletingIssue, setDeletingIssue] = useState<any>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [issueStatusFilter, setIssueStatusFilter] = useState("");
@@ -86,6 +89,27 @@ export function useIssues() {
     queryFn: async () => {
       const { fetchWithAuth } = await import("@/lib/fetchWithAuth");
       const res = await fetchWithAuth("/api/account-head/options?type=C");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  // Cost centres for the issue's "Cost centre / GL account" field: active ones from the Cost Center master, for this project or for none.
+  const { data: costCenterOptions = [] } = useQuery({
+    queryKey: ["issues-cost-centers"],
+    queryFn: getCostCenterOptions,
+    staleTime: 5 * 60_000,
+  });
+  const issueCostCenters = costCenterOptions.filter(
+    (c) => !c.projectId || !header.projectId || String(c.projectId) === header.projectId,
+  );
+  // GL heads share the same field: an issue is charged to a cost centre or straight to a GL account.
+  const { data: glHeads = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["issues-gl-heads"],
+    queryFn: async () => {
+      const { fetchWithAuth } = await import("@/lib/fetchWithAuth");
+      const res = await fetchWithAuth("/api/account-head/options?type=GL");
       if (!res.ok) return [];
       return res.json();
     },
@@ -568,7 +592,7 @@ export function useIssues() {
       header: "Doc No",
       size: 160,
       cell: ({ row, getValue }) => (
-        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs">
+        <span className="font-heading font-bold text-foreground text-xs">
           {String(getValue() || row.original.IssueNo || "—")}
         </span>
       ),
@@ -582,7 +606,6 @@ export function useIssues() {
         const v = String(getValue() || "—");
         return (
           <div className="flex items-center gap-1.5 text-xs min-w-0" title={v}>
-            <Building2 size={11} className="text-muted-foreground shrink-0" />
             <span className="truncate">{v}</span>
           </div>
         );
@@ -597,7 +620,6 @@ export function useIssues() {
         const v = String(getValue() || "—");
         return (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0" title={v}>
-            <FolderOpen size={11} className="shrink-0" />
             <span className="truncate">{v}</span>
           </div>
         );
@@ -613,11 +635,10 @@ export function useIssues() {
         if (!name) return <span className="text-muted-foreground text-xs">—</span>;
         return (
           <div className="flex items-center gap-1.5 min-w-0">
-            <Warehouse size={11} className="text-emerald-600/70 dark:text-emerald-400/70 shrink-0" />
             <div className="min-w-0 leading-tight">
               <p className="text-xs truncate" title={name}>{name}</p>
               {row.original.GodownCode && (
-                <p className="text-[0.625rem] text-muted-foreground font-mono truncate">
+                <p className="text-[0.625rem] text-muted-foreground font-heading truncate">
                   {row.original.GodownCode}
                 </p>
               )}
@@ -673,7 +694,7 @@ export function useIssues() {
           <ApprovalStatusChain
             table="MaterialIssues"
             recordId={row.original.IssueId}
-            fallback={<StatusBadge status={row.original.Status} />}
+            fallback={<SheetMark text={row.original.Status || "Draft"} tone={statusTone(row.original.Status || "Draft")} />}
             preloaded={issueApprovalTrails.get(String(row.original.IssueId)) ?? null}
             preloadedLoading={issueApprovalTrailsLoading}
           />
@@ -690,26 +711,19 @@ export function useIssues() {
           <button data-row-view
             type="button"
             onClick={() => handleView(row.original)}
-            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+            className={`${ACT} hover:text-foreground hover:border-foreground`}
             title="View details"
           >
-            <Eye size={15} />
+            <Eye size={14} />
           </button>
           {rights.canDelete && (
           <button
             type="button"
-            onClick={() => {
-              if (
-                confirm(
-                  "Delete this issue permanently? This will reverse the stock deduction.",
-                )
-              )
-                deleteMutation.mutate(row.original.IssueId);
-            }}
-            className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+            onClick={() => setDeletingIssue(row.original)}
+            className={`${ACT} hover:text-destructive hover:border-destructive`}
             title="Delete this issue"
           >
-            <Trash2 size={15} />
+            <Trash2 size={14} />
           </button>
           )}
         </div>
@@ -784,6 +798,10 @@ export function useIssues() {
     editingId,
     setEditingId,
     viewingRecord,
+    issueCostCenters,
+    glHeads,
+    deletingIssue,
+    setDeletingIssue,
     setViewingRecord,
     page,
     setPage,

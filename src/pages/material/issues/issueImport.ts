@@ -107,7 +107,7 @@ export async function planImport(rows: Record<string, string>[], m: ImportMaster
       ? m.finYears.find((f) => f.startDate <= date && f.endDate >= date && (f.status === "Active" || f.isActive))
       : null;
     if (date && !finYear) errors.push(`No active financial year covers ${date}`);
-    if (finYear?.isLocked) errors.push(`Financial year ${finYear.name} is locked`);
+    if (finYear?.locked || finYear?.isLocked) errors.push(`Financial year ${finYear.year ?? finYear.name} is locked`);
 
     const reason = cell(first, COL.reason);
     if (!reason) errors.push("Reason is missing");

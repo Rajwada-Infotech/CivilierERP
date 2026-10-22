@@ -5,7 +5,6 @@ import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Warehouse, ClipboardList } from "lucide-react";
 import { type ExportColumn } from "@/lib/export";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
@@ -113,7 +112,7 @@ export const Field = ({
   className?: string;
 }) => (
   <div className={className}>
-    <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+    <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5">
       {label}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -133,14 +132,14 @@ export function GodownBadge({
   isMain?: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold border border-emerald-500/20">
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-card text-foreground text-xs font-semibold border border-foreground/40">
       <Warehouse size={11} />
       {name}
       {code && (
-        <span className="font-mono text-[0.625rem] text-emerald-600/70 dark:text-emerald-400/70">({code})</span>
+        <span className="font-heading text-[0.625rem] text-foreground">({code})</span>
       )}
       {isMain && (
-        <span className="px-1 py-0 rounded bg-emerald-500/20 text-[0.5625rem] font-bold uppercase tracking-wider">
+        <span className="px-1 py-0 bg-card text-[0.5625rem] font-bold uppercase tracking-wider">
           Main
         </span>
       )}
@@ -218,20 +217,20 @@ export function WorkOrderComparePanel({
   const covered = listed.filter((r) => r.issuedQty + r.thisQty > 0).length;
 
   return (
-    <Card className="border-border shadow-sm">
-      <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+    <div className="bg-card" style={{ border: RULE }}>
+      <div className="px-5 py-4 flex flex-row items-center justify-between" style={{ borderBottom: RULE }}>
         <div className="flex items-center gap-2.5">
-          <ClipboardList size={15} className="text-orange-600 dark:text-orange-400" />
-          <CardTitle className="text-base font-semibold">Work order comparison</CardTitle>
-          <span className="px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700 dark:text-orange-400 text-xs font-semibold">{docNo}</span>
+          <ClipboardList size={15} className="text-foreground" />
+          <h3 className={HEAD}>Work order comparison</h3>
+          <span className="px-2 py-0.5 bg-card text-foreground text-xs font-semibold">{docNo}</span>
         </div>
         {!isLoading && !error && listed.length > 0 && (
           <span className="text-[0.6875rem] text-muted-foreground">
             {covered} of {listed.length} work order items issued so far
           </span>
         )}
-      </CardHeader>
-      <CardContent className="p-0">
+      </div>
+      <div className="p-0">
         {isLoading ? (
           <p className="px-5 py-4 text-sm text-muted-foreground">Loading the work order's items…</p>
         ) : error ? (
@@ -241,7 +240,7 @@ export function WorkOrderComparePanel({
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-[0.625rem] uppercase tracking-widest text-muted-foreground bg-muted/30">
+              <thead className="text-[0.625rem] uppercase tracking-[0.12em] text-muted-foreground bg-card">
                 <tr>
                   <th className="px-4 py-2 text-left font-semibold">Item</th>
                   <th className="px-4 py-2 text-left font-semibold">Unit</th>
@@ -252,7 +251,7 @@ export function WorkOrderComparePanel({
                   <th className="px-4 py-2 text-left font-semibold">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/60">
+              <tbody className="divide-y divide-foreground/10">
                 {rows.map((r) => (
                   <tr key={r.key}>
                     <td className="px-4 py-2.5 font-medium text-foreground">{r.name}</td>
@@ -265,10 +264,10 @@ export function WorkOrderComparePanel({
                     </td>
                     <td className="px-4 py-2.5">
                       {r.state === "over" && <span className="text-xs font-medium text-destructive">Over by {fmtQty(-r.balance)}</span>}
-                      {r.state === "done" && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Fully issued</span>}
+                      {r.state === "done" && <span className="text-xs font-medium text-foreground">Fully issued</span>}
                       {r.state === "left" && <span className="text-xs text-muted-foreground">{fmtQty(r.balance)} still to issue</span>}
-                      {r.state === "unit" && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Different unit from the work order</span>}
-                      {r.state === "extra" && <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Not in the work order</span>}
+                      {r.state === "unit" && <span className="text-xs font-medium text-foreground">Different unit from the work order</span>}
+                      {r.state === "extra" && <span className="text-xs font-medium text-foreground">Not in the work order</span>}
                     </td>
                   </tr>
                 ))}
@@ -276,8 +275,8 @@ export function WorkOrderComparePanel({
             </table>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
