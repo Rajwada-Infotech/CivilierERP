@@ -145,10 +145,9 @@ const CrmBrokerage: React.FC = () => {
     if (editingId == null) return;
     setApproving(true);
     try {
-      const token = sessionStorage.getItem("token");
-      const res = await fetch(`${API}/${editingId}/approve`, {
+      const res = await fetchWithAuth(`${API}/${editingId}/approve`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        headers: { "Content-Type": "application/json" },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok && res.status !== 207) throw new Error(data.error || `HTTP ${res.status}`);
