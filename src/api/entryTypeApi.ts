@@ -1,22 +1,16 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 const BASE_URL = "/api/entry-type";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
-
 export const getEntryTypes = async () => {
-  const res = await fetch(BASE_URL, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(BASE_URL, {
   });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json().catch(() => ({}));
 };
 
 export const addEntryType = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
 
     body: JSON.stringify(data),
   });
@@ -31,9 +25,8 @@ export const updateEntryType = async (
   id: string,
   data: Record<string, unknown>,
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
 
     body: JSON.stringify(data),
   });
@@ -45,9 +38,8 @@ export const updateEntryType = async (
 };
 
 export const deleteEntryType = async (id: string) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -56,8 +48,7 @@ export const deleteEntryType = async (id: string) => {
   return res.json().catch(() => ({}));
 };
 export const getProjects = async () => {
-  const res = await fetch(`${BASE_URL}/projects`, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(`${BASE_URL}/projects`, {
   });
   if (!res.ok) throw new Error(`GET projects failed: ${res.status}`);
   return res.json().catch(() => ({}));

@@ -1,14 +1,10 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type { PagePermission } from "@/contexts/types";
 
 export type { PagePermission };
 
 const BASE_URL = "/api/users";
 const RIGHTS_BASE_URL = "/api/user-rights";
-
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
 
 export interface User {
   id: number;
@@ -30,8 +26,7 @@ export interface User {
 // implementation so backend error messages are preserved consistently.
 
 export const getUsers = async (): Promise<User[]> => {
-  const res = await fetch(BASE_URL, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(BASE_URL, {
   });
   if (!res.ok) throw new Error("Failed to fetch users");
   return res.json().catch(() => []);
@@ -43,9 +38,8 @@ export const addUser = async (user: {
   role: string;
   password: string;
 }) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(user),
   });
   if (!res.ok) throw new Error("Failed to add user");
@@ -53,9 +47,8 @@ export const addUser = async (user: {
 };
 
 export const updateUser = async (id: number, user: Partial<User>) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify(user),
   });
   if (!res.ok) throw new Error("Failed to update user");
@@ -63,9 +56,8 @@ export const updateUser = async (id: number, user: Partial<User>) => {
 };
 
 export const deleteUser = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete user");
   return res.json().catch(() => ({}));
@@ -74,8 +66,7 @@ export const deleteUser = async (id: number) => {
 export const getUsersForRights = async (): Promise<
   { id: number; name: string; role: string }[]
 > => {
-  const res = await fetch(`${RIGHTS_BASE_URL}/users`, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(`${RIGHTS_BASE_URL}/users`, {
   });
   if (!res.ok) throw new Error("Failed to fetch users for rights");
   return res.json().catch(() => ({}));
@@ -84,8 +75,7 @@ export const getUsersForRights = async (): Promise<
 export const getUserPermissions = async (
   userId: number,
 ): Promise<PagePermission[]> => {
-  const res = await fetch(`${RIGHTS_BASE_URL}/${userId}`, {
-    headers: getAuthHeaders(),
+  const res = await fetchWithAuth(`${RIGHTS_BASE_URL}/${userId}`, {
   });
   if (!res.ok) throw new Error("Failed to fetch user permissions");
   const data = await res.json().catch(() => ({}));
@@ -96,9 +86,8 @@ export const saveUserPermissions = async (
   userId: number,
   permissions: PagePermission[],
 ): Promise<{ success: boolean; message: string }> => {
-  const res = await fetch(`${RIGHTS_BASE_URL}/${userId}`, {
+  const res = await fetchWithAuth(`${RIGHTS_BASE_URL}/${userId}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ rightsJson: permissions }),
   });
 
@@ -114,9 +103,8 @@ export const resetUserPassword = async (
   id: number,
   new_password: string,
 ): Promise<{ message: string }> => {
-  const res = await fetch(`${BASE_URL}/${id}/reset-password`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/reset-password`, {
     method: "PATCH",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ new_password }),
   });
   if (!res.ok) {

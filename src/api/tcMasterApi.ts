@@ -1,20 +1,15 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 const BASE_URL = "/api/tc-master";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
-});
-
 export const getTCRecords = async () => {
-  const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json().catch(() => ({}));
 };
 
 export const addTCRecord = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
 
     body: JSON.stringify(data),
   });
@@ -30,9 +25,8 @@ export const updateTCRecord = async (
   id: string | number,
   data: Record<string, unknown>,
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
 
     body: JSON.stringify(data),
   });
@@ -45,9 +39,8 @@ export const updateTCRecord = async (
 
 // Updated to accept string | number
 export const deleteTCRecord = async (id: string | number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
