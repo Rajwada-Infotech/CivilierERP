@@ -850,6 +850,8 @@ const ChequeMaster: React.FC = () => {
                         <option key={b.id} value={String(b.id)}>
                           {b.label}
                           {b.branchName ? ` — ${b.branchName}` : ""}
+                          {/* Last four of the account number, so same-name accounts at one branch are told apart. */}
+                          {String(b.accountNumber ?? "").replace(/\s/g, "").slice(-4) ? ` ··${String(b.accountNumber).replace(/\s/g, "").slice(-4)}` : ""}
                         </option>
                       ))}
                     </select>
