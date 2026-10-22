@@ -39,7 +39,6 @@ import { FinYearProvider } from "./contexts/FinYearContext";
 import { HsnProvider } from "./contexts/HsnContext";
 import { RecordsProvider } from "./contexts/RecordsContext";
 import { TdsProvider } from "./contexts/TdsContext";
-import { DebitNoteProvider } from "./contexts/DebitNoteContext";
 import { BillingTermsProvider } from "./contexts/BillingTermsContext";
 import { useActivityBrowser } from "./contexts/ActivityBrowserContext";
 import { ActivityBrowserProvider } from "./contexts/ActivityBrowserContext";
@@ -561,11 +560,9 @@ function ProtectedProviders({ children }: { children: React.ReactNode }) {
       <HsnProvider>
         <RecordsProvider>
           <TdsProvider>
-            <DebitNoteProvider>
-              <BillingTermsProvider>
-                <TaskProvider>{children}</TaskProvider>
-              </BillingTermsProvider>
-            </DebitNoteProvider>
+            <BillingTermsProvider>
+              <TaskProvider>{children}</TaskProvider>
+            </BillingTermsProvider>
           </TdsProvider>
         </RecordsProvider>
       </HsnProvider>
