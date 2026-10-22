@@ -10,6 +10,9 @@ import { getInventoryMaster, getItemStockLedger, type ItemLedgerRow } from "@/ap
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
 import { DateInput } from "@/components/ui/date-input";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { usePageRights } from "@/hooks/usePageRights";
 
 // ─── RefType presentation (Stock drill-down) ──────────────────────────────────
 const REF_TYPE_META: Record<string, { label: string; route?: string }> = {
@@ -26,6 +29,19 @@ const REF_TYPE_META: Record<string, { label: string; route?: string }> = {
 const fmtNum = (n: number) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
 
 const today = new Date().toISOString().slice(0, 10);
+
+// What Export writes: the godown's rows as shown (item search applied).
+const STOCK_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Item", accessor: "ItemName" },
+  { header: "Group", accessor: "ItemGroupName" },
+  { header: "UOM", accessor: (r) => (r.UOMSymbol || r.UOMName || "") as string },
+  { header: "Opening", accessor: (r) => Number(r.OpeningStock) || 0 },
+  { header: "In", accessor: (r) => Number(r.StockIn) || 0 },
+  { header: "Out", accessor: (r) => Number(r.StockOut) || 0 },
+  { header: "Closing", accessor: (r) => Number(r.ClosingStock) || 0 },
+  { header: "Customer Rate", accessor: (r) => (r.CustomerRate == null ? "" : Number(r.CustomerRate)) },
+  { header: "Stock Value", accessor: (r) => (r.CustomerRate == null ? "" : Number(r.ClosingStock) * Number(r.CustomerRate)) },
+];
 
 // Sheet styles
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
@@ -224,7 +240,8 @@ function ItemLedgerModal({
 }
 
 // ─── Stock Details Table ──────────────────────────────────────────────────────
-function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: { godownId: number; dateFrom?: string; dateTo?: string; projectName?: string }) {
+function StockDetailsTable({ godownId, godownName, dateFrom, dateTo, projectName }: { godownId: number; godownName: string; dateFrom?: string; dateTo?: string; projectName?: string }) {
+  const rights = usePageRights("stock-ledger");
   const queryDate = dateTo || today;
   const { data, isLoading } = useQuery({
     queryKey: ["inventory-master", queryDate, godownId, dateFrom, dateTo],
@@ -274,6 +291,13 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: { godown
             <button type="button" onClick={() => setAppliedItemSearch(itemSearch)} className={`${KEY_INK} h-9 px-3 shrink-0`}>
               <Search size={12} /> Search
             </button>
+            <ExportMenu
+              data={rows as unknown as Record<string, unknown>[]}
+              columns={STOCK_EXPORT_COLUMNS}
+              title={`Stock — ${godownName} — ${dateFrom ? `${dateFrom} to ` : "as of "}${queryDate}`}
+              filename={`stock-${godownName.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${queryDate}`}
+              disabled={isLoading || !rows.length || !rights.canExport}
+            />
             {appliedItemSearch && (
               <button
                 type="button"
@@ -506,7 +530,7 @@ export default function Stock() {
           {selectedGodown ? (
             <>
               <GodownInfoCard godown={selectedGodown} />
-              {!badRange && <StockDetailsTable godownId={selectedGodown.GodownID} dateFrom={dateFrom} dateTo={dateTo} projectName={selectedGodown.ProjectName ?? undefined} />}
+              {!badRange && <StockDetailsTable godownId={selectedGodown.GodownID} godownName={selectedGodown.GodownName} dateFrom={dateFrom} dateTo={dateTo} projectName={selectedGodown.ProjectName ?? undefined} />}
             </>
           ) : (
             <div className="bg-card py-20 text-center" style={{ border: RULE }}>
