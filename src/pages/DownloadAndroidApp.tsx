@@ -58,7 +58,8 @@ function AppCard({ app }: { app: PublicApp }) {
     <div className="bg-card flex flex-col" style={{ border: RULE }}>
       <div className="px-5 pt-5 pb-4" style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.2)" }}>
         <h2 className="font-heading text-base font-bold tracking-tight text-foreground">{app.label}</h2>
-        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{ABOUT[app.appKey] ?? ""}</p>
+        {/* Two lines kept for every description, so the figures, codes and buttons line up across a row. */}
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed min-h-[3.25em]">{ABOUT[app.appKey] ?? ""}</p>
       </div>
 
       <div className="grid grid-cols-3" style={{ borderBottom: "1px solid hsl(var(--foreground) / 0.2)" }}>
@@ -84,7 +85,7 @@ function AppCard({ app }: { app: PublicApp }) {
             <a
               href={href}
               download={fileName}
-              className="w-full h-10 inline-flex items-center justify-center gap-2 bg-foreground text-card border border-foreground font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] hover:opacity-90 transition-opacity"
+              className="mt-auto w-full h-10 inline-flex items-center justify-center gap-2 bg-foreground text-card border border-foreground font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] hover:opacity-90 transition-opacity"
             >
               <Download size={14} /> Download APK
             </a>
