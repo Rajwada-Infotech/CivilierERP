@@ -279,7 +279,7 @@ export const InboxRow: React.FC<{
         {/* Row 3: amount + approved/rejected by */}
         <div className="flex items-center justify-between gap-2">
           {activityName ? (
-            <p className="text-xs font-heading font-semibold text-foreground truncate min-w-0" title={activityName}>
+            <p className="text-xs font-heading font-semibold text-foreground leading-snug whitespace-normal break-words min-w-0">
               {activityName}
             </p>
           ) : (
@@ -421,7 +421,7 @@ export const InboxRow: React.FC<{
         <div className="ai-c-amount min-w-0">
         <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Amount</span>
         {activityName ? (
-          <p className="text-[0.8125rem] font-heading font-bold text-foreground truncate" title={activityName}>
+          <p className="text-[0.8125rem] font-heading font-bold text-foreground leading-snug whitespace-normal break-words">
             {activityName}
           </p>
         ) : (

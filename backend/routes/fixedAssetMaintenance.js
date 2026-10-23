@@ -6,6 +6,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const {
   resolveDocTypeId, lockNextDocNumber, previewNextDocNumber, backPatchRecordId,
@@ -55,6 +56,8 @@ async function computeGstSnapshot(pool, assetId, amount) {
 }
 
 router.use(authenticateToken);
+// Every /:id route (open, preview, edit, post, delete) refuses a record in a project outside the user's.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.FixedAssetMaintenance WHERE MaintenanceId = @id"));
 
 const PAGE = "fixed-asset-maintenance";
 const REPAIR_TYPES = ["Direct", "Indirect"];
@@ -82,6 +85,7 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
     ];
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "fa.ProjectId", "").trim());
     const result = await request.query(`
       SELECT fa.AssetId, fa.FAItemCode, fa.AssetName, fa.AssetCategory,
              fa.CompanyId, fa.ProjectId, fa.FinYear,
@@ -141,6 +145,7 @@ router.get("/fa-item-codes", requirePageRight(PAGE, "view"), async (req, res) =>
     ];
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "fa.ProjectId", "").trim());
     const result = await request.query(`
       SELECT fa.AssetId, fa.FAItemCode, fa.AssetName, fa.AssetCategory,
              fa.CompanyId, fa.ProjectId, fa.FinYear,
@@ -193,6 +198,7 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     const where = ["m.Status <> 'Cancelled'"];
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("m.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("m.ProjectId = @ProjectId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "m.ProjectId", "").trim());
     if (req.query.assetId)   { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10)); where.push("m.AssetId = @AssetId"); }
     if (req.query.status)    { request.input("Status", sql.NVarChar(20), req.query.status); where.push("m.Status = @Status"); }
     if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), String(req.query.finYear)); where.push("m.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
@@ -291,6 +297,7 @@ router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
   try {
+    if (!assertProjectAllowed(req, res, toInt(req.body?.projectId))) return;
     const pool = getPool();
     const check = await validateBody(pool, req.body);
     if (typeof check === "string") return res.status(400).json({ error: check });
@@ -361,6 +368,7 @@ router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   if (!email) return;
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (!assertProjectAllowed(req, res, toInt(req.body?.projectId))) return;
   try {
     const pool = getPool();
     const cur = await pool.request().input("Id", sql.Int, id)

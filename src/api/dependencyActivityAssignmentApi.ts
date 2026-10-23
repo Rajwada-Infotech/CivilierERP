@@ -321,7 +321,7 @@ export interface ReportedAssignment {
   attemptNo: number;
   reworkFromAssignmentId: number | null;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -797,7 +797,7 @@ export interface AssignmentAttempt {
   endDate: string | null;
   reworkFromAssignmentId: number | null;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   createdAt: string;
   updatedAt: string | null;
   engineerNames: string | null;
@@ -827,7 +827,7 @@ export interface AmendmentRecord {
   attemptNo: number;
   status: AssignmentStatus;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   startDate: string | null;
   endDate: string | null;
   updatedAt: string;
@@ -861,9 +861,9 @@ export const getAmendments = async (): Promise<AmendmentRecord[]> => {
 // Bringing a Cancelled activity back — super_admin only (enforced
 // server-side by role, not a page right), and only after reviewing the
 // activity's full detail in ActivityDetailModal, where this is called
-// from. Restores to APPROVED if it genuinely was before being cancelled,
-// otherwise IN_PROGRESS regardless of exactly where it was — see the
-// backend route's own comment.
+// from. Restores to APPROVED if it genuinely was before being cancelled;
+// otherwise it starts over as a fresh attempt at ALLOCATED (PENDING if no
+// engineer is on it) with Work Done at 0 — see the backend route's own comment.
 export const restoreCancelledActivity = async (
   rungId: number,
 ): Promise<{ success: boolean; status: AssignmentStatus }> => {
