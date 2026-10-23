@@ -6,6 +6,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
@@ -88,7 +89,8 @@ router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), a
 // that has no tags yet, and why (e.g. its project has no ID Template) ─────────
 router.get("/pending-batches", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
   try {
-    res.json(await listUntaggedBatches(getPool()));
+    // Only the user's projects, as the tagging list below.
+    res.json((await listUntaggedBatches(getPool())).filter((b) => projectAllowed(req.projectScope, b.ProjectId)));
   } catch (err) {
     console.error("[fixedAssetTagging] GET /pending-batches:", err.message);
     res.status(500).json({ error: err.message });
@@ -234,6 +236,7 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
     if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
     if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
     if (req.query.godownId)  { request.input("GodownId",  sql.Int, parseInt(req.query.godownId, 10));   where.push("t.GodownId = @GodownId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "t.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 

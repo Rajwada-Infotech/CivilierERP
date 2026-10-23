@@ -94,7 +94,10 @@ export interface PendingBatch {
   CompanyName: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
+  GodownId: number | null;
   GodownName: string | null;
+  /** The Item Master item received, for tagging this batch from its row. */
+  SourceItemId: string | null;
   Reason: "NO_TEMPLATE" | "READY";
 }
 
