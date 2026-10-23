@@ -15,6 +15,7 @@ import {
   FormScaffold, FormSection, TextField, NumberField, RemarksField, PickerField, DateField, ImageCaptureField,
 } from "@/components/form";
 import { useActiveFinYear } from "@/hooks/useActiveFinYear";
+import { projectBelongsToCompany } from "@/utils/projectBelongsTo";
 import {
   getCompanies, getProjects, getSuppliers, getSacCodes, getActiveDepreciationSetups,
 } from "@/api/mastersApi";
@@ -106,7 +107,7 @@ export default function AssetFormScreen() {
   );
   const projectOpts = useMemo(
     () => (projectsQ.data ?? [])
-      .filter((p) => !form.companyId || String(p.company_id) === form.companyId)
+      .filter((p) => projectBelongsToCompany(p, form.companyId))
       .map((p) => ({ key: String(p.id), label: p.label })),
     [projectsQ.data, form.companyId],
   );
