@@ -2899,7 +2899,10 @@ router.post(
           END
           SELECT @n AS carried;
         `);
-      res.json({ carried: r.recordset[0]?.carried ?? 0 });
+      const carried = r.recordset[0]?.carried ?? 0;
+      // Opening the Photos tab calls this every time; only a carry that copied photos is anyone's change.
+      if (!carried) res.locals.noChange = true;
+      res.json({ carried, ...(carried ? { message: `Carried ${carried} After photo${carried === 1 ? "" : "s"} forward as today's Before` } : {}) });
     } catch (err) {
       console.error("[dependency-activity-assignment] POST /:rungId/photos/carry-forward error:", err.message);
       res.status(500).json({ error: err.message });

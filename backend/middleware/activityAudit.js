@@ -7,8 +7,14 @@ const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion, redisZIncrBy } = require("../redis");
 
-// Housekeeping writes that are not anyone's work.
-const SKIP = [/^\/api\/user-activity/, /^\/api\/home\/usage/, /^\/api\/users\/(login|logout|refresh)/, /^\/api\/doc-search/];
+// Housekeeping writes that are not anyone's work, and POSTs that only look things up (previews, checks, sums).
+const SKIP = [
+  /^\/api\/user-activity/,
+  /^\/api\/home\/usage/,
+  /^\/api\/users\/(login|logout|refresh)/,
+  /^\/api\/doc-search/,
+  /\/(preview|naming-preview|validate|calculate|bulk-search)(\?|$)/,
+];
 
 const ACTION = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
 const WEIGHT = { create: 10, update: 8, delete: 15 };
@@ -166,7 +172,9 @@ function activityAudit(req, res, next) {
     return json(body);
   };
   res.on("finish", () => {
-    if (res.statusCode < 200 || res.statusCode >= 300 || !req.user?.userId) return;
+    // A route sets res.locals.noChange when the request turned out to change nothing (e.g. opening an activity's
+    // photos asks the server to carry yesterday's After photos forward, and usually there is nothing to carry).
+    if (res.statusCode < 200 || res.statusCode >= 300 || !req.user?.userId || res.locals?.noChange) return;
     write(req, res, payload).catch((err) => console.warn("activityAudit:", err.message));
   });
   next();
