@@ -50,9 +50,8 @@ export const toPayload = (
 ): ActivityPayload => {
   const isGroup = r.activityType === "Group";
 
-  // groupId in the form holds the group's display label (from MasterPage select).
-  // Resolve it back to the numeric id via groupOptions lookup.
-  const matched = groupOptions.find((o) => o.label === r.groupId);
+  // groupId in the form holds the group's id (older callers passed its name; both resolve to the id).
+  const matched = groupOptions.find((o) => o.value === String(r.groupId ?? "")) ?? groupOptions.find((o) => o.label === r.groupId);
   const groupId = matched ? Number(matched.value) : null;
 
   return {
@@ -72,9 +71,15 @@ export const toPayload = (
 
 // ─── API Functions ──────────────────────────────────────────────────────────
 
+// The server's own reason ("This group already has an activity named …") rather than the bare status text.
+const fail = async (res: Response, fallback: string): Promise<never> => {
+  const body = await res.json().catch(() => ({}));
+  throw new Error(body?.error || `${fallback}: ${res.statusText}`);
+};
+
 export const getActivities = async (): Promise<DbActivity[]> => {
   const res = await fetchWithAuth(BASE);
-  if (!res.ok) throw new Error(`Failed to fetch activities: ${res.statusText}`);
+  if (!res.ok) await fail(res, "Failed to fetch activities");
   return res.json().catch(() => []);
 };
 
@@ -86,7 +91,7 @@ export const addActivity = async (
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(`Failed to add activity: ${res.statusText}`);
+  if (!res.ok) await fail(res, "Failed to add activity");
   return res.json().catch(() => ({}));
 };
 
@@ -99,7 +104,7 @@ export const updateActivity = async (
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(`Failed to update activity: ${res.statusText}`);
+  if (!res.ok) await fail(res, "Failed to update activity");
   return res.json().catch(() => ({}));
 };
 
@@ -107,6 +112,6 @@ export const deleteActivity = async (
   id: string | number,
 ): Promise<ApiResponse> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(`Failed to delete activity: ${res.statusText}`);
+  if (!res.ok) await fail(res, "Failed to delete activity");
   return res.json().catch(() => ({}));
 };
