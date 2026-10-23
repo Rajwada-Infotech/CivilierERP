@@ -64,6 +64,8 @@ export const InboxRow: React.FC<{
   const Icon = cfg?.icon ?? ClipboardCheck;
 
   const approvedBy = item.ApprovedBy?.trim();
+  // An activity has no amount; its name goes in that slot instead of a dash.
+  const activityName = item.Module === "civilworkdpr-approval" ? item.ActivityName?.trim() || null : null;
   const rejectedBy = item.RejectedBy?.trim();
   const party =
     item.SupplierName || item.ContractorName || item.CreatedBy || "—";
@@ -276,9 +278,15 @@ export const InboxRow: React.FC<{
 
         {/* Row 3: amount + approved/rejected by */}
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-heading tabular-nums font-semibold text-foreground">
-            {fmtAmount(effectiveAmount)}
-          </p>
+          {activityName ? (
+            <p className="text-xs font-heading font-semibold text-foreground truncate min-w-0" title={activityName}>
+              {activityName}
+            </p>
+          ) : (
+            <p className="text-xs font-heading tabular-nums font-semibold text-foreground">
+              {fmtAmount(effectiveAmount)}
+            </p>
+          )}
           <div className="flex items-center gap-1.5">
             {approvedBy && (
               <span className={`${TAG} text-emerald-500 border-emerald-500 truncate max-w-[120px]`}>
@@ -412,9 +420,15 @@ export const InboxRow: React.FC<{
         {/* Col 5 — Amount */}
         <div className="ai-c-amount min-w-0">
         <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Amount</span>
-        <p className="text-[0.8125rem] font-heading font-bold text-foreground tabular-nums">
-          {fmtAmount(effectiveAmount)}
-        </p>
+        {activityName ? (
+          <p className="text-[0.8125rem] font-heading font-bold text-foreground truncate" title={activityName}>
+            {activityName}
+          </p>
+        ) : (
+          <p className="text-[0.8125rem] font-heading font-bold text-foreground tabular-nums">
+            {fmtAmount(effectiveAmount)}
+          </p>
+        )}
         </div>
 
         {/* Col 6 — Approved/Rejected By */}

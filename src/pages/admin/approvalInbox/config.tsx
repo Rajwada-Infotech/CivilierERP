@@ -54,6 +54,8 @@ export interface InboxItem {
   // — RecordId itself is the DependencyActivityEngineer row (per-engineer,
   // needed for the confirm action) and doesn't work as a lookup key there.
   RungId: number | null;
+  // civilworkdpr-approval only — the activity's name, shown where other modules show an amount.
+  ActivityName?: string | null;
   // Set by the backend's visibility filter (approvalInbox.js) only when the
   // viewer is named somewhere on this record's workflow but NOT on the
   // level it's currently sitting at — e.g. a Level-2 approver looking at a
@@ -459,17 +461,18 @@ export const ALL_MODULES = Object.keys(MODULE_CONFIG);
 // Material Issues etc. all read as "Material", Payments/JV/Fund Transfer as
 // "Finance", and so on — so the inbox groups like-with-like instead of one
 // long flat module list.
-export type CategoryId = "material" | "finance" | "engineering" | "sales" | "admin";
+export type CategoryId = "material" | "finance" | "engineering" | "civilworkdpr" | "sales" | "admin";
 
 export const CATEGORY_META: Record<CategoryId, { label: string; color: string }> = {
   material: { label: "Material", color: "text-cyan-600" },
   finance: { label: "Finance", color: "text-emerald-600" },
   engineering: { label: "Engineering", color: "text-indigo-600" },
+  civilworkdpr: { label: "Civil Work DPR", color: "text-cyan-600" },
   sales: { label: "Sales / CRM", color: "text-orange-600" },
   admin: { label: "Admin", color: "text-purple-600" },
 };
 
-export const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering", "sales", "admin"];
+export const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering", "civilworkdpr", "sales", "admin"];
 
 export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "material-requests": "material",
@@ -493,7 +496,10 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
 
   "work-done": "engineering",
   boq: "engineering",
-  "work-allocation-engineer": "engineering",
+
+  // Civil Work DPR: an activity's final approval (and the engineer confirmations that used to come here).
+  "civilworkdpr-approval": "civilworkdpr",
+  "work-allocation-engineer": "civilworkdpr",
 
   "sale-orders": "sales",
   "crm-bookings": "sales",
