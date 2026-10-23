@@ -12,6 +12,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getActiveDepreciationSetups } from "@/api/depreciationApi";
@@ -143,8 +144,8 @@ export default function FixedAssetInventoryImport() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   const godowns = useMemo(() => {
