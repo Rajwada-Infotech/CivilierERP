@@ -153,10 +153,14 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
-    // Optional narrowing for the mobile app (the web page still gets the whole list, unchanged):
+    // Optional narrowing (the mobile app, and Work Allocation's tree, which loads the light list and each room's
+    // chains only when that room is opened):
     //   projectId — one project's chains      search — alias / location text
+    //   roomId — one room's chains            rungId — the chain one activity belongs to
     //   page+limit — OFFSET/FETCH paging      withActivities=0 — skip the per-chain ladder
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const roomId = req.query.roomId ? parseInt(req.query.roomId, 10) : null;
+    const rungId = req.query.rungId ? parseInt(req.query.rungId, 10) : null;
     const search = req.query.search ? String(req.query.search).trim().slice(0, 100) : null;
     const paged = req.query.page != null || req.query.limit != null;
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 30));
@@ -170,6 +174,11 @@ router.get("/", authMiddleware, async (req, res) => {
     const includeInactive = req.query.includeInactive === "1";
     const activeOnly = includeInactive ? "" : " AND dm.IsActive = 1";
     if (Number.isFinite(projectId)) { listReq.input("projectId", sql.Int, projectId); extra += " AND dm.ProjectId = @projectId"; }
+    if (Number.isFinite(roomId)) { listReq.input("roomId", sql.Int, roomId); extra += " AND dm.RoomId = @roomId"; }
+    if (Number.isFinite(rungId)) {
+      listReq.input("rungId", sql.Int, rungId);
+      extra += " AND dm.Id = (SELECT dmr.DependencyMasterId FROM dbo.DependencyMasterActivity dmr WHERE dmr.Id = @rungId)";
+    }
     if (search) {
       listReq.input("search", sql.NVarChar(200), `%${search}%`);
       extra += " AND (dm.Alias LIKE @search OR bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search)";

@@ -132,6 +132,23 @@ export const getDependencyMasters = async (): Promise<DependencyMasterListRow[]>
   return handleResponse<DependencyMasterListRow[]>(res);
 };
 
+/** The chain list narrowed on the server: one project's, one room's, the chain an activity belongs to, and/or
+ *  without each chain's activity ladder (enough to draw the location tree). */
+export const listDependencyMasters = async (params: {
+  projectId?: number;
+  roomId?: number;
+  rungId?: number;
+  withActivities?: boolean;
+}): Promise<DependencyMasterListRow[]> => {
+  const q = new URLSearchParams();
+  if (params.projectId) q.set("projectId", String(params.projectId));
+  if (params.roomId) q.set("roomId", String(params.roomId));
+  if (params.rungId) q.set("rungId", String(params.rungId));
+  if (params.withActivities === false) q.set("withActivities", "0");
+  const res = await fetchWithAuth(`${BASE}${q.toString() ? `?${q}` : ""}`);
+  return handleResponse<DependencyMasterListRow[]>(res);
+};
+
 export const getDependencyMaster = async (id: number): Promise<DependencyMasterDetail> => {
   const res = await fetchWithAuth(`${BASE}/${id}`);
   return handleResponse<DependencyMasterDetail>(res);
