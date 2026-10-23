@@ -25,10 +25,11 @@ describe("hsnApi", () => {
       "/api/hsn",
       expect.objectContaining({
         method: "POST",
-        headers: {
+        // Every request also carries the page and session it came from (X-Page / X-Session-Id).
+        headers: expect.objectContaining({
           "Content-Type": "application/json",
           Authorization: "Bearer test-token",
-        },
+        }),
         body: JSON.stringify({ code: "9983", description: "Services" }),
       }),
     );
@@ -45,10 +46,11 @@ describe("hsnApi", () => {
       "/api/hsn/9983",
       expect.objectContaining({
         method: "PUT",
-        headers: {
+        // Every request also carries the page and session it came from (X-Page / X-Session-Id).
+        headers: expect.objectContaining({
           "Content-Type": "application/json",
           Authorization: "Bearer test-token",
-        },
+        }),
         body: JSON.stringify({ description: "Updated" }),
       }),
     );
@@ -65,10 +67,11 @@ describe("hsnApi", () => {
       "/api/hsn/9983",
       expect.objectContaining({
         method: "DELETE",
-        headers: {
+        // Every request also carries the page and session it came from (X-Page / X-Session-Id).
+        headers: expect.objectContaining({
           "Content-Type": "application/json",
           Authorization: "Bearer test-token",
-        },
+        }),
       }),
     );
   });

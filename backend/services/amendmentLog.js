@@ -140,6 +140,28 @@ async function recordAmendment({
 
   const pool = getPool();
 
+  // Callers that don't pass the names (BOQ, Work Order, Work Done all passed null, leaving the Amendment page's
+  // project / company blank) get them from the document's own ids.
+  if (!projectName || !companyName) {
+    const pid = after?.ProjectId ?? before?.ProjectId ?? null;
+    const cid = after?.CompanyId ?? before?.CompanyId ?? null;
+    if (pid || cid) {
+      try {
+        const names = (
+          await pool
+            .request()
+            .input("pid", sql.Int, pid)
+            .input("cid", sql.Int, cid)
+            .query("SELECT (SELECT name FROM dbo.enterprise WHERE id = @pid) AS ProjectName, (SELECT name FROM dbo.enterprise WHERE id = @cid) AS CompanyName")
+        ).recordset[0];
+        projectName = projectName || names?.ProjectName || null;
+        companyName = companyName || names?.CompanyName || null;
+      } catch {
+        /* names are a convenience: the amendment is recorded without them */
+      }
+    }
+  }
+
   const headerResult = await pool
     .request()
     .input("RefDocType", sql.NVarChar(100), refDocType)
