@@ -6,6 +6,8 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
+const { deriveFinYear } = require("../services/fixedAssetAutoAlloc");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { runFollowupReminderCheck } = require("../services/fixedAssetFollowupReminders");
@@ -49,6 +51,7 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
     const where = ["fa.Status <> 'Deleted'", "fa.FAItemCode IS NOT NULL", "fa.AssetCode IS NOT NULL", "fa.AssetStatus <> 'Transferred'"];
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "fa.ProjectId", "").trim());
     const result = await request.query(`
       SELECT fa.AssetId, fa.FAItemCode, fa.AssetName, fa.AssetCategory,
              fa.CompanyId, fa.ProjectId, fa.FinYear
@@ -153,7 +156,11 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     if (req.query.assetId)       { request.input("AssetId", sql.Int, parseInt(req.query.assetId, 10)); where.push("q.AssetId = @AssetId"); }
     if (req.query.followUpStatus){ request.input("FUS", sql.NVarChar(20), req.query.followUpStatus); where.push("q.FollowUpStatus = @FUS"); }
     if (req.query.overdue === "1") where.push("q.FollowUpStatus = 'Pending' AND q.NextFollowUpDate < CAST(SYSDATETIME() AS DATE)");
-    const result = await request.query(`${LIST_SELECT} WHERE ${where.join(" AND ")} ORDER BY q.CreatedAt DESC`);
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "q.ProjectId", "").trim());
+    // The list never shows the pictures: they stay out of it (each is a whole image) and come with one record.
+    const listSelect = LIST_SELECT.replace("q.UserPhoto,", "CAST(NULL AS NVARCHAR(MAX)) AS UserPhoto,")
+      .replace("q.ItemPicture,", "CAST(NULL AS NVARCHAR(MAX)) AS ItemPicture,");
+    const result = await request.query(`${listSelect} WHERE ${where.join(" AND ")} ORDER BY q.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (err) {
     console.error("[faQualityCheck] GET /:", err.message);
@@ -211,11 +218,13 @@ router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
     `);
     const fa = faRes.recordset[0];
     if (!fa) return res.status(400).json({ error: "This FA Item Code is not a valid Fixed Asset Record" });
+    if (!projectAllowed(req.projectScope, toInt(projectId) || fa.ProjectId)) return res.status(403).json({ error: "You don't have access to that project." });
 
     const asn = await latestAssignment(pool, assetIdVal);
     const docTypeId = await resolveDocTypeId(pool, sql, "FAQ");
+    // Numbered in the year of the check, not the year the asset was recorded.
     const docNo = await lockNextDocNumber(pool, sql, {
-      docTypeId, finYear: fa.FinYear || null, tableName: "FixedAssetQualityCheck", issuedBy: email,
+      docTypeId, finYear: (docDate && (await deriveFinYear(pool, docDate))) || fa.FinYear || null, tableName: "FixedAssetQualityCheck", issuedBy: email,
     });
 
     const ins = await pool.request()
