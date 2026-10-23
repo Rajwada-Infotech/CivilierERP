@@ -5,11 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Eye, PenSquare, Plus, Printer, RefreshCw, Send, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getMaintenance, getMaintenanceList, postMaintenance, REPAIR_EXPENSE_LABEL, type MaintenanceItem } from "@/api/fixedAssetMaintenanceApi";
-import { KEY_INK, KEY_LINE, RULE, ensureArray, fmt, fmtDate } from "./record/config";
+import { KEY_INK, KEY_LINE, Mark, RULE, ensureArray, fmt, fmtDate } from "./record/config";
 import { MAINT_REFRESH, fmtAmt, maintTone, printMaintenanceVoucher } from "./maintenance/config";
 import { MaintenanceForm } from "./maintenance/MaintenanceForm";
 import { DeleteMaintenanceDialog, MaintenancePanel } from "./maintenance/MaintenancePanel";
@@ -110,7 +110,7 @@ export default function FixedAssetMaintenance() {
         </div>
       ),
     },
-    { id: "Status", accessorKey: "Status", size: 110, header: "Status", cell: ({ getValue }) => <SheetMark text={getValue() as string} tone={maintTone(getValue() as MaintenanceItem["Status"])} /> },
+    { id: "Status", accessorKey: "Status", size: 110, header: "Status", cell: ({ getValue }) => <Mark text={getValue() as string} tone={maintTone(getValue() as MaintenanceItem["Status"])} /> },
     {
       id: "actions",
       size: 170,
