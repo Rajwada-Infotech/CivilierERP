@@ -63,9 +63,12 @@ function serverDetails(details?: string | null): ServerDetails | null {
   }
 }
 
-/** "EDocNo" -> "E Doc No", "item_name" -> "Item Name". */
-export const fieldLabel = (k: string) =>
-  titleFromSlug(k.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2"));
+/** "EDocNo" -> "E Doc No", "item_name" -> "Item Name"; the server shows names for ids, so "Engineer Ids" -> "Engineers"
+ *  and "Labour Contractor Id" -> "Labour Contractor". */
+export const fieldLabel = (k: string) => {
+  const label = titleFromSlug(k.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2"));
+  return label.replace(/\s+Ids$/i, "s").replace(/\s+Id$/i, "") || label;
+};
 
 export function describeActivity(e: SessionEvent): Described {
   if (e.event === "login") return { kind: "login", verb: "Signed in", subject: "", where: "" };

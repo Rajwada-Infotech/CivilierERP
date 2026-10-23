@@ -89,6 +89,35 @@ router.get("/latest", async (req, res) => {
   }
 });
 
+// GET /public — PUBLIC. Every app's current build for the Download Android App page (shared without signing in):
+// version, build, size and date only — who published it stays private. An app with nothing published has null.
+router.get("/public", async (_req, res) => {
+  try {
+    const pool = getPool();
+    const r = await pool.request().query("SELECT * FROM dbo.AppRelease WHERE IsCurrent = 1");
+    const byKey = new Map(r.recordset.map((x) => [x.AppKey, x]));
+    res.set("Cache-Control", "no-store");
+    res.json(
+      Object.entries(APP_CATALOG).map(([appKey, a]) => {
+        const x = byKey.get(appKey);
+        const rel = x && toRelease(x);
+        return {
+          appKey,
+          label: a.label,
+          // The stable file every build is published under; also where a hand-copied APK sits.
+          filePath: `/downloads/${a.fileName}`,
+          current: rel
+            ? { versionName: rel.versionName, versionCode: rel.versionCode, sizeBytes: rel.sizeBytes, publishedAt: rel.publishedAt, downloadPath: rel.downloadPath }
+            : null,
+        };
+      }),
+    );
+  } catch (err) {
+    console.error("[app-releases] GET /public error:", err.message);
+    res.status(500).json({ error: "Failed to load the apps" });
+  }
+});
+
 // GET /catalog — the six apps with their current release (APK Manager page).
 router.get("/catalog", authenticateToken, requirePageRight("apk-manager", "view"), async (_req, res) => {
   try {
