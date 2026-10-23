@@ -1749,7 +1749,34 @@ router.patch(
         `);
     }
 
-    res.json({ success: true, status: effectiveStatus, remarks, progressPercent });
+    // Dates the allocation left blank are worked out from the reporting itself, never over what someone entered:
+    //   Start date - the first day work was reported (FirstReportedAt; the same day the logbook's first entry has).
+    //   End date   - the day it reaches 100% - the same day as the start, or later; never before the start.
+    //   Days       - start to end, counting both days (the same count the allocation form uses).
+    let dates = null;
+    if (hasProgress && progressPercent > 0) {
+      const d = await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("done", sql.Bit, progressPercent === 100 ? 1 : 0).query(`
+          DECLARE @today DATE = CAST(SYSDATETIME() AS DATE);
+          UPDATE dbo.DependencyActivityAssignment
+            SET StartDate = COALESCE(FirstReportedAt, @today)
+            WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1 AND StartDate IS NULL;
+          IF @done = 1
+            UPDATE dbo.DependencyActivityAssignment
+              SET EndDate = CASE WHEN StartDate > @today THEN StartDate ELSE @today END
+              WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1 AND EndDate IS NULL AND StartDate IS NOT NULL;
+          UPDATE dbo.DependencyActivityAssignment
+            SET Days = DATEDIFF(DAY, StartDate, EndDate) + 1
+            WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1 AND Days IS NULL
+              AND StartDate IS NOT NULL AND EndDate IS NOT NULL AND EndDate >= StartDate;
+          SELECT CONVERT(VARCHAR(10), StartDate, 23) AS startDate, CONVERT(VARCHAR(10), EndDate, 23) AS endDate, Days AS days
+            FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1;
+        `);
+      dates = d.recordset[0] || null;
+    }
+
+    res.json({ success: true, status: effectiveStatus, remarks, progressPercent, ...(dates ? { startDate: dates.startDate, endDate: dates.endDate, days: dates.days } : {}) });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
