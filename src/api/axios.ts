@@ -1,6 +1,7 @@
 import axios from "axios";
 import { getToken } from "../utils/tokenStorage";
 import { activityHeaders } from "@/lib/fetchWithAuth";
+import { refreshAfterWrite, wantsFresh } from "@/lib/queryClient";
 
 // Use relative /api path — the Vite dev proxy forwards to localhost:5000
 // and production nginx rewrites /api → backend. Never rely on VITE_API_URL.
@@ -15,11 +16,18 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
   Object.assign(config.headers, activityHeaders());
+  const method = (config.method || "get").toLowerCase();
+  if ((method === "get" || method === "head") && wantsFresh()) config.headers["X-Fresh"] = "1";
   return config;
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // A save: lists on screen read again (see lib/queryClient.ts refreshAfterWrite).
+    const method = (response.config?.method || "get").toLowerCase();
+    if (method !== "get" && method !== "head") refreshAfterWrite();
+    return response;
+  },
   async (error) => {
     const isLoginRoute = error.config?.url?.includes("/users/login");
     const isUsersListRoute = error.config?.url === "/users";

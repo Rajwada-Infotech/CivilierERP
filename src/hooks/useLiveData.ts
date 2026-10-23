@@ -12,12 +12,13 @@ import { connectSocket, getSocket } from "@/lib/socket";
  *
  * Topics:
  *   "ledgers" - a ledger / vendor / contractor / customer / partner / bank account head was added, changed or removed
+ *   "any"     - something was saved somewhere (AppLayout marks every cached list out of date on it)
  *
  * Calls are spread out by a short random delay, so fifty people with the page open don't all hit the server in the
  * same instant, and several signals close together become one reload. After the connection drops and comes back the
  * page reloads once as well, since a change during the gap would otherwise be missed.
  */
-export type LiveTopic = "ledgers";
+export type LiveTopic = "ledgers" | "any";
 
 export const LIVE_EVENT = "data:changed";
 export const LIVE_DELAY_MIN_MS = 150;

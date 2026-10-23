@@ -379,6 +379,15 @@ export const SidebarNav = ({
   accentColor?: string;
 }) => {
   const location = useLocation();
+  // One link lit at a time: the one whose path matches the page most closely. A prefix match alone lit the
+  // module's dashboard ("/finance") on every page under it ("/finance/contracts") as well as the page's own link.
+  const covers = (path?: string) =>
+    !!path && (path === "/" ? location.pathname === "/" : location.pathname === path || location.pathname.startsWith(path + "/"));
+  // Group entries count too, so a page inside a group (Transaction › Payment) doesn't also light the dashboard.
+  const allPaths = items.flatMap((it) => [it.path, ...(it.children ?? []).map((c) => c.path), ...(it.sections ?? []).flatMap((s) => s.items.map((x) => x.path))]);
+  const activePath = allPaths
+    .filter(covers)
+    .reduce<string | undefined>((best, p) => (!best || (p || "").length > best.length ? p : best), undefined);
   return (
     <div className={collapsed ? "space-y-1.5" : "space-y-1"}>
       {items.map((item, i) =>
@@ -405,12 +414,7 @@ export const SidebarNav = ({
             item={item}
             collapsed={collapsed}
             accentColor={accentColor}
-            isActive={
-              item.path === "/"
-                ? location.pathname === "/"
-                : location.pathname === item.path ||
-                  location.pathname.startsWith((item.path || "") + "/")
-            }
+            isActive={!!item.path && item.path === activePath}
           />
         ),
       )}

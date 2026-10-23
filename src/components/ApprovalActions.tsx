@@ -12,6 +12,7 @@ import {
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
 import { activityHeaders } from "@/lib/fetchWithAuth";
+import { refreshAfterWrite } from "@/lib/queryClient";
 import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "lucide-react";
 
 // ─── Role check ───────────────────────────────────────────────────────────────
@@ -57,6 +58,8 @@ async function authFetch(url: string, method: string, body?: object) {
       throw new Error("Server is busy — please try again in a moment.");
     throw new Error(data.error || `HTTP ${res.status}`);
   }
+  // Approve / reject / submit changes statuses shown in lists elsewhere: read them again (lib/queryClient.ts).
+  refreshAfterWrite();
   return data;
 }
 
