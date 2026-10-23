@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import {
   getTransferUsers, getTransferableAssets, getAssetTransfers, getAssetTransfer,
   createAssetTransfer, updateAssetTransfer, deleteAssetTransfer, setAssetPicture,
@@ -435,14 +436,14 @@ export default function AssetTransfer() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   const filterProjects = useMemo(() => {
     if (!filterCompany) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(filterCompany));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, filterCompany));
   }, [allProjects, filterCompany]);
 
   const toUserOptions = useMemo(

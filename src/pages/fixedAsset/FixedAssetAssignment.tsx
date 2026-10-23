@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { getTransferUsers, type TransferUser } from "@/api/assetTransferApi";
 import {
   getAssignableAssets, getAssignments, createAssignment, getAssignment,
@@ -300,8 +301,8 @@ export default function FixedAssetAssignment() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   // Scoped to the selected company/project once chosen, otherwise every

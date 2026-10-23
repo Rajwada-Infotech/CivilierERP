@@ -17,6 +17,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { getSuppliers } from "@/api/grnApi";
 import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depreciationApi";
 import {
@@ -679,8 +680,8 @@ export default function FixedAssetRecord() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   const suppliers = ensureArray<{ LHeadId: number; LHeadName: string }>(suppliersRaw);
