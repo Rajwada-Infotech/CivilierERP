@@ -43,7 +43,12 @@ function emitDataChanged(topic) {
   const timer = setTimeout(() => {
     pending.delete(topic);
     const io = getIoSafely();
-    if (io) io.emit(EVENT, { topic, at: Date.now() });
+    // A signal is a courtesy: it must never throw out of a timer (a socket double without emit, a closed server).
+    try {
+      if (io && typeof io.emit === "function") io.emit(EVENT, { topic, at: Date.now() });
+    } catch {
+      /* nobody to tell */
+    }
   }, DEBOUNCE_MS);
   if (typeof timer.unref === "function") timer.unref();
   pending.set(topic, timer);

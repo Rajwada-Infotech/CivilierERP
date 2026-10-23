@@ -7,8 +7,14 @@ const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion, redisZIncrBy } = require("../redis");
 
-// Housekeeping writes that are not anyone's work.
-const SKIP = [/^\/api\/user-activity/, /^\/api\/home\/usage/, /^\/api\/users\/(login|logout|refresh)/, /^\/api\/doc-search/];
+// Housekeeping writes that are not anyone's work, and POSTs that only look things up (previews, checks, sums).
+const SKIP = [
+  /^\/api\/user-activity/,
+  /^\/api\/home\/usage/,
+  /^\/api\/users\/(login|logout|refresh)/,
+  /^\/api\/doc-search/,
+  /\/(preview|naming-preview|validate|calculate|bulk-search)(\?|$)/,
+];
 
 const ACTION = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
 const WEIGHT = { create: 10, update: 8, delete: 15 };
@@ -101,7 +107,12 @@ async function write(req, res, payload) {
     record: identify(path, req.body, payload),
     fields: summarise(req.body),
     files: files(req),
-    message: typeof payload?.message === "string" ? short(payload.message) : undefined,
+    // What happened, in words: a route's own note for the log (res.locals.activityMessage), else the reply's message.
+    message: res.locals?.activityMessage
+      ? short(res.locals.activityMessage)
+      : typeof payload?.message === "string"
+        ? short(payload.message)
+        : undefined,
   };
   let text = JSON.stringify(details);
   if (text.length > MAX_DETAILS) text = JSON.stringify({ ...details, fields: { "…": "too large to record in full" } });
@@ -166,7 +177,9 @@ function activityAudit(req, res, next) {
     return json(body);
   };
   res.on("finish", () => {
-    if (res.statusCode < 200 || res.statusCode >= 300 || !req.user?.userId) return;
+    // A route sets res.locals.noChange when the request turned out to change nothing (e.g. opening an activity's
+    // photos asks the server to carry yesterday's After photos forward, and usually there is nothing to carry).
+    if (res.statusCode < 200 || res.statusCode >= 300 || !req.user?.userId || res.locals?.noChange) return;
     write(req, res, payload).catch((err) => console.warn("activityAudit:", err.message));
   });
   next();
