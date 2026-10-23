@@ -17,7 +17,10 @@ if command -v dnf >/dev/null 2>&1; then
   sudo dnf install -y docker-compose-plugin || true
 elif command -v apt-get >/dev/null 2>&1; then
   sudo apt-get update
-  sudo apt-get install -y ca-certificates curl git docker.io docker-compose-plugin
+  sudo apt-get install -y ca-certificates curl git docker.io
+  # The Compose plugin is called docker-compose-v2 in Ubuntu's own repositories (docker-compose-plugin is the name
+  # in Docker's repository, which isn't added here); try both so this works on either.
+  sudo apt-get install -y docker-compose-v2 || sudo apt-get install -y docker-compose-plugin
 else
   echo "Unsupported Linux distribution. Install git, Docker, Node.js 20, and npm manually." >&2
   exit 1
