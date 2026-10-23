@@ -270,6 +270,17 @@ router.post("/depreciation/run", requirePageRight("fixed-asset-record", "edit"),
 });
 
 // ── GET /:id — single ─────────────────────────────────────────────────────────
+// ── GET /dashboard — the Fixed Asset dashboard: figures from every page of the module, kept to the user's projects ─
+router.get("/dashboard", async (req, res) => {
+  try {
+    const { buildFixedAssetDashboard } = require("../services/fixedAssetDashboard");
+    res.json(await buildFixedAssetDashboard(getPool(), req.projectScope ?? null));
+  } catch (err) {
+    console.error("[fixedAssets] GET /dashboard:", err.message);
+    res.status(500).json({ error: "Could not load the fixed asset figures." });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
