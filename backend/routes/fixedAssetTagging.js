@@ -190,6 +190,8 @@ router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), asy
       request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
       where.push("(t.FAItemCode LIKE @Search OR ISNULL(fr.AssetName, im.M_Name) LIKE @Search)");
     }
+    // Only the user's projects, judged by where the asset is now.
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "ISNULL(fr.ProjectId, t.ProjectId)", "").trim());
 
     const result = await request.query(`
       SELECT
