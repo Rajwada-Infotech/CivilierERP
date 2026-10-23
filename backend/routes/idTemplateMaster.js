@@ -6,8 +6,11 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { autoTagPendingBatchesForProject } = require("../services/fixedAssetAutoAlloc");
+const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
 
 router.use(authMiddleware);
+// A template belongs to one project: a user only sees, changes or deletes those of their own projects.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.IDTemplateMaster WHERE Id = @id"));
 
 function cleanStr(v, len = 50) {
   if (!v || String(v).trim() === "") return null;
@@ -25,6 +28,7 @@ router.get("/", requirePageRight("id-template-master", "view"), async (req, res)
              t.UpdatedBy AS updatedBy, t.UpdatedAt AS updatedAt
       FROM dbo.IDTemplateMaster t
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
+      WHERE 1 = 1${projectPredicate(req.projectScope, "t.ProjectId")}
       ORDER BY pr.name ASC
     `);
     res.json(result.recordset);
@@ -39,6 +43,7 @@ router.get("/", requirePageRight("id-template-master", "view"), async (req, res)
 router.get("/by-project/:projectId", requirePageRight("id-template-master", "view"), async (req, res) => {
   const projectId = parseInt(req.params.projectId, 10);
   if (!Number.isFinite(projectId)) return res.status(400).json({ error: "Invalid projectId" });
+  if (!assertProjectAllowed(req, res, projectId)) return;
   try {
     const pool = getPool();
     const result = await pool.request().input("ProjectId", sql.Int, projectId).query(`
@@ -61,6 +66,8 @@ router.post("/", requirePageRight("id-template-master", "create"), async (req, r
   const alias = cleanStr(projectAlias, 50);
   if (!Number.isFinite(pId)) return res.status(400).json({ error: "Project is required" });
   if (!alias) return res.status(400).json({ error: "Project Alias is required" });
+  if (alias.includes("/")) return res.status(400).json({ error: "Project Alias can't contain \"/\" — it separates the parts of an FA Item Code" });
+  if (!assertProjectAllowed(req, res, pId)) return;
 
   try {
     const pool = getPool();
@@ -106,6 +113,8 @@ router.put("/:id", requirePageRight("id-template-master", "edit"), async (req, r
   const alias = cleanStr(projectAlias, 50);
   if (!Number.isFinite(pId)) return res.status(400).json({ error: "Project is required" });
   if (!alias) return res.status(400).json({ error: "Project Alias is required" });
+  if (alias.includes("/")) return res.status(400).json({ error: "Project Alias can't contain \"/\" — it separates the parts of an FA Item Code" });
+  if (!assertProjectAllowed(req, res, pId)) return;
 
   try {
     const pool = getPool();
