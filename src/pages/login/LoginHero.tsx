@@ -38,18 +38,18 @@ export function LoginHero({ stats }: { stats: PublicStats | null }) {
   const pct = Math.min(100, Math.max(0, stats?.workOrderCompletionPct ?? 0));
 
   return (
-    <div className="hidden lg:flex flex-col justify-between relative overflow-hidden p-10 min-h-[560px]">
-      {/* The drawing sits behind the text, faded at the top so it never competes with the headline. */}
-      <div className="absolute inset-0 pointer-events-none z-0">
-        <div className="absolute bottom-0 left-0 right-0" style={{ height: "105%", opacity: 0.5 }}>
+    <div className="hidden lg:flex flex-col justify-between relative overflow-hidden px-12 xl:px-16 py-14">
+      {/* The drawing sits in the lower half, behind the figures, and fades out before it reaches the text. */}
+      <div className="absolute inset-x-0 bottom-0 pointer-events-none z-0" style={{ height: "58%" }}>
+        <div className="absolute inset-0" style={{ opacity: 0.45 }}>
           <CivilScene />
         </div>
-        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(13,10,26,0.9) 0%, rgba(13,10,26,0.35) 45%, rgba(13,10,26,0.2) 70%, rgba(13,10,26,0.75) 100%)" }} />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, var(--ground) 0%, rgba(13,10,26,0) 35%, rgba(13,10,26,0) 75%, rgba(13,10,26,0.6) 100%)" }} />
       </div>
 
       <div className="relative z-10 ls-in">
         <p className="label">CivilierERP · Construction ERP</p>
-        <h1 className="font-heading font-bold tracking-tight mt-4" style={{ fontSize: "clamp(34px, 3.6vw, 52px)", lineHeight: 1.08, color: "var(--ink)" }}>
+        <h1 className="font-heading font-bold tracking-tight mt-4 max-w-[16ch]" style={{ fontSize: "clamp(30px, 3vw, 44px)", lineHeight: 1.1, color: "var(--ink)", textWrap: "balance" }}>
           CivilierERP —{" "}
           <span style={{ color: "var(--violet-soft)" }}>Manage Smarter,</span>
           <br />
@@ -65,8 +65,8 @@ export function LoginHero({ stats }: { stats: PublicStats | null }) {
         </p>
       </div>
 
-      <div className="relative z-10 mt-10" style={{ border: "1px solid var(--rule)", background: "rgba(20,16,42,0.82)" }}>
-        <div className="grid grid-cols-3" style={{ gap: 1, background: "var(--rule-soft)" }}>
+      <div className="relative z-10 mt-12" style={{ border: "1px solid var(--rule)", background: "rgba(20,16,42,0.82)" }}>
+        <div className="grid grid-cols-3 2xl:grid-cols-6" style={{ gap: 1, background: "var(--rule-soft)" }}>
           {cells.map((c) => (
             <div key={c.label} className="px-4 py-3.5" style={{ background: "rgba(20,16,42,0.96)" }}>
               <p className="label">{c.label}</p>

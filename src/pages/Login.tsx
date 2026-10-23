@@ -66,7 +66,7 @@ export default function Login() {
 
   return (
     <div
-      className="login-page login-sheet min-h-screen w-full flex items-center justify-center px-4 py-8 overflow-x-hidden overflow-y-auto relative"
+      className="login-page login-sheet min-h-screen w-full overflow-x-hidden overflow-y-auto relative"
       style={{ background: "var(--ground)" }}
     >
       <style>{LOGIN_CSS}</style>
@@ -83,17 +83,11 @@ export default function Login() {
 
       <AnimatePresence>{loginSuccess && <WelcomeBack name={loginName} />}</AnimatePresence>
 
-      {/* The sheet: a ruled frame with a title strip, the headline and figures on the left, the card on the right */}
-      <div className="relative z-10 w-full max-w-6xl" style={{ border: "1.5px solid var(--rule)", outline: "1px solid var(--rule-soft)", outlineOffset: 4, background: "rgba(13,10,26,0.72)" }}>
-        <div className="flex items-center justify-between px-5 py-2.5" style={{ borderBottom: "1px solid var(--rule)" }}>
-          <p className="label">CivilierERP · Enterprise resource planning</p>
-          <p className="label hidden sm:block">Sign in</p>
-        </div>
-
-        <div className="bw-login-lift grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr]">
+      {/* The whole screen: headline and figures on the left, the sign-in panel on the right */}
+      <div className="bw-login-lift relative z-10 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,34%)] min-h-screen">
           <LoginHero stats={stats} />
 
-          <div className="flex justify-center items-center p-5 sm:p-8 lg:p-10 lg:border-l" style={{ borderColor: "var(--rule)" }}>
+          <div className="flex justify-center items-center px-5 py-10 sm:px-10 lg:border-l" style={{ borderColor: "var(--rule)", background: "rgba(20,16,42,0.78)" }}>
             <LoginCard
               email={email}
               password={password}
@@ -113,7 +107,6 @@ export default function Login() {
               onNavigate={(path) => navigate(path)}
             />
           </div>
-        </div>
       </div>
     </div>
   );

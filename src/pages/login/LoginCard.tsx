@@ -28,8 +28,8 @@ export function LoginCard(p: LoginCardProps) {
   const [showPass, setShowPass] = useState(false);
 
   return (
-    <div className="w-full max-w-md ls-in" style={{ background: "var(--paper)", border: "1px solid var(--rule)" }}>
-      <div className="p-6 sm:p-8">
+    <div className="w-full max-w-sm ls-in">
+      <div className="p-6 sm:p-2">
         {/* Header */}
         <div className="text-center mb-7">
           <div className="flex flex-col items-center gap-3 bw-color-keep">
