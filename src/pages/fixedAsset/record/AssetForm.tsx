@@ -11,6 +11,7 @@ import { getActiveDepreciationSetups } from "@/api/depreciationApi";
 import { createFixedAsset, getFixedAsset, updateFixedAsset, type FixedAssetDetail } from "@/api/fixedAssetApi";
 import { getSacCodes } from "@/api/hsnApi";
 import { getUnassignedFAItemCodes, type UnassignedFAItemCode } from "@/api/fixedAssetTaggingApi";
+import { fetchDocTypes, fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { DateInput } from "@/components/ui/date-input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -119,6 +120,21 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
   const { data: sacCodes = [] } = useQuery({ queryKey: ["hsn-sac-codes"], queryFn: getSacCodes });
   const { data: unassignedCodes = [], isLoading: codesLoading } = useQuery({ queryKey: ["fa-unassigned-codes"], queryFn: getUnassignedFAItemCodes, enabled: !isEdit });
   const { data: detail } = useQuery<FixedAssetDetail>({ queryKey: ["fixed-asset", editingId], queryFn: () => getFixedAsset(editingId!), enabled: isEdit });
+
+  // The number the next save will take: the server numbers new assets from the first active "FA" document type,
+  // in the form's financial year. A preview only; someone else saving first takes it.
+  const { data: faDocTypeId } = useQuery({
+    queryKey: ["doc-type-id", "FA"],
+    queryFn: async () => (await fetchDocTypes()).filter((t) => t.DocNoPrefix === "FA").sort((a, b) => a.TypeOfDocId - b.TypeOfDocId)[0]?.TypeOfDocId ?? null,
+    enabled: !isEdit,
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: nextDocNo, isFetching: nextDocLoading } = useQuery({
+    queryKey: ["doc-next-number", faDocTypeId, form.finYear],
+    queryFn: () => fetchNextDocNumber(faDocTypeId!, form.finYear || undefined),
+    enabled: !isEdit && !!faDocTypeId,
+    staleTime: 0,
+  });
 
   // An asset being edited fills the form once it loads.
   useEffect(() => {
@@ -265,8 +281,10 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
       <div className="space-y-5 min-w-0">
         <Block title="Document">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-            <Field label="Doc no">
-              <div className={READ_ONLY}>{detail?.DocNo || "Given on save"}</div>
+            <Field label="Doc no" note={!isEdit && nextDocNo ? "Next number; taken when you save" : undefined}>
+              <div className={`${READ_ONLY} font-heading tabular-nums`}>
+                {isEdit ? detail?.DocNo || "—" : nextDocNo || (nextDocLoading ? "…" : faDocTypeId === null ? "No active FA document type" : "Given on save")}
+              </div>
             </Field>
             <Field label="Document date">
               <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={INP} />
