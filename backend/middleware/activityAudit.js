@@ -107,7 +107,12 @@ async function write(req, res, payload) {
     record: identify(path, req.body, payload),
     fields: summarise(req.body),
     files: files(req),
-    message: typeof payload?.message === "string" ? short(payload.message) : undefined,
+    // What happened, in words: a route's own note for the log (res.locals.activityMessage), else the reply's message.
+    message: res.locals?.activityMessage
+      ? short(res.locals.activityMessage)
+      : typeof payload?.message === "string"
+        ? short(payload.message)
+        : undefined,
   };
   let text = JSON.stringify(details);
   if (text.length > MAX_DETAILS) text = JSON.stringify({ ...details, fields: { "…": "too large to record in full" } });
