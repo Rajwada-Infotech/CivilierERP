@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, Play, RefreshCw } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { DataTable } from "@/components/ui/DataTable";
 import { MonthInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -15,7 +15,7 @@ import {
   generateDepreciation, getGeneratePreview, getGenerateRuns, getPostingHistory,
   type GenerateOutcome, type GenerateResult,
 } from "@/api/fixedAssetDepreciationGenerateApi";
-import { Field, INP, KEY_INK, KEY_LINE, LBL, RULE, fmt } from "./record/config";
+import { Field, INP, Mark, KEY_INK, KEY_LINE, LBL, RULE, fmt } from "./record/config";
 import { currentMonth, fmtAmt, lastClosedMonth, monthLabel, monthMark } from "./depreciationRun/config";
 import { HISTORY_COLUMNS, RUN_COLUMNS, assetColumns } from "./depreciationRun/columns";
 import { GenerateConfirm } from "./depreciationRun/GenerateConfirm";
@@ -162,7 +162,7 @@ export default function FixedAssetDepreciationGenerate() {
                 <div className="px-5 py-3 flex flex-wrap items-center gap-3" style={{ borderTop: RULE }}>
                   <span className="font-heading text-sm font-bold text-foreground">{monthName}</span>
                   {projectLabel && <span className="text-xs text-muted-foreground truncate">{projectLabel}</span>}
-                  {mark && <SheetMark text={mark.text} tone={mark.tone} />}
+                  {mark && <Mark text={mark.text} tone={mark.tone} />}
                 </div>
                 <div className="statrow four" style={{ padding: "16px 20px 18px", borderTop: "1px solid hsl(var(--foreground) / 0.2)" }}>
                   {stats.map((x) => (

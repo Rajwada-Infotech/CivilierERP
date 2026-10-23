@@ -1,7 +1,7 @@
 // The three schedules of a depreciation run: the project's assets for the month, what has been posted, and each Generate click.
-import { SheetMark } from "@/components/sheet/Sheet";
 import type { ColumnDef } from "@/components/ui/DataTable";
 import type { GenerateAssetRow, GenerateOutcome, GenerateRunRow, PostingHistoryRow } from "@/api/fixedAssetDepreciationGenerateApi";
+import { Mark } from "../record/config";
 import { assetMark, fmtAmt, fmtDateTime, monthLabel } from "./config";
 
 const Num = ({ v, strong }: { v: number | null | undefined; strong?: boolean }) => (
@@ -60,7 +60,7 @@ export function assetColumns(
       accessorFn: (r) => assetMark(r, outcomeOf.get(r.assetId)).text,
       size: 130,
       header: "Status",
-      cell: ({ row: { original: r } }) => { const m = assetMark(r, outcomeOf.get(r.assetId)); return <SheetMark text={m.text} tone={m.tone} />; },
+      cell: ({ row: { original: r } }) => { const m = assetMark(r, outcomeOf.get(r.assetId)); return <Mark text={m.text} tone={m.tone} />; },
     },
     {
       id: "Details",
@@ -126,7 +126,7 @@ export const HISTORY_COLUMNS: ColumnDef<PostingHistoryRow>[] = [
     accessorKey: "PostingStatus",
     size: 110,
     header: "Status",
-    cell: ({ row: { original: h } }) => <SheetMark text={h.PostingStatus} tone={h.PostingStatus === "Posted" ? "done" : "none"} />,
+    cell: ({ row: { original: h } }) => <Mark text={h.PostingStatus} tone={h.PostingStatus === "Posted" ? "done" : "none"} />,
   },
 ];
 

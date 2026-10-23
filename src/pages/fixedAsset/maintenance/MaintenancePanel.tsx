@@ -3,9 +3,8 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, Pencil, Printer, Send, X } from "lucide-react";
-import { SheetMark } from "@/components/sheet/Sheet";
 import { deleteMaintenance, getMaintenance, REPAIR_EXPENSE_LABEL, type MaintenanceItem } from "@/api/fixedAssetMaintenanceApi";
-import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, fmtDate } from "../record/config";
+import { KEY_INK, KEY_LINE, KEY_RED, LBL, Mark, RULE, fmtDate } from "../record/config";
 import { MAINT_REFRESH, fmtAmt, maintTone, printMaintenanceVoucher } from "./config";
 import { PostingTable } from "./PostingTable";
 
@@ -37,7 +36,7 @@ export function MaintenancePanel({
         ) : (
           <div className="p-5 space-y-5">
             <div className="flex flex-wrap items-center gap-3">
-              <SheetMark text={d.Status} tone={maintTone(d.Status)} />
+              <Mark text={d.Status} tone={maintTone(d.Status)} />
               {d.VoucherNo && <span className={`${LBL} tabular-nums`}>Voucher {d.VoucherNo}</span>}
             </div>
             <dl className="text-sm" style={{ borderTop: RULE }}>

@@ -2,6 +2,7 @@
 import React from "react";
 import type { ExportColumn } from "@/lib/export";
 import type { FixedAssetDetail, FixedAssetListItem } from "@/api/fixedAssetApi";
+import { SheetMark } from "@/components/sheet/Sheet";
 
 export const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
 export const DEP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -194,6 +195,17 @@ export const Block: React.FC<{ title: string; note?: React.ReactNode; children: 
     <div className="p-5 space-y-5">{children}</div>
   </div>
 );
+
+/** A sheet status mark that still names an idle state (SheetMark's "none" is just a dash): an empty square and the word in grey. */
+export const Mark: React.FC<{ text: string; tone: "done" | "waiting" | "stopped" | "none" }> = ({ text, tone }) =>
+  tone !== "none" ? (
+    <SheetMark text={text} tone={tone} />
+  ) : (
+    <span className="inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap text-muted-foreground">
+      <i className="shrink-0" style={{ width: 8, height: 8, border: "1px solid hsl(var(--muted-foreground))" }} />
+      {text}
+    </span>
+  );
 
 /** A row of figures in ruled cells. */
 export const Figures: React.FC<{ items: { label: string; value: string; tone?: "red" | "blue" }[] }> = ({ items }) => (
