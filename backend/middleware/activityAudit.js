@@ -160,6 +160,8 @@ async function write(req, res, payload) {
         @actionType, @resource, @details, @sessionId, @requestMethod, @requestUrl, @createdAt)`);
 
   Promise.resolve(bumpCacheVersion("user-activity")).catch(() => {});
+  // Live line for open Activity Browsers: ids as names, the same as when the list is read.
+  await require("../services/activityNames").nameIds([row]);
   Promise.resolve(redisZIncrBy("engagement:score", WEIGHT[actionType] || 2, row.userId, 2592000)).catch(() => {});
   try {
     require("../socket").getIo().to("activity-watchers").emit("activity:new", row);

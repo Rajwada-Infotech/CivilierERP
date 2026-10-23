@@ -15,6 +15,7 @@ const {
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { cache } = require("../middleware/cache");
+const { nameIds } = require("../services/activityNames");
 
 // Socket.io — lazy-loaded so the route module works even before initSocket()
 // is called (e.g. during unit tests).  getIo() will throw only if it's
@@ -241,7 +242,7 @@ router.get(
       const total = dataResult.recordset[0]?.totalCount ?? 0;
 
       res.json({
-        data: dataResult.recordset.map(mapActivityRow),
+        data: await nameIds(dataResult.recordset.map(mapActivityRow)),
         total,
         page,
         limit,
@@ -349,7 +350,7 @@ router.get(
         OFFSET ${(page - 1) * limit} ROWS FETCH NEXT ${limit} ROWS ONLY
       `);
       const total = result.recordset[0]?.totalCount ?? 0;
-      res.json({ data: result.recordset.map(mapActivityRow), total, page, limit, pages: Math.ceil(total / limit) });
+      res.json({ data: await nameIds(result.recordset.map(mapActivityRow)), total, page, limit, pages: Math.ceil(total / limit) });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch the user's activity" });
     }
@@ -371,7 +372,7 @@ router.get(
           "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
         );
 
-      res.json(result.recordset.map(mapActivityRow));
+      res.json(await nameIds(result.recordset.map(mapActivityRow)));
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
         console.error("Session error:", err.message);
