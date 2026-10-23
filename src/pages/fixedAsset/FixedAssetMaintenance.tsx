@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import {
   getMaintAssets, getMaintVendors, getMaintenanceList, getMaintenance,
   getFaItemCodesByItem,
@@ -370,8 +371,8 @@ export default function FixedAssetMaintenance() {
 
   const projects = useMemo(() => {
     if (!form.companyId) return [];
-    return ensureArray<{ id: number; label: string; company_id: number | null }>(allProjects)
-      .filter((p) => p.company_id === Number(form.companyId));
+    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
+      .filter((p) => projectBelongsToCompany(p, form.companyId));
   }, [allProjects, form.companyId]);
 
   const itemNames = useMemo(
