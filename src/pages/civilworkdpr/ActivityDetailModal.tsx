@@ -1170,6 +1170,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
 // this is the "keep the history of the reworked task" record, not
 // something acted on here.
 const REWORK_SOURCE_LABEL: Record<string, string> = { QC: "Quality Check", APPROVAL: "Approval" };
+const RESTORE_SOURCE = "RESTORE";
 
 function HistoryTab({ rungId }: { rungId: number }) {
   const { data: attempts = [], isLoading } = useQuery({
@@ -1219,7 +1220,9 @@ function HistoryTab({ rungId }: { rungId: number }) {
               <p className="text-xs mt-1.5 flex items-start gap-1.5 text-foreground">
                 <RotateCcw size={11} className="shrink-0 mt-0.5" />
                 <span>
-                  Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}
+                  {a.reworkSource === RESTORE_SOURCE
+                    ? a.reworkReason
+                    : <>Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}</>}
                 </span>
               </p>
             )}
@@ -1479,20 +1482,22 @@ function DailyLogTab({ rungId }: { rungId: number }) {
 // out of the plain status dropdown (that badge stays terminal once
 // Cancelled) and behind an explicit confirm step here, only reachable
 // after opening this modal and reviewing the activity's full detail. The
-// target status (APPROVED vs IN_PROGRESS) is decided server-side from
-// PreCancelStatus, but shown here up front so the confirm step isn't a
-// guess — see restoreCancelledActivity's own comment.
+// target (APPROVED, or a fresh attempt back at Allocated with the bar at 0)
+// is decided server-side from PreCancelStatus, but shown here up front so the
+// confirm step isn't a guess — see restoreCancelledActivity's own comment.
 function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "ALLOCATED";
 
   const restore = useMutation({
     mutationFn: () => restoreCancelledActivity(row.rungId),
     onSuccess: (res) => {
       toast.success(`Restored — back to ${ASSIGNMENT_STATUS_META[res.status].label}.`);
-      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
-      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      [
+        "civilworkdpr-activity-reporting", "civilworkdpr-work-done-saved-flow", "dependency-activity-assignment",
+        "civilworkdpr-work-done-dependency-detail", "activity-attempts", "activity-progress-log", "qc-queue",
+      ].forEach((k) => queryClient.invalidateQueries({ queryKey: [k] }));
       setConfirmOpen(false);
       onClose();
     },
@@ -1530,7 +1535,8 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
               <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
                 It will move from <span className="font-semibold">Cancelled</span> back to{" "}
                 <span className="font-semibold">{ASSIGNMENT_STATUS_META[restoreTo].label}</span>
-                {restoreTo === "IN_PROGRESS" && " — it hadn't been approved yet, so it goes through Reporting/QC/Approval again from there"}.
+                {restoreTo === "ALLOCATED" &&
+                  " with Work Done reset to 0% — it hadn't been approved yet, so it starts over: reported up to Completed again, then Quality Check and Approval. The cancelled attempt stays in its history"}.
               </p>
               <div className="flex justify-end gap-2">
                 <button
