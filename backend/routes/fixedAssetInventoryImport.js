@@ -6,6 +6,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { autoTagBatch, deriveFinYear } = require("../services/fixedAssetAutoAlloc");
@@ -34,6 +35,7 @@ router.get("/", requirePageRight("fixed-asset-inventory-import", "view"), async 
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("i.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("i.ProjectId = @ProjectId"); }
     if (req.query.godownId)  { request.input("GodownId",  sql.Int, parseInt(req.query.godownId, 10));  where.push("i.GodownId = @GodownId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "i.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -104,6 +106,10 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
   const rateVal = rate != null && rate !== "" ? parseFloat(rate) : null;
 
   if (!docDate) return res.status(400).json({ error: "docDate is required" });
+  // Stock with no project can never be tagged (FA codes come from the project's ID template), so it is refused here.
+  if (!toInt(companyId)) return res.status(400).json({ error: "Pick the company." });
+  if (!toInt(projectId)) return res.status(400).json({ error: "Pick the project: its ID template is what tags the stock." });
+  if (!projectAllowed(req.projectScope, projectId)) return res.status(403).json({ error: "You don't have access to that project." });
   if (!godownIdVal) return res.status(400).json({ error: "godownId is required" });
   if (!itemIdVal) return res.status(400).json({ error: "itemId is required" });
   if (!Number.isFinite(qtyVal) || qtyVal <= 0) return res.status(400).json({ error: "quantity must be a positive number" });

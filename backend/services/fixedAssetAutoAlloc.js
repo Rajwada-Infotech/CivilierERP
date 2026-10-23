@@ -258,12 +258,13 @@ async function listUntaggedBatches(pool) {
            fa.PurchaseInvoiceRef AS SourceDocNo, fa.DocDate,
            fa.CompanyId, co.name AS CompanyName, fa.ProjectId, pr.name AS ProjectName,
            fa.GodownID AS GodownId, gd.GodownName,
-           CASE WHEN tpl.Id IS NULL THEN 'NO_TEMPLATE' ELSE 'READY' END AS Reason
+           -- EXISTS, not a join: a project with two active templates listed its batches twice.
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.IDTemplateMaster tpl WHERE tpl.ProjectId = fa.ProjectId AND tpl.IsActive = 1)
+                THEN 'READY' ELSE 'NO_TEMPLATE' END AS Reason
     FROM dbo.FixedAssetRecord fa
     LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
     LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
     LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
-    LEFT JOIN dbo.IDTemplateMaster tpl ON tpl.ProjectId = fa.ProjectId AND tpl.IsActive = 1
     WHERE fa.AssetCode IS NULL AND fa.SourceType IN ('GRN', 'IMPORT', 'ICT')
       AND fa.AssetStatus = 'Pending' AND fa.Status <> 'Deleted'
       AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetTagging t WHERE t.AssetId = fa.AssetId AND t.Status = 'Tagged')

@@ -6,6 +6,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { rebuildFAItemCode } = require("../services/faItemCodeRebuild");
@@ -202,6 +203,7 @@ router.get("/transferable-assets", requirePageRight("asset-transfer", "view"), a
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
     if (req.query.finYear)   { request.input("FinYear", sql.NVarChar(20), req.query.finYear);          where.push("fa.FinYear = @FinYear"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "fa.ProjectId", "").trim());
 
     const result = await request.query(`
       SELECT fa.AssetId, fa.AssetName, fa.AssetCode, fa.AssetCategory, fa.FAItemCode,
@@ -281,6 +283,7 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
     if (req.query.toUserId)   { request.input("ToUserId", sql.Int, parseInt(req.query.toUserId, 10));     where.push("h.ToUserId = @ToUserId"); }
     if (req.query.fromDate)   { request.input("FromDate", sql.Date, req.query.fromDate);                 where.push("h.TransferDate >= @FromDate"); }
     if (req.query.toDate)     { request.input("ToDate", sql.Date, req.query.toDate);                     where.push("h.TransferDate <= @ToDate"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "h.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -363,6 +366,7 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
 
   if (!assetIdVal) return res.status(400).json({ error: "assetId is required" });
   if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
+  if (!projectAllowed(req.projectScope, projectIdVal)) return res.status(403).json({ error: "You don't have access to that project." });
   if (!fromUserIdVal || !toUserIdVal) return res.status(400).json({ error: "fromUserId and toUserId are required" });
   if (fromUserIdVal === toUserIdVal) return res.status(400).json({ error: "From User and To User must be different" });
   if (!departmentIdVal) return res.status(400).json({ error: "departmentId is required" });
@@ -510,6 +514,7 @@ router.put("/:id", requirePageRight("asset-transfer", "edit"), async (req, res) 
 
   if (!assetIdVal) return res.status(400).json({ error: "assetId is required" });
   if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
+  if (!projectAllowed(req.projectScope, projectIdVal)) return res.status(403).json({ error: "You don't have access to that project." });
   if (!fromUserIdVal || !toUserIdVal) return res.status(400).json({ error: "fromUserId and toUserId are required" });
   if (fromUserIdVal === toUserIdVal) return res.status(400).json({ error: "From User and To User must be different" });
   if (!departmentIdVal) return res.status(400).json({ error: "departmentId is required" });

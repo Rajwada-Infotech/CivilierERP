@@ -39,6 +39,8 @@ export interface FixedAssetListItem {
   GodownName: string | null;
   SourceTagId: number | null;
   FAItemCode: string | null;
+  /** Depreciation posted so far (reversed entries left out); book value is PurchaseCost less this. */
+  Depreciated: number;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {
