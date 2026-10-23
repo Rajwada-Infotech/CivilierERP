@@ -10,6 +10,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useModule } from "@/contexts/ModuleContext";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
+import { useLiveData } from "@/hooks/useLiveData";
+import { markAllStale } from "@/lib/queryClient";
 import { LoginRemindersPopup } from "@/components/LoginRemindersPopup";
 const SlowConnectionBanner = React.lazy(
   () => import("@/components/SlowConnectionBanner"),
@@ -114,6 +116,8 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const isMobile = useIsMobile();
   const { moduleSwitching, activeModule } = useModule();
   const isHome = useIsHomePage();
+  // Someone saved something: every cached list is read again the next time it is shown (lib/queryClient.ts).
+  useLiveData("any", markAllStale);
   const location = useLocation();
 
   // Home hides the strip/nav panel by default (full-width dashboard), but

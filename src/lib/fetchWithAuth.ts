@@ -1,6 +1,7 @@
 ﻿import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
 import { STABILISING_MESSAGE, isGatewayFailure } from "./gatewayFetch";
+import { refreshAfterWrite, wantsFresh } from "./queryClient";
 
 // Exported so callers can distinguish auth/permission errors from network errors.
 export class ApiError extends Error {
@@ -72,6 +73,8 @@ export async function fetchWithAuth(
   // Pull out our custom flag before spreading into fetch() — fetch does not
   // accept unknown options and would silently drop it, so we strip it here.
   const { skipActivityLog, ...fetchOptions } = options;
+  const method = (fetchOptions.method || "GET").toUpperCase();
+  const isRead = method === "GET" || method === "HEAD";
 
   const token =
     typeof window !== "undefined" ? sessionStorage.getItem("token") : null;
@@ -103,6 +106,7 @@ export async function fetchWithAuth(
         ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...activityHeaders(),
+        ...(isRead && wantsFresh() ? { "X-Fresh": "1" } : {}),
         ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
       },
     });
@@ -185,6 +189,10 @@ export async function fetchWithAuth(
       response.status,
     );
   }
+
+  // A save: every list on screen reads again, so what was just created shows in every dropdown at once.
+  // Activity-log and page-visit writes (skipActivityLog) are not saves.
+  if (!isRead && response.ok && !skipActivityLog) refreshAfterWrite();
 
   return response;
 }
