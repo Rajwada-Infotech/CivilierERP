@@ -62,95 +62,8 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
   if (!(totalGst > 0)) return { none: "no GST was charged on this booking" };
 
   const b = rf.BookingId;
-  const sums = (await pool.request().input("b", sql.Int, b).input("r", sql.Int, refundId).query(`
-    SELECT
-      (SELECT ISNULL(SUM(RPAmount), 0) FROM dbo.ReceivedPayment WHERE CrmBookingId = @b AND RPStatus = N'Approved' AND SourceCrmResaleId IS NULL) AS Received,
-      (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmInvoice WHERE BookingId = @b AND Status <> N'Void' AND InvoiceType IN (N'Milestone', N'Booking', N'Final'))
-        - (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.CrmGstNote WHERE BookingId = @b AND Source = N'Adjustment' AND Status = N'Issued') AS Invoiced,
-      (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.CrmGstNote WHERE BookingId = @b AND DocType = N'RefundVoucher' AND Status <> N'Cancelled') AS PriorVouchers,
-      (SELECT ISNULL(SUM(DeductionAmount), 0) FROM dbo.CrmRefund WHERE BookingId = @b AND Status = N'Paid' AND Id <> @r) AS PriorKept`)).recordset[0];
-  // Money still sitting as an advance (received, never invoiced, not given back or kept before).
-  const uninvoiced = Math.max(0, r2(sums.Received) - r2(sums.Invoiced) - r2(sums.PriorVouchers) - r2(sums.PriorKept));
-
   const rate = await rateFor(pool, b);
-  const voucherPart = Math.min(net, uninvoiced);
-  let creditPart = r2(net - voucherPart);
-  const pieces = [];
-  if (creditPart > 0) {
-    const invoices = (await pool.request().input("b", sql.Int, b).query(`
-      SELECT i.Id, i.InvoiceNo, i.InvoiceDate, i.Amount,
-             i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount
-      FROM dbo.CrmInvoice i
-      WHERE i.BookingId = @b AND i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final')
-      ORDER BY i.InvoiceDate DESC, i.Id DESC`)).recordset;
-    for (const inv of invoices) {
-      if (!(creditPart > 0)) break;
-      const take = r2(Math.min(creditPart, Number(inv.OpenAmount)));
-      if (!(take > 0)) continue;
-      const deadline = creditNoteDeadline(inv.InvoiceDate);
-      pieces.push({ type: "CreditNote", amount: take, invoice: inv, deadline, barred: iso(rf.PaidAt || new Date()) > deadline });
-      creditPart = r2(creditPart - take);
-    }
-  }
-  // Anything not matched to an invoice is still money that came in as an advance.
-  const voucherTotal = r2(voucherPart + Math.max(0, creditPart));
-  if (voucherTotal > 0) pieces.unshift({ type: "RefundVoucher", amount: voucherTotal });
 
-  // The receipt(s) we gave for that money: hierarchical lookup so statutory
-  // Refund Voucher (s.31(3)(e), Rule 51) always references the actual payment receipt.
-  let receipts = [];
-  if (voucherTotal > 0) {
-    if (rf.SourceOnAccountId) {
-      const oaRec = (await pool.request().input("oa", sql.Int, rf.SourceOnAccountId).query(`
-        SELECT TOP 1 oa.ReceiptNo AS No, oa.ReceivedDate AS RPDocDate, oa.SourceReceivedPaymentId
-        FROM dbo.CrmOnAccountPayment oa WHERE oa.Id = @oa`)).recordset[0];
-      if (oaRec) {
-        if (oaRec.SourceReceivedPaymentId) {
-          const rpRec = (await pool.request().input("srp", sql.Int, oaRec.SourceReceivedPaymentId).query(`
-            SELECT TOP 1 COALESCE(mr.ReceiptNo, rp.RPDocNo, rp.DocNo, @oaNo) AS No,
-                         COALESCE(mr.ReceivedDate, rp.RPDocDate, @oaDate) AS RPDocDate
-            FROM dbo.ReceivedPayment rp
-            LEFT JOIN dbo.CrmMoneyReceipt mr ON mr.ReceivedPaymentId = rp.RPPaymentID
-            WHERE rp.RPPaymentID = @srp`).input("oaNo", sql.NVarChar(50), oaRec.No).input("oaDate", sql.Date, oaRec.RPDocDate)).recordset[0];
-          receipts.push(rpRec || oaRec);
-        } else {
-          receipts.push(oaRec);
-        }
-      }
-    }
-    if (!receipts.length) {
-      receipts = (await pool.request().input("b", sql.Int, b).query(`
-        SELECT TOP 3 oa.ReceiptNo AS No, oa.ReceivedDate AS RPDocDate
-        FROM dbo.CrmOnAccountPayment oa
-        WHERE (oa.BookingId = @b OR oa.HeldFromBookingId = @b) AND oa.ReceiptNo IS NOT NULL
-        ORDER BY oa.ReceivedDate DESC, oa.Id DESC`)).recordset;
-    }
-    if (!receipts.length) {
-      receipts = (await pool.request().input("b", sql.Int, b).query(`
-        SELECT TOP 3 mr.ReceiptNo AS No, mr.ReceivedDate AS RPDocDate
-        FROM dbo.CrmMoneyReceipt mr
-        WHERE mr.BookingId = @b AND mr.Status = N'Approved'
-        ORDER BY mr.ReceivedDate DESC, mr.Id DESC`)).recordset;
-    }
-    if (!receipts.length) {
-      receipts = (await pool.request().input("b", sql.Int, b).query(`
-        SELECT TOP 3 pr.ReceiptNo AS No, pr.ReceivedDate AS RPDocDate
-        FROM dbo.CrmPaymentReceipt pr
-        JOIN dbo.CrmPaymentMilestone m ON m.Id = pr.MilestoneId
-        WHERE m.BookingId = @b AND pr.ReceiptNo IS NOT NULL
-        ORDER BY pr.ReceivedDate DESC, pr.Id DESC`)).recordset;
-    }
-    if (!receipts.length) {
-      receipts = (await pool.request().input("b", sql.Int, b).query(`
-        SELECT TOP 3 COALESCE(rp.RPDocNo, rp.DocNo, CONCAT('RP-', rp.RPPaymentID)) AS No, rp.RPDocDate AS RPDocDate
-        FROM dbo.ReceivedPayment rp
-        WHERE rp.CrmBookingId = @b AND rp.RPStatus = N'Approved'
-        ORDER BY rp.RPDocDate DESC, rp.RPPaymentID DESC`)).recordset;
-    }
-  }
-
-  // GST split of each piece: the shares add up exactly to the refund's GST.
-  let gstLeft = totalGst;
   const { getNextDocNumber } = require("./docNumber");
   const issued = [];
   const tx = new sql.Transaction(pool);
@@ -162,6 +75,104 @@ async function issueForRefund(pool, refundId, userEmail, { replacesId = null } =
     const liveNow = (await tx.request().input("r", sql.Int, refundId)
       .query("SELECT COUNT(*) AS n FROM dbo.CrmGstNote WHERE RefundId = @r AND Status <> N'Cancelled'")).recordset[0].n;
     if (liveNow) { await tx.rollback(); return { none: "already issued" }; }
+
+    // Also lock the booking: two different refunds on the SAME booking,
+    // issued back-to-back (not simultaneously), both read the uninvoiced/
+    // open-invoice sums below before either's note existed, and could
+    // double-count the same uninvoiced amount or the same invoice's open
+    // balance. Locking here (same booking-row lock crmResaleTransfer.js
+    // takes for its own writes) serializes the two issuances so the second
+    // one's sums reflect the first one's just-inserted notes.
+    await tx.request().input("b", sql.Int, b).query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @b");
+
+    const sums = (await tx.request().input("b", sql.Int, b).input("r", sql.Int, refundId).query(`
+      SELECT
+        (SELECT ISNULL(SUM(RPAmount), 0) FROM dbo.ReceivedPayment WHERE CrmBookingId = @b AND RPStatus = N'Approved' AND SourceCrmResaleId IS NULL) AS Received,
+        (SELECT ISNULL(SUM(Amount), 0) FROM dbo.CrmInvoice WHERE BookingId = @b AND Status <> N'Void' AND InvoiceType IN (N'Milestone', N'Booking', N'Final'))
+          - (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.CrmGstNote WHERE BookingId = @b AND Source = N'Adjustment' AND Status = N'Issued') AS Invoiced,
+        (SELECT ISNULL(SUM(TotalAmount), 0) FROM dbo.CrmGstNote WHERE BookingId = @b AND DocType = N'RefundVoucher' AND Status <> N'Cancelled') AS PriorVouchers,
+        (SELECT ISNULL(SUM(DeductionAmount), 0) FROM dbo.CrmRefund WHERE BookingId = @b AND Status = N'Paid' AND Id <> @r) AS PriorKept`)).recordset[0];
+    // Money still sitting as an advance (received, never invoiced, not given back or kept before).
+    const uninvoiced = Math.max(0, r2(sums.Received) - r2(sums.Invoiced) - r2(sums.PriorVouchers) - r2(sums.PriorKept));
+
+    const voucherPart = Math.min(net, uninvoiced);
+    let creditPart = r2(net - voucherPart);
+    const pieces = [];
+    if (creditPart > 0) {
+      const invoices = (await tx.request().input("b", sql.Int, b).query(`
+        SELECT i.Id, i.InvoiceNo, i.InvoiceDate, i.Amount,
+               i.Amount - ISNULL((SELECT SUM(n.TotalAmount) FROM dbo.CrmGstNote n WHERE n.InvoiceId = i.Id AND n.Status IN (N'Issued', N'TimeBarred')), 0) AS OpenAmount
+        FROM dbo.CrmInvoice i
+        WHERE i.BookingId = @b AND i.Status <> N'Void' AND i.InvoiceType IN (N'Milestone', N'Booking', N'Final')
+        ORDER BY i.InvoiceDate DESC, i.Id DESC`)).recordset;
+      for (const inv of invoices) {
+        if (!(creditPart > 0)) break;
+        const take = r2(Math.min(creditPart, Number(inv.OpenAmount)));
+        if (!(take > 0)) continue;
+        const deadline = creditNoteDeadline(inv.InvoiceDate);
+        pieces.push({ type: "CreditNote", amount: take, invoice: inv, deadline, barred: iso(rf.PaidAt || new Date()) > deadline });
+        creditPart = r2(creditPart - take);
+      }
+    }
+    // Anything not matched to an invoice is still money that came in as an advance.
+    const voucherTotal = r2(voucherPart + Math.max(0, creditPart));
+    if (voucherTotal > 0) pieces.unshift({ type: "RefundVoucher", amount: voucherTotal });
+
+    // The receipt(s) we gave for that money: hierarchical lookup so statutory
+    // Refund Voucher (s.31(3)(e), Rule 51) always references the actual payment receipt.
+    let receipts = [];
+    if (voucherTotal > 0) {
+      if (rf.SourceOnAccountId) {
+        const oaRec = (await tx.request().input("oa", sql.Int, rf.SourceOnAccountId).query(`
+          SELECT TOP 1 oa.ReceiptNo AS No, oa.ReceivedDate AS RPDocDate, oa.SourceReceivedPaymentId
+          FROM dbo.CrmOnAccountPayment oa WHERE oa.Id = @oa`)).recordset[0];
+        if (oaRec) {
+          if (oaRec.SourceReceivedPaymentId) {
+            const rpRec = (await tx.request().input("srp", sql.Int, oaRec.SourceReceivedPaymentId).query(`
+              SELECT TOP 1 COALESCE(mr.ReceiptNo, rp.RPDocNo, rp.DocNo, @oaNo) AS No,
+                           COALESCE(mr.ReceivedDate, rp.RPDocDate, @oaDate) AS RPDocDate
+              FROM dbo.ReceivedPayment rp
+              LEFT JOIN dbo.CrmMoneyReceipt mr ON mr.ReceivedPaymentId = rp.RPPaymentID
+              WHERE rp.RPPaymentID = @srp`).input("oaNo", sql.NVarChar(50), oaRec.No).input("oaDate", sql.Date, oaRec.RPDocDate)).recordset[0];
+            receipts.push(rpRec || oaRec);
+          } else {
+            receipts.push(oaRec);
+          }
+        }
+      }
+      if (!receipts.length) {
+        receipts = (await tx.request().input("b", sql.Int, b).query(`
+          SELECT TOP 3 oa.ReceiptNo AS No, oa.ReceivedDate AS RPDocDate
+          FROM dbo.CrmOnAccountPayment oa
+          WHERE (oa.BookingId = @b OR oa.HeldFromBookingId = @b) AND oa.ReceiptNo IS NOT NULL
+          ORDER BY oa.ReceivedDate DESC, oa.Id DESC`)).recordset;
+      }
+      if (!receipts.length) {
+        receipts = (await tx.request().input("b", sql.Int, b).query(`
+          SELECT TOP 3 mr.ReceiptNo AS No, mr.ReceivedDate AS RPDocDate
+          FROM dbo.CrmMoneyReceipt mr
+          WHERE mr.BookingId = @b AND mr.Status = N'Approved'
+          ORDER BY mr.ReceivedDate DESC, mr.Id DESC`)).recordset;
+      }
+      if (!receipts.length) {
+        receipts = (await tx.request().input("b", sql.Int, b).query(`
+          SELECT TOP 3 pr.ReceiptNo AS No, pr.ReceivedDate AS RPDocDate
+          FROM dbo.CrmPaymentReceipt pr
+          JOIN dbo.CrmPaymentMilestone m ON m.Id = pr.MilestoneId
+          WHERE m.BookingId = @b AND pr.ReceiptNo IS NOT NULL
+          ORDER BY pr.ReceivedDate DESC, pr.Id DESC`)).recordset;
+      }
+      if (!receipts.length) {
+        receipts = (await tx.request().input("b", sql.Int, b).query(`
+          SELECT TOP 3 COALESCE(rp.RPDocNo, rp.DocNo, CONCAT('RP-', rp.RPPaymentID)) AS No, rp.RPDocDate AS RPDocDate
+          FROM dbo.ReceivedPayment rp
+          WHERE rp.CrmBookingId = @b AND rp.RPStatus = N'Approved'
+          ORDER BY rp.RPDocDate DESC, rp.RPPaymentID DESC`)).recordset;
+      }
+    }
+
+    // GST split of each piece: the shares add up exactly to the refund's GST.
+    let gstLeft = totalGst;
     for (let i = 0; i < pieces.length; i++) {
       const p = pieces[i];
       const gst = i === pieces.length - 1 ? r2(gstLeft) : r2((totalGst * p.amount) / net);

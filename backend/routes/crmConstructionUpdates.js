@@ -47,11 +47,19 @@ router.post("/", requirePageRight("crm-construction-updates", "create"), async (
       .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
     if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
 
+    // Customer-portal-visible, so a typo'd 150 or a stray decimal shift
+    // shows up directly to buyers — PercentComplete is a percentage, not
+    // a free-form number.
+    const pctComplete = b.PercentComplete != null && b.PercentComplete !== "" ? parseFloat(b.PercentComplete) : null;
+    if (pctComplete != null && (!Number.isFinite(pctComplete) || pctComplete < 0 || pctComplete > 100)) {
+      return res.status(400).json({ error: "Percent Complete must be between 0 and 100" });
+    }
+
     await pool.request()
       .input("pid",  sql.Int,           parseInt(b.ProjectId))
       .input("proj", sql.NVarChar(200), proj.recordset[0].name)
       .input("dt",   sql.Date,          b.UpdateDate || null)
-      .input("pct",  sql.Decimal(5,2),  b.PercentComplete != null && b.PercentComplete !== "" ? parseFloat(b.PercentComplete) : null)
+      .input("pct",  sql.Decimal(5,2),  pctComplete)
       .input("stage",sql.NVarChar(100), b.Stage || null)
       .input("sum",  sql.NVarChar(sql.MAX), b.Summary || null)
       .input("photos",sql.NVarChar(sql.MAX), b.PhotoUrls ? JSON.stringify(b.PhotoUrls) : null)

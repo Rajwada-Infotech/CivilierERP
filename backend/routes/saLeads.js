@@ -296,6 +296,20 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
     });
     if (sourceError) return res.status(400).json({ error: sourceError });
 
+    // Same dedup POST / already does — this route never had it, so editing
+    // a lead's Mobile to match another active lead's number went through
+    // silently with no 409, unlike creating a lead with that same number.
+    if (b.Mobile && b.Mobile !== old.Mobile) {
+      const dup = await pool.request().input("mob", sql.NVarChar(20), b.Mobile).input("id", sql.Int, leadId)
+        .query("SELECT TOP 1 Id, LeadUid, CustomerName, Status FROM dbo.SaLead WHERE Mobile = @mob AND IsActive = 1 AND Id <> @id ORDER BY CreatedAt DESC");
+      if (dup.recordset.length) {
+        return res.status(409).json({
+          error: `A lead with this mobile number already exists: ${dup.recordset[0].LeadUid} (${dup.recordset[0].CustomerName || "no name"}, ${dup.recordset[0].Status})`,
+          existingLeadId: dup.recordset[0].Id,
+        });
+      }
+    }
+
     // Effective values actually being written — @x falls back to the
     // existing column via ISNULL below whenever the caller omits a field,
     // instead of the old behavior of writing a bare NULL over it. The audit

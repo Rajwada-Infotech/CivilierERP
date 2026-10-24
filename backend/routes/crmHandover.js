@@ -245,6 +245,18 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: "Handover requires the Possession Notice to be Acknowledged by the customer first" });
     }
 
+    // Re-check Pre-Possession here too: its three manual checklist items can
+    // be unchecked at any time (e.g. a defect found during a walkthrough),
+    // including after the notice above was already sent and Acknowledged —
+    // nothing on the notice itself re-validates when that happens. Without
+    // this, a flagged, uncorrected inspection defect would still let the
+    // unit go out the door because Handover only ever looked at the notice.
+    const pp = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (pp.recordset.length && pp.recordset[0].Status !== "Ready") {
+      return res.status(400).json({ error: `Handover requires Pre-Possession to still be Ready — it is currently ${pp.recordset[0].Status}. Resolve the open item there first.` });
+    }
+
     // Workflow guard: if an NOC (Org or Bank) was ever requested for this
     // booking, it has to have actually been issued before handover — a NOC
     // in Pending/Approved-but-not-yet-issued means the paperwork isn't
@@ -356,6 +368,16 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
         const funding = await getBookingFunding(pool, cur0.recordset[0].BookingId);
         if (funding.shortfall > 0.009) {
           return res.status(400).json({ error: `Cannot complete handover — the booking still owes ₹${Math.round(funding.shortfall).toLocaleString("en-IN")}` });
+        }
+      }
+      // Recheck Pre-Possession at completion too, same reasoning — its
+      // checklist can be unchecked (e.g. a defect found) any time after the
+      // Possession Notice was already scheduled/acknowledged.
+      {
+        const pp = await pool.request().input("bid", sql.Int, cur0.recordset[0].BookingId)
+          .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+        if (pp.recordset.length && pp.recordset[0].Status !== "Ready") {
+          return res.status(400).json({ error: `Cannot complete handover — Pre-Possession is currently ${pp.recordset[0].Status}, not Ready. Resolve the open item there first.` });
         }
       }
       if (!b.CustomerAcknowledged) {

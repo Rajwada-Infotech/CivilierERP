@@ -503,6 +503,25 @@ router.put("/:id/approve", requirePageRight("crm-resales", "edit"), async (req, 
   try {
     const email = req.user?.email || req.user?.name;
     if (!email) return res.status(401).json({ error: "Sign in again" });
+    const pool0 = getPool();
+
+    // Re-check eligibility at approval time, not just at Draft creation —
+    // the CRM-head-then-Finance chain can legitimately take days, long
+    // enough for the Sale Deed to get registered (conveyed) in the
+    // meantime. POST /deal's conveyedReason/openResaleOn checks ran once,
+    // long before this request; without re-running them here, an already-
+    // conveyed or otherwise no-longer-eligible case would still approve.
+    const caseRow = (await pool0.request().input("id", sql.Int, id)
+      .query("SELECT BookingIds FROM dbo.CrmUnitResale WHERE Id = @id AND Status = N'Pending'")).recordset[0];
+    if (caseRow?.BookingIds) {
+      const { conveyedReason, openResaleOn } = require("../services/crmResaleTransfer");
+      const bookingIds = caseRow.BookingIds.split(",").map((s) => parseInt(s, 10)).filter(Number.isInteger);
+      const conveyed = bookingIds.length ? await conveyedReason(pool0, bookingIds) : null;
+      if (conveyed) return res.status(409).json({ error: `No longer eligible — ${conveyed}` });
+      const open = bookingIds.length ? await openResaleOn(pool0, bookingIds, id) : null;
+      if (open) return res.status(409).json({ error: `No longer eligible — this property now has another open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
+    }
+
     const { transition } = require("../services/approvalService");
     const result = await transition("crm-resales", id, "Approved", email, req.user?.role, null, req.user?.userId ?? null);
     if (result.newStatus === "Approved") {
