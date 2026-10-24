@@ -10,7 +10,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -689,11 +689,14 @@ router.post("/work-done", requirePageRight("work-done", "create"), async (req, r
 
 router.put("/work-done/:id", requirePageRight("work-done", "edit"), async (req, res) => {
   let wasApproved = false;
+  let wasPending = false;
   try {
     const currentStatus = await getRecordStatus("work-done", req.params.id);
     const allowPostApproval = await resolveAllowPostApproval(req, "work-done");
-    await guardEdit("work-done", req.params.id, { allowPostApproval });
+    // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+    await guardEditAnyStage("work-done", req.params.id, { allowPostApproval });
     wasApproved = currentStatus === "Approved";
+    wasPending = currentStatus === "Pending";
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -797,7 +800,7 @@ router.put("/work-done/:id", requirePageRight("work-done", "edit"), async (req, 
       // — ignore whatever status the client sends. Mirrors
       // journalVoucher.js's wasApproved handling; Work Done doesn't post to
       // GL directly, so no reversal needed.
-      .input("Status", sql.NVarChar(50), wasApproved ? "Pending" : body.Status || "Draft")
+      .input("Status", sql.NVarChar(50), wasApproved || wasPending ? "Pending" : body.Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
       .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.WorkDone SET
@@ -858,6 +861,16 @@ router.put("/work-done/:id", requirePageRight("work-done", "edit"), async (req, 
       }
     } catch (e) {
       console.warn("[Work Done auto-submit on update]", e.message);
+    }
+
+    // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+    // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("work-done", req.params.id, userEmail, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[work-done] could not restart approval cycle after pending edit:", cycleErr.message);
+      }
     }
 
     if (wasApproved && beforeSnapshot) {
