@@ -2172,31 +2172,44 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
 
     for (let i = 0; i < tpl.PlotCount; i++) {
       const plotNo = `${prefix}${tpl.StartNumber + i}`;
-      // Existing names are skipped rather than erroring the whole run, so a
-      // partially-generated block can be completed without manual cleanup.
-      const dupe = await pool.request()
-        .input("pid", sql.Int, tpl.ProjectId).input("bid", sql.Int, blockId).input("n", sql.NVarChar(100), plotNo)
-        .query("SELECT Id FROM dbo.PlotMaster WHERE ProjectId = @pid AND BlockId = @bid AND PlotName = @n AND IsActive = 1");
-      if (dupe.recordset.length) { skipped.push(plotNo); continue; }
+      // Wrap the check+INSERT in a transaction with UPDLOCK so two concurrent
+      // generate-plots requests for the same block serialize per-plot-name —
+      // without this, both can pass the dupe-check SELECT before either
+      // INSERT commits, producing duplicate plots. Mirrors the identical fix
+      // already applied to generate-units/generate-parking-slots in this file.
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        // Existing names are skipped rather than erroring the whole run, so a
+        // partially-generated block can be completed without manual cleanup.
+        const dupe = await tx.request()
+          .input("pid", sql.Int, tpl.ProjectId).input("bid", sql.Int, blockId).input("n", sql.NVarChar(100), plotNo)
+          .query("SELECT Id FROM dbo.PlotMaster WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND PlotName = @n AND IsActive = 1");
+        if (dupe.recordset.length) { await tx.commit(); skipped.push(plotNo); continue; }
 
-      await pool.request()
-        .input("pid", sql.Int, tpl.ProjectId)
-        .input("bid", sql.Int, blockId)
-        .input("name", sql.NVarChar(100), plotNo)
-        .input("plotNo", sql.NVarChar(50), plotNo)
-        .input("area", sql.Decimal(18, 2), tpl.DefaultAreaSqFt)
-        .input("rate", sql.Decimal(18, 2), tpl.DefaultRatePerSqFt)
-        .input("facing", sql.NVarChar(20), tpl.DefaultFacing)
-        .input("road", sql.Decimal(18, 2), tpl.DefaultRoadWidthFt)
-        .input("by", sql.Int, createdBy)
-        .query(`
-          INSERT INTO dbo.PlotMaster
-            (ProjectId, BlockId, PlotName, PlotNo, AreaSqFt, RatePerSqFt,
-             Facing, RoadWidthFt, IsActive, CreatedBy, CreatedAt)
-          VALUES (@pid, @bid, @name, @plotNo, @area, @rate,
-                  @facing, @road, 1, @by, SYSDATETIME())
-        `);
-      created++;
+        await tx.request()
+          .input("pid", sql.Int, tpl.ProjectId)
+          .input("bid", sql.Int, blockId)
+          .input("name", sql.NVarChar(100), plotNo)
+          .input("plotNo", sql.NVarChar(50), plotNo)
+          .input("area", sql.Decimal(18, 2), tpl.DefaultAreaSqFt)
+          .input("rate", sql.Decimal(18, 2), tpl.DefaultRatePerSqFt)
+          .input("facing", sql.NVarChar(20), tpl.DefaultFacing)
+          .input("road", sql.Decimal(18, 2), tpl.DefaultRoadWidthFt)
+          .input("by", sql.Int, createdBy)
+          .query(`
+            INSERT INTO dbo.PlotMaster
+              (ProjectId, BlockId, PlotName, PlotNo, AreaSqFt, RatePerSqFt,
+               Facing, RoadWidthFt, IsActive, CreatedBy, CreatedAt)
+            VALUES (@pid, @bid, @name, @plotNo, @area, @rate,
+                    @facing, @road, 1, @by, SYSDATETIME())
+          `);
+        await tx.commit();
+        created++;
+      } catch (txErr) {
+        try { await tx.rollback(); } catch { /* already rolled back */ }
+        throw txErr;
+      }
     }
 
     await pool.request().input("id", sql.Int, tpl.Id)
