@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useEffect, useMemo, useState } from "react";
 import { getSocket } from '@/lib/socket';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -65,10 +66,6 @@ const STATUS_STYLE: Record<string, string> = {
   Booked: "bg-rose-500/15 text-rose-600 border border-rose-400/30",
   OnHold: "bg-amber-500/15 text-amber-600 border border-amber-400/30",
   Blocked: "bg-muted text-muted-foreground border border-border",
-};
-const PAYMENT_STATUS_STYLE: Record<string, string> = {
-  Paid: "text-emerald-600 bg-emerald-50 border-emerald-200",
-  Pending: "text-amber-600 bg-amber-50 border-amber-200",
 };
 const fmtMoney = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
@@ -397,9 +394,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
               <div><span className="text-muted-foreground block">Booking</span><span className="font-semibold text-sm">{slot.BookingNo || "Standalone parking sale"}</span></div>
               <div>
                 <span className="text-muted-foreground block">Payment Status</span>
-                <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${PAYMENT_STATUS_STYLE[slot.AllotmentPaymentStatus || ""] || ""}`}>
-                  {slot.AllotmentPaymentStatus || "—"}
-                </span>
+                {slot.AllotmentPaymentStatus ? <StatusBadge status={slot.AllotmentPaymentStatus} /> : <span className="text-xs">—</span>}
               </div>
               <div className="flex items-center gap-1"><CalendarClock size={11} className="text-muted-foreground" /><span className="text-muted-foreground">Sold on</span></div>
               <div className="font-medium">{slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"}</div>

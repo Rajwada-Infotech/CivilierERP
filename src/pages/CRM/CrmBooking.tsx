@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -58,15 +59,6 @@ const TOKEN_TYPES = ["Percentage", "Amount"];
 const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
 const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
 const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
-
-const statusColor: Record<string, string> = {
-  Pending:   "text-orange-600 bg-orange-50 border-orange-200",
-  Approved:  "text-green-600 bg-green-50 border-green-200",
-  Rejected:  "text-red-600 bg-red-50 border-red-200",
-  Cancelled: "text-muted-foreground bg-muted/50 border-border",
-  // Closed by a resale — the sale stands, the land / villa now has a new owner.
-  Transferred: "text-violet-600 bg-violet-50 border-violet-200",
-};
 
 const workflowStageLabel: Record<string, string> = {
   Review: "Application Review",
@@ -714,7 +706,7 @@ const CrmBooking: React.FC = () => {
         const b = i.row.original;
         return (
           <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
+            <StatusBadge status={b.Status} />
             {b.IsFrozen && (
               <div className="flex items-center gap-1 text-[0.625rem] font-medium text-red-600 dark:text-red-400">
                 <Lock size={10} /> Frozen

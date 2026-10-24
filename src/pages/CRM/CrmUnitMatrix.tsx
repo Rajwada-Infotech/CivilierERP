@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useEffect, useMemo, useState } from "react";
 import { getSocket } from '@/lib/socket';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -83,12 +84,6 @@ const STATUS_STYLE: Record<string, string> = {
   Booked: "bg-rose-500/15 text-rose-600 border border-rose-400/30",
   OnHold: "bg-amber-500/15 text-amber-600 border border-amber-400/30",
   Blocked: "bg-muted text-muted-foreground border border-border",
-};
-const BOOKING_STATUS_STYLE: Record<string, string> = {
-  Pending: "text-amber-600 bg-amber-50 border-amber-200",
-  Approved: "text-emerald-600 bg-emerald-50 border-emerald-200",
-  Rejected: "text-red-600 bg-red-50 border-red-200",
-  Cancelled: "text-muted-foreground bg-muted/50 border-border",
 };
 const fmtMoney = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
@@ -319,9 +314,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
                 <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold">{unit.BookingNo || "—"}</span></div>
                 <div>
                   <span className="text-muted-foreground block">Status</span>
-                  <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${BOOKING_STATUS_STYLE[unit.BookingStatus || ""] || ""}`}>
-                    {unit.BookingStatus || "—"}
-                  </span>
+                  {unit.BookingStatus ? <StatusBadge status={unit.BookingStatus} /> : <span className="text-xs">—</span>}
                 </div>
               </div>
             )}
@@ -338,9 +331,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
               <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold text-sm">{unit.BookingNo || "—"}</span></div>
               <div>
                 <span className="text-muted-foreground block">Status</span>
-                <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${BOOKING_STATUS_STYLE[unit.BookingStatus || ""] || ""}`}>
-                  {unit.BookingStatus || "—"}
-                </span>
+                {unit.BookingStatus ? <StatusBadge status={unit.BookingStatus} /> : <span className="text-xs">—</span>}
               </div>
               <div className="flex items-center gap-1"><CalendarClock size={11} className="text-muted-foreground" /><span className="text-muted-foreground">Booked on</span></div>
               <div className="font-medium">{unit.BookingDate ? String(unit.BookingDate).slice(0, 10) : "—"}</div>

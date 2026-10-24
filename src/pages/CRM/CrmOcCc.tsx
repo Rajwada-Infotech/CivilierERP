@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
+import { StatusBadge } from "@/components/StatusBadge";
 
 const API      = "/api/crm/oc-cc";
 const PROJ_API = "/api/unit-master/projects";
@@ -270,9 +271,14 @@ function CertLine({ row, onOpen }: { row: any; onOpen: () => void }) {
           : <span className={a.overdue ? "text-red-600 font-semibold" : a.warning ? "text-amber-600 font-semibold" : "text-muted-foreground"}>
               Applied {fmtDate(row.ApplicationDate) || ""}{a.days != null ? ` · ${a.days} day${a.days === 1 ? "" : "s"} pending` : ""}
             </span>}
-        <span className={`px-1.5 py-0.5 rounded-full border font-semibold ${a.received
-          ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-800"
-          : "text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-950/30 dark:border-sky-800"}`}>{row.Status}</span>
+        {/* "Received" has a shared StatusBadge entry; "Applied" doesn't exist in
+            StatusBadge's registry yet, so it keeps its original local pill
+            (see migration report — status key gap). */}
+        {row.Status === "Received" ? (
+          <StatusBadge status={row.Status} className="px-1.5 py-0.5" />
+        ) : (
+          <span className="px-1.5 py-0.5 rounded-full border font-semibold text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-300 dark:bg-sky-950/30 dark:border-sky-800">{row.Status}</span>
+        )}
         <Pencil size={11} className="text-muted-foreground" />
       </div>
     </button>

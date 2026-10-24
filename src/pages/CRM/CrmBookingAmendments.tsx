@@ -4,14 +4,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   XCircle,
-  Clock,
   FileEdit,
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge as SharedStatusBadge } from "@/components/StatusBadge";
 import {
   Dialog,
   DialogContent,
@@ -75,27 +74,6 @@ const STATUS_ACCENT: Record<AmendmentStatus, string> = {
   Approved: "border-l-emerald-500",
   Rejected: "border-l-red-500",
 };
-
-function StatusBadge({ status }: { status: AmendmentStatus }) {
-  if (status === "Approved")
-    return (
-      <Badge className="bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800">
-        {status}
-      </Badge>
-    );
-  if (status === "Rejected")
-    return (
-      <Badge className="bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800">
-        {status}
-      </Badge>
-    );
-  return (
-    <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800">
-      <Clock className="w-3 h-3 mr-1 inline" />
-      {status}
-    </Badge>
-  );
-}
 
 /** Parses ProposedChange JSON and renders as a read-only diff card. */
 function ProposedChangeDiffCard({ json }: { json: string }) {
@@ -280,7 +258,7 @@ export default function CrmBookingAmendments() {
       key: "status", header: "Status", sortKey: "Status",
       cell: (r) => (
         <div>
-          <StatusBadge status={r.Status} />
+          <SharedStatusBadge status={r.Status} />
           {r.ReviewedByName && (
             <div className="text-[0.6875rem] text-muted-foreground mt-0.5">
               by {r.ReviewedByName} ·{" "}

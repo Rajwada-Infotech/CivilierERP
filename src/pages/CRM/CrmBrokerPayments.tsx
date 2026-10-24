@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -32,12 +33,6 @@ async function fetchBrokerages(cpb?: BrokerPaymentsCpb): Promise<any[]> {
   }
   return r.json();
 }
-
-const statusColor: Record<string, string> = {
-  [CrmStatus.PENDING]:  "text-orange-600 bg-orange-50 border-orange-200",
-  [CrmStatus.APPROVED]: "text-blue-600 bg-blue-50 border-blue-200",
-  [CrmStatus.PAID]:     "text-green-600 bg-green-50 border-green-200",
-};
 
 const finStatusColor: Record<string, string> = {
   [CrmStatus.PENDING]:  "text-orange-600 bg-orange-50 border-orange-200",
@@ -127,11 +122,7 @@ const CrmBrokerPayments: React.FC = () => {
             </span>
           );
         }
-        return (
-          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[r.Status] || ""}`}>
-            {r.Status}
-          </span>
-        );
+        return <StatusBadge status={r.Status} className="text-xs px-2 py-0.5" />;
       },
     },
     {

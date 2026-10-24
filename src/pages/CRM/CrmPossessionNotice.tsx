@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmDataTable, CrmRowMenu, type CrmColumn, type RowMenuItem } from "@/components/crm/CrmDataTable";
+import { StatusBadge } from "@/components/StatusBadge";
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -56,6 +57,10 @@ const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: s
   Acknowledged: { label: "Acknowledged", badgeCls: "text-green-700 bg-green-50 border-green-200",  accent: "border-l-green-500", Icon: CheckCircle2  },
   Disputed:     { label: "Disputed",     badgeCls: "text-red-600 bg-red-50 border-red-200",        accent: "border-l-red-500",   Icon: AlertTriangle },
 };
+// "Acknowledged" and "Disputed" have no entry in the shared StatusBadge
+// registry yet (see migration report — status key gap), so only Draft/Sent
+// render via StatusBadge; the other two keep their original local pill.
+const SHARED_BADGE_STATUSES = new Set([CrmStatus.DRAFT, "Sent"]);
 
 const moneyCompact = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
 
@@ -497,6 +502,7 @@ const CrmPossessionNotice: React.FC = () => {
     { key: "unit", header: "Unit", className: "hidden md:table-cell",
       cell: (n) => <span className="text-xs whitespace-nowrap">{n.UnitNo}</span> },
     { key: "status", header: "Status", sortKey: "Status", cell: (n) => {
+      if (SHARED_BADGE_STATUSES.has(n.Status)) return <StatusBadge status={n.Status} className="whitespace-nowrap" />;
       const cfg = STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft;
       return (
         <span className={cn("inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap", cfg.badgeCls)}>

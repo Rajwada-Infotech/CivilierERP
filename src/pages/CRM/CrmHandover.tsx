@@ -19,6 +19,7 @@ import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
 import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
 
 const API        = "/api/crm/handover";
@@ -44,6 +45,11 @@ const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: s
   Completed:      { label: "Completed",        badgeCls: "text-green-600 bg-green-50 border-green-200",   accent: "border-l-green-500",  dot: "bg-green-500" },
   Cancelled:      { label: "Cancelled",        badgeCls: "text-red-600 bg-red-50 border-red-200",         accent: "border-l-red-500",    dot: "bg-red-500" },
 };
+
+// "Scheduled", "SnagInspection" and "SnagPending" have no entry in the shared
+// StatusBadge registry yet (see migration report — status key gap), so only
+// Completed/Cancelled render via StatusBadge; the others keep their local pill.
+const SHARED_BADGE_STATUSES = new Set(["Completed", CrmStatus.CANCELLED]);
 
 const statusLabel: Record<string, string> = {
   SnagInspection: "Start Inspection",
@@ -336,6 +342,7 @@ const CrmHandover: React.FC = () => {
     { key: "unit", header: "Unit", className: "hidden md:table-cell",
       cell: (h) => <span className="text-xs whitespace-nowrap">{h.UnitNo}</span> },
     { key: "status", header: "Status", sortKey: "Status", cell: (h) => {
+      if (SHARED_BADGE_STATUSES.has(h.Status)) return <StatusBadge status={h.Status} className="whitespace-nowrap" />;
       const cfg = STATUS_CONFIG[h.Status] ?? STATUS_CONFIG.Scheduled;
       return <span className={`text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${cfg.badgeCls}`}>{cfg.label}</span>;
     } },
@@ -555,11 +562,13 @@ const CrmHandover: React.FC = () => {
             {detail.handover.BookingNo} · {detail.handover.UnitNo}
           </button>
         ) : undefined}
-        badge={detail && (
+        badge={detail && (SHARED_BADGE_STATUSES.has(detail.handover.Status) ? (
+          <StatusBadge status={detail.handover.Status} />
+        ) : (
           <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${(STATUS_CONFIG[detail.handover.Status] ?? STATUS_CONFIG.Scheduled).badgeCls}`}>
             {(STATUS_CONFIG[detail.handover.Status] ?? STATUS_CONFIG.Scheduled).label}
           </span>
-        )}
+        ))}
       >
         {selectedId != null && !detail ? (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>

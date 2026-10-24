@@ -18,6 +18,7 @@ import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { CrmDataTable, type CrmColumn } from "@/components/crm/CrmDataTable";
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
 import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
+import { StatusBadge } from "@/components/StatusBadge";
 
 const API         = "/api/crm/service-tickets";
 const BKG_API     = "/api/crm/bookings";
@@ -41,6 +42,10 @@ const statusColor: Record<string, string> = {
   Closed:     "text-muted-foreground bg-muted/50 border-border",
   Reopened:   "text-red-600 bg-red-50 border-red-200",
 };
+// "Assigned" and "Reopened" have no entry in the shared StatusBadge registry
+// yet (see migration report — status key gap), so only Open/InProgress/
+// Resolved/Closed render via StatusBadge; the other two keep their local pill.
+const SHARED_BADGE_STATUSES = new Set([CrmStatus.OPEN, CrmStatus.IN_PROGRESS, CrmStatus.RESOLVED, CrmStatus.CLOSED]);
 const STATUS_ACCENT: Record<string, string> = {
   Open:       "border-l-sky-400",
   Assigned:   "border-l-blue-400",
@@ -236,7 +241,9 @@ const CrmServiceTickets: React.FC = () => {
         );
       } },
     { key: "status", header: "Status", sortKey: "Status",
-      cell: (t) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${statusColor[t.Status] || ""}`}>{t.Status}</span> },
+      cell: (t) => SHARED_BADGE_STATUSES.has(t.Status)
+        ? <StatusBadge status={t.Status} className="whitespace-nowrap" />
+        : <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${statusColor[t.Status] || ""}`}>{t.Status}</span> },
     { key: "rating", header: "Rating", className: "hidden xl:table-cell",
       cell: (t) => t.CustomerRating ? (
         <span className="flex items-center gap-0.5 text-yellow-500 text-xs whitespace-nowrap">

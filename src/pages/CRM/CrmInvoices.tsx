@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -593,11 +594,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-semibold text-primary">{b.BookingNo}</span>
-                        <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
-                          b.Status === CrmStatus.APPROVED ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                            : b.Status === CrmStatus.REJECTED || b.Status === CrmStatus.CANCELLED ? "text-red-700 bg-red-50 border-red-200"
-                            : "text-sky-700 bg-sky-50 border-sky-200"
-                        }`}>{b.Status}</span>
+                        <StatusBadge status={b.Status} className="text-[0.625rem] px-1.5 py-0.5 shrink-0" />
                       </div>
                       <div className="text-sm font-medium truncate"><ApplicantNames name={b.ApplicantName} bookingId={b.BookingId} applicationId={b.ApplicationId} /></div>
                       <div className="text-xs text-muted-foreground truncate">

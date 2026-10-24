@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -21,14 +22,6 @@ import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 
 const API = "/api/crm/cancellations";
 const BKG_API = "/api/crm/bookings";
-
-const statusColor: Record<string, string> = {
-  Pending:  "text-orange-600 bg-orange-50 border-orange-200",
-  FinancePending: "text-purple-600 bg-purple-50 border-purple-200",
-  Approved: "text-blue-600 bg-blue-50 border-blue-200",
-  Rejected: "text-red-600 bg-red-50 border-red-200",
-  Refunded: "text-green-600 bg-green-50 border-green-200",
-};
 
 const fmt = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
@@ -188,7 +181,7 @@ const CrmCancellations: React.FC = () => {
         const net = Math.max(0, Number(r.AmountPaidTillDate || 0) - Math.round(Number(r.AmountPaidTillDate || 0) * Number(r.DeductionPercent || 0)) / 100);
         return <span className="font-semibold text-green-600" title={`The full ${fmt(r.AmountPaidTillDate)} is held as credit; a re-booking uses all of it`}>{fmt(net)}</span>; } },
     { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
+      cell: (i) => <StatusBadge status={i.row.original.Status} className="text-xs px-2 py-0.5" /> },
     { accessorKey: "RequestedDate", header: "Requested", size: 100,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.RequestedDate ? String(i.row.original.RequestedDate).slice(0, 10) : "—"}</span> },
     { id: "actions", header: "Actions", size: 160, enableSorting: false,

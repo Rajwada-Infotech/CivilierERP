@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -38,11 +39,6 @@ const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: s
   Issued:   { label: "Issued",   badgeCls: "text-emerald-700 bg-emerald-50 border-emerald-200", accent: "border-l-emerald-500" },
   Rejected: { label: "Rejected", badgeCls: "text-rose-700 bg-rose-50 border-rose-200",         accent: "border-l-rose-500" },
 };
-
-function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_CONFIG[status] ?? STATUS_CONFIG.Pending;
-  return <span className={cn("text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap", c.badgeCls)}>{c.label}</span>;
-}
 
 // ─── Detail row ────────────────────────────────────────────────────────────
 

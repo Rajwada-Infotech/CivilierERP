@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -23,11 +24,6 @@ const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
 const BROKER_API = "/api/account-head?type=BR";
 
-const statusColor: Record<string, string> = {
-  Pending: "text-orange-600 bg-orange-50 border-orange-200",
-  Approved: "text-blue-600 bg-blue-50 border-blue-200",
-  Paid: "text-green-600 bg-green-50 border-green-200",
-};
 const STATUS_ACCENT: Record<string, string> = {
   Pending: "border-l-orange-400",
   Approved: "border-l-blue-400",
@@ -257,7 +253,7 @@ const CrmBrokerage: React.FC = () => {
         );
       } },
     { key: "status", header: "Status", sortKey: "Status",
-      cell: (r) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${statusColor[r.Status] || ""}`}>{r.Status}</span> },
+      cell: (r) => <StatusBadge status={r.Status} className="text-xs px-2 py-0.5 whitespace-nowrap" /> },
     { key: "actions", header: <span className="sr-only">Actions</span>, align: "right", className: "w-px whitespace-nowrap",
       cell: (r) => {
         if (r.IsLocked) {

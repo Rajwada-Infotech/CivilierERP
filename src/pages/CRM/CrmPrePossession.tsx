@@ -10,6 +10,7 @@ import {
   ChevronRight, Circle, CreditCard, Send, Check,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { StatusBadge } from "@/components/StatusBadge";
 import { useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
@@ -40,6 +41,10 @@ const STATUS_CONFIG: Record<string, { label: string; badge: string; accent: stri
   Ready:      { label: "Ready",       badge: "bg-green-50 text-green-700 border-green-200",    accent: "border-l-green-500"  },
   Blocked:    { label: "Blocked",     badge: "bg-red-50 text-red-700 border-red-200",          accent: "border-l-red-500"    },
 };
+// "Ready" has no entry in the shared StatusBadge registry yet (see migration
+// report — status key gap), so only these three statuses render via
+// StatusBadge; "Ready" keeps its original local pill below.
+const SHARED_BADGE_STATUSES = new Set(["Pending", "InProgress", "Blocked"]);
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
@@ -434,6 +439,7 @@ const CrmPrePossession: React.FC = () => {
     { key: "unit", header: "Unit", className: "hidden md:table-cell",
       cell: (c) => <span className="text-xs whitespace-nowrap">{c.UnitNo}</span> },
     { key: "status", header: "Status", sortKey: "Priority", cell: (c) => {
+      if (SHARED_BADGE_STATUSES.has(c.Status)) return <StatusBadge status={c.Status} className="whitespace-nowrap" />;
       const st = STATUS_CONFIG[c.Status] ?? STATUS_CONFIG.Pending;
       return <span className={cn("text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold whitespace-nowrap", st.badge)}>{st.label}</span>;
     } },
@@ -604,7 +610,9 @@ const CrmPrePossession: React.FC = () => {
         onClose={() => setSelectedId(null)}
         title={selected?.ApplicantName ?? ""}
         subtitle={selected ? `${selected.BookingNo} · ${selected.UnitNo}` : undefined}
-        badge={st && <span className={cn("text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold", st.badge)}>{st.label}</span>}
+        badge={st && (selected && SHARED_BADGE_STATUSES.has(selected.Status)
+          ? <StatusBadge status={selected.Status} />
+          : <span className={cn("text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold", st.badge)}>{st.label}</span>)}
         footer={selected?.Status === "Ready" ? (
           <button onClick={() => sendNotice(selected)}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">

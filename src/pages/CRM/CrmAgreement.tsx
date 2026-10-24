@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { StatusBadge } from "@/components/StatusBadge";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,12 +35,6 @@ const USERS_API = "/api/users";
 
 const DOC_TYPES = ["SaleAgreement", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
 
-const agrStatusColor: Record<string, string> = {
-  Draft:      "text-muted-foreground bg-muted/50 border-border",
-  Executed:   "text-blue-600 bg-blue-50 border-blue-200",
-  Registered: "text-green-600 bg-green-50 border-green-200",
-  Cancelled:  "text-red-600 bg-red-50 border-red-200",
-};
 
 function isBookingCancelled(a: { BookingStatus?: string | null; BookingIsActive?: boolean | null }): boolean {
   return a.BookingIsActive === false || ["Cancelled", "Rejected"].includes(a.BookingStatus || "");
@@ -1131,7 +1126,7 @@ const CrmAgreement: React.FC = () => {
                   <div className="flex-1 min-w-0 p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} /></span>
-                      <span className={`shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
+                      <StatusBadge status={a.Status} className="shrink-0" />
                     </div>
                     {isBookingCancelled(a) && (
                       <div className="text-[0.625rem] font-semibold text-red-600">⚠ Booking {a.BookingStatus || "inactive"} — locked</div>
@@ -1185,9 +1180,7 @@ const CrmAgreement: React.FC = () => {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h2 className="font-bold text-base text-foreground leading-tight truncate"><ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} /></h2>
-                      <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${agrStatusColor[detail.agreement?.Status] || ""}`}>
-                        {detail.agreement?.Status}
-                      </span>
+                      <StatusBadge status={detail.agreement?.Status} />
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       <span className="font-mono">{detail.agreement?.AgreementNo}</span>
