@@ -14,6 +14,22 @@ const { logCrmAudit } = require("../services/crmAudit");
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+// The Unit and Parking Matrix are where holds are placed, released and extended, under their own rights (placing is
+// "create" there, release / extend "edit"); this route only accepted the Bookings edit right, so a matrix user without
+// it was refused. Either now passes.
+const { hasAnyPageAction } = require("../middleware/requirePageRight");
+const holdRight = (matrixAction) => async (req, res, next) => {
+  try {
+    if (await hasAnyPageAction(req, "crm-bookings", ["edit"])
+      || await hasAnyPageAction(req, "crm-unit-matrix", [matrixAction])
+      || await hasAnyPageAction(req, "crm-parking-matrix", [matrixAction])) return next();
+    return res.status(403).json({ error: "You don't have the right to change holds." });
+  } catch (err) {
+    console.error("[crm-holds] right check failed:", err.message);
+    return res.status(500).json({ error: "Permission check error" });
+  }
+};
+
 const HOLD_SELECT = `
   SELECT h.*, a.ApplicationNo, a.ApplicantName, a.Mobile, cb.name AS CreatedByName
   FROM dbo.CrmInventoryHold h
@@ -22,7 +38,7 @@ const HOLD_SELECT = `
 `;
 
 // POST / — place a hold on a unit or parking slot for N days
-router.post("/", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.post("/", holdRight("create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body || {};
@@ -45,7 +61,7 @@ router.post("/", requirePageRight("crm-bookings", "edit"), async (req, res) => {
 });
 
 // PUT /:id/release — manually release a hold early (back to Available)
-router.put("/:id/release", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/release", holdRight("edit"), async (req, res) => {
   try {
     const pool = getPool();
     await releaseHold(pool, parseInt(req.params.id), actorId(req));
@@ -60,7 +76,7 @@ router.put("/:id/release", requirePageRight("crm-bookings", "edit"), async (req,
 // Matrix have offered "Extend hold" (1-90 days) all along, but this route
 // never existed, so the button always failed. Extends from the later of now
 // and the current end date; only an Active hold can be extended.
-router.put("/:id/extend", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/extend", holdRight("edit"), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const days = parseInt(req.body?.AdditionalDays, 10);

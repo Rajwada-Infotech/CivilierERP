@@ -727,7 +727,8 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
 // Registered BEFORE POST /:bookingId deliberately — Express matches routes
 // in registration order, and "/:bookingId" is a single-segment param that
 // would otherwise greedily match the literal path "/standalone" too.
-router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
+// The Parking Matrix sells a slot from here too (its "Sell now"), under its own edit right.
+router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications", "crm-parking-matrix"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;

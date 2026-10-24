@@ -4,7 +4,8 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 
 router.use(authMiddleware);
@@ -17,7 +18,7 @@ router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit
     const result = await pool.request().query(`
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
-      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0
+      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0${projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -35,9 +36,11 @@ router.get("/blocks", requirePageRight("crm-unit-matrix", "view"), async (req, r
     const request = pool.request();
     let query = "SELECT Id, BlockName AS Name FROM dbo.BlockMaster WHERE IsActive = 1";
     if (Number.isFinite(projectId)) {
+      if (!assertProjectAllowed(req, res, projectId)) return;
       request.input("pid", sql.Int, projectId);
       query += " AND ProjectId = @pid";
     }
+    query += projectPredicate(req.projectScope, "ProjectId");
     query += " ORDER BY BlockName";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -70,6 +73,8 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    // A user limited to some projects sees only their matrices (any project id used to be served).
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
@@ -171,6 +176,8 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    // A user limited to some projects sees only their matrices (any project id used to be served).
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);
@@ -306,6 +313,31 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
   } catch (err) {
     console.error("[unit-matrix] GET error:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /customers?projectId= — who a unit, plot or parking slot can be held or sold for on the matrix: every live
+// application of that project (rejected, cancelled and expired ones aside), converted ones included, since a customer
+// who has booked a flat is the usual buyer of its parking. Under the matrix rights: the matrices used to read
+// Applications' own list (that page's right, and converted applications left out).
+router.get("/customers", requireAnyPageRight(["crm-unit-matrix", "crm-parking-matrix"], "view"), async (req, res) => {
+  try {
+    const projectId = parseInt(req.query.projectId, 10);
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    if (!assertProjectAllowed(req, res, projectId)) return;
+    const result = await getPool().request().input("pid", sql.Int, projectId).query(`
+      SELECT a.Id, a.ApplicationNo, a.ApplicantName, a.Mobile, a.Status,
+             (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
+               WHERE b.ApplicationId = a.Id AND b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected')
+               ORDER BY b.Id DESC) AS BookingNo
+      FROM dbo.CrmApplication a
+      WHERE a.ProjectId = @pid AND a.IsActive = 1 AND a.Status NOT IN ('Rejected', 'Cancelled', 'Expired')
+      ORDER BY a.ApplicantName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[unit-matrix] GET /customers error:", err.message);
+    res.status(500).json({ error: "Could not load the customers." });
   }
 });
 
