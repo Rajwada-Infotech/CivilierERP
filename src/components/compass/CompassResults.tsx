@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { Command as CommandPrimitive } from "cmdk";
 import type { CompassEntry } from "./compassRegistry";
 import type { CompassGroup } from "./compassSearch";
@@ -7,12 +8,15 @@ import { CompassSection } from "./CompassSection";
 // What sits under the search line: the matching pages grouped by module while there's a query, otherwise the pages
 // visited recently and an index of modules to jump to. Rows are numbered straight down the list.
 export function CompassResults({
+  listRef,
   query,
   groups,
   recent,
   landings,
   onSelect,
 }: {
+  /** The scrolling list, so the panel can put it back at the top. */
+  listRef?: RefObject<HTMLDivElement>;
   query: string;
   groups: CompassGroup[];
   recent: CompassEntry[];
@@ -23,7 +27,7 @@ export function CompassResults({
   let n = 0;
 
   return (
-    <CommandPrimitive.List className="thin-scroll" label="Pages">
+    <CommandPrimitive.List ref={listRef} className="thin-scroll" label="Pages">
       {q ? (
         groups.length === 0 ? (
           <p className="c-empty">No pages match “{q}”.</p>

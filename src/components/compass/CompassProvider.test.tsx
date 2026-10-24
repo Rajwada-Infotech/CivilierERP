@@ -254,6 +254,24 @@ describe("Compass recent pages", () => {
     expect(screen.queryByText("Recent")).not.toBeInTheDocument();
   });
 
+  it("opens on the latest recent page, at the top of the list", async () => {
+    localStorage.setItem("compass:recent:v1:u1", JSON.stringify(["/finance", "/trial-balance"]));
+    mount("/home");
+    press();
+    await screen.findByRole("dialog");
+    const latest = screen.getByText("Proceeding").closest("[cmdk-item]")!; // /finance's label
+    await waitFor(() => expect(latest).toHaveAttribute("aria-selected", "true"));
+    const list = document.querySelector("[cmdk-list]") as HTMLElement;
+    expect(list.scrollTop).toBe(0);
+
+    // Scrolled down and searched again: back to the first match, at the top.
+    list.scrollTop = 400;
+    fireEvent.change(input(), { target: { value: "trial balance" } });
+    const match = (await screen.findAllByText("Trial Balance"))[0].closest("[cmdk-item]")!;
+    await waitFor(() => expect(match).toHaveAttribute("aria-selected", "true"));
+    expect(list.scrollTop).toBe(0);
+  });
+
   it("survives corrupt storage", async () => {
     localStorage.setItem("compass:recent:v1:u1", "{not json");
     mount("/finance");
