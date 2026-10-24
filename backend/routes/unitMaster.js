@@ -136,7 +136,7 @@ router.get("/projects", cache("unit-master-projects", 600, { dropOnAnyWrite: tru
       SELECT id AS Id, name AS Name, company_id AS CompanyId
       FROM dbo.enterprise
       WHERE business_type = 'P'
-        AND ISNULL(discontinue, 0) = 0
+        AND ISNULL(discontinue, 0) = 0${require("../services/projectScope").projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
