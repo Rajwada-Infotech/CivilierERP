@@ -87,7 +87,7 @@ export default function Login() {
       <div className="bw-login-lift relative z-10 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,34%)] min-h-screen">
           <LoginHero stats={stats} />
 
-          <div className="flex justify-center items-center px-5 py-10 sm:px-10 lg:border-l" style={{ borderColor: "var(--rule)", background: "rgba(20,16,42,0.78)" }}>
+          <div className="flex justify-center items-center px-5 py-12 sm:px-12 xl:px-16 lg:border-l" style={{ borderColor: "var(--rule)", background: "rgba(20,16,42,0.78)" }}>
             <LoginCard
               email={email}
               password={password}

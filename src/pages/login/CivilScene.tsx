@@ -2,7 +2,7 @@
 // ── Blueprint SVG scene (crane) ───────────────────────────────────────────────
 export function CivilScene() {
   return (
-    <svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" className="w-full h-full" style={{ overflow: "visible" }}>
+    <svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" className="w-full h-full" preserveAspectRatio="xMidYMax meet" style={{ overflow: "visible" }}>
       <defs>
         <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
           <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(167,139,250,0.18)" strokeWidth="0.8" />

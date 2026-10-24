@@ -33,7 +33,7 @@ export const LOGIN_CSS = `
   font-variant-numeric: tabular-nums; color: var(--ink);
 }
 .login-sheet .ls-input {
-  width: 100%; height: 44px; padding: 0 12px; background: rgba(255, 255, 255, 0.03); color: var(--ink);
+  width: 100%; height: 48px; padding: 0 14px; background: rgba(255, 255, 255, 0.03); color: var(--ink);
   border: 1px solid var(--rule-soft); border-radius: 0; outline: none; font-size: 14px;
   transition: border-color .15s, background-color .15s;
 }
@@ -41,7 +41,7 @@ export const LOGIN_CSS = `
 .login-sheet .ls-input:hover { border-color: var(--rule); }
 .login-sheet .ls-input:focus { border-color: var(--violet); background: rgba(139, 92, 246, 0.08); box-shadow: 0 0 0 1px var(--violet); }
 .login-sheet .ls-btn {
-  width: 100%; height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   background: var(--violet-deep); color: #fff; border: 1px solid var(--violet); border-radius: 0;
   font-family: "Sora", sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   transition: background-color .15s, border-color .15s;
