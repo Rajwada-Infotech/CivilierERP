@@ -1,4 +1,4 @@
-// Sign in. Parts under ./login: config (the sheet look, public figures type) · LoginHero · LoginCard · WelcomeBack · CivilScene
+// Sign in. Parts under ./login: config (the look, public figures type) · LoginHero (and the phone band) · LoginCard · WelcomeBack
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { LOGIN_CSS, type PublicStats } from "./login/config";
-import { LoginHero } from "./login/LoginHero";
+import { LoginBand, LoginHero } from "./login/LoginHero";
 import { LoginCard } from "./login/LoginCard";
 import { WelcomeBack } from "./login/WelcomeBack";
 
@@ -67,27 +67,19 @@ export default function Login() {
   return (
     <div
       className="login-page login-sheet min-h-screen w-full overflow-x-hidden overflow-y-auto relative"
-      style={{ background: "var(--ground)" }}
+      style={{ background: "var(--concrete)" }}
     >
       <style>{LOGIN_CSS}</style>
 
-      {/* The drawing grid, and a still wash of violet in the top corner */}
-      <div
-        className="absolute inset-0 z-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            "radial-gradient(60% 50% at 0% 0%, rgba(124,58,237,0.22), transparent 70%), linear-gradient(rgba(167,139,250,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(167,139,250,0.07) 1px, transparent 1px)",
-          backgroundSize: "auto, 28px 28px, 28px 28px",
-        }}
-      />
-
       <AnimatePresence>{loginSuccess && <WelcomeBack name={loginName} />}</AnimatePresence>
 
-      {/* The whole screen: headline and figures on the left, the sign-in panel on the right */}
-      <div className="bw-login-lift relative z-10 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,34%)] min-h-screen">
+      {/* The whole screen: the hoarding on the left (a band on a phone), the sign-in side on the right. The sign-in side
+          stays the last child: the black-and-white theme keeps the logo in colour through it. */}
+      <div className="bw-login-lift relative z-10 grid grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(440px,1fr)] min-h-screen">
+          <LoginBand />
           <LoginHero stats={stats} />
 
-          <div className="flex justify-center items-center px-5 py-12 sm:px-12 xl:px-16 lg:border-l" style={{ borderColor: "var(--rule)", background: "rgba(20,16,42,0.78)" }}>
+          <div className="flex justify-center items-center px-5 sm:px-12 xl:px-20" style={{ background: "var(--paper)", paddingBlock: "min(2.5rem, 2vh)" }}>
             <LoginCard
               email={email}
               password={password}

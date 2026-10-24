@@ -1,6 +1,6 @@
-// Left of the sign-in page: the headline, what the product covers and the company's figures, over the site drawing.
+// Left of the sign-in page: the site hoarding. The headline, what the product covers and the company's figures on a
+// charcoal board with a hazard stripe down its edge. On a phone it shrinks to a band above the form.
 import React, { useEffect, useState } from "react";
-import { CivilScene } from "./CivilScene";
 import type { PublicStats } from "./config";
 
 // Types a rotating tagline one letter at a time.
@@ -26,6 +26,21 @@ function useTypewriter(words: string[], speed = 60, pause = 2400) {
 const TAGLINES = ["Built for Civil Contractors", "Project Insights at a Glance", "One Platform. Total Control."];
 const num = (n: number | undefined) => (n ?? 0).toLocaleString("en-IN");
 
+/** The hoarding on a phone: the name and the headline in a band, the stripe along its foot. */
+export function LoginBand() {
+  return (
+    <div className="lg:hidden relative" style={{ background: "var(--board)", color: "var(--chalk)" }}>
+      <div className="px-6 pt-6 pb-7">
+        <p className="eyebrow" style={{ color: "var(--hivis)" }}>CivilierERP · Construction ERP</p>
+        <p className="display mt-3" style={{ fontSize: 34 }}>
+          Manage <span style={{ color: "var(--hivis)" }}>smarter</span>,<br />build better.
+        </p>
+      </div>
+      <div className="hazard h-2.5" />
+    </div>
+  );
+}
+
 export function LoginHero({ stats }: { stats: PublicStats | null }) {
   const tagline = useTypewriter(TAGLINES);
   const cells: { label: string; value: number | undefined }[] = [
@@ -38,73 +53,61 @@ export function LoginHero({ stats }: { stats: PublicStats | null }) {
   const pct = Math.min(100, Math.max(0, stats?.workOrderCompletionPct ?? 0));
 
   return (
-    <div className="hidden lg:flex flex-col relative overflow-hidden px-12 xl:px-20 min-h-screen" style={{ paddingTop: "min(3.5rem, 6vh)", paddingBottom: "min(3rem, 5vh)" }}>
-      {/* Eyebrow on a rule that runs to the panel */}
-      <div className="relative z-10 flex items-center gap-4 ls-in">
-        <p className="label shrink-0" style={{ color: "var(--violet-soft)" }}>CivilierERP · Construction ERP</p>
-        <span className="h-px flex-1" style={{ background: "var(--rule-soft)" }} />
-      </div>
+    <div className="hidden lg:flex relative min-h-screen" style={{ background: "var(--board)", color: "var(--chalk)" }}>
+      <div className="flex-1 flex flex-col min-w-0 px-12 xl:px-20" style={{ paddingTop: "min(3.5rem, 6vh)", paddingBottom: "min(3rem, 5vh)" }}>
+        {/* Name plate */}
+        <div className="flex items-center justify-between gap-4 ls-in">
+          <p className="font-heading font-bold text-lg tracking-tight">CivilierERP</p>
+          <p className="eyebrow" style={{ color: "var(--chalk-2)" }}>Construction ERP</p>
+        </div>
 
-      <div className="relative z-10 ls-in" style={{ animationDelay: "60ms", marginTop: "min(3.5rem, 5vh)" }}>
-        <h1 className="font-heading font-bold" style={{ letterSpacing: "-0.035em", lineHeight: 0.98, color: "var(--ink)", textWrap: "balance" }}>
-          <span className="block" style={{ fontSize: "clamp(20px, 1.7vw, 28px)", letterSpacing: "-0.01em", color: "var(--graphite)", fontWeight: 600, marginBottom: "0.55em" }}>
-            CivilierERP —
-          </span>
-          <span className="block" style={{ fontSize: "clamp(40px, min(5vw, 8.5vh), 84px)", color: "var(--violet-soft)" }}>Manage Smarter,</span>
-          <span className="block" style={{ fontSize: "clamp(40px, min(5vw, 8.5vh), 84px)" }}>Build Better.</span>
-        </h1>
-
-        <div className="grid gap-4 max-w-xl" style={{ gridTemplateColumns: "2px minmax(0,1fr)", marginTop: "min(2rem, 3.5vh)" }}>
-          <span style={{ background: "var(--violet)" }} />
-          <div>
-            <p className="flex items-center gap-2 text-[15px] font-medium h-6" style={{ color: "var(--ink)" }} aria-live="off">
-              <span className="whitespace-nowrap">{tagline}</span>
-              <span className="inline-block w-px h-4 animate-pulse" style={{ background: "var(--violet-soft)" }} />
-            </p>
-            <p className="mt-2 text-[15px] leading-relaxed" style={{ color: "var(--graphite)", maxWidth: "52ch" }}>
-              From procurement and material tracking to contractor management and live project dashboards — CivilierERP gives your team total visibility and control.
-            </p>
+        {/* The headline is the page */}
+        <div className="my-auto" style={{ paddingBlock: "min(2.5rem, 4vh)" }}>
+          <p className="eyebrow ls-in" style={{ color: "var(--hivis)", animationDelay: "60ms" }}>CivilierERP —</p>
+          <h1 className="display mt-5 ls-in" style={{ fontSize: "clamp(40px, min(4.8vw, 9.5vh), 104px)", animationDelay: "120ms" }}>
+            <span className="block whitespace-nowrap">Manage <span style={{ color: "var(--hivis)" }}>smarter</span>,</span>
+            <span className="block whitespace-nowrap">build better.</span>
+          </h1>
+          <div className="flex items-center gap-3 ls-in" style={{ animationDelay: "200ms", marginTop: "min(2.25rem, 4vh)" }} aria-live="off">
+            <span className="w-2.5 h-2.5 shrink-0" style={{ background: "var(--hivis)" }} />
+            <span className="font-heading font-semibold text-lg whitespace-nowrap">{tagline}</span>
+            <span className="inline-block w-[2px] h-5 animate-pulse" style={{ background: "var(--hivis)" }} />
           </div>
+          <p className="mt-4 text-[17px] leading-relaxed ls-in" style={{ color: "var(--chalk-2)", maxWidth: "46ch", animationDelay: "240ms" }}>
+            From procurement and material tracking to contractor management and live project dashboards — CivilierERP gives your team total visibility and control.
+          </p>
         </div>
-      </div>
 
-      {/* The drawing takes whatever height is left between the words and the figures, so it never runs into the text;
-          it stands on the figures' top rule. */}
-      <div className="relative flex-1 min-h-[90px] pointer-events-none" style={{ marginTop: "min(2rem, 3vh)" }} aria-hidden="true">
-        <div className="absolute inset-0" style={{ opacity: 0.75 }}>
-          <CivilScene />
-        </div>
-        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, var(--ground) 0%, rgba(13,10,26,0) 25%)" }} />
-      </div>
-
-      {/* Figures: one ruled strip along the foot of the sheet */}
-      <div className="relative z-10 ls-in" style={{ animationDelay: "140ms" }}>
-        <div className="grid grid-cols-3 min-[1800px]:grid-cols-6" style={{ gap: 1, background: "var(--rule-soft)", border: "1px solid var(--rule)" }}>
-          {cells.map((c) => (
-            <div key={c.label} className="px-5 py-3.5" style={{ background: "rgba(16,12,34,0.94)" }}>
-              <p className="label">{c.label}</p>
+        {/* Figures: big numbers on hairline rules */}
+        <div className="grid grid-cols-3 ls-in" style={{ borderTop: "1px solid var(--chalk-rule)", animationDelay: "300ms" }}>
+          {cells.map((c, i) => (
+            <div key={c.label} className="pr-4" style={{ paddingBlock: "min(1.25rem, 2.2vh)", borderBottom: i < 3 ? "1px solid var(--chalk-rule)" : undefined, borderLeft: i % 3 ? "1px solid var(--chalk-rule)" : undefined, paddingLeft: i % 3 ? 20 : 0 }}>
               {stats ? (
-                <p className="figure mt-3" style={{ fontSize: "clamp(24px, 2vw, 32px)" }}>{num(c.value)}</p>
+                <p className="num" style={{ fontSize: "clamp(30px, min(2.8vw, 5vh), 46px)" }}>{num(c.value)}</p>
               ) : (
-                <div className="mt-3 h-7 w-14 animate-pulse" style={{ background: "var(--rule-soft)" }} />
+                <div className="h-9 w-16 animate-pulse rounded" style={{ background: "var(--chalk-rule)" }} />
               )}
+              <p className="mt-2 text-[13px]" style={{ color: "var(--chalk-2)" }}>{c.label}</p>
             </div>
           ))}
-          <div className="px-5 py-3.5" style={{ background: "rgba(16,12,34,0.94)" }}>
-            <p className="label">Work completed</p>
+          <div className="pr-4" style={{ paddingBlock: "min(1.25rem, 2.2vh)", borderLeft: "1px solid var(--chalk-rule)", paddingLeft: 20 }}>
             {stats ? (
-              <>
-                <p className="figure mt-3" style={{ fontSize: "clamp(24px, 2vw, 32px)" }}>{pct}%</p>
-                <div className="mt-2.5 h-1" style={{ background: "var(--rule-soft)" }}>
-                  <div className="h-full" style={{ width: `${pct}%`, background: "var(--violet)" }} />
-                </div>
-              </>
+              <p className="num" style={{ fontSize: "clamp(30px, min(2.8vw, 5vh), 46px)" }}>
+                {pct}<span style={{ color: "var(--hivis)" }}>%</span>
+              </p>
             ) : (
-              <div className="mt-3 h-7 w-14 animate-pulse" style={{ background: "var(--rule-soft)" }} />
+              <div className="h-9 w-16 animate-pulse rounded" style={{ background: "var(--chalk-rule)" }} />
             )}
+            <p className="mt-2 text-[13px]" style={{ color: "var(--chalk-2)" }}>Work completed</p>
+            <div className="mt-2.5 h-[3px] max-w-[160px]" style={{ background: "var(--chalk-rule)" }}>
+              <div className="h-full" style={{ width: `${pct}%`, background: "var(--hivis)" }} />
+            </div>
           </div>
         </div>
       </div>
+
+      {/* The hazard stripe down the board's edge */}
+      <div className="hazard w-4 shrink-0" aria-hidden="true" />
     </div>
   );
 }
