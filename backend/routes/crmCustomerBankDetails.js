@@ -150,11 +150,9 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 
     const result = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
-             CASE WHEN LEN(d.AccountNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AccountNo) - 4), RIGHT(d.AccountNo, 4)) ELSE d.AccountNo END AS AccountNo,
-             d.IfscCode, d.AccountHolderName,
+             d.AccountNo, d.IfscCode, d.AccountHolderName,
              d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
-             CASE WHEN LEN(d.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.PanNo) - 4), RIGHT(d.PanNo, 4)) ELSE d.PanNo END AS PanNo,
-             CASE WHEN LEN(d.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AadhaarNo) - 4), RIGHT(d.AadhaarNo, 4)) ELSE d.AadhaarNo END AS AadhaarNo,
+             d.PanNo, d.AadhaarNo,
              d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
              d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
              vu.name AS BookingStageVerifiedByName
@@ -385,11 +383,9 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
       SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
-             CASE WHEN LEN(d.AccountNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AccountNo) - 4), RIGHT(d.AccountNo, 4)) ELSE d.AccountNo END AS AccountNo,
-             d.IfscCode, d.AccountHolderName,
+             d.AccountNo, d.IfscCode, d.AccountHolderName,
              d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
-             CASE WHEN LEN(d.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.PanNo) - 4), RIGHT(d.PanNo, 4)) ELSE d.PanNo END AS PanNo,
-             CASE WHEN LEN(d.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(d.AadhaarNo) - 4), RIGHT(d.AadhaarNo, 4)) ELSE d.AadhaarNo END AS AadhaarNo,
+             d.PanNo, d.AadhaarNo,
              d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
              d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
              vu.name AS BookingStageVerifiedByName
@@ -404,12 +400,15 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // staff never have to retype data the system already captured at
     // Customer intake (dbo.CrmCustomer). Flagged _prefilledFrom so the UI can
     // lock these fields for review/confirm rather than freshly-typed edit.
+    // Unmasked, like the saved-row branch above: this feeds the same
+    // editable save form, and the Aadhaar/AccountNo regex checks (both here
+    // and on the frontend) reject a masked value's "XXXX" placeholder
+    // characters outright, so a masked value round-tripped unmodified either
+    // silently corrupts the real stored value (no format check at all) or
+    // blocks every save until the field is retyped — masking a value this
+    // form will write straight back was the bug, not a privacy improvement.
     const prefill = await pool.request().input("aid", sql.Int, aid).query(`
-      SELECT
-        CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
-        c.CustomerName AS AccountHolderName,
-        CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
-        c.Occupation, c.AnnualIncome
+      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
       FROM dbo.CrmApplication a
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE a.Id = @aid
