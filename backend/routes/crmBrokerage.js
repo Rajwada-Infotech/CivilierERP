@@ -393,9 +393,15 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     const rateValue = parseFloat(b.RateValue);
     if (!rateValue || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
     const bk = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
-      .query("SELECT TotalValue, ParkingTotal, CompanyId FROM dbo.CrmBooking WHERE Id = @bid");
+      .query("SELECT TotalValue, ParkingTotal, ExtraChargesTotal, CompanyId FROM dbo.CrmBooking WHERE Id = @bid");
     const bkRow = bk.recordset[0] || {};
-    const dealValue = Number(bkRow.TotalValue || 0) + Number(bkRow.ParkingTotal || 0);
+    // Same deal-value definition as the auto-created schedule in
+    // crmWorkflowGuards.js's maybeAutoCreateBrokerage (TotalValue +
+    // ParkingTotal + ExtraChargesTotal) — this manual-entry path never
+    // picked up ExtraChargesTotal when that one was fixed (booking 41),
+    // so a broker's tier/commission silently depended on which of the two
+    // paths created their record.
+    const dealValue = Number(bkRow.TotalValue || 0) + Number(bkRow.ParkingTotal || 0) + Number(bkRow.ExtraChargesTotal || 0);
 
     try {
       assertSanePercentRate(rateType, rateValue, dealValue);

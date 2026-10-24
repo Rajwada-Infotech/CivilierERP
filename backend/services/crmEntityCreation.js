@@ -1024,6 +1024,15 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .query(`SELECT Id FROM dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"} WITH (UPDLOCK, ROWLOCK) WHERE ${isPlotBooking ? "PlotId" : "UnitId"} IN (${unitIds.join(",")}) AND Status = N'Active'`);
     if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
 
+    // Re-check villa land ownership inside this same transaction, right
+    // before the insert — the first assertVillaBuyer check above ran on the
+    // plain pool, well before this lock, so a concurrent resale/transfer of
+    // the underlying plot could complete in between and leave this booking
+    // going through for a buyer who no longer owns the land.
+    if (!isPlotBooking) {
+      await assertVillaBuyer(tx, unitIds, appRow.recordset[0].CustomerId);
+    }
+
     const result = await tx.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
       .input("appId", sql.Int,           parseInt(b.ApplicationId))

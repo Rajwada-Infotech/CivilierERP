@@ -614,6 +614,13 @@ function agreementDateError(message, status) {
 // THEM to respond — never while waiting on the other side. Writes
 // CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
 async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
+  // Same guard crmTransferDeed.js's proposeDate already enforces for its
+  // sibling date-negotiation flow — this one never had it, so a backdated
+  // date could sail through to CrmAgreementDateHistory with only a human
+  // super_admin sign-off at finalizeAgreementDate left to catch it.
+  if (proposedDate && String(proposedDate).slice(0, 10) < new Date().toISOString().slice(0, 10)) {
+    throw agreementDateError("The agreement date can't be in the past", 400);
+  }
   // UPDLOCK+HOLDLOCK: this turn-taking check is reachable from at least
   // four independent entry points on the same agreement (staff propose/
   // accept, staff proxy-propose/proxy-accept, and the customer portal's own
