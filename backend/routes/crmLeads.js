@@ -1,5 +1,5 @@
 // CRM Leads: the pool of leads marked Converted in Sales Automation, each with the CRM customer made from it (if any).
-// Read-only, under the CRM page's own right. The page used to read /api/sa/leads (Sales Automation's right) and
+// Read-only, under the CRM Leads or Customers right. The page used to read /api/sa/leads (Sales Automation's right) and
 // /api/crm/customers (project-scoped, so a customer with no application yet was missing); a CRM user without the first
 // saw an empty pool, and one limited to some projects saw used leads as still available.
 const express = require("express");
@@ -7,16 +7,17 @@ const router = express.Router();
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requireAnyPageRight } = require("../middleware/requirePageRight");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-router.get("/", requirePageRight("crm-leads", "view"), async (_req, res) => {
+// Also read by Customers' New Customer form, to offer only leads no active customer carries yet.
+router.get("/", requireAnyPageRight(["crm-leads", "crm-customers"], "view"), async (_req, res) => {
   try {
     const result = await getPool().request().query(`
       SELECT
-        l.Id, l.LeadUid, l.CustomerName, l.Mobile, l.Email, l.DateGenerated, l.SourceType,
+        l.Id, l.LeadUid, l.CustomerName, l.Mobile, l.AltMobile, l.Email, l.DateGenerated, l.SourceType,
         l.PropertyType, l.BhkPreference, l.PreferredLocation, l.BudgetMin, l.BudgetMax,
         sp.name AS SalespersonName,
         -- "Used" means an active customer carries the lead: the same rule Create Customer refuses on.
