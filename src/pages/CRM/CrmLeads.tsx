@@ -1,196 +1,218 @@
+// CRM Leads: leads marked Converted in Sales Automation, waiting to become CRM customers. Converting a lead never makes
+// an application by itself: staff pick one here with Create Customer (CrmCustomers' New Customer dialog, ?leadId=X),
+// which is the real Leads -> Customer step and is enforced again on the server (crmCustomers.js POST /). An
+// application only comes later, from that customer, on Applications.
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { CrmShell } from "@/components/crm/CrmShell";
-import { usePageRights } from "@/hooks/usePageRights";
+import { ExternalLink, RefreshCw, UserPlus } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Search, UserPlus, ExternalLink, Users, CheckCircle2 } from "lucide-react";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const LEADS_API = "/api/sa/leads";
-const CUSTOMER_API = "/api/crm/customers";
-
-// Converted leads from Sales Automation land here first, as a pool — they
-// are NOT CrmApplications yet. Converting a lead (SaLead.Status ->
-// 'Converted', see saHandoff.js) never auto-creates one anymore. Staff pick
-// a lead from this pool via "Create Customer" (deep-links into
-// CrmCustomers.tsx's New Customer dialog with ?leadId=X pre-selected) —
-// that's the real Leads -> Customer step (also the actual "only a converted
-// lead may enter the CRM module" gate, enforced again server-side in
-// crmCustomers.js POST /). An Application only ever gets created afterwards,
-// from that Customer, on the Applications page.
-async function fetchConvertedLeads(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(`${LEADS_API}?status=Converted`);
-    return res.ok ? res.json() : [];
-  } catch { return []; }
-}
-async function fetchCustomers(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(CUSTOMER_API);
-    return res.ok ? res.json() : [];
-  } catch { return []; }
+interface PoolLead {
+  Id: number;
+  LeadUid: string;
+  CustomerName: string;
+  Mobile: string | null;
+  Email: string | null;
+  DateGenerated: string | null;
+  SourceType: string | null;
+  PropertyType: string | null;
+  BhkPreference: string | null;
+  PreferredLocation: string | null;
+  BudgetMin: number | null;
+  BudgetMax: number | null;
+  SalespersonName: string | null;
+  CustomerId: number | null;
+  CustomerNo: string | null;
+  CustomerCreatedAt: string | null;
 }
 
-const CrmLeads: React.FC = () => {
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+const lakh = (n: number) => (n >= 1e7 ? `₹${(n / 1e7).toFixed(2)} Cr` : `₹${(n / 1e5).toFixed(1)} L`);
+const budget = (l: PoolLead) => (l.BudgetMin || l.BudgetMax ? [l.BudgetMin, l.BudgetMax].filter(Boolean).map((n) => lakh(Number(n))).join(" – ") : "");
+const daysSince = (d: string | null) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000) : null);
+
+async function fetchPool(): Promise<PoolLead[]> {
+  const res = await fetchWithAuth("/api/crm/leads");
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Could not load the leads (${res.status}).`);
+  return Array.isArray(body) ? body : [];
+}
+
+export default function CrmLeads() {
+  const rights = usePageRights("crm-leads");
+  const customerRights = usePageRights("crm-customers");
   const navigate = useNavigate();
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
-  const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"Available" | "Used">("Available");
+  const [show, setShow] = useState<"waiting" | "made">("waiting");
 
-  const { data: leads = [], isLoading } = useQuery({ queryKey: ["crm-leads-pool"], queryFn: fetchConvertedLeads, staleTime: 30_000 });
-  const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-for-leads-pool"], queryFn: fetchCustomers, staleTime: 30_000 });
+  const { data: leads = [], isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: ["crm-leads-pool"], queryFn: fetchPool, staleTime: 30_000 });
+  const waiting = useMemo(() => leads.filter((l) => !l.CustomerId), [leads]);
+  const made = useMemo(() => leads.filter((l) => l.CustomerId), [leads]);
+  const rows = show === "waiting" ? waiting : made;
 
-  // A lead is "used" the moment it's linked to a Customer (CrmCustomer.LeadId)
-  // — an Application beyond that is just the next, later step and doesn't
-  // change this. Merging in the linked customer here (rather than trusting
-  // CrmApplicationId alone) is what keeps this pool in sync with the actual
-  // gate now enforced in crmCustomers.js POST /.
-  const merged = useMemo(() => {
-    const customerByLeadId = new Map((customers as any[]).filter((c: any) => c.LeadId).map((c: any) => [c.LeadId, c]));
-    return (leads as any[]).map((l: any) => ({ ...l, _customer: customerByLeadId.get(l.Id) || null }));
-  }, [leads, customers]);
-
-  const available = useMemo(() => merged.filter((l) => !l._customer), [merged]);
-  const used = useMemo(() => merged.filter((l) => l._customer), [merged]);
-
-  const filtered = useMemo(() => {
-    const base = tab === "Available" ? available : used;
-    if (!search) return base;
-    const s = search.toLowerCase();
-    return base.filter((l: any) =>
-      l.CustomerName?.toLowerCase().includes(s) || l.Mobile?.includes(search) || l.LeadUid?.toLowerCase().includes(s)
-    );
-  }, [tab, available, used, search]);
-
-  const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "LeadUid", header: "Lead", size: 130,
-      cell: (i) => (
-        <div>
-          <div className="font-mono text-xs">{i.row.original.LeadUid}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "—"}</div>
-        </div>
-      ) },
-    { accessorKey: "CustomerName", header: "Customer", size: 160,
-      cell: (i) => (
-        <div>
-          <div className="font-medium">{i.row.original.CustomerName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}{i.row.original.Email ? ` — ${i.row.original.Email}` : ""}</div>
-        </div>
-      ) },
-    { accessorKey: "SourceType", header: "Source", size: 100, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "PropertyType", header: "Interested In", size: 120,
-      cell: (i) => <span className="text-xs">{[i.row.original.BhkPreference, i.row.original.PropertyType].filter(Boolean).join(" — ") || "—"}</span> },
-    { accessorKey: "PreferredLocation", header: "Preferred Location", size: 130, cell: (i) => <span className="text-xs">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "SalespersonName", header: "Salesperson", size: 120, cell: (i) => <span className="text-xs text-muted-foreground">{(i.getValue() as string) || "—"}</span> },
-    { id: "action", header: "", size: 150, enableSorting: false,
-      cell: (i) => {
-        const l = i.row.original;
-        return l._customer ? (
-          <button
-            onClick={() => navigate(`/crm/customers?customerId=${l._customer.Id}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-          >
-            View Customer <ExternalLink size={11} />
-          </button>
-        ) : (
-          <button
-            onClick={() => navigate(`/crm/customers?leadId=${l.Id}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all"
-          >
-            <UserPlus size={12} /> Create Customer
-          </button>
-        );
-      } },
+  const thisMonth = new Date();
+  thisMonth.setDate(1);
+  const stats = [
+    { label: "Waiting", value: waiting.length, note: "converted leads with no customer yet" },
+    { label: "Waiting over a week", value: waiting.filter((l) => (daysSince(l.DateGenerated) ?? 0) > 7).length, note: "by the date the lead came in" },
+    { label: "Made customers", value: made.length, note: "leads already turned into a CRM customer" },
+    { label: "This month", value: made.filter((l) => l.CustomerCreatedAt && new Date(l.CustomerCreatedAt) >= thisMonth).length, note: "customers made from leads" },
   ];
 
-  const glassStyle: React.CSSProperties = {
-    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-  };
-  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
-
-  return (
-    <CrmShell
-      title="CRM — Leads"
-      subtitle="Converted leads from Sales Automation, waiting to be linked to a CRM Customer"
-    >
-      {/* Toolbar + table live in one continuous card instead of a loose
-          toolbar row floating above a separately-bordered table. */}
-      <div className="rounded-xl overflow-hidden" style={glassStyle}>
-        <div className="flex gap-3 flex-wrap items-center px-4 py-3 border-b" style={{ borderColor }}>
-          <div className="flex items-center gap-1 rounded-lg bg-muted/20 p-1 shrink-0">
-            {(["Available", "Used"] as const).map((t) => (
-              <button key={t} onClick={() => setTab(t)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
-                  tab === t
-                    ? "text-white shadow-sm btn-module "
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }`}>
-                {t === "Available" ? <Users size={13} /> : <CheckCircle2 size={13} />} {t} ({t === "Available" ? available.length : used.length})
-              </button>
-            ))}
+  const columns: ColumnDef<PoolLead, unknown>[] = [
+    {
+      id: "lead",
+      accessorFn: (l) => l.LeadUid,
+      header: "Lead",
+      size: 170,
+      cell: ({ row: { original: l } }) => {
+        const age = daysSince(l.DateGenerated);
+        return (
+          <div className="leading-tight">
+            <p className="font-heading tabular-nums text-xs">{l.LeadUid}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">
+              {fmtDate(l.DateGenerated)}
+              {show === "waiting" && age != null ? ` · ${age === 0 ? "today" : `${age} day${age === 1 ? "" : "s"}`}` : ""}
+            </p>
           </div>
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, mobile, lead code..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
-          </div>
+        );
+      },
+    },
+    {
+      id: "person",
+      accessorFn: (l) => `${l.CustomerName} ${l.Mobile ?? ""} ${l.Email ?? ""}`,
+      header: "Person",
+      size: 220,
+      cell: ({ row: { original: l } }) => (
+        <div className="leading-tight min-w-0">
+          <p className="text-sm font-medium text-foreground truncate">{l.CustomerName}</p>
+          <p className="text-[0.6875rem] text-muted-foreground truncate">{[l.Mobile, l.Email].filter(Boolean).join(" · ") || "—"}</p>
         </div>
-
-        {/* Custom, actionable empty state — DataTable's own emptyMessage is
-            plain text only, and "convert one in Sales Automation" used to
-            be a dead end with no way to actually get there. */}
-        {!isLoading && filtered.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-14 px-6 text-center">
-            <div
-              className="w-11 h-11 rounded-full flex items-center justify-center"
-              style={{ background: "rgba(14,165,233,0.12)" }}
-            >
-              {tab === "Available" ? (
-                <Users size={20} style={{ color: "#0ea5e9" }} />
-              ) : (
-                <CheckCircle2 size={20} style={{ color: "#0ea5e9" }} />
-              )}
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {search
-                  ? "No leads match your search"
-                  : tab === "Available"
-                    ? "No converted leads waiting"
-                    : "No leads linked to a customer yet"}
-              </p>
-              <p className="text-xs text-muted-foreground max-w-sm">
-                {search
-                  ? "Try a different name, mobile number, or lead code."
-                  : tab === "Available"
-                    ? "Leads land here the moment they're marked Converted in Sales Automation."
-                    : "Once a lead is turned into a CRM Customer, it'll show up here for reference."}
-              </p>
-            </div>
+      ),
+    },
+    {
+      id: "wants",
+      accessorFn: (l) => `${l.BhkPreference ?? ""} ${l.PropertyType ?? ""} ${l.PreferredLocation ?? ""}`,
+      header: "Looking for",
+      size: 220,
+      cell: ({ row: { original: l } }) => (
+        <div className="leading-tight text-xs">
+          <p className="text-foreground">{[l.BhkPreference, l.PropertyType].filter(Boolean).join(" ") || "—"}</p>
+          <p className="text-muted-foreground">{[l.PreferredLocation, budget(l)].filter(Boolean).join(" · ")}</p>
+        </div>
+      ),
+    },
+    {
+      id: "source",
+      accessorFn: (l) => `${l.SourceType ?? ""} ${l.SalespersonName ?? ""}`,
+      header: "Source / salesperson",
+      size: 170,
+      cell: ({ row: { original: l } }) => (
+        <div className="leading-tight text-xs">
+          <p className="text-foreground">{l.SourceType || "—"}</p>
+          <p className="text-muted-foreground">{l.SalespersonName || ""}</p>
+        </div>
+      ),
+    },
+    {
+      id: "action",
+      header: "",
+      size: 170,
+      enableSorting: false,
+      cell: ({ row: { original: l } }) =>
+        l.CustomerId ? (
+          <div className="flex items-center justify-end gap-3">
+            <SheetMark text={l.CustomerNo || "Customer"} tone="done" />
+            {customerRights.canView && (
+              <button onClick={() => navigate(`/crm/customers?customerId=${l.CustomerId}`)} title="Open the customer" className="p-1.5 text-muted-foreground hover:text-foreground">
+                <ExternalLink size={13} />
+              </button>
+            )}
+          </div>
+        ) : customerRights.canCreate ? (
+          <div className="flex justify-end">
+            <button onClick={() => navigate(`/crm/customers?leadId=${l.Id}`)} className={`${KEY_INK} h-8 px-3 whitespace-nowrap`}>
+              <UserPlus size={12} /> Create customer
+            </button>
           </div>
         ) : (
-          <DataTable
-            data={filtered}
-            columns={columns}
-            searchable={false}
-            loading={isLoading}
-            className="border-0"
-          />
-        )}
-      </div>
-    </CrmShell>
-  );
-};
+          <p className="text-right text-[0.6875rem] text-muted-foreground">Needs the Customers right</p>
+        ),
+    },
+  ];
 
-export default CrmLeads;
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Leads"]} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
+        title="Leads"
+        subtitle="Leads marked Converted in Sales Automation, waiting to be made CRM customers. A customer's application comes later, on Applications."
+        action={
+          <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh">
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+          </button>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {stats.map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <span className="inline-flex h-9 border border-foreground" role="group" aria-label="Show">
+                {([
+                  ["waiting", `Waiting (${waiting.length})`],
+                  ["made", `Made customers (${made.length})`],
+                ] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setShow(k)} aria-pressed={show === k}
+                    className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] px-3 transition-colors ${show === k ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}>
+                    {label}
+                  </button>
+                ))}
+              </span>
+              {!rights.canView && <p className="text-xs text-destructive">You don't have the right to see this page.</p>}
+            </div>
+
+            {isError ? (
+              <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : (
+              <DataTable
+                data={rows}
+                columns={columns}
+                loading={isLoading}
+                searchable
+                searchPlaceholder="Search name, mobile, lead code, location…"
+                paginated
+                getRowId={(l) => String(l.Id)}
+                emptyMessage={
+                  show === "waiting"
+                    ? "No converted leads waiting. A lead lands here when it is marked Converted in Sales Automation."
+                    : "No lead has been made a customer yet."
+                }
+              />
+            )}
+          </div>
+        </div>
+      </SheetShell>
+    </>
+  );
+}
