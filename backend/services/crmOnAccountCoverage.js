@@ -66,7 +66,12 @@ async function isMilestoneOneCoveredByOnAccount(pool, bookingId) {
 async function areEarlierMilestonesCoveredByOnAccount(pool, bookingId, milestoneNo) {
   if (Number(milestoneNo) <= 1) return true;
   const { milestones } = await getBookingOnAccountCoverage(pool, bookingId);
-  const preceding = milestones.find((m) => Number(m.MilestoneNo) === Number(milestoneNo) - 1);
+  // Same reasoning as isMilestoneOneCoveredByOnAccount above: an older
+  // booking can carry a legacy dedicated parking/extra-charge milestone
+  // sharing the same MilestoneNo as a real schedule milestone. Matching on
+  // MilestoneNo alone could silently return that legacy row instead of the
+  // real "milestone N-1" the caller means.
+  const preceding = milestones.find((m) => Number(m.MilestoneNo) === Number(milestoneNo) - 1 && m.ExtraChargeId == null && m.ParkingAllotmentId == null);
   return !!preceding?.VirtuallyCovered;
 }
 

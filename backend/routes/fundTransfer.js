@@ -447,19 +447,31 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     const linesError = validateTransfer(b);
     if (linesError) return res.status(400).json({ error: linesError });
 
-    let beforeSnapshot = null;
-    if (wasApproved) {
-      beforeSnapshot = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
-      // A transfer that already moved a loan or credited a re-booking can't just be re-posted.
-      if (beforeSnapshot?.LinkedLoanId) {
-        return res.status(409).json({ error: "This transfer created a loan, so it can't be edited. Reverse the loan first." });
-      }
+    // These guards previously only ran when wasApproved, but LinkedLoanId
+    // and an applied CrmRebookingTransfer link are set by an EXTERNAL module
+    // (loan sanction / re-booking), independent of this record's own
+    // approval status — a Draft/Pending/Rejected transfer that already
+    // carries one could still have its Amount/banks/companies edited with
+    // nothing reconciling the edit against the linked loan or claim.
+    const beforeSnapshot = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+    if (beforeSnapshot?.LinkedLoanId) {
+      return res.status(409).json({ error: "This transfer created a loan, so it can't be edited. Reverse the loan first." });
+    }
+    {
       const applied = await pool.request().input("ft", sql.Int, id).query(
         "SELECT TOP 1 Id FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft AND Status <> 'PendingTransfer'",
       );
       if (applied.recordset.length) {
         return res.status(409).json({ error: "This transfer has already been applied to a booking, so it can't be edited." });
       }
+    }
+    // POST / refuses to create a new Inter-company transfer at all ("use
+    // Loan Sanction instead") — an edit that flips an existing Intra record
+    // to Inter re-exercises that same deprecated path. An already-Inter row
+    // may still be edited (validateTransfer accepts both by design, for
+    // historical rows), just never created or converted into one here.
+    if (b.TransferType === "Inter" && beforeSnapshot?.TransferType !== "Inter") {
+      return res.status(400).json({ error: "Inter-company transfers are no longer created or converted from Fund Transfer — use Loan Sanction instead." });
     }
 
     const isChequeMode = b.Mode === "Cheque" || b.Mode === "Post-Dated Cheque";
