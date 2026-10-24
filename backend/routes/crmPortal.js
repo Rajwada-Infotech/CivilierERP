@@ -15,8 +15,12 @@ const { getInvoicePdfBuffer } = require("../services/invoicePdf");
 const { getMoneyReceiptPdfBuffer } = require("../services/moneyReceiptPdf");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const attachProjectScope = require("../services/projectScope").attachProjectScope;
+const projectPredicate = require("../services/projectScope").projectPredicate;
 const { getAgreementBookingLockReason, agreementExecutedLockReason } = require("./crmAgreements");
 const { redisGet, redisSet, redisDel } = require("../redis");
+const { redisGetStrict, getRedis } = require("../redis");
+const { blacklistToken } = require("../middleware/blacklist");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 // Categories a customer is allowed to raise themselves — same vocabulary as
@@ -103,16 +107,13 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Normalize input password and stored customer mobile for initial credential check
+    // Check the submitted password and, for the initial mobile-number
+    // credential, its normalized form against the stored bcrypt hash.
     const normalizedInput = (password || '').replace(/\D/g, '').slice(-10);
-    const normalizedStoredMobile = (user.Mobile || '').replace(/\D/g, '').slice(-10);
 
     let ok = await bcrypt.compare(password, user.PasswordHash);
     if (!ok && normalizedInput) {
       ok = await bcrypt.compare(normalizedInput, user.PasswordHash);
-    }
-    if (!ok && user.MustChangePassword && normalizedInput && normalizedStoredMobile && normalizedInput === normalizedStoredMobile) {
-      ok = true;
     }
     if (!ok) { await incrementPortalLoginAttempts(attemptsKey, lockKey); return res.status(401).json({ error: "Invalid email or password" }); }
 
@@ -121,12 +122,16 @@ router.post("/login", async (req, res) => {
     await pool.request().input("id", sql.Int, user.PortalUserId)
       .query("UPDATE dbo.CrmCustomerPortalUser SET LastLoginAt = SYSDATETIME() WHERE Id = @id");
 
+    // Redis stores a per-account session generation. Password resets and
+    // changes increment it, revoking every previously issued portal token.
+    const sessionVersion = Number(await redisGetStrict(`crm-portal:session-version:${user.PortalUserId}`)) || 0;
+
     // JWT carries customerId only — applicationId is a request-scoped param,
     // validated per-request against customerId, never embedded in the token.
     // Portal uses its own secret (PORTAL_JWT_SECRET) so staff tokens can't be
     // replayed against the portal API and vice-versa.
     const token = jwt.sign(
-      { type: "crm_portal", portalUserId: user.PortalUserId, customerId: user.CustomerId, email: user.Email },
+      { type: "crm_portal", portalUserId: user.PortalUserId, customerId: user.CustomerId, email: user.Email, sessionVersion },
       process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -153,6 +158,23 @@ router.post(
   "/admin/reset-password",
   authMiddleware,
   requirePageRight("crm-customers", "edit"),
+  attachProjectScope,
+  async (req, res, next) => {
+    const customerId = Number.parseInt(req.body?.customerId, 10);
+    if (!req.projectScope || !Number.isFinite(customerId)) return next();
+    try {
+      const visible = await getPool().request().input("cid", sql.Int, customerId).query(`
+        SELECT TOP 1 1 AS Visible
+        FROM dbo.CrmApplication a
+        WHERE a.CustomerId = @cid${projectPredicate(req.projectScope, "a.ProjectId")}
+      `);
+      if (visible.recordset.length) return next();
+      return res.status(403).json({ error: "You don't have access to this customer's projects." });
+    } catch (e) {
+      console.error("[crm-portal] reset-password project scope check failed:", e.message);
+      return res.status(500).json({ error: "Could not verify customer project access." });
+    }
+  },
   async (req, res) => {
     const pool = getPool();
     try {
@@ -182,6 +204,10 @@ router.post(
       }
 
       const hash = await bcrypt.hash(rawPassword, 10);
+
+      // Revoke existing sessions before changing credentials. If Redis is
+      // unavailable, do not complete a password reset that cannot revoke.
+      await getRedis().then((redis) => redis.incr(`crm-portal:session-version:${portalUser.Id}`));
 
       await pool.request()
         .input("id", sql.Int, portalUser.Id)
@@ -259,10 +285,14 @@ router.post("/change-password", async (req, res) => {
     }
     const pool = getPool();
     const hash = await bcrypt.hash(newPassword, 10);
+    // Revoke every existing session before changing credentials. If Redis is
+    // unavailable, leave the password unchanged and report the failure.
+    await getRedis().then((redis) => redis.incr(`crm-portal:session-version:${req.portalUser.portalUserId}`));
     await pool.request()
       .input("id", sql.Int, req.portalUser.portalUserId)
       .input("hash", sql.NVarChar(200), hash)
       .query("UPDATE dbo.CrmCustomerPortalUser SET PasswordHash = @hash, MustChangePassword = 0 WHERE Id = @id");
+    _portalUserStatusCache.delete(req.portalUser.portalUserId);
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-portal] POST /change-password error:", e.message);
@@ -270,11 +300,15 @@ router.post("/change-password", async (req, res) => {
   }
 });
 
-// POST /logout — client-side logout: instructs the frontend to discard the token.
-// Token invalidation (Redis blacklist) is a future hardening item; until then,
-// the 7-day expiry is the backstop and the client must delete the token locally.
-router.post("/logout", (req, res) => {
-  res.json({ success: true, message: "Logged out" });
+// POST /logout — revoke this token before confirming logout.
+router.post("/logout", async (req, res) => {
+  try {
+    await blacklistToken(req.portalToken, req.portalUser.exp);
+    res.json({ success: true, message: "Logged out" });
+  } catch (e) {
+    console.error("[crm-portal] logout revocation failed:", e.message);
+    res.status(503).json({ error: "Could not revoke this session. Please try again." });
+  }
 });
 
 // ─── Ownership-check helper ───────────────────────────────────────────────────

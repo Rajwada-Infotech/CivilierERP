@@ -69,6 +69,24 @@ const CUSTOMER_SELECT_DETAIL = CUSTOMER_SELECT.replace(
   "c.AadhaarNo,",
 );
 
+// Customer identity can span projects, but project restricted staff should
+// only see the application count and project names associated with projects
+// they can access. The scope is resolved by attachProjectScope and contains
+// integer IDs only (projectPredicate emits an SQL-safe integer list).
+function customerSelectForScope(select, projectScope) {
+  if (!projectScope) return select;
+  const projectPredicate = require("../services/projectScope").projectPredicate;
+  return select
+    .replace(
+      "(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id)",
+      `(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id${projectPredicate(projectScope, "a.ProjectId")})`,
+    )
+    .replace(
+      "WHERE pa.CustomerId = c.Id) px)",
+      `WHERE pa.CustomerId = c.Id${projectPredicate(projectScope, "pa.ProjectId")}) px)`,
+    );
+}
+
 function normalizeEmail(value) {
   const trimmed = String(value || "").trim().toLowerCase();
   return trimmed || null;
@@ -124,7 +142,7 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     const where = `WHERE ${conds.join(" AND ")}`;
 
     if (!req.query.page) {
-      const result = await req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      const result = await req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
@@ -132,7 +150,7 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
-      req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       (() => {
         const countReq = pool.request()
           .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
@@ -296,13 +314,13 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT_DETAIL} WHERE c.Id = @id`),
+      pool.request().input("id", sql.Int, id).query(`${customerSelectForScope(CUSTOMER_SELECT_DETAIL, req.projectScope)} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
         SELECT a.Id, a.ApplicationNo, a.Status, a.InterestedProject, a.CreatedAt,
                b.Id AS BookingId, b.BookingNo, b.Status AS BookingStatus
         FROM dbo.CrmApplication a
         OUTER APPLY (SELECT TOP 1 Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = a.Id ORDER BY CreatedAt DESC) b
-        WHERE a.CustomerId = @id
+        WHERE a.CustomerId = @id ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "a.ProjectId") : ""}
         ORDER BY a.CreatedAt DESC
       `),
       pool.request().input("id", sql.Int, id).query(`
@@ -315,12 +333,14 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
             JOIN dbo.CrmBooking ob ON ob.Id = oa.BookingId
             JOIN dbo.CrmApplication oapp ON oapp.Id = ob.ApplicationId
             WHERE oapp.CustomerId = @id AND ob.IsActive = 1 AND ob.Status NOT IN ${DEAD_BOOKING_SQL}
+              ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "ob.ProjectId") : ""}
           ), 0) AS TotalPaid,
           ISNULL(SUM(CASE WHEN m.Status <> 'Waived' THEN m.AmountDue ELSE 0 END), 0) AS TotalDue
         FROM dbo.CrmPaymentMilestone m
         JOIN dbo.CrmBooking b ON b.Id = m.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         WHERE a.CustomerId = @id AND b.IsActive = 1 AND b.Status NOT IN ${DEAD_BOOKING_SQL}
+          ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : ""}
       `),
     ]);
     if (!custRes.recordset.length) return res.status(404).json({ error: "Customer not found" });

@@ -10,8 +10,10 @@
  * request against the authenticated customerId — never baked into the JWT.
  */
 const jwt = require("jsonwebtoken");
+const { redisGetStrict } = require("../redis");
 
-module.exports = (req, res, next) => {
+module.exports = async (req, res, next) => {
+  let tokenVerified = false;
   try {
     let token = null;
     if (req.headers.authorization?.startsWith("Bearer ")) {
@@ -20,6 +22,7 @@ module.exports = (req, res, next) => {
     if (!token) return res.status(401).json({ error: "No token provided" });
 
     const decoded = jwt.verify(token, process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET);
+    tokenVerified = true;
     if (decoded.type !== "crm_portal") {
       return res.status(401).json({ error: "Invalid portal token" });
     }
@@ -29,9 +32,19 @@ module.exports = (req, res, next) => {
     if (!decoded.customerId) {
       return res.status(401).json({ error: "Session expired — please log in again" });
     }
+    const revoked = await redisGetStrict(`blacklist:${token}`);
+    if (revoked) return res.status(401).json({ error: "Token has been invalidated. Please log in again." });
+    const currentVersion = Number(await redisGetStrict(`crm-portal:session-version:${decoded.portalUserId}`)) || 0;
+    if ((Number(decoded.sessionVersion) || 0) !== currentVersion) {
+      return res.status(401).json({ error: "Session has expired. Please log in again." });
+    }
     req.portalUser = decoded;
+    req.portalToken = token;
     next();
   } catch (err) {
+    if (tokenVerified) {
+      return res.status(503).json({ error: "Authentication service temporarily unavailable. Please try again shortly." });
+    }
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 };

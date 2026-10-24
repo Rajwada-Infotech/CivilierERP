@@ -27,6 +27,10 @@ describe("CRM project guards", () => {
     const guarded = new Set([...src.matchAll(/router\.param\("([A-Za-z]+)"/g)].map((m) => m[1]));
     if (/crmProjectGuards\(router/.test(src)) { guarded.add("bookingId"); guarded.add("applicationId"); }
     if (/crmProjectGuards\(router, (?!null)/.test(src)) guarded.add("id");
+    // transferId (CrmRebookingTransfer) has no router.param macro — every
+    // handler instead resolves the transfer's source/target booking ids and
+    // checks each inline with assertBookingProjectScope before touching it.
+    if (/:transferId/.test(src) && /assertBookingProjectScope\(req, res,/.test(src)) guarded.add("transferId");
     expect(needed.filter((p) => !guarded.has(p))).toEqual([]);
   });
 });

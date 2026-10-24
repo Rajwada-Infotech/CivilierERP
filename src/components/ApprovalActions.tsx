@@ -176,7 +176,22 @@ export function ApprovalActions({
         ? `${endpoint}/${recordId}/${actionPathSuffix}/${action}`
         : `${endpoint}/${recordId}/${action}`;
       const data = await authFetch(path, "PUT", body);
-      if (
+      if (action === "approve" && data?.partialFailure) {
+        toast.warning(data.message || "Approval completed with a follow-up issue", data.crmLedgerRetryId ? {
+          action: {
+            label: "Retry CRM ledger",
+            onClick: async () => {
+              try {
+                const result = await authFetch(`/api/crm/refunds/rebooking-transfer/${data.crmLedgerRetryId}/retry-ledger`, "PUT");
+                if (result.partialFailure) toast.warning(result.message || "CRM ledger follow-up is still incomplete");
+                else toast.success(result.message || "CRM ledger entries updated");
+              } catch (err: unknown) {
+                toast.error(err instanceof Error ? err.message : "CRM ledger retry failed");
+              }
+            },
+          },
+        } : undefined);
+      } else if (
         action === "approve" &&
         data?.newStatus &&
         data.newStatus !== "Approved"

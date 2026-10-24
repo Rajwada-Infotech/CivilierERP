@@ -765,11 +765,12 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, refundId).query(`
-    SELECT Id, RefundNo, DeductionAmount, NetAmount, BookingId, CompanyId, ProjectId, CustomerId, PaidAt
+    SELECT Id, RefundNo, Status, DeductionAmount, NetAmount, BookingId, CompanyId, ProjectId, CustomerId, PaidAt
     FROM dbo.CrmRefund WHERE Id = @id
   `);
   const row = r.recordset[0];
   if (!row) return { posted: false, reason: `CrmRefund ${refundId} not found` };
+  if (row.Status !== "Paid") return { skipped: true, reason: `Refund ${refundId} is ${row.Status}, not Paid` };
   if (!row.CustomerId) return { posted: false, reason: `Refund ${refundId}: no linked CrmCustomer` };
 
   const deduction = Number(row.DeductionAmount) || 0;
@@ -885,29 +886,55 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
  * applyOnAccountToMilestone sweep then DEBITs it back down onto milestones.
  */
 async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAccountId, amount, companyId, projectId, receiptNo, userEmail, executor }) {
-  const exec = executor || pool;
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, customerId, userEmail);
-  await exec.request()
-    .input("PartyId", sql.Int, customerHeadId)
-    .input("PartyType", sql.NVarChar(20), "Customer") // readable label, same as Finance's own rows (onAccount.js PARTY_LABEL)
-    .input("TxnDate", sql.Date, new Date())
-    .input("TxnType", sql.NVarChar(10), "CREDIT")
-    .input("Amount", sql.Decimal(18, 2), amount)
-    .input("RefType", sql.NVarChar(30), "CrmOnAccountPayment")
-    .input("RefDocNo", sql.NVarChar(100), receiptNo || null)
-    .input("RefId", sql.Int, newOnAccountId)
-    .input("CompanyId", sql.Int, companyId ?? null)
-    .input("ProjectId", sql.Int, projectId ?? null)
-    .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
-    .input("CreatedBy", sql.NVarChar(150), userEmail)
-    .query(`
-      INSERT INTO dbo.OnAccountLedger
-        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
-      VALUES
-        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
-      UPDATE dbo.AccountHeadMaster SET OnAccountBalance = OnAccountBalance + @Amount WHERE LHeadId = @PartyId;
-    `);
-  return { posted: true };
+  let tx = executor || null;
+  const ownsTx = !tx;
+  if (!tx) {
+    tx = pool.transaction();
+    await tx.begin();
+  }
+  try {
+    const customerHeadId = await ensureCrmCustomerLedgerHead(pool, customerId, userEmail);
+    const lockResource = `crm-rebooking-onaccount:${newOnAccountId}`;
+    const existing = await tx.request()
+      .input("resource", sql.NVarChar(255), lockResource)
+      .input("RefId", sql.Int, newOnAccountId)
+      .query(`
+        DECLARE @lockResult INT;
+        EXEC @lockResult = sys.sp_getapplock @Resource = @resource, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+        IF @lockResult < 0 THROW 51000, 'Could not lock re-booking on-account ledger entry', 1;
+        SELECT TOP 1 OAId FROM dbo.OnAccountLedger WITH (UPDLOCK, HOLDLOCK)
+        WHERE RefType = 'CrmOnAccountPayment' AND RefId = @RefId AND TxnType = 'CREDIT';
+      `);
+    if (existing.recordset.length) {
+      if (ownsTx) await tx.commit();
+      return { posted: true, reason: "already posted (idempotent)" };
+    }
+    await tx.request()
+      .input("PartyId", sql.Int, customerHeadId)
+      .input("PartyType", sql.NVarChar(20), "Customer")
+      .input("TxnDate", sql.Date, new Date())
+      .input("TxnType", sql.NVarChar(10), "CREDIT")
+      .input("Amount", sql.Decimal(18, 2), amount)
+      .input("RefType", sql.NVarChar(30), "CrmOnAccountPayment")
+      .input("RefDocNo", sql.NVarChar(100), receiptNo || null)
+      .input("RefId", sql.Int, newOnAccountId)
+      .input("CompanyId", sql.Int, companyId ?? null)
+      .input("ProjectId", sql.Int, projectId ?? null)
+      .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
+      .input("CreatedBy", sql.NVarChar(150), userEmail)
+      .query(`
+        INSERT INTO dbo.OnAccountLedger
+          (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+        VALUES
+          (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+        UPDATE dbo.AccountHeadMaster SET OnAccountBalance = OnAccountBalance + @Amount WHERE LHeadId = @PartyId;
+      `);
+    if (ownsTx) await tx.commit();
+    return { posted: true };
+  } catch (err) {
+    if (ownsTx) { try { await tx.rollback(); } catch {} }
+    throw err;
+  }
 }
 
 /**
@@ -921,9 +948,6 @@ async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAc
  * Same-company transfers do NOT call this (no cross-company reclass needed).
  */
 async function postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, userEmail) {
-  if (await hasPosting(pool, "CrmRebookingTransfer", rebookingTransferId))
-    return { posted: true, reason: "already posted (idempotent)" };
-
   const r = await pool.request().input("id", sql.Int, rebookingTransferId).query(`
     SELECT rt.Id, rt.Amount, rt.FromCompanyId, rt.ToCompanyId, rt.ToBookingId,
            fb.ProjectId AS FromProjectId, tb.ProjectId AS ToProjectId,
@@ -946,34 +970,37 @@ async function postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, us
   const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
   const docNo = `REBK-${rebookingTransferId}`;
 
-  // Company A — liability leaves A's CRM books
-  await postVoucher(pool, {
-    voucherNo: `${docNo}-A`,
-    voucherDate: new Date(),
-    sourceType: "CrmRebookingTransfer",
-    sourceId: rebookingTransferId,
-    companyId: row.FromCompanyId ?? null,
-    projectId: row.FromProjectId ?? null,
-    createdBy: userEmail,
-    legs: [
-      { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — held credit transferred out for re-booking` },
-      { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — held credit transferred out` },
-    ],
-  });
-  // Company B — liability arrives in B's CRM books
-  await postVoucher(pool, {
-    voucherNo: `${docNo}-B`,
-    voucherDate: new Date(),
-    sourceType: "CrmRebookingTransfer",
-    sourceId: rebookingTransferId,
-    companyId: row.ToCompanyId ?? null,
-    projectId: row.ToProjectId ?? null,
-    createdBy: userEmail,
-    legs: [
-      { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — held credit received for re-booking` },
-      { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — held credit received` },
-    ],
-  });
+  const hasCompanyPosting = async (companyId) => {
+    const posted = await pool.request().input("id", sql.Int, rebookingTransferId)
+      .input("companyId", sql.Int, companyId).query(`
+        SELECT TOP 1 1 AS found FROM dbo.GeneralLedgerEntry
+        WHERE SourceType = 'CrmRebookingTransfer' AND SourceId = @id
+          AND CompanyId = @companyId AND IsReversed = 0
+      `);
+    return posted.recordset.length > 0;
+  };
+  if (!(await hasCompanyPosting(row.FromCompanyId))) {
+    await postVoucher(pool, {
+      voucherNo: `${docNo}-A`, voucherDate: new Date(), sourceType: "CrmRebookingTransfer",
+      sourceId: rebookingTransferId, companyId: row.FromCompanyId ?? null,
+      projectId: row.FromProjectId ?? null, createdBy: userEmail,
+      legs: [
+        { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — held credit transferred out for re-booking` },
+        { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — held credit transferred out` },
+      ],
+    });
+  }
+  if (!(await hasCompanyPosting(row.ToCompanyId))) {
+    await postVoucher(pool, {
+      voucherNo: `${docNo}-B`, voucherDate: new Date(), sourceType: "CrmRebookingTransfer",
+      sourceId: rebookingTransferId, companyId: row.ToCompanyId ?? null,
+      projectId: row.ToProjectId ?? null, createdBy: userEmail,
+      legs: [
+        { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — held credit received for re-booking` },
+        { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — held credit received` },
+      ],
+    });
+  }
   return { posted: true };
 }
 

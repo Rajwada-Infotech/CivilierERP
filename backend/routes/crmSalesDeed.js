@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const router = express.Router();
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: a sale deed belongs to its booking's project.
@@ -761,6 +761,25 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
     const tx = pool.transaction();
     await tx.begin();
     try {
+      const booking = (await tx.request().input("bid", sql.Int, cur.recordset[0].BookingId).query(`
+        SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+      `)).recordset[0];
+      if (!booking || !booking.IsActive || DEAD_BOOKING_STATUSES.includes(booking.Status)) {
+        throw Object.assign(new Error("Cannot complete registry because the booking is no longer active"), { status: 409 });
+      }
+      const pendingCancellation = (await tx.request().input("bid", sql.Int, booking.Id).query(`
+        SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation
+        WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+      `)).recordset[0];
+      if (pendingCancellation) {
+        throw Object.assign(new Error(`Cannot complete registry while cancellation ${pendingCancellation.CancellationNo} is open; resolve it first.`), { status: 409 });
+      }
+      const currentRegistry = (await tx.request().input("id", sql.Int, id).query(`
+        SELECT Status FROM dbo.CrmRegistry WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      `)).recordset[0];
+      if (!currentRegistry || currentRegistry.Status !== "Scheduled") {
+        throw Object.assign(new Error("Registry is no longer scheduled; reload before completing it."), { status: 409 });
+      }
       await tx.request()
         .input("id", sql.Int, id)
         .input("dt", sql.Date, completedDate)
@@ -838,6 +857,7 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-sales-deed/registry] PUT /:id/complete error:", e.message);
+    if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });

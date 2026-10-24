@@ -8,6 +8,7 @@ const router = express.Router();
 const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 const { getPool, sql } = require("../db");
+const { getRedis } = require("../redis");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -18,7 +19,8 @@ const { applyPagination } = require("../services/crmListPagination");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
-const { guardAndConvertHold, placeHoldIfNeeded, releaseAllHoldsForApplication } = require("../services/crmHoldService");
+const { bumpCacheVersion } = require("../redis");
+const { guardAndConvertHold, placeHoldIfNeeded } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, recalculateRemainingMilestones, resolveNocType } = require("../services/crmWorkflowGuards");
 const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoicePdf");
@@ -32,8 +34,8 @@ const { recordGLPosting } = require("../services/approvalService");
 // the Admin Approval Inbox, same as every other CRM approval flow.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
-const { logStatusChange, syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
-const { getBookingFunding } = require("../services/crmPaymentFunding");
+const { logStatusChange, advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
+const { getBookingFunding, onAccountAvailableSql } = require("../services/crmPaymentFunding");
 
 // Keep the fixed Booking Amount line aligned with CrmBooking.BookingAmount.
 // recalculateRemainingMilestones intentionally excludes Milestone 1, so this
@@ -230,9 +232,8 @@ const BOOKING_SELECT = `
     CAST(CASE WHEN EXISTS (
        SELECT 1 FROM dbo.CrmPaymentMilestone m1 WHERE m1.BookingId = b.Id AND m1.MilestoneNo = 1 AND m1.ExtraChargeId IS NULL AND m1.ParkingAllotmentId IS NULL
          AND (m1.Status IN ('${CrmStatus.PAID}', 'Waived')
-              OR ISNULL(m1.AmountPaid, 0) + ISNULL((SELECT SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
-                THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END) FROM dbo.CrmOnAccountPayment
-                WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')), 0) >= ISNULL(m1.AmountDue, 0))
+              OR ISNULL(m1.AmountPaid, 0) + ISNULL((SELECT SUM(${onAccountAvailableSql("oa")}) FROM dbo.CrmOnAccountPayment oa
+                WHERE oa.BookingId = b.Id), 0) >= ISNULL(m1.AmountDue, 0))
      ) THEN 1 ELSE 0 END AS BIT) AS Milestone1VirtuallyCovered,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
@@ -248,8 +249,8 @@ const BOOKING_SELECT = `
     -- CrmOnAccountPayment row for the exact same money — adding them
     -- double-counted every on-account deposit (confirmed: booking 77 showed
     -- ₹20,000 on-account for a real ₹10,000 deposit).
-    (SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount,0) THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END),0) FROM dbo.CrmOnAccountPayment
-      WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')) AS ApprovedOnAccount,
+    (SELECT ISNULL(SUM(${onAccountAvailableSql("oa")}),0) FROM dbo.CrmOnAccountPayment oa
+      WHERE oa.BookingId = b.Id) AS ApprovedOnAccount,
     -- Post-agreement lifecycle flags — mirror GET /:id/lifecycle's own gates
     -- exactly (agRegistered/sdDone/hoDone/regDone/mutDone there) so this
     -- list's "next step" chip stops falsely declaring "All Steps Complete"
@@ -1556,7 +1557,42 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const actor = actorId(req);
     const tx = pool.transaction();
     await tx.begin();
+    let releasedHoldTypes = [];
     try {
+      const lockedBooking = (await tx.request().input("id", sql.Int, id).query(`
+        SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (XLOCK, HOLDLOCK) WHERE Id = @id
+      `)).recordset[0];
+      if (!lockedBooking || lockedBooking.IsActive !== booking.IsActive || lockedBooking.Status !== booking.Status) {
+        throw Object.assign(new Error("Booking changed while deletion was being prepared; reload and try again."), { status: 409 });
+      }
+      // Recheck the full preflight under the booking lock. Payment and
+      // workflow writers that serialize on this booking must finish first;
+      // if any permanent/progressed child committed while preflight ran, do
+      // not deactivate its parent and leave the audit trail orphaned.
+      const lockedDownstream = (await tx.request().input("bid", sql.Int, id).query(downstreamSql)).recordset[0] || {};
+      const lockedProgress = Object.entries(lockedDownstream).filter(([, count]) => Number(count) > 0).map(([name]) => name);
+      if (lockedProgress.length) {
+        throw Object.assign(new Error(`Booking gained dependent records while deletion was being prepared (${lockedProgress.join(", ")}); reload and use the appropriate workflow.`), { status: 409 });
+      }
+      const lockedVillaOnLand = await require("../services/villaLand").villaBookedOnLandOf(tx, id);
+      if (lockedVillaOnLand) {
+        throw Object.assign(new Error(`Villa booking ${lockedVillaOnLand} stands on this plot — cancel the villa booking first.`), { status: 409 });
+      }
+      const openResale = (await tx.request().input("bid", sql.Int, id).query(`
+        SELECT TOP 1 Id FROM dbo.CrmUnitResale
+        WHERE IsActive = 1 AND Status IN ('Draft', 'Pending', 'Approved')
+          AND (FromBookingId = @bid OR CHARINDEX(',' + CAST(@bid AS VARCHAR(20)) + ',', ',' + ISNULL(BookingIds, '') + ',') > 0)
+      `)).recordset[0];
+      if (openResale) {
+        throw Object.assign(new Error(`Cannot delete this booking while resale/buy-back case #${openResale.Id} is open.`), { status: 409 });
+      }
+      const openCancellation = (await tx.request().input("bid", sql.Int, id).query(`
+        SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation
+        WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+      `)).recordset[0];
+      if (openCancellation) {
+        throw Object.assign(new Error(`Cannot delete this booking while cancellation ${openCancellation.CancellationNo} is open.`), { status: 409 });
+      }
       await tx.request()
       .input("id", sql.Int, id)
       .input("ub", sql.Int, actor)
@@ -1609,6 +1645,36 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       WHERE BookingId = @bid AND Status = 'Pending'
     `);
 
+      // Keep the parent application in step with the booking in this same
+      // transaction; a post-commit best-effort sync could leave it live if
+      // the application update failed after the booking was retired.
+      if (!isCancelled) {
+        await advanceApplicationStatus(tx, booking.ApplicationId, CrmStatus.CANCELLED,
+          "BookingAdminDelete", "Booking deleted by admin", actor, { force: true });
+        const appNow = (await tx.request().input("aid", sql.Int, booking.ApplicationId)
+          .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid")).recordset[0];
+        if (appNow && appNow.Status === CrmStatus.CANCELLED) {
+          releasedHoldTypes = (await tx.request().input("aid", sql.Int, booking.ApplicationId).input("ub", sql.Int, actor).query(`
+            UPDATE dbo.CrmInventoryHold
+            SET Status = 'Released', ReleasedBy = @ub, ReleasedAt = SYSDATETIME()
+            OUTPUT INSERTED.EntityType
+            WHERE ApplicationId = @aid AND Status = 'Active'
+          `)).recordset.map((r) => r.EntityType);
+        } else if (booking.UnitId) {
+          await placeHoldIfNeeded(tx, {
+            entityType: "Unit",
+            entityId: booking.UnitId,
+            applicationId: booking.ApplicationId,
+            reason: "Booking deleted by admin - application reverted to pre-booking hold",
+            userId: actor,
+          });
+        }
+      }
+
+      await logCrmAudit(tx, "Booking", id, actor, [
+        { field: "IsActive", oldVal: 1, newVal: 0 },
+      ]);
+
       await tx.commit();
     } catch (txErr) {
       await tx.rollback().catch(() => {});
@@ -1624,42 +1690,17 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     // For cancelled bookings these steps were already executed when the
     // cancellation was approved — skip to avoid double-sync and ghost holds.
     if (!isCancelled) {
-      await syncApplicationOnBookingTerminal(pool, id, CrmStatus.CANCELLED,
-        "BookingAdminDelete", "Booking deleted by admin", actor);
-
       // A cancelled application can't hold inventory — release whatever it
       // still holds instead of re-holding the unit for nobody. Only a live
       // application gets the unit held while it's corrected and re-booked.
-      const appNow = (await pool.request().input("aid", sql.Int, booking.ApplicationId)
-        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid")).recordset[0];
-      if (appNow && appNow.Status === CrmStatus.CANCELLED) {
-        try {
-          await releaseAllHoldsForApplication(pool, booking.ApplicationId, actor);
-        } catch (holdErr) {
-          console.error("[crm-bookings] hold release after delete failed:", holdErr.message);
-        }
-      } else if (booking.UnitId) {
-        try {
-          await placeHoldIfNeeded(pool, {
-            entityType: "Unit",
-            entityId: booking.UnitId,
-            applicationId: booking.ApplicationId,
-            reason: "Booking deleted by admin - application reverted to pre-booking hold",
-            userId: actor,
-          });
-        } catch (holdErr) {
-          console.error("[crm-bookings] unit hold restore after delete failed:", holdErr.message);
-        }
-      }
+      if (releasedHoldTypes.includes("Unit")) bumpCacheVersion("unit-master").catch(() => {});
+      if (releasedHoldTypes.length) { try { getIo().emit("matrix:update", {}); } catch {} }
     }
-
-    await logCrmAudit(pool, "Booking", id, actor, [
-      { field: "IsActive", oldVal: 1, newVal: 0 },
-    ]);
 
     res.json({ success: true, message: `Booking ${booking.BookingNo} deleted` });
   } catch (e) {
     console.error("[crm-bookings] DELETE error:", e.message);
+    if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
@@ -2762,6 +2803,11 @@ async function setBookingPortalActive(pool, bookingId, isActive) {
     } catch (_) {}
   }
   if (portalUserId == null) return { error: "No portal account exists for this customer yet", status: 404 };
+  // Invalidate any existing session before either deactivation or reactivation.
+  // The generation check in crmPortalAuth is immediate and also avoids the
+  // short stale-active window in crmPortal's in-memory account-status cache.
+  const redis = await getRedis();
+  await redis.incr(`crm-portal:session-version:${portalUserId}`);
   await pool.request().input("id", sql.Int, portalUserId).input("act", sql.Bit, isActive ? 1 : 0)
     .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = @act WHERE Id = @id");
   return { ok: true };

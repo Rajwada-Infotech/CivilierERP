@@ -211,6 +211,12 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
   const bbReq = tx.request();
   ids.forEach((id, i) => bbReq.input(`bbid${i}`, sql.Int, id));
   const bbInList = ids.length ? ids.map((_, i) => `@bbid${i}`).join(",") : "0";
+  // Serialize voucher creation with claim creation. Claim writers lock these
+  // same deposit rows before checking buy-back state and inserting a claim.
+  await bbReq.query(`
+    SELECT Id FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK)
+    WHERE BookingId IN (${bbInList}) ORDER BY BookingId, Id
+  `);
   const bookings = (await bbReq.query(`
     SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.CompanyId, a.CustomerId,
            (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
@@ -221,10 +227,8 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
   const conveyed = await conveyedReason(tx, ids);
   if (conveyed) throw new ResaleError(conveyed, 409);
   if (bookings.some((b) => b.CustomerId !== resale.FromCustomerId)) throw new ResaleError("The property no longer belongs to the seller on this buy-back", 409);
-  // Money still on account counts as paid (until the full price is in it
-  // stays there — the full-booking hold), and completeBuyBack uses it up. It
-  // must not be promised elsewhere meanwhile: an open refund or re-booking
-  // transfer on the same credit would pay it out twice.
+  // Money still on account counts as paid and completeBuyBack consumes it.
+  // It must not already be promised to a refund or re-booking transfer.
   const refReq = tx.request();
   ids.forEach((id, i) => refReq.input(`refid${i}`, sql.Int, id));
   const refInList = ids.length ? ids.map((_, i) => `@refid${i}`).join(",") : "0";
@@ -232,6 +236,11 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
     SELECT TOP 1 r.RefundNo FROM dbo.CrmRefund r
     WHERE r.BookingId IN (${refInList}) AND r.Status NOT IN ('Paid', 'Rejected', 'Cancelled')`)).recordset[0];
   if (claimed) throw new ResaleError(`Refund ${claimed.RefundNo} is open on this property's money — finish or reject it first`, 409);
+  const transferClaimed = (await refReq.query(`
+    SELECT TOP 1 rt.Id FROM dbo.CrmRebookingTransfer rt
+    JOIN dbo.CrmOnAccountPayment oa ON oa.Id = rt.HeldOnAccountId
+    WHERE oa.BookingId IN (${refInList}) AND rt.Status NOT IN ('Rejected', 'Applied')`)).recordset[0];
+  if (transferClaimed) throw new ResaleError(`Re-booking transfer #${transferClaimed.Id} is open on this property's money — finish or reject it first`, 409);
   const price = Math.round(Number(resale.AgreedValue || 0) * 100) / 100;
   const tds = Math.round(Number(resale.TdsAmount || 0) * 100) / 100;
   if (!(price > 0)) throw new ResaleError("The buy-back has no agreed price");

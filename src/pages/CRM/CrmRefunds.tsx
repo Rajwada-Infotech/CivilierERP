@@ -207,9 +207,44 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
-        toast.success(d.crossCompany
-          ? `Inter-company transfer ${d.fundTransferDocNo || ""} raised — credit lands once Finance approves it`
-          : "Held credit applied to the booking");
+        if (d.partialFailure && d.fundTransferId) {
+          toast.warning(d.message || "Fund Transfer remains Draft; submit it when ready", {
+            action: {
+              label: "Submit for approval",
+              onClick: async () => {
+                try {
+                  const submitResult = await fetchWithAuth(`${API}/rebooking-transfer/${d.id}/submit-fund-transfer`, { method: "PUT" });
+                  const submitData = await submitResult.json();
+                  if (!submitResult.ok) throw new Error(submitData.error || "Fund Transfer submission failed");
+                  toast.success(submitData.message || "Fund Transfer submitted for approval");
+                } catch (err: any) {
+                  toast.error(err?.message || "Fund Transfer submission failed");
+                }
+              },
+            },
+          });
+        } else if (d.partialFailure) {
+          toast.warning(d.message || "Credit applied, but accounting follow-up is incomplete", {
+            action: {
+              label: "Retry ledger",
+              onClick: async () => {
+                try {
+                  const retry = await fetchWithAuth(`${API}/rebooking-transfer/${d.id}/retry-ledger`, { method: "PUT" });
+                  const retryResult = await retry.json();
+                  if (!retry.ok) throw new Error(retryResult.error || "Ledger retry failed");
+                  if (retryResult.partialFailure) toast.warning(retryResult.message || "Ledger follow-up is still incomplete");
+                  else toast.success(retryResult.message || "Ledger entries updated");
+                } catch (err: any) {
+                  toast.error(err?.message || "Ledger retry failed");
+                }
+              },
+            },
+          });
+        } else {
+          toast.success(d.crossCompany
+            ? `Inter-company transfer ${d.fundTransferDocNo || ""} raised — credit lands once Finance approves it`
+            : "Held credit applied to the booking");
+        }
       } else {
         if (!picked) { toast.error("Pick a source"); return; }
         const body: any = { GrossAmount: amt, Reason: reason || null, RefundBankLHeadId: bankLHeadId || null,

@@ -51,12 +51,12 @@ async function fetchCustomersList(filters: CustomerListFilters, page: number, pa
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const res = await fetchWithAuth(`${API}?${params}`);
-    if (!res.ok) return { rows: [], total: 0 };
-    const data = await res.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+  const res = await fetchWithAuth(`${API}?${params}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `Could not load customers (HTTP ${res.status})`);
+  }
+  return { rows: data.rows || [], total: data.total || 0 };
 }
 // Only converted leads are offered here — this dropdown IS the real "only a
 // converted lead may enter the CRM module" gate now (Leads -> Customer ->
@@ -512,7 +512,7 @@ const CrmCustomers: React.FC = () => {
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: listResult, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-customers", listFilters, page],
     queryFn: () => fetchCustomersList(listFilters, page),
     staleTime: 30_000,
@@ -770,15 +770,27 @@ const CrmCustomers: React.FC = () => {
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
-      <DataTable
-        data={filtered}
-        columns={customerColumns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage="No customers found"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+      {isError ? (
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm">
+          <p className="font-medium text-destructive">Customers could not be loaded.</p>
+          <p className="mt-1 text-muted-foreground">{(error as Error)?.message || "Check your connection and try again."}</p>
+          <button type="button" onClick={() => refetch()} className="mt-3 rounded-md border border-border px-3 py-1.5 font-medium hover:bg-muted">
+            Try again
+          </button>
+        </div>
+      ) : (
+        <>
+          <DataTable
+            data={filtered}
+            columns={customerColumns}
+            searchable={false}
+            loading={isLoading}
+            emptyMessage="No customers found"
+            className="rounded-xl border border-border overflow-hidden bg-card"
+          />
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+        </>
+      )}
 
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}

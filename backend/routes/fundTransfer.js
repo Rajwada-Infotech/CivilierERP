@@ -7,9 +7,9 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
-const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus, getWorkflow } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
-const { postFundTransferApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
+const { postFundTransferApproval, hasCompleteFundTransferPosting, reversePostingBySource } = require("../services/generalLedger");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 
 function requireUser(req, res) {
@@ -19,6 +19,21 @@ function requireUser(req, res) {
     return null;
   }
   return email;
+}
+
+async function authorizeApprovedTransferRetry(req) {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (role === "super_admin") return;
+  const userId = req.user?.userId ?? req.user?.id;
+  const workflow = await getWorkflow("fund-transfer");
+  const namedApprover = userId != null && workflow?.LevelDefs?.some((level) =>
+    Array.isArray(level.userIds) && level.userIds.map(Number).includes(Number(userId)),
+  );
+  if (!namedApprover) {
+    const err = new Error("Only a Fund Transfer approver can retry its accounting posting.");
+    err.status = 403;
+    throw err;
+  }
 }
 
 // Shared validation for POST / and PUT /:id — same rules the DB's own
@@ -192,7 +207,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
 
-    const postedToGL = await hasPosting(pool, "FundTransfer", id);
+    const postedToGL = await hasCompleteFundTransferPosting(pool, id);
     res.json({ ...result.recordset[0], PostedToGL: postedToGL });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -665,8 +680,24 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
 
     // If already Approved (a prior posting attempt failed after the status
     // transition succeeded), skip transition() and just retry the post —
-    // postFundTransferApproval() is idempotent via hasPosting().
+    // postFundTransferApproval() retries any missing company voucher.
     const alreadyApproved = current.recordset[0].Status === "Approved";
+
+    if (!alreadyApproved) {
+      const staleCrmLink = await pool.request().input("ft", sql.Int, id).query(`
+        SELECT TOP 1 Id FROM dbo.CrmRebookingTransfer
+        WHERE FundTransferId = @ft AND Status = 'Rejected'
+      `);
+      if (staleCrmLink.recordset.length) {
+        return res.status(409).json({
+          error: "This Fund Transfer's linked CRM re-booking claim was rejected because its source credit was consumed. Do not approve it as a standalone transfer; reconcile any bank movement manually.",
+        });
+      }
+    }
+
+    // The retry path skips transition(), so apply the same narrow Fund
+    // Transfer approver boundary before allowing any accounting/CRM side effect.
+    if (alreadyApproved) await authorizeApprovedTransferRetry(req);
 
     let transitionResult = {};
     if (!alreadyApproved) {
@@ -683,35 +714,91 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
       }
     }
 
+    if (transitionResult.newStatus === "Pending") {
+      await bumpCacheVersion("fund-transfer");
+      return res.json({
+        message: "Approval step recorded. Fund Transfer is awaiting further approval; GL posting and linked CRM credit will occur after final approval.",
+        ...transitionResult,
+      });
+    }
+
+    // approvalService commits the status before its best-effort GL poster.
+    // Do not apply linked customer credit until the transfer has a live GL
+    // posting. Retrying this route on an Approved record retries the poster.
+    const approvedNow = transitionResult.newStatus === "Approved" || alreadyApproved;
+    const glPosted = approvedNow && await hasCompleteFundTransferPosting(pool, id);
+    if (approvedNow && !glPosted) {
+      await bumpCacheVersion("fund-transfer");
+      await bumpCacheVersion("general-ledger");
+      return res.status(202).json({
+        message: "Fund Transfer is approved, but its GL posting is not complete. Linked CRM credit was not applied. Retry approval after resolving the posting issue.",
+        partialFailure: true,
+        glPostingPending: true,
+        ...transitionResult,
+      });
+    }
+
+    let crmCreditApplyError = null;
+    let linkedRebookingTransferId = null;
+    let crmLedgerRetryId = null;
+    let crmClaimRejected = false;
     // CRM re-booking credit transfer: if this Inter-company transfer was
     // raised to move a cancelled booking's held credit to a new booking in
     // another company, now that it's Approved (real bank + LOAN-C squared),
     // drop the fresh on-account credit on the target booking. Non-fatal.
-    if (transitionResult.newStatus === "Approved" || alreadyApproved) {
+    if (approvedNow && glPosted) {
       try {
         const linked = await pool.request().input("ft", sql.Int, id)
-          .query("SELECT Id FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft AND Status = 'PendingTransfer'");
+          .query("SELECT Id, Status FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft");
         if (linked.recordset.length) {
-          const { applyRebookingTransferToBooking } = require("./crmRefunds");
-          const outcome = await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
-          // The money has moved between the companies; if the credit couldn't
-          // land on the booking, say why on the transfer instead of dropping it.
-          if (outcome && outcome.ok === false) {
-            console.warn("[fund-transfer] CRM re-booking not applied:", outcome.reason);
-            await pool.request().input("rt", sql.Int, linked.recordset[0].Id)
-              .input("n", sql.NVarChar(500), `Fund transfer approved, but the credit could not be put on the booking: ${String(outcome.reason || "").slice(0, 400)}`)
-              .query("UPDATE dbo.CrmRebookingTransfer SET Notes = CONCAT(ISNULL(Notes + CHAR(10), ''), @n), UpdatedAt = SYSDATETIME() WHERE Id = @rt");
+          linkedRebookingTransferId = linked.recordset[0].Id;
+          if (linked.recordset[0].Status === "Rejected") {
+            crmClaimRejected = true;
+            crmCreditApplyError = "The linked CRM re-booking claim was rejected; no credit was applied to the target booking";
+          } else if (["PendingTransfer", "Applied"].includes(linked.recordset[0].Status)) {
+            const { applyRebookingTransferToBooking } = require("./crmRefunds");
+            const outcome = await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
+            // The money has moved between the companies; if the credit couldn't
+            // land on the booking, say why on the transfer instead of dropping it.
+            if (outcome && outcome.ok === false) {
+              console.warn("[fund-transfer] CRM re-booking not applied:", outcome.reason);
+              crmCreditApplyError = outcome.reason || "CRM credit could not be applied";
+              if (outcome.applied) crmLedgerRetryId = linked.recordset[0].Id;
+            }
+            await bumpCacheVersion("crm-refunds");
+          } else {
+            crmCreditApplyError = `The linked CRM re-booking claim is ${linked.recordset[0].Status}; no target booking credit was applied`;
           }
-          await bumpCacheVersion("crm-refunds");
         }
       } catch (rebookErr) {
         console.warn("[fund-transfer] CRM re-booking apply failed (non-fatal):", rebookErr.message);
+        crmCreditApplyError = rebookErr.message;
       }
     }
 
+    if (crmCreditApplyError && linkedRebookingTransferId) {
+      await pool.request().input("rt", sql.Int, linkedRebookingTransferId)
+        .input("n", sql.NVarChar(500), `${crmLedgerRetryId ? "Fund transfer approved and CRM credit applied, but CRM ledger follow-up failed" : "Fund transfer approved, but CRM credit could not be applied"}: ${String(crmCreditApplyError).slice(0, 400)}`)
+        .query("UPDATE dbo.CrmRebookingTransfer SET Notes = CONCAT(ISNULL(Notes + CHAR(10), ''), @n), UpdatedAt = SYSDATETIME() WHERE Id = @rt AND Status IN ('PendingTransfer', 'Applied')");
+    }
     await bumpCacheVersion("fund-transfer");
     await bumpCacheVersion("general-ledger");
-    res.json({ message: "Fund Transfer approved and posted to GL", ...transitionResult });
+    if (crmCreditApplyError) {
+      return res.status(202).json({
+        message: crmClaimRejected
+          ? "Fund Transfer is approved and posted, but its linked CRM re-booking claim was rejected and no target booking credit was applied. Reconcile the bank movement manually."
+          : crmLedgerRetryId
+            ? "Fund Transfer was approved and posted. CRM credit was applied, but its accounting ledger follow-up is incomplete; use Retry CRM ledger to retry it."
+            : linkedRebookingTransferId
+              ? "Fund Transfer was approved and posted, but its linked CRM re-booking claim is not in an applicable state and no target booking credit was applied. Reconcile the bank movement manually."
+              : "Fund Transfer was approved (confirming the manual bank transfer) and posted to GL, but its CRM re-booking credit is still unapplied. The failure is recorded on the re-booking transfer for follow-up.",
+        partialFailure: true, crmCreditApplyError, crmLedgerRetryId, crmClaimRejected, ...transitionResult,
+      });
+    }
+    res.json({
+      message: "Fund Transfer approved and posted to GL. Approval records confirmation that the bank transfer was completed manually; CivilierERP does not move the funds.",
+      ...transitionResult,
+    });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
   }

@@ -218,6 +218,33 @@ async function hasPosting(pool, sourceType, sourceId) {
   return result.recordset.length > 0;
 }
 
+async function hasCompleteFundTransferPosting(pool, ftId) {
+  const result = await pool.request().input("id", sql.Int, ftId).query(`
+    SELECT ft.TransferType, ft.SourceCompanyId, ft.DestinationCompanyId,
+      COUNT(DISTINCT CASE WHEN gle.IsReversed = 0
+        AND gle.CompanyId IN (ft.SourceCompanyId, ft.DestinationCompanyId)
+        THEN gle.CompanyId END) AS PostedCompanies
+    FROM dbo.FundTransfer ft
+    LEFT JOIN dbo.GeneralLedgerEntry gle
+      ON gle.SourceType = 'FundTransfer' AND gle.SourceId = ft.FTId
+    WHERE ft.FTId = @id
+    GROUP BY ft.TransferType, ft.SourceCompanyId, ft.DestinationCompanyId
+  `);
+  const row = result.recordset[0];
+  if (!row) return false;
+  const expectedCompanies = Number(row.SourceCompanyId) === Number(row.DestinationCompanyId) ? 1 : 2;
+  return Number(row.PostedCompanies || 0) === expectedCompanies;
+}
+
+async function hasCompanyFundTransferPosting(pool, ftId, companyId) {
+  const result = await pool.request()
+    .input("id", sql.Int, ftId)
+    .input("companyId", sql.Int, companyId)
+    .query(`SELECT TOP 1 1 AS found FROM dbo.GeneralLedgerEntry
+      WHERE SourceType = 'FundTransfer' AND SourceId = @id AND CompanyId = @companyId AND IsReversed = 0`);
+  return result.recordset.length > 0;
+}
+
 /**
  * Post a balanced voucher. `legs` is an array of
  *   { lHeadId, debit?, credit?, narration? }
@@ -825,7 +852,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .request()
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
-      SELECT PPaymentID, PAmount, PDate, PBankID, PMode, PExpenseRef, DocNo,
+      SELECT PPaymentID, Status, PAmount, PDate, PBankID, PMode, PExpenseRef, DocNo,
              PCompany, PProject, ContractId, PPartyId, PPaymentName, JVLineId,
              ISNULL(TDSAmount, 0) AS TDSAmount
       FROM dbo.NewPayment
@@ -833,6 +860,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     `);
   const payment = result.recordset[0];
   if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
+  if (payment.Status !== "Approved") return { skipped: true, reason: `Payment ${paymentId} is ${payment.Status}, not Approved` };
 
   // Cash-mode payments never carry a PBankID (Payment.tsx disables the Bank
   // field for Cash) — that company's own Cash-in-Hand head stands in for
@@ -1497,8 +1525,9 @@ async function postJournalVoucherApproval(pool, jvId, userEmail) {
  * The loan's own creation only credits the borrower's On-Account balance —
  * it deliberately does NOT touch GeneralLedgerEntry (a sanctioned loan can
  * predate real disbursement). Fund Transfer, unlike a loan sanctioned by
- * hand, *is* the disbursement — real cash actually left one bank and
- * arrived at another — so this posts the combined bank-movement +
+ * hand is paired with Fund Transfer approval as the recorded disbursement:
+ * staff confirm real cash left one bank and arrived at another before
+ * approval. The ERP does not initiate the external bank movement; this posts the combined bank-movement +
  * lender/borrower legs itself, in one shot, instead of also calling
  * loanSanction.js's separate POST /:id/post-to-gl (which would double-count
  * both loan heads). See that route's own guard against exactly this.
@@ -1506,16 +1535,48 @@ async function postJournalVoucherApproval(pool, jvId, userEmail) {
  *   Destination (borrower) company's books: Dr Destination Bank / Cr Borrower Loan head
  */
 async function postFundTransferApproval(pool, ftId, userEmail) {
-  if (await hasPosting(pool, "FundTransfer", ftId))
-    return { posted: true, reason: "already posted (idempotent)" };
-
   const result = await pool.request().input("id", sql.Int, ftId).query(`
     SELECT FTId, DocNo, TransferDate, TransferType, SourceCompanyId, DestinationCompanyId,
-           SourceBankId, DestinationBankId, Amount, Narration
+           SourceBankId, DestinationBankId, Amount, Narration, LinkedLoanId
     FROM dbo.FundTransfer WHERE FTId = @id
   `);
   const ft = result.recordset[0];
   if (!ft) return { posted: false, reason: `FundTransfer ${ftId} not found` };
+  if (await hasCompleteFundTransferPosting(pool, ftId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  // CRM may reject a re-booking claim after its source credit was consumed
+  // elsewhere. Its linked Fund Transfer must not then post as an unrelated
+  // inter-company movement. Staff must reconcile the already-manual bank
+  // movement outside this approval path if it happened before the claim ended.
+  const rejectedCrmClaim = (await pool.request().input("ft", sql.Int, ftId).query(`
+    SELECT TOP 1 Id FROM dbo.CrmRebookingTransfer
+    WHERE FundTransferId = @ft AND Status = 'Rejected'
+  `)).recordset[0];
+  if (rejectedCrmClaim) {
+    throw new Error(`Fund Transfer ${ftId} is linked to a rejected CRM re-booking claim and cannot be posted`);
+  }
+  const pendingCrmClaim = (await pool.request().input("ft", sql.Int, ftId).query(`
+    SELECT TOP 1 rt.Id, rt.Status, rt.Amount, oa.Amount AS SourceAmount, oa.AppliedAmount,
+      ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
+              WHERE r.SourceOnAccountId = rt.HeldOnAccountId
+                AND r.Status NOT IN ('Rejected', 'Paid')), 0) AS OtherRefundClaims,
+      ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
+              WHERE t.HeldOnAccountId = rt.HeldOnAccountId
+                AND t.Status NOT IN ('Rejected', 'Applied') AND t.Id <> rt.Id), 0) AS OtherTransferClaims
+    FROM dbo.CrmRebookingTransfer rt
+    JOIN dbo.CrmOnAccountPayment oa ON oa.Id = rt.HeldOnAccountId
+    WHERE rt.FundTransferId = @ft AND rt.Status = 'PendingTransfer'
+  `)).recordset[0];
+  if (pendingCrmClaim) {
+    const available = Number(pendingCrmClaim.SourceAmount || 0)
+      - Number(pendingCrmClaim.AppliedAmount || 0)
+      - Number(pendingCrmClaim.OtherRefundClaims || 0)
+      - Number(pendingCrmClaim.OtherTransferClaims || 0);
+    if (Number(pendingCrmClaim.Amount) > available + 0.01) {
+      throw new Error(`Fund Transfer ${ftId} is linked to CRM re-booking claim ${pendingCrmClaim.Id}, but only ${available.toFixed(2)} remains available from its held source credit`);
+    }
+  }
 
   const amount = Number(ft.Amount) || 0;
   if (amount <= 0)
@@ -1540,46 +1601,62 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
     return { posted: true };
   }
 
-  const { createLoanSanctionInternal } = require("../routes/loanSanction");
-  const { loanId, loanNo, lenderLHeadId, borrowerLHeadId } = await createLoanSanctionInternal({
-    loanType: "Inter-Company",
-    lenderCompanyId: ft.SourceCompanyId,
-    lenderBankAccountId: ft.SourceBankId,
-    borrowerCompanyId: ft.DestinationCompanyId,
-    borrowerBankAccountId: ft.DestinationBankId,
-    loanDate: ft.TransferDate,
-    amount,
-    hasInterest: false,
-    purpose: `Inter-Company Fund Transfer ${docNo}${note}`,
-  }, userEmail);
+  let loanId = ft.LinkedLoanId;
+  let loanNo;
+  let lenderLHeadId;
+  let borrowerLHeadId;
+  if (loanId) {
+    const linkedLoan = (await pool.request().input("loanId", sql.Int, loanId).query(`
+      SELECT LoanId, LoanNo, LenderLHeadId, BorrowerLHeadId FROM dbo.LoanSanction WHERE LoanId = @loanId
+    `)).recordset[0];
+    if (!linkedLoan) throw new Error(`Linked LoanSanction ${loanId} for FundTransfer ${ftId} is missing`);
+    ({ LoanId: loanId, LoanNo: loanNo, LenderLHeadId: lenderLHeadId, BorrowerLHeadId: borrowerLHeadId } = linkedLoan);
+  } else {
+    const { createLoanSanctionInternal } = require("../routes/loanSanction");
+    const loan = await createLoanSanctionInternal({
+      loanType: "Inter-Company",
+      lenderCompanyId: ft.SourceCompanyId,
+      lenderBankAccountId: ft.SourceBankId,
+      borrowerCompanyId: ft.DestinationCompanyId,
+      borrowerBankAccountId: ft.DestinationBankId,
+      loanDate: ft.TransferDate,
+      amount,
+      hasInterest: false,
+      purpose: `Inter-Company Fund Transfer ${docNo}${note}`,
+    }, userEmail);
+    ({ loanId, loanNo, lenderLHeadId, borrowerLHeadId } = loan);
+    await pool.request().input("id", sql.Int, ftId).input("loanId", sql.Int, loanId)
+      .query(`UPDATE dbo.FundTransfer SET LinkedLoanId = @loanId WHERE FTId = @id AND LinkedLoanId IS NULL`);
+  }
 
-  await pool.request().input("id", sql.Int, ftId).input("loanId", sql.Int, loanId)
-    .query(`UPDATE dbo.FundTransfer SET LinkedLoanId = @loanId WHERE FTId = @id`);
-
-  await postVoucher(pool, {
-    voucherNo: docNo,
-    voucherDate: ft.TransferDate,
-    sourceType: "FundTransfer",
-    sourceId: ftId,
-    companyId: ft.SourceCompanyId,
-    createdBy: userEmail,
-    legs: [
-      { lHeadId: lenderLHeadId, debit: amount, narration: `${docNo} — inter-company loan ${loanNo} receivable (funds sent)${note}` },
-      { lHeadId: ft.SourceBankId, credit: amount, narration: `${docNo} — fund transfer out` },
-    ],
-  });
-  await postVoucher(pool, {
-    voucherNo: docNo,
-    voucherDate: ft.TransferDate,
-    sourceType: "FundTransfer",
-    sourceId: ftId,
-    companyId: ft.DestinationCompanyId,
-    createdBy: userEmail,
-    legs: [
-      { lHeadId: ft.DestinationBankId, debit: amount, narration: `${docNo} — fund transfer in` },
-      { lHeadId: borrowerLHeadId, credit: amount, narration: `${docNo} — inter-company loan ${loanNo} payable (funds received)${note}` },
-    ],
-  });
+  if (!(await hasCompanyFundTransferPosting(pool, ftId, ft.SourceCompanyId))) {
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: ft.TransferDate,
+      sourceType: "FundTransfer",
+      sourceId: ftId,
+      companyId: ft.SourceCompanyId,
+      createdBy: userEmail,
+      legs: [
+        { lHeadId: lenderLHeadId, debit: amount, narration: `${docNo} — inter-company loan ${loanNo} receivable (funds sent)${note}` },
+        { lHeadId: ft.SourceBankId, credit: amount, narration: `${docNo} — fund transfer out` },
+      ],
+    });
+  }
+  if (!(await hasCompanyFundTransferPosting(pool, ftId, ft.DestinationCompanyId))) {
+    await postVoucher(pool, {
+      voucherNo: docNo,
+      voucherDate: ft.TransferDate,
+      sourceType: "FundTransfer",
+      sourceId: ftId,
+      companyId: ft.DestinationCompanyId,
+      createdBy: userEmail,
+      legs: [
+        { lHeadId: ft.DestinationBankId, debit: amount, narration: `${docNo} — fund transfer in` },
+        { lHeadId: borrowerLHeadId, credit: amount, narration: `${docNo} — inter-company loan ${loanNo} payable (funds received)${note}` },
+      ],
+    });
+  }
   return { posted: true, loanId, loanNo };
 }
 
@@ -1591,6 +1668,7 @@ module.exports = {
   ensureCashInHandHead,
   getHeadIdByName,
   hasPosting,
+  hasCompleteFundTransferPosting,
   postVoucher,
   postGRNApproval,
   postExpenseBookingApproval,

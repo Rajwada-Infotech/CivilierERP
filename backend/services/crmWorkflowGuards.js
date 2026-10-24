@@ -3,6 +3,7 @@ const { getNextDocNumber } = require("./docNumber");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
+const { onAccountAvailableSql } = require("./crmPaymentFunding");
 
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
@@ -231,9 +232,8 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // full-booking auto-sweep to physically mark it Paid.
   if (!milestone1.recordset.length || (milestone1.recordset[0].Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
     const totalsRow = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
-        THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment
-      WHERE BookingId = @bid AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+      SELECT ISNULL(SUM(${onAccountAvailableSql("oa")}), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment oa
+      WHERE oa.BookingId = @bid
     `);
     const totalReceived = (Number(milestone1.recordset[0]?.AmountPaid) || 0)
       + (Number(totalsRow.recordset[0]?.TotalReceived) || 0);

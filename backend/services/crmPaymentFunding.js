@@ -1,5 +1,17 @@
 const { sql } = require("../db");
 
+function onAccountAvailableSql(alias = "o") {
+  const remaining = `${alias}.Amount - ISNULL(${alias}.AppliedAmount, 0)`;
+  const reserved = `ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
+      WHERE r.SourceOnAccountId = ${alias}.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
+    + ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
+      WHERE t.HeldOnAccountId = ${alias}.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)`;
+  return `CASE
+    WHEN ISNULL(${alias}.Status, '') IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN 0
+    WHEN ${remaining} - (${reserved}) > 0 THEN ${remaining} - (${reserved})
+    ELSE 0 END`;
+}
+
 // SQL twin of getBookingFunding for larger list queries. The caller supplies
 // a trusted booking-id expression (for example `b.Id` or `@bid`).
 function bookingFullyFundedSql(bookingIdExpr) {
@@ -9,7 +21,18 @@ function bookingFullyFundedSql(bookingIdExpr) {
     <= ISNULL((SELECT SUM(ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
       WHERE m.BookingId = ${bookingIdExpr}), 0)
       + ISNULL((SELECT SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
-          AND o.Amount > ISNULL(o.AppliedAmount, 0) THEN o.Amount - ISNULL(o.AppliedAmount, 0) ELSE 0 END)
+          AND o.Amount > ISNULL(o.AppliedAmount, 0) THEN CASE WHEN
+            o.Amount - ISNULL(o.AppliedAmount, 0)
+              - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
+                  WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
+              - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
+                  WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0) > 0
+            THEN o.Amount - ISNULL(o.AppliedAmount, 0)
+              - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
+                  WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
+              - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
+                  WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)
+            ELSE 0 END ELSE 0 END)
         FROM dbo.CrmOnAccountPayment o WHERE o.BookingId = ${bookingIdExpr}), 0) + 0.009`;
 }
 
@@ -24,8 +47,18 @@ async function getBookingFunding(pool, bookingId) {
       END AS RequiredAmount,
       ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS MilestonePaid,
       ISNULL((
-        SELECT SUM(CASE WHEN o.Amount > ISNULL(o.AppliedAmount, 0)
-          THEN o.Amount - ISNULL(o.AppliedAmount, 0) ELSE 0 END)
+      SELECT SUM(CASE WHEN o.Amount > ISNULL(o.AppliedAmount, 0) THEN CASE WHEN
+          o.Amount - ISNULL(o.AppliedAmount, 0)
+            - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
+                WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
+            - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
+                WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0) > 0
+          THEN o.Amount - ISNULL(o.AppliedAmount, 0)
+            - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
+                WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
+            - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
+                WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)
+          ELSE 0 END ELSE 0 END)
         FROM dbo.CrmOnAccountPayment o
         WHERE o.BookingId = b.Id
           AND ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
@@ -49,4 +82,4 @@ async function getBookingFunding(pool, bookingId) {
   };
 }
 
-module.exports = { getBookingFunding, bookingFullyFundedSql };
+module.exports = { getBookingFunding, bookingFullyFundedSql, onAccountAvailableSql };

@@ -533,6 +533,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
     const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated, CrmMilestoneId, CrmBookingId, CrmApplicationId`;
     const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated, @CrmMilestoneId, @CrmBookingId, @CrmApplicationId`;
 
+    const crmBookingInsert = CrmBookingId != null;
     const result = await req2.query(`
       INSERT INTO dbo.ReceivedPayment (
         RPCompanyName, RPReceivedFrom, RPProjectName, RPDocDate, RPMode,
@@ -541,13 +542,29 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         RPStatus, RPCreatedBy, RPCreatedAt ${extraCols}
       )
       OUTPUT INSERTED.*
-      VALUES (
-        @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
-        @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
-        @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
-        'Draft', @RPCreatedBy, GETDATE() ${extraVals}
-      )
+      ${crmBookingInsert ? `
+        SELECT @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
+          @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
+          @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
+          'Draft', @RPCreatedBy, GETDATE() ${extraVals}
+        FROM dbo.CrmBooking crmBooking WITH (UPDLOCK, HOLDLOCK)
+        WHERE crmBooking.Id = @CrmBookingId AND crmBooking.IsActive = 1
+          AND crmBooking.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+      ` : `
+        VALUES (
+          @RPCompanyName, @RPReceivedFrom, @RPProjectName, @RPDocDate, @RPMode,
+          @RPAmount, @RPBankName, @RPTransactionID, @RPCheckNumber, @RPRemarks,
+          @RPIsEmi, @RPEmiTotal, @RPEmiMonths, @RPEmiStartDate, @RPEmiSchedule, @RPEmiPaying,
+          'Draft', @RPCreatedBy, GETDATE() ${extraVals}
+        )
+      `}
     `);
+
+    if (crmBookingInsert && !result.recordset.length) {
+      const err = new Error("This booking is no longer active; the payment was not submitted.");
+      err.status = 409;
+      throw err;
+    }
 
     const row = result.recordset[0];
 
@@ -645,15 +662,24 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
     const wasApproved = beforeSnapshot?.RPStatus === "Approved";
 
+    // CRM approval writes a separate on-account deposit and GL posting keyed
+    // by that deposit. Re-queuing an approved source row without reversing and
+    // rebuilding those linked records would leave amount/bank/status data out
+    // of sync while the old CRM GL entry remains live. Bounce/reversal is the
+    // supported path for correcting an already-approved CRM receipt.
+    if (wasApproved && (beforeSnapshot?.CrmBookingId != null || beforeSnapshot?.CrmMilestoneId != null)) {
+      return res.status(409).json({
+        error: "This CRM-linked receipt is already approved and posted. Use the payment bounce/reversal workflow before entering a corrected replacement.",
+      });
+    }
+
     // Editing an already-Approved payment must go back through approval —
     // this UPDATE never touched RPStatus before, so an edited-Approved
     // receipt silently stayed Approved with no re-approval and no GL
     // reversal. Mirrors journalVoucher.js's wasApproved handling. Only
-    // reverses the standard (non-CRM) posting path — a CRM-linked receipt's
-    // actual GL legs live under CrmPaymentReceipt/CrmOnAccountPayment, keyed
-    // by their own id, not this one; editing still gets re-queued for
-    // approval, but re-approving a CRM-linked edit won't repost its GL
-    // (hasPosting() will still see the old, unreversed entries).
+    // reverses the standard (non-CRM) posting path. CRM-linked approved
+    // receipts were rejected above because their linked CRM records need a
+    // separate source-aware reversal.
     if (wasApproved) {
       const { reversePostingBySource } = require("../services/generalLedger");
       await reversePostingBySource(pool, "ReceivedPayment", id);

@@ -851,7 +851,8 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
     }
 
     // A CRM customer's payment: the booking stops counting it (milestones
-    // reopen, the money goes back on account). Reported, never fatal.
+    // reopen, the money goes back on account). This is a separate transaction
+    // from the BRS flag and GL reversal, so surface failures for an explicit retry.
     let crm = null;
     if (sourceType === "RECEIVED") {
       try {
@@ -861,10 +862,20 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
         console.error(`BRS bounce: CRM unwind for receipt ${sourceId} failed:`, crmErr.message);
         crm = { crm: true, error: crmErr.message };
       }
+      for (const k of ["crm-payments", "crm-bookings", "crm-money-receipts", "crm-on-account"]) await bumpCacheVersion(k);
     }
 
     await bumpCacheVersion("brs");
     await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
+    if (crm?.error) {
+      return res.status(503).json({
+        error: "Payment marked bounced, but the CRM unwind failed. Retry the bounce action to finish reconciling the booking.",
+        retryable: true,
+        bounced: true,
+        glReversed: glReversal.reversed || !!crm?.glReversed,
+        crm: { error: crm.error },
+      });
+    }
     res.json({ message: "Marked as bounced", glReversed: glReversal.reversed || !!crm?.glReversed,
       ...(crm?.crm ? { crm: { bookingId: crm.bookingId, reversed: crm.reversed, invoicesToReview: crm.invoices || [], error: crm.error } } : {}) });
 

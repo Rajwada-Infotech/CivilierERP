@@ -1,4 +1,5 @@
 const { sql } = require("../db");
+const { onAccountAvailableSql } = require("./crmPaymentFunding");
 
 // Business rule (confirmed 2026-09-15): every rupee a customer pays lands in
 // On Account and stays there, on hold — it is never swept onto a specific
@@ -25,9 +26,8 @@ async function getBookingOnAccountCoverage(pool, bookingId) {
     FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo, Id
   `);
   const oaRes = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
-      THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS TotalOnAccount FROM dbo.CrmOnAccountPayment
-    WHERE BookingId = @bid AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held', N'Void', N'Cancelled', N'Refunded')
+    SELECT ISNULL(SUM(${onAccountAvailableSql("o")}), 0) AS TotalOnAccount FROM dbo.CrmOnAccountPayment o
+    WHERE o.BookingId = @bid
   `);
   const totalOnAccount = Number(oaRes.recordset[0]?.TotalOnAccount) || 0;
 

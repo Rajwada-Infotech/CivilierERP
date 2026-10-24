@@ -729,6 +729,7 @@ async function transition(
   userRole,
   note = null,
   userId = null,
+  beforeApprove = null,
 ) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
@@ -834,6 +835,11 @@ async function transition(
         tx,
       );
       result = { newStatus: "Pending" };
+    } else if (targetStatus === "Rejected" && currentStatus === "Rejected") {
+      // Let callers safely retry post-rejection cleanup (for example,
+      // releasing a CRM credit reservation linked to a rejected Fund
+      // Transfer) without appending another approval audit event.
+      result = { newStatus: "Rejected", alreadyRejected: true };
     } else if (targetStatus === "Rejected") {
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot reject from status "${currentStatus}"`);
@@ -864,6 +870,10 @@ async function transition(
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot approve from status "${currentStatus}"`);
       }
+      // Callers with state-dependent approval gates can perform their final
+      // validation while this transaction holds the record's update lock.
+      // This closes the read-then-approve race with concurrent edits.
+      if (beforeApprove) await beforeApprove(tx);
       const workflow = await getWorkflow(module);
       const totalLevels = workflow?.Levels ?? 1;
       const levelDefs = workflow?.LevelDefs ?? [];
@@ -1016,7 +1026,7 @@ async function transition(
 
   // Phone pushes ("Approval needed" / "Approved" / "Rejected"). After the commit
   // and strictly best-effort: it never delays or fails the approval itself.
-  if (process.env.NODE_ENV !== "test") {
+  if (process.env.NODE_ENV !== "test" && !result?.alreadyRejected) {
     void (async () => {
       try {
         const wf = await getWorkflow(module);
