@@ -1,33 +1,29 @@
-import { CrmStatus } from "@/constants/crmStatuses";
-import { AutoInput } from "@/components/ui/date-input";
-import React, { useMemo, useState } from "react";
+// CRM Customer Bank Details: the bank, identity, income and financing details (KYC) of each approved booking. Once
+// on file they are sensitive: only the booking's assigned salesperson or an admin-tier role may change them.
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { translateError } from "@/lib/translateError";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CrmShell } from "@/components/crm/CrmShell";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useAuth } from "@/contexts/AuthContext";
-import {
-  Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark,
-  IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil, CreditCard,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { usePageRights } from "@/hooks/usePageRights";
+import { AlertTriangle, ChevronRight, Landmark, Lock, PenSquare, Save } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { AutoInput } from "@/components/ui/date-input";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { translateError } from "@/lib/translateError";
+import { Block, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
 const BKG_API = "/api/crm/bookings";
 
-// Same "always allowed regardless of assignment" role set the backend
-// enforces (backend/services/approvalService.js CRM_APPROVER_ROLES) — kept
-// in sync manually since it's a small, stable list. The real gate is
-// server-side (PUT rejects with 403 for anyone else); this only drives the
-// UI so non-assigned staff see the lock before they try to save and get
-// rejected, instead of after.
+// The roles the server always lets edit (approvalService CRM_APPROVER_ROLES); everyone else must be the booking's
+// assigned salesperson. The server is the real gate; this shows the lock before a save is refused.
 const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const EMPTY_FORM = {
@@ -35,145 +31,107 @@ const EMPTY_FORM = {
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Notes: "",
   FinancingType: "",
 };
+type BankForm = typeof EMPTY_FORM;
 
-// Same completeness rule the backend (crmPortal.js / crmWelcomeCalls.js
-// checklist / the GET / list query below) uses to decide when agreement
-// prep can auto-start — mirrored here so the dialog shows live progress
-// before the record is even saved.
-const REQUIRED_KEYS: (keyof typeof EMPTY_FORM)[] = [
-  "BankName", "AccountNo", "IfscCode", "AccountHolderName",
-  "PanNo", "AadhaarNo", "Occupation",
-  "FinancingType",
-];
+// The server's completeness rule (the list's IsComplete), shown live while typing. None of it is mandatory to save.
+const REQUIRED_KEYS: (keyof BankForm)[] = ["BankName", "AccountNo", "IfscCode", "AccountHolderName", "PanNo", "AadhaarNo", "Occupation", "FinancingType"];
+const UPPERCASE_FIELDS: (keyof BankForm)[] = ["PanNo", "IfscCode"];
 
-const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-const AADHAAR_RE = /^\d{12}$/;
-
-function validate(form: typeof EMPTY_FORM) {
-  const errors: Partial<Record<keyof typeof EMPTY_FORM, string>> = {};
-  if (form.IfscCode && !IFSC_RE.test(form.IfscCode.toUpperCase())) errors.IfscCode = "Invalid IFSC format (e.g. HDFC0001234)";
-  if (form.PanNo && !PAN_RE.test(form.PanNo.toUpperCase())) errors.PanNo = "Invalid PAN format (e.g. ABCDE1234F)";
-  if (form.AadhaarNo && !AADHAAR_RE.test(form.AadhaarNo)) errors.AadhaarNo = "Aadhaar must be exactly 12 digits";
-  if (form.AccountNo && !/^\d{6,20}$/.test(form.AccountNo)) errors.AccountNo = "Account number should be 6-20 digits";
+function validate(form: BankForm) {
+  const errors: Partial<Record<keyof BankForm, string>> = {};
+  if (form.IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(form.IfscCode.toUpperCase())) errors.IfscCode = "IFSC looks like HDFC0001234.";
+  if (form.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.toUpperCase())) errors.PanNo = "PAN looks like ABCDE1234F.";
+  if (form.AadhaarNo && !/^\d{12}$/.test(form.AadhaarNo.replace(/\s+/g, ""))) errors.AadhaarNo = "Aadhaar is exactly 12 digits.";
+  if (form.AccountNo && !/^\d{6,20}$/.test(form.AccountNo)) errors.AccountNo = "Account number is 6 to 20 digits.";
   return errors;
 }
 
-function initials(name: string | null | undefined) {
-  if (!name) return "?";
-  return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-}
+const toForm = (d: any): BankForm => (d ? {
+  BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
+  IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
+  PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
+  Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
+  Notes: d.Notes || "", FinancingType: d.FinancingType || "",
+} : { ...EMPTY_FORM });
 
-interface BankDetailsCpb { companyId: string; projectId: string; blockId: string }
-// NOTE on scale: still fetched in full — Pending/Complete counts are
-// computed client-side from the whole set (see `counts` below), same as
-// CrmDemands. Company/Project/Block narrows the set server-side instead.
-async function fetchList(cpb?: BankDetailsCpb): Promise<any[]> {
+interface Cpb { companyId: string; projectId: string; blockId: string }
+// Every approved booking under the filters (counts are worked out here). Throws, so a failed load shows as one.
+async function fetchList(cpb: Cpb): Promise<any[]> {
   const params = new URLSearchParams();
-  if (cpb?.companyId) params.set("companyId", cpb.companyId);
-  if (cpb?.projectId) params.set("projectId", cpb.projectId);
-  if (cpb?.blockId) params.set("blockId", cpb.blockId);
-  const qs = params.toString();
-  try { const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`); return r.ok ? r.json() : []; } catch { return []; }
+  if (cpb.companyId) params.set("companyId", cpb.companyId);
+  if (cpb.projectId) params.set("projectId", cpb.projectId);
+  if (cpb.blockId) params.set("blockId", cpb.blockId);
+  const r = await fetchWithAuth(`${API}${params.toString() ? `?${params}` : ""}`);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Could not load the bookings (${r.status}).`);
+  return Array.isArray(data) ? data : [];
 }
-async function fetchBankDetail(bookingId: number): Promise<any> {
-  try { const r = await fetchWithAuth(`${API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
-}
-async function fetchChecklist(bookingId: number): Promise<any> {
-  try { const r = await fetchWithAuth(`${CHECKLIST_API}/${bookingId}/checklist`); return r.ok ? r.json() : null; } catch { return null; }
-}
-async function fetchLoan(bookingId: number): Promise<any> {
-  try { const r = await fetchWithAuth(`${BKG_API}/${bookingId}/loan`); return r.ok ? r.json() : null; } catch { return null; }
+async function getOrNull(url: string): Promise<any> {
+  try { const r = await fetchWithAuth(url); return r.ok ? r.json() : null; } catch { return null; }
 }
 
-function SectionCard({ icon: Icon, iconClass, title, children }: { icon: any; iconClass: string; title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-      <h3 className="text-sm font-semibold flex items-center gap-2 text-foreground">
-        <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${iconClass}`}><Icon size={14} /></span>
-        {title}
-      </h3>
-      {children}
-    </div>
-  );
-}
+const INP = "w-full h-9 border bg-card px-2.5 text-sm text-foreground outline-none transition-colors read-only:bg-muted/30 read-only:border-foreground/20 read-only:cursor-default";
 
-// Opened when a booking row is clicked — the entire capture/edit form lives
-// here, never inline on the list page.
 function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => void; onSaved: () => void }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { currentUser } = useAuth();
-  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const { currentUser, canDoAction } = useAuth();
+  const [form, setForm] = useState<BankForm>({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
 
-  // Once KYC data is on file it's sensitive — only the salesperson this
-  // booking is assigned to, or an admin-tier role, can edit it. Everyone
-  // else sees the whole form read-only. Backend enforces the real gate on
-  // save; this just reflects it in the UI ahead of time.
-  const isApprover = CRM_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
+  // Editing needs the page's edit right as well as being an approver or the assigned salesperson (the server refuses
+  // either way; the page used to offer Edit without the right).
+  const role = String(currentUser?.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const isApprover = CRM_APPROVER_ROLES.includes(role);
   const isAssigned = row.AssignedTo != null && currentUser?.id != null && Number(currentUser.id) === Number(row.AssignedTo);
-  const canEdit = isApprover || isAssigned;
-  // Even for someone who CAN edit, the form still opens read-only by
-  // default — an explicit "Edit" click is required, and a successful save
-  // re-locks it. Layered on top of (not a replacement for) the permission
-  // gate above: someone without canEdit never sees an Edit button at all.
+  const hasRight = canDoAction("crm-customer-bank-details", "edit");
+  const canEdit = hasRight && (isApprover || isAssigned);
+  // Opens read-only even for those who may edit; Edit unlocks it, saving locks it again.
   const [uiLocked, setUiLocked] = useState(true);
   const locked = !canEdit || uiLocked;
 
-  useQuery({
+  const { data: saved, isLoading } = useQuery({
     queryKey: ["crm-bank-detail", row.BookingId],
-    queryFn: async () => {
-      const d = await fetchBankDetail(row.BookingId);
-      setForm(d ? {
-        BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
-        IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
-        PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
-        Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
-        Notes: d.Notes || "", FinancingType: d.FinancingType || "",
-      } : { ...EMPTY_FORM });
-      return d;
-    },
+    queryFn: () => getOrNull(`${API}/booking/${row.BookingId}`),
   });
+  // The form follows what is on file until it is unlocked (it used to be set from inside the fetch, so a cached copy
+  // opened with an empty form).
+  useEffect(() => { if (uiLocked) setForm(toForm(saved)); }, [saved, uiLocked]);
   const { data: checklist } = useQuery({
     queryKey: ["crm-welcome-checklist", row.BookingId],
-    queryFn: () => fetchChecklist(row.BookingId),
+    queryFn: () => getOrNull(`${CHECKLIST_API}/${row.BookingId}/checklist`),
   });
-  // Soft check only — never blocks saving/completing this form. Just tells
-  // staff, right where they're declaring Financing Type, whether the loan
-  // side actually has anything on file yet.
+  // Soft check only: says whether the loan side has anything on file yet.
   const { data: loanDetail } = useQuery({
     queryKey: ["crm-loan-detail", row.BookingId],
-    queryFn: () => fetchLoan(row.BookingId),
+    queryFn: () => getOrNull(`${BKG_API}/${row.BookingId}/loan`),
     enabled: form.FinancingType === "LoanFinanced",
   });
 
   const errors = useMemo(() => validate(form), [form]);
   const hasErrors = Object.keys(errors).length > 0;
-  const missingRequired = REQUIRED_KEYS.filter((k) => !String(form[k]).trim());
-  const filledCount = REQUIRED_KEYS.length - missingRequired.length;
+  const filledCount = REQUIRED_KEYS.filter((k) => String(form[k]).trim()).length;
   const progressPct = Math.round((filledCount / REQUIRED_KEYS.length) * 100);
-  const isComplete = missingRequired.length === 0 && !hasErrors;
+  const isComplete = filledCount === REQUIRED_KEYS.length && !hasErrors;
+  const welcomed = !!checklist?.welcomeCall?.done;
 
   const handleSave = async () => {
-    if (locked) { toast.error("This record is locked — only the assigned salesperson or an admin can edit it"); return; }
+    if (locked) return;
     setTouched(true);
-    if (hasErrors) { toast.error("Fix the highlighted fields before saving"); return; }
+    if (hasErrors) return void toast.error("Fix the marked fields first.");
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/booking/${row.BookingId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, AadhaarNo: form.AadhaarNo.replace(/\s+/g, "") }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(isComplete
-        ? (checklist?.welcomeCall?.done ? "KYC complete — agreement prep will proceed automatically" : "KYC complete — waiting on the welcome call to proceed")
-        : "Bank details saved");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save the bank details.");
+      toast.success(isComplete ? (welcomed ? "KYC complete; agreement prep will go ahead" : "KYC complete; waiting on the welcome call") : "Bank details saved");
+      ["crm-bank-detail", "crm-welcome-checklist"].forEach((k) => qc.invalidateQueries({ queryKey: [k, row.BookingId] }));
       setUiLocked(true);
-      qc.invalidateQueries({ queryKey: ["crm-bank-detail", row.BookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-welcome-checklist", row.BookingId] });
       onSaved();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -182,162 +140,117 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
     }
   };
 
-  const UPPERCASE_FIELDS: (keyof typeof EMPTY_FORM)[] = ["PanNo", "IfscCode"];
-
-  const field = (key: keyof typeof form, label: string, type = "text") => (
-    <div>
-      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+  const field = (key: keyof BankForm, label: string, type = "text", className?: string) => (
+    <label className={`block space-y-1 min-w-0 ${className ?? ""}`}>
+      <span className={`block ${LBL}`}>{label}</span>
       <AutoInput type={type} value={form[key]} readOnly={locked}
-        onChange={(e) => {
-          if (locked) return;
-          const val = UPPERCASE_FIELDS.includes(key) ? e.target.value.toUpperCase() : e.target.value;
-          setForm((f) => ({ ...f, [key]: val }));
-        }}
+        onChange={(e) => setForm((f) => ({ ...f, [key]: UPPERCASE_FIELDS.includes(key) ? e.target.value.toUpperCase() : e.target.value }))}
         onBlur={() => setTouched(true)}
-        className={`w-full text-sm border rounded-lg px-2.5 py-2 ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"} ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
-      {touched && errors[key] && <p className="text-[0.6875rem] text-rose-500 mt-0.5">{errors[key]}</p>}
-    </div>
+        className={`${INP} ${touched && errors[key] ? "border-destructive" : "border-foreground/40 focus:border-foreground"}`} />
+      {touched && errors[key] && <span className="block text-[0.6875rem] text-destructive">{errors[key]}</span>}
+    </label>
   );
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-5 gap-4 rounded-none" style={{ border: RULE }}>
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
-            <span className="flex items-center gap-2">
-              <Landmark size={16} className="text-primary" /> Bank Details
+          <DialogTitle className="flex flex-wrap items-center justify-between gap-3 pr-6">
+            <span className="min-w-0">
+              <span className={`block ${LBL}`}>{locked ? "Bank and KYC" : "Editing bank and KYC"}</span>
+              <span className="font-heading text-lg font-bold text-foreground flex items-center gap-2">
+                <Landmark size={16} /> <ApplicantNames name={row.ApplicantName} bookingId={row.BookingId} applicationId={row.ApplicationId} />
+              </span>
+              <span className="block text-xs text-muted-foreground font-normal mt-0.5 tabular-nums">
+                {[row.BookingNo, row.Mobile, row.ProjectName, row.UnitNo && `Unit ${row.UnitNo}`].filter(Boolean).join(" · ")}
+              </span>
             </span>
-            {canEdit && uiLocked && (
-              <button onClick={() => setUiLocked(false)}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
-                <Pencil size={12} /> Edit
-              </button>
-            )}
+            {canEdit && uiLocked && <button onClick={() => setUiLocked(false)} className={`${KEY_INK} h-9 px-4`}><PenSquare size={13} /> Edit</button>}
           </DialogTitle>
         </DialogHeader>
 
-        {!canEdit ? (
-          <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
-            <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.
-          </div>
-        ) : uiLocked ? (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
-            <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
-          </div>
-        ) : null}
+        {locked && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground px-3 py-2" style={{ border: RULE_SOFT }}>
+            <Lock size={11} />
+            {canEdit ? "Read-only. Edit unlocks it; saving locks it again."
+              : !hasRight ? "Read-only: you don't have the edit right on this page."
+              : "Read-only: only the booking's assigned salesperson or an admin can change these details."}
+          </p>
+        )}
 
-        {/* ── Customer context + progress + workflow status ── */}
-        <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/15 text-primary font-bold text-sm flex items-center justify-center shrink-0">
-                {initials(row.ApplicantName)}
-              </div>
-              <div>
-                <span className="font-semibold text-foreground"><ApplicantNames name={row.ApplicantName} bookingId={row.BookingId} applicationId={row.ApplicationId} /></span>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-                  <span className="font-mono">{row.BookingNo}</span>
-                  <span>·</span>
-                  <Phone size={11} /> {row.Mobile}
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-                  <Building2 size={11} /> {row.ProjectName || "—"}{row.UnitNo ? ` · Unit ${row.UnitNo}` : ""}
-                </div>
-              </div>
-            </div>
-            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${isComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
-              {isComplete ? "KYC Complete" : `${progressPct}% Complete`}
-            </span>
+        <div className="bg-card px-4 py-3 space-y-3" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <SheetMark text={isComplete ? "KYC complete" : `KYC ${progressPct}%`} tone={isComplete ? "done" : "waiting"} />
+            <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{filledCount} of {REQUIRED_KEYS.length} captured · none needed to save</span>
           </div>
-
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-[0.6875rem] text-muted-foreground">
-              <span>{filledCount} of {REQUIRED_KEYS.length} fields captured (none mandatory)</span>
-              <span className="font-medium text-foreground">{progressPct}%</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div className={`h-full transition-all ${isComplete ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${progressPct}%` }} />
-            </div>
+          <div className="h-1.5 w-full" style={{ border: RULE_SOFT }}>
+            <div className="h-full bg-foreground transition-all" style={{ width: `${progressPct}%` }} />
           </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border font-medium ${checklist?.welcomeCall?.done ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
-              {checklist?.welcomeCall?.done ? <CheckCircle2 size={12} /> : <Circle size={12} />} Welcome Call
-            </span>
-            <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border font-medium ${isComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
-              {isComplete ? <CheckCircle2 size={12} /> : <Circle size={12} />} Bank & KYC
-            </span>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <SheetMark text="Welcome call" tone={welcomed ? "done" : "waiting"} />
+            <SheetMark text="Bank and KYC" tone={isComplete ? "done" : "waiting"} />
             {checklist?.agreement ? (
-              <button onClick={() => navigate(`/crm/agreements?bookingId=${row.BookingId}`)}
-                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15 ml-auto">
+              <button onClick={() => navigate(`/crm/agreements?bookingId=${row.BookingId}`)} className={`${KEY_LINE} h-7 px-2 ml-auto`}>
                 Agreement: {checklist.agreement.Status} <ChevronRight size={11} />
               </button>
-            ) : isComplete && !checklist?.welcomeCall?.done ? (
-              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-sky-200 text-sky-600 bg-sky-50 ml-auto">
-                <AlertTriangle size={12} /> Welcome call needed to trigger agreement prep
-              </span>
+            ) : isComplete && !welcomed ? (
+              <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground"><AlertTriangle size={12} /> The welcome call starts agreement prep.</span>
             ) : null}
           </div>
         </div>
 
-        {/* ── Form sections ── */}
-        <SectionCard icon={Landmark} iconClass="bg-sky-500/10 text-sky-600" title="Bank Details">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {field("BankName", "Bank Name")}
-            {field("BranchName", "Branch Name")}
-            {field("AccountNo", "Account Number")}
-            {field("IfscCode", "IFSC Code")}
-            <div className="col-span-2">{field("AccountHolderName", "Account Holder Name")}</div>
-          </div>
-        </SectionCard>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <SectionCard icon={IdCard} iconClass="bg-sky-500/10 text-sky-600" title="Identity">
-            {field("PanNo", "PAN (Permanent Account Number)")}
-            {field("AadhaarNo", "Aadhaar Number")}
-          </SectionCard>
-          <SectionCard icon={Briefcase} iconClass="bg-emerald-500/10 text-emerald-600" title="Occupation & Income">
-            {field("Occupation", "Occupation")}
-            {field("AnnualIncome", "Annual Income (₹)", "number")}
-          </SectionCard>
-        </div>
-
-        <SectionCard icon={CreditCard} iconClass="bg-cyan-500/10 text-cyan-600" title="Financing">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed?</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {(["SelfFunded", "LoanFinanced"] as const).map((opt) => (
-                <button key={opt} type="button" disabled={locked}
-                  onClick={() => !locked && setForm((f) => ({ ...f, FinancingType: opt }))}
-                  className={`text-sm rounded-lg border px-3 py-2 text-left transition-colors ${
-                    form.FinancingType === opt ? "border-primary bg-primary/10 text-primary font-medium" : "border-border bg-background"
-                  } ${locked ? "cursor-not-allowed opacity-70" : "hover:bg-muted/40"}`}>
-                  {opt === "SelfFunded" ? "Self-funded" : "Loan-financed"}
-                </button>
-              ))}
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <>
+            <Block title="Bank">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {field("BankName", "Bank")}
+                {field("BranchName", "Branch")}
+                {field("AccountNo", "Account number")}
+                {field("IfscCode", "IFSC")}
+                {field("AccountHolderName", "Account holder", "text", "sm:col-span-2")}
+              </div>
+            </Block>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Block title="Identity">
+                {field("PanNo", "PAN")}
+                {field("AadhaarNo", "Aadhaar number")}
+              </Block>
+              <Block title="Occupation and income">
+                {field("Occupation", "Occupation")}
+                {field("AnnualIncome", "Annual income (₹)", "number")}
+              </Block>
             </div>
-          </div>
-          {form.FinancingType === "LoanFinanced" && !loanDetail?.HasLoanRecord && (
-            <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
-              <AlertTriangle size={13} /> No loan record on file yet — capture it on Home Loan Tracking once the customer's bank/sanction details are known.
-            </div>
-          )}
-        </SectionCard>
+            <Block title="Financing" note="How is this purchase paid for?">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(["SelfFunded", "LoanFinanced"] as const).map((opt) => (
+                  <button key={opt} type="button" disabled={locked}
+                    onClick={() => setForm((f) => ({ ...f, FinancingType: opt }))}
+                    className={`${form.FinancingType === opt ? KEY_INK : KEY_LINE} h-9 px-3 disabled:!opacity-70`}>
+                    {opt === "SelfFunded" ? "Self-funded" : "Loan-financed"}
+                  </button>
+                ))}
+              </div>
+              {form.FinancingType === "LoanFinanced" && !loanDetail?.HasLoanRecord && (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground px-3 py-2" style={{ border: RULE_SOFT }}>
+                  <AlertTriangle size={12} /> No loan on file yet: capture it on Home Loan Tracking once the bank and sanction are known.
+                </p>
+              )}
+            </Block>
+          </>
+        )}
 
-        <div className="flex justify-between items-center pt-3 border-t border-border">
-          <span className="text-xs text-muted-foreground">
-            {!canEdit ? "Locked — assigned salesperson or admin only" : uiLocked ? "Locked for viewing" : hasErrors ? "Fix highlighted errors before saving" : "No fields are mandatory — save anytime"}
-          </span>
+        <div className="flex flex-wrap justify-between items-center gap-2 pt-3" style={{ borderTop: RULE }}>
+          <span className="text-xs text-muted-foreground">{!locked && hasErrors ? "Fix the marked fields before saving." : ""}</span>
           <div className="flex gap-2">
             {locked ? (
-              <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+              <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Close</button>
             ) : (
               <>
-                <button onClick={() => { setUiLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={handleSave} disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg disabled:opacity-40">
-                  <Save size={14} /> {saving ? "Saving..." : "Save Details"}
-                </button>
+                {/* Cancel puts back what is on file and locks again, without closing. */}
+                <button onClick={() => { setTouched(false); setUiLocked(true); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+                <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-4`}><Save size={13} /> {saving ? "Saving…" : "Save"}</button>
               </>
             )}
           </div>
@@ -351,6 +264,7 @@ type StatusFilter = "All" | "Pending" | "Complete";
 
 const CrmCustomerBankDetails: React.FC = () => {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   usePageRights("crm-customer-bank-details");
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
@@ -360,109 +274,113 @@ const CrmCustomerBankDetails: React.FC = () => {
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
-  const { data: list = [], isLoading } = useQuery({ queryKey: ["crm-bank-details-list", cpb], queryFn: () => fetchList(cpb), staleTime: 30_000 });
+  const { data: list = [], isLoading, isError, error } = useQuery({ queryKey: ["crm-bank-details-list", cpb], queryFn: () => fetchList(cpb), staleTime: 30_000 });
 
-  // Deep-link support: /crm/customer-bank-details?bookingId=X opens the
-  // dialog for that booking directly (e.g. from the Bookings list action).
-  // deepLinkOpened is a one-shot guard — without it, closing the dialog
-  // (setActiveRow(null)) re-ran this effect, saw bookingId was still in the
-  // URL, and immediately reopened it, making Close look completely broken.
-  React.useEffect(() => {
-    if (!bkgFilter || deepLinkOpened) return;
-    const row = (list as any[]).find((r) => String(r.BookingId) === bkgFilter);
-    if (row) { setActiveRow(row); setDeepLinkOpened(true); }
-  }, [bkgFilter, list, deepLinkOpened]);
+  // ?bookingId=X (e.g. from Bookings' "Bank details") opens that booking once. It used to do nothing when the booking
+  // wasn't listed (not approved yet, or outside the user's projects); it now says so.
+  useEffect(() => {
+    if (!bkgFilter || deepLinkOpened || isLoading) return;
+    setDeepLinkOpened(true);
+    const row = list.find((r: any) => String(r.BookingId) === bkgFilter);
+    if (row) setActiveRow(row);
+    else toast.error("That booking isn't here: only approved bookings in your projects are listed.");
+  }, [bkgFilter, list, deepLinkOpened, isLoading]);
 
-  const counts = useMemo(() => {
-    const rows = list as any[];
-    return { all: rows.length, complete: rows.filter((r) => r.IsComplete).length, pending: rows.filter((r) => !r.IsComplete).length };
-  }, [list]);
+  const counts = useMemo(() => ({
+    all: list.length,
+    complete: list.filter((r: any) => r.IsComplete).length,
+    pending: list.filter((r: any) => !r.IsComplete).length,
+    welcomedPending: list.filter((r: any) => !r.IsComplete && r.LastCallOutcome === "Welcomed").length,
+  }), [list]);
 
   const filtered = useMemo(() => {
     let rows = list as any[];
-    if (statusFilter === CrmStatus.PENDING) rows = rows.filter((r) => !r.IsComplete);
+    if (statusFilter === "Pending") rows = rows.filter((r) => !r.IsComplete);
     if (statusFilter === "Complete") rows = rows.filter((r) => r.IsComplete);
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      rows = rows.filter((r) =>
-        r.ApplicantName?.toLowerCase().includes(q) ||
-        r.BookingNo?.toLowerCase().includes(q) ||
-        r.ProjectName?.toLowerCase().includes(q)
-      );
-    }
+    const q = search.trim().toLowerCase();
+    if (q) rows = rows.filter((r) => r.ApplicantName?.toLowerCase().includes(q) || r.BookingNo?.toLowerCase().includes(q) || r.ProjectName?.toLowerCase().includes(q) || r.Mobile?.includes(q));
     return rows;
   }, [list, statusFilter, search]);
+
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking", size: 120, cell: (i) => <span className="font-heading text-xs font-semibold tabular-nums">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 200,
+      cell: (i) => (
+        <div className="min-w-0">
+          <div className="font-medium truncate"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="text-xs text-muted-foreground tabular-nums">{i.row.original.Mobile}</div>
+        </div>
+      ) },
+    { id: "projectUnit", header: "Project / unit", size: 200, enableSorting: false,
+      cell: (i) => <span className="text-xs">{[i.row.original.ProjectName, i.row.original.UnitNo].filter(Boolean).join(" · ") || "—"}</span> },
+    { id: "financing", header: "Financing", size: 120, enableSorting: false,
+      cell: (i) => <span className="text-xs">{i.row.original.FinancingType === "LoanFinanced" ? "Loan" : i.row.original.FinancingType === "SelfFunded" ? "Self-funded" : "—"}</span> },
+    { id: "call", header: "Welcome call", size: 130, enableSorting: false,
+      cell: (i) => <SheetMark text={i.row.original.LastCallOutcome === "Welcomed" ? "Welcomed" : "Not yet"} tone={i.row.original.LastCallOutcome === "Welcomed" ? "done" : "waiting"} /> },
+    { accessorKey: "IsComplete", header: "KYC", size: 120,
+      cell: (i) => <SheetMark text={i.row.original.IsComplete ? "Complete" : "Pending"} tone={i.row.original.IsComplete ? "done" : "waiting"} /> },
+  ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Bank Details"]} />
-      <CrmShell title="CRM — Customer Bank Details" subtitle="KYC captured before agreement preparation">
-      <div className="space-y-4">
-        <div className="flex gap-3 items-center flex-wrap">
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by customer, booking, project..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
+        title="Customer Bank Details"
+        subtitle="Bank, identity, income and financing for each approved booking, captured before the agreement is prepared."
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {[
+                { label: "Approved bookings", value: counts.all, note: "Under these filters", go: "All" as StatusFilter },
+                { label: "KYC pending", value: counts.pending, note: `${counts.welcomedPending} already welcomed`, go: "Pending" as StatusFilter },
+                { label: "KYC complete", value: counts.complete, note: "Every detail on file", go: "Complete" as StatusFilter },
+                { label: "Complete", value: `${counts.all ? Math.round((counts.complete / counts.all) * 100) : 0}%`, note: "Of the approved bookings", go: "Complete" as StatusFilter },
+              ].map((x) => (
+                <div key={x.label}>
+                  <button onClick={() => setStatusFilter(x.go)} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
-          <div className="flex rounded-lg border border-border overflow-hidden">
-            {([
-              ["All", counts.all],
-              ["Pending", counts.pending],
-              ["Complete", counts.complete],
-            ] as [StatusFilter, number][]).map(([key, count]) => (
-              <button key={key} onClick={() => setStatusFilter(key)}
-                className={`px-3 py-2 text-xs font-medium ${statusFilter === key ? "btn-module text-white" : "bg-background hover:bg-muted"}`}>
-                {key} ({count})
-              </button>
-            ))}
-          </div>
-        </div>
 
-        <div className="space-y-2">
-          {isLoading ? (
-            <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-4 text-center text-muted-foreground text-sm">No bookings found</div>
-          ) : filtered.map((r: any) => (
-            <button
-              key={r.BookingId}
-              onClick={() => setActiveRow(r)}
-              className="w-full text-left rounded-lg border border-border p-3 flex items-center gap-3 hover:bg-muted/10 hover:border-primary/40 transition-colors cursor-pointer"
-            >
-              <div className="w-9 h-9 rounded-full bg-primary/15 text-primary font-bold text-xs flex items-center justify-center shrink-0">
-                {initials(r.ApplicantName)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
-                  <span className="text-xs font-mono text-muted-foreground shrink-0">{r.BookingNo}</span>
-                </div>
-                <div className="text-xs text-muted-foreground truncate">
-                  {r.Mobile} · {r.ProjectName || "—"}{r.UnitNo ? ` · Unit ${r.UnitNo}` : ""}
-                </div>
-              </div>
-              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.LastCallOutcome === "Welcomed" ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
-                {r.LastCallOutcome === "Welcomed" ? "Called" : "Not Called"}
-              </span>
-              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.IsComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
-                {r.IsComplete ? "KYC Complete" : "KYC Pending"}
-              </span>
-              <ChevronRight size={14} className="text-muted-foreground shrink-0" />
-            </button>
-          ))}
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="flex items-stretch overflow-x-auto overflow-y-hidden" style={{ borderBottom: RULE }}>
+              {([["All", counts.all], ["Pending", counts.pending], ["Complete", counts.complete]] as [StatusFilter, number][]).map(([key, n]) => (
+                <button key={key} onClick={() => setStatusFilter(key)}
+                  className={`inline-flex items-center gap-2 px-4 h-11 font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${statusFilter === key ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`}
+                  style={{ borderRight: RULE_SOFT }}>
+                  {key} <span className="tabular-nums">{n}</span>
+                </button>
+              ))}
+            </div>
+            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search customer, mobile, booking or project…"
+                className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
+            </div>
+            {isError ? (
+              <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : (
+              <DataTable data={filtered} columns={columns} searchable={false} loading={isLoading} className="border-0"
+                onRowClick={(row) => setActiveRow(row.original)} getRowId={(r: any) => String(r.BookingId)}
+                emptyMessage={search || statusFilter !== "All" ? "No booking matches." : "No approved bookings yet."} />
+            )}
+          </div>
         </div>
-      </div>
+      </SheetShell>
 
       {activeRow && (
         <BankDetailDialog
           row={activeRow}
-          onClose={() => setActiveRow(null)}
+          onClose={() => { setActiveRow(null); if (bkgFilter) navigate("/crm/customer-bank-details", { replace: true }); }}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-bank-details-list"] })}
         />
       )}
-      </CrmShell>
     </>
   );
 };

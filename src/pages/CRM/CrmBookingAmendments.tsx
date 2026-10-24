@@ -1,139 +1,55 @@
-import React, { useState, useMemo } from "react";
-import { fmtIstDateTime } from "@/lib/istTime";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  XCircle,
-  Clock,
-  FileEdit,
-  AlertCircle,
-} from "lucide-react";
+// CRM Booking Amendments: parking and extra-charge changes requested on a booking after its Agreement was executed.
+// Each needs an approver (admin, super admin, marketing head, or the amendment workflow's level) before it is applied.
+import React, { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { AlertCircle, CheckCircle2, XCircle } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { usePageRights } from "@/hooks/usePageRights";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { useAuth } from "@/contexts/AuthContext";
-import { CrmShell } from "@/components/crm/CrmShell";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { fmtIstDateTime } from "@/lib/istTime";
+import { translateError } from "@/lib/translateError";
+import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
 
+// The roles the server always lets approve; others need the Approval Inbox edit right and the workflow's level (the
+// server decides).
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-
 const BASE = "/api/crm/booking-amendments";
+const PAGE_SIZE = 20;
 
 type AmendmentStatus = "Pending" | "Approved" | "Rejected";
 type StatusFilter = AmendmentStatus | "All";
+const STATUS_FILTERS: StatusFilter[] = ["Pending", "Approved", "Rejected", "All"];
 
 interface AmendmentRow {
-  Id: number;
-  BookingId: number;
-  BookingNo: string;
-  ProjectName: string;
-  UnitNo: string;
-  ApplicantName: string;
-  ChangeType: string;
-  Action: string;
-  Reason: string;
-  ProposedChange: string;
-  Status: AmendmentStatus;
-  RequestedByName: string;
-  RequestedAt: string;
-  ReviewedByName: string | null;
-  ReviewedAt: string | null;
-  ReviewNotes: string | null;
+  Id: number; BookingId: number; BookingNo: string; ProjectName: string; UnitNo: string; ApplicantName: string;
+  ChangeType: string; Action: string; Reason: string; ProposedChange: string; Status: AmendmentStatus;
+  RequestedByName: string; RequestedAt: string; ReviewedByName: string | null; ReviewedAt: string | null; ReviewNotes: string | null;
+}
+interface AmendmentListFilters { status?: string; search: string; companyId: string; projectId: string; blockId: string }
+
+const changeLabel = (type: string, action: string) =>
+  `${type === "ParkingAllotment" ? "Parking" : type === "ExtraCharge" ? "Extra charge" : type} · ${action}`;
+
+const proposedEntries = (json: string) => {
+  try { return Object.entries(JSON.parse(json || "{}") as Record<string, unknown>).filter(([k]) => k !== "Reason"); }
+  catch { return []; }
+};
+
+// The server's { error } is read out instead of showing the raw response body.
+async function readError(r: Response, fallback: string) {
+  const data = await r.json().catch(() => ({}));
+  return new Error(data?.error || `${fallback} (${r.status}).`);
 }
 
-function fmtDate(v: string | null) {
-  return fmtIstDateTime(v);
-}
-
-function formatChangeType(type: string, action: string) {
-  const typeLabel =
-    type === "ParkingAllotment"
-      ? "Parking"
-      : type === "ExtraCharge"
-      ? "Extra Charge"
-      : type;
-  return `${typeLabel} — ${action}`;
-}
-
-function StatusBadge({ status }: { status: AmendmentStatus }) {
-  if (status === "Approved")
-    return (
-      <Badge className="bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800">
-        {status}
-      </Badge>
-    );
-  if (status === "Rejected")
-    return (
-      <Badge className="bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800">
-        {status}
-      </Badge>
-    );
-  return (
-    <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800">
-      <Clock className="w-3 h-3 mr-1 inline" />
-      {status}
-    </Badge>
-  );
-}
-
-/** Parses ProposedChange JSON and renders as a read-only diff card. */
-function ProposedChangeDiffCard({ json }: { json: string }) {
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = JSON.parse(json || "{}");
-  } catch {
-    /* ignore */
-  }
-  const entries = Object.entries(parsed).filter(
-    ([k]) => !["Reason"].includes(k)
-  );
-  if (!entries.length)
-    return (
-      <p className="text-xs text-muted-foreground italic">
-        No field details recorded.
-      </p>
-    );
-
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-      {entries.map(([k, v]) => (
-        <React.Fragment key={k}>
-          <dt className="text-muted-foreground font-medium whitespace-nowrap">
-            {k}
-          </dt>
-          <dd className="text-foreground font-medium break-all">
-            {String(v ?? "—")}
-          </dd>
-        </React.Fragment>
-      ))}
-    </dl>
-  );
-}
-
-const PAGE_SIZE = 20;
-interface AmendmentListFilters {
-  status?: string;
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchAmendmentsList(filters: AmendmentListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: AmendmentRow[]; total: number }> {
+async function fetchAmendmentsList(filters: AmendmentListFilters, page: number, pageSize: number) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.status) params.set("status", filters.status);
   if (filters.search) params.set("search", filters.search);
@@ -141,47 +57,29 @@ async function fetchAmendmentsList(filters: AmendmentListFilters, page: number, 
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
   const r = await fetchWithAuth(`${BASE}?${params}`);
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw await readError(r, "Could not load the amendments");
   const data = await r.json();
-  return { rows: data.rows || [], total: data.total || 0 };
+  return { rows: (data.rows || []) as AmendmentRow[], total: Number(data.total || 0), statusCounts: (data.statusCounts || {}) as Record<string, number> };
 }
 
-async function reviewAmendment(
-  id: number,
-  action: "approve" | "reject",
-  notes: string
-) {
+async function reviewAmendment(id: number, action: "approve" | "reject", notes: string) {
   const r = await fetchWithAuth(`${BASE}/${id}/${action}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ Notes: notes || null }),
   });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw await readError(r, `Could not ${action} the amendment`);
   return r.json();
 }
-
-const STATUS_FILTERS: StatusFilter[] = ["Pending", "Approved", "Rejected", "All"];
-
-const filterAccent: Record<StatusFilter, string> = {
-  Pending: "#f59e0b",
-  Approved: "#10b981",
-  Rejected: "#ef4444",
-  All: "#6366f1",
-};
 
 export default function CrmBookingAmendments() {
   const { canEdit } = usePageRights("crm-bookings");
   const { currentUser, canDoAction } = useAuth();
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Pending");
-  const [reviewDialog, setReviewDialog] = useState<{
-    row: AmendmentRow;
-    action: "approve" | "reject";
-  } | null>(null);
+  const [review, setReview] = useState<{ row: AmendmentRow; action: "approve" | "reject" } | null>(null);
   const [notes, setNotes] = useState("");
   const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -189,419 +87,220 @@ export default function CrmBookingAmendments() {
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
 
-  const isApprover =
-    AMENDMENT_APPROVER_ROLES.includes(
-      String(currentUser?.role || "").toLowerCase()
-    ) || canDoAction("approval-inbox" as any, "edit");
+  const role = String(currentUser?.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const isApprover = AMENDMENT_APPROVER_ROLES.includes(role) || canDoAction("approval-inbox" as any, "edit");
 
   const listFilters: AmendmentListFilters = useMemo(() => ({
     status: statusFilter === "All" ? undefined : statusFilter,
     search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId,
   }), [statusFilter, search, cpb]);
-  const { data: listResult, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["crm-booking-amendments", listFilters, page, pageSize],
     queryFn: () => fetchAmendmentsList(listFilters, page, pageSize),
+    placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
-  const rows = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const counts = data?.statusCounts ?? {};
+  const countOf = (s: StatusFilter) => (s === "All" ? Object.values(counts).reduce((a, b) => a + b, 0) : counts[s] || 0);
 
   const mutation = useMutation({
-    mutationFn: ({
-      id,
-      action,
-      notes,
-    }: {
-      id: number;
-      action: "approve" | "reject";
-      notes: string;
-    }) => reviewAmendment(id, action, notes),
+    mutationFn: ({ id, action, notes: n }: { id: number; action: "approve" | "reject"; notes: string }) => reviewAmendment(id, action, n),
     onSuccess: (_, { action }) => {
-      toast.success(
-        `Amendment ${action === "approve" ? "approved and applied" : "rejected"}`
-      );
-      qc.invalidateQueries({ queryKey: ["crm-booking-amendments"] });
-      setReviewDialog(null);
+      toast.success(action === "approve" ? "Amendment approved and applied" : "Amendment rejected");
+      // An approved change re-prices the booking: its card and list must not show the old figures.
+      ["crm-booking-amendments", "crm-bookings", "crm-booking-detail"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      setReview(null);
       setNotes("");
     },
-    onError: (e: Error) => toast.error(e.message || "Failed"),
+    onError: (e: Error) => toast.error(translateError(e.message)),
   });
 
   const columns: ColumnDef<AmendmentRow>[] = [
-    {
-      header: "Booking",
-      accessorKey: "BookingNo",
+    { header: "Booking", accessorKey: "BookingNo", size: 170,
       cell: ({ row }) => (
-        <div>
-          <div className="font-semibold text-xs">{row.original.BookingNo}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">
-            {row.original.ProjectName} · {row.original.UnitNo}
-          </div>
+        <div className="min-w-0">
+          <div className="font-heading text-xs font-semibold tabular-nums">{row.original.BookingNo}</div>
+          <div className="text-[0.6875rem] text-muted-foreground truncate">{[row.original.ProjectName, row.original.UnitNo].filter(Boolean).join(" · ")}</div>
         </div>
-      ),
-    },
-    {
-      header: "Customer",
-      accessorKey: "ApplicantName",
-      cell: ({ row }) => (
-        <span className="text-xs font-medium"><ApplicantNames name={row.original.ApplicantName} bookingId={row.original.BookingId} /></span>
-      ),
-    },
-    {
-      header: "Change",
-      accessorKey: "ChangeType",
+      ) },
+    { header: "Customer", accessorKey: "ApplicantName", size: 170,
+      cell: ({ row }) => <span className="text-xs font-medium"><ApplicantNames name={row.original.ApplicantName} bookingId={row.original.BookingId} /></span> },
+    { header: "Change", accessorKey: "ChangeType", size: 230,
+      cell: ({ row }) => {
+        const entries = proposedEntries(row.original.ProposedChange);
+        return (
+          <div className="min-w-0">
+            <div className="text-xs font-medium">{changeLabel(row.original.ChangeType, row.original.Action)}</div>
+            {entries.length > 0 && <div className="mt-0.5 text-[0.6875rem] text-muted-foreground truncate">{entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}</div>}
+          </div>
+        );
+      } },
+    { header: "Reason", accessorKey: "Reason", size: 180,
+      cell: ({ row }) => <span className="text-xs text-muted-foreground block truncate" title={row.original.Reason}>{row.original.Reason || "—"}</span> },
+    { header: "Requested", accessorKey: "RequestedByName", size: 150,
       cell: ({ row }) => (
         <div>
-          <div className="text-xs font-medium">
-            {formatChangeType(row.original.ChangeType, row.original.Action)}
-          </div>
-          {(() => {
-            let parsed: Record<string, unknown> = {};
-            try {
-              parsed = JSON.parse(row.original.ProposedChange || "{}");
-            } catch {
-              /* ignore */
-            }
-            const entries = Object.entries(parsed).filter(
-              ([k]) => !["Reason"].includes(k)
-            );
-            if (!entries.length) return null;
-            return (
-              <div className="mt-0.5 text-[0.6875rem] text-muted-foreground truncate max-w-[200px]">
-                {entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}
-              </div>
-            );
-          })()}
+          <div className="text-xs font-medium">{row.original.RequestedByName || "—"}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtIstDateTime(row.original.RequestedAt)}</div>
         </div>
-      ),
-    },
-    {
-      header: "Reason",
-      accessorKey: "Reason",
+      ) },
+    { header: "Status", accessorKey: "Status", size: 170,
       cell: ({ row }) => (
-        <span
-          className="text-xs text-muted-foreground max-w-[180px] block truncate"
-          title={row.original.Reason}
-        >
-          {row.original.Reason || "—"}
-        </span>
-      ),
-    },
-    {
-      header: "Requested By",
-      accessorKey: "RequestedByName",
-      cell: ({ row }) => (
-        <div>
-          <div className="text-xs font-medium">
-            {row.original.RequestedByName || "—"}
-          </div>
-          <div className="text-[0.6875rem] text-muted-foreground">
-            {fmtDate(row.original.RequestedAt)}
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: "Status",
-      accessorKey: "Status",
-      cell: ({ row }) => (
-        <div>
-          <StatusBadge status={row.original.Status} />
+        <div className="min-w-0">
+          <SheetMark text={row.original.Status} tone={statusTone(row.original.Status)} />
           {row.original.ReviewedByName && (
-            <div className="text-[0.6875rem] text-muted-foreground mt-0.5">
-              by {row.original.ReviewedByName} ·{" "}
-              {fmtDate(row.original.ReviewedAt)}
-            </div>
+            <div className="text-[0.6875rem] text-muted-foreground mt-0.5">by {row.original.ReviewedByName} · {fmtIstDateTime(row.original.ReviewedAt)}</div>
           )}
-          {row.original.ReviewNotes && (
-            <div
-              className="text-[0.6875rem] text-muted-foreground italic mt-0.5 max-w-[160px] truncate"
-              title={row.original.ReviewNotes}
-            >
-              {row.original.ReviewNotes}
-            </div>
-          )}
+          {row.original.ReviewNotes && <div className="text-[0.6875rem] text-muted-foreground italic mt-0.5 truncate" title={row.original.ReviewNotes}>{row.original.ReviewNotes}</div>}
         </div>
-      ),
-    },
+      ) },
     ...(canEdit && isApprover
-      ? [
-          {
-            id: "actions",
-            header: "",
-            enableSorting: false,
-            size: 72,
-            cell: ({ row }: { row: { original: AmendmentRow } }) => {
-              if (row.original.Status !== "Pending") return null;
-              return (
-                <div className="flex items-center gap-1.5 justify-end">
-                  <button
-                    type="button"
-                    title="Approve this amendment"
-                    onClick={() => {
-                      setReviewDialog({ row: row.original, action: "approve" });
-                      setNotes("");
-                    }}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-green-600 hover:bg-green-50 hover:text-green-700 dark:hover:bg-green-900/30 border border-transparent hover:border-green-200 dark:hover:border-green-800 transition-colors"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Reject this amendment"
-                    onClick={() => {
-                      setReviewDialog({ row: row.original, action: "reject" });
-                      setNotes("");
-                    }}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 border border-transparent hover:border-red-200 dark:hover:border-red-800 transition-colors"
-                  >
-                    <XCircle className="w-4 h-4" />
-                  </button>
-                </div>
-              );
-            },
-          } as ColumnDef<AmendmentRow>,
-        ]
+      ? [{
+          id: "actions", header: "", enableSorting: false, size: 170,
+          cell: ({ row }: { row: { original: AmendmentRow } }) => row.original.Status !== "Pending" ? null : (
+            <div className="flex items-center gap-1.5 justify-end">
+              <button type="button" onClick={() => { setReview({ row: row.original, action: "approve" }); setNotes(""); }} className={`${KEY_INK} h-7 px-2`}>
+                <CheckCircle2 size={11} /> Approve
+              </button>
+              <button type="button" onClick={() => { setReview({ row: row.original, action: "reject" }); setNotes(""); }} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>
+                <XCircle size={11} /> Reject
+              </button>
+            </div>
+          ),
+        } as ColumnDef<AmendmentRow>]
       : []),
   ];
 
-  const isApprove = reviewDialog?.action === "approve";
+  const isApprove = review?.action === "approve";
 
   return (
-    <CrmShell
-      title="Booking Amendments"
-      subtitle="Parking and extra-charge changes requested after Agreement execution — requires admin approval before applying."
-      icon={FileEdit}
-    >
+    <>
       <Breadcrumbs items={["Dashboard", "CRM", "Booking Amendments"]} />
-
-      {/* ── Status filter tab bar ─────────────────────────────────────────── */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {STATUS_FILTERS.map((s) => {
-          const active = statusFilter === s;
-          const accent = filterAccent[s];
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => updateFilter(setStatusFilter)(s)}
-              className="relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all"
-              style={
-                active
-                  ? {
-                      background: `${accent}18`,
-                      border: `1px solid ${accent}50`,
-                      color: accent,
-                      boxShadow: `0 0 8px ${accent}20`,
-                    }
-                  : {
-                      background: "transparent",
-                      border: "1px solid var(--border)",
-                      color: "var(--muted-foreground)",
-                    }
-              }
-            >
-              {s === "Pending" && (
-                <Clock className="w-3 h-3" style={{ color: active ? accent : undefined }} />
-              )}
-              {s === "Approved" && (
-                <CheckCircle2 className="w-3 h-3" style={{ color: active ? accent : undefined }} />
-              )}
-              {s === "Rejected" && (
-                <XCircle className="w-3 h-3" style={{ color: active ? accent : undefined }} />
-              )}
-              {s}
-              {/* Live count badge — total matching this status, not just the current page */}
-              {!isLoading && statusFilter === s && total > 0 && (
-                <span
-                  className="text-[0.625rem] font-bold px-1 py-0.5 rounded-full leading-none min-w-[18px] text-center"
-                  style={{
-                    background: `${accent}25`,
-                    color: accent,
-                  }}
-                >
-                  {total}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative flex-1 min-w-48">
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search by booking, customer..."
-            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
-
-      {/* ── Main data table ───────────────────────────────────────────────── */}
-      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-        columns={columns}
-        data={rows}
-        loading={isLoading}
-        searchable={false}
-        emptyMessage="No amendment requests found."
-      />
-
-      {/* ── Review dialog ─────────────────────────────────────────────────── */}
-      {reviewDialog && (
-        <Dialog open onOpenChange={() => setReviewDialog(null)}>
-          <DialogContent accent="crm" className="max-w-lg">
-            <DialogHeader>
-              {/* Coloured header banner */}
-              <div
-                className="flex items-center gap-2.5 px-4 py-3 -mx-6 -mt-4 mb-2 rounded-t-lg"
-                style={{
-                  background: isApprove
-                    ? "linear-gradient(135deg, rgba(16,185,129,0.12) 0%, transparent 70%)"
-                    : "linear-gradient(135deg, rgba(239,68,68,0.10) 0%, transparent 70%)",
-                  borderBottom: isApprove
-                    ? "1px solid rgba(16,185,129,0.2)"
-                    : "1px solid rgba(239,68,68,0.18)",
-                }}
-              >
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                  style={{
-                    background: isApprove
-                      ? "rgba(16,185,129,0.15)"
-                      : "rgba(239,68,68,0.12)",
-                    border: isApprove
-                      ? "1px solid rgba(16,185,129,0.3)"
-                      : "1px solid rgba(239,68,68,0.25)",
-                  }}
-                >
-                  {isApprove ? (
-                    <CheckCircle2
-                      className="w-4 h-4"
-                      style={{ color: "#10b981" }}
-                    />
-                  ) : (
-                    <XCircle className="w-4 h-4" style={{ color: "#ef4444" }} />
-                  )}
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
+        title="Booking Amendments"
+        subtitle="Parking and extra-charge changes asked for after the Agreement was executed. Each is applied only once an approver signs it off."
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {([
+                { s: "Pending", note: isApprover ? "Waiting for your decision" : "Waiting for an approver" },
+                { s: "Approved", note: "Applied to the booking" },
+                { s: "Rejected", note: "Not applied" },
+                { s: "All", note: "Under these filters" },
+              ] as { s: StatusFilter; note: string }[]).map((x) => (
+                <div key={x.s}>
+                  <button onClick={() => updateFilter(setStatusFilter)(x.s)} className="label link">{x.s === "All" ? "All requests" : x.s}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : countOf(x.s)}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
                 </div>
-                <DialogTitle className="text-sm font-semibold">
-                  {isApprove ? "Approve" : "Reject"} Amendment
-                  <span className="ml-1.5 font-mono text-muted-foreground font-normal">
-                    {reviewDialog.row.BookingNo}
-                  </span>
-                </DialogTitle>
-              </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="flex items-stretch overflow-x-auto overflow-y-hidden" style={{ borderBottom: RULE }}>
+              {STATUS_FILTERS.map((s) => (
+                <button key={s} type="button" onClick={() => updateFilter(setStatusFilter)(s)}
+                  className={`inline-flex items-center gap-2 px-4 h-11 font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${statusFilter === s ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`}
+                  style={{ borderRight: RULE_SOFT }}>
+                  {s} <span className="tabular-nums">{countOf(s)}</span>
+                </button>
+              ))}
+            </div>
+            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                placeholder="Search booking or customer…"
+                className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+            </div>
+            {isError ? (
+              <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : (
+              <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
+                columns={columns} data={rows} loading={isLoading} searchable={false} className="border-0"
+                emptyMessage={statusFilter === "Pending" ? "Nothing waiting for a decision." : "No amendment requests match these filters."} />
+            )}
+          </div>
+        </div>
+      </SheetShell>
+
+      {review && (
+        <Dialog open onOpenChange={(o) => !o && setReview(null)}>
+          <DialogContent className="max-w-lg p-5 gap-4 rounded-none" style={{ border: RULE }}>
+            <DialogHeader>
+              <DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
+                {isApprove ? <CheckCircle2 size={14} /> : <XCircle size={14} className="text-destructive" />}
+                {isApprove ? "Approve amendment" : "Reject amendment"}
+                <span className="tabular-nums normal-case tracking-normal text-sm text-muted-foreground">· {review.row.BookingNo}</span>
+              </DialogTitle>
             </DialogHeader>
 
-            <div className="space-y-4">
-              {/* Context row */}
-              <div className="flex items-start gap-3 text-xs">
-                <div className="flex-1 min-w-0">
-                  <p className="text-muted-foreground">Change</p>
-                  <p className="font-semibold mt-0.5">
-                    {formatChangeType(
-                      reviewDialog.row.ChangeType,
-                      reviewDialog.row.Action
-                    )}
-                  </p>
+            <div className="grid grid-cols-3 gap-px" style={{ background: "hsl(var(--foreground) / 0.15)", border: RULE_SOFT }}>
+              {[
+                ["Change", changeLabel(review.row.ChangeType, review.row.Action)],
+                ["Customer", <ApplicantNames key="c" name={review.row.ApplicantName} bookingId={review.row.BookingId} />],
+                ["Unit", review.row.UnitNo || "—"],
+              ].map(([k, v]) => (
+                <div key={k as string} className="bg-card px-3 py-2 min-w-0">
+                  <p className={LBL}>{k as string}</p>
+                  <p className="text-xs font-semibold mt-0.5 truncate">{v}</p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-muted-foreground">Customer</p>
-                  <p className="font-semibold mt-0.5 truncate">
-                    <ApplicantNames name={reviewDialog.row.ApplicantName} bookingId={reviewDialog.row.BookingId} />
-                  </p>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-muted-foreground">Unit</p>
-                  <p className="font-semibold mt-0.5">
-                    {reviewDialog.row.UnitNo}
-                  </p>
-                </div>
-              </div>
+              ))}
+            </div>
 
-              {/* Proposed change diff card — always visible */}
-              <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-2">
-                <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Proposed Changes
-                </p>
-                <ProposedChangeDiffCard json={reviewDialog.row.ProposedChange} />
-              </div>
-
-              {/* Reason */}
-              {reviewDialog.row.Reason && (
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
-                  <span className="text-muted-foreground font-medium">
-                    Reason:{" "}
-                  </span>
-                  {reviewDialog.row.Reason}
-                </div>
-              )}
-
-              {/* Approve warning */}
-              {isApprove && (
-                <div className="flex items-start gap-2 text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg px-3 py-2 border border-green-100 dark:border-green-900">
-                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  <span>
-                    Approving will immediately apply this change to the booking.
-                    The customer's payment milestones will be recalculated.
-                  </span>
-                </div>
-              )}
-
-              {/* Notes */}
-              <div className="space-y-1">
-                <Label className="text-xs">
-                  Review Notes{" "}
-                  <span className="text-muted-foreground">
-                    {reviewDialog.action === "reject"
-                      ? "(required)"
-                      : "(optional)"}
-                  </span>
-                </Label>
-                <Textarea
-                  rows={3}
-                  placeholder="Add notes for this decision…"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="text-sm resize-none"
-                />
+            <div className="bg-card" style={{ border: RULE }}>
+              <p className="px-3 py-2 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]" style={{ borderBottom: RULE }}>Proposed change</p>
+              <div className="px-3 py-2.5">
+                {proposedEntries(review.row.ProposedChange).length ? (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+                    {proposedEntries(review.row.ProposedChange).map(([k, v]) => (
+                      <React.Fragment key={k}>
+                        <dt className="text-muted-foreground whitespace-nowrap">{k}</dt>
+                        <dd className="text-foreground font-medium break-all tabular-nums">{String(v ?? "—")}</dd>
+                      </React.Fragment>
+                    ))}
+                  </dl>
+                ) : <p className="text-xs text-muted-foreground italic">No field details recorded.</p>}
               </div>
             </div>
 
-            <DialogFooter className="gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setReviewDialog(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                variant={isApprove ? "default" : "destructive"}
-                disabled={
-                  mutation.isPending ||
-                  (!isApprove && !notes.trim())
-                }
-                onClick={() =>
-                  mutation.mutate({
-                    id: reviewDialog.row.Id,
-                    action: reviewDialog.action,
-                    notes,
-                  })
-                }
-              >
-                {mutation.isPending
-                  ? "Processing…"
-                  : isApprove
-                  ? "Approve & Apply"
-                  : "Reject"}
-              </Button>
-            </DialogFooter>
+            {review.row.Reason && (
+              <p className="px-3 py-2 text-xs" style={{ border: RULE_SOFT }}><span className="text-muted-foreground">Reason: </span>{review.row.Reason}</p>
+            )}
+
+            {isApprove && (
+              <p className="flex items-start gap-2 text-xs px-3 py-2" style={{ border: RULE_SOFT }}>
+                <AlertCircle size={13} className="mt-0.5 shrink-0" />
+                Approving applies the change to the booking at once; its payment milestones are recalculated.
+              </p>
+            )}
+
+            <div>
+              <label className={`block mb-1.5 ${LBL}`}>Review notes {isApprove ? "(optional)" : "(required)"}</label>
+              <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes for this decision"
+                className="w-full border border-foreground/40 focus:border-foreground bg-card px-2.5 py-2 text-sm text-foreground outline-none resize-none" />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+              <button onClick={() => setReview(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button
+                disabled={mutation.isPending || (!isApprove && !notes.trim())}
+                onClick={() => mutation.mutate({ id: review.row.Id, action: review.action, notes })}
+                className={`${isApprove ? KEY_INK : KEY_RED} h-9 px-4`}>
+                {mutation.isPending ? "Working…" : isApprove ? "Approve and apply" : "Reject"}
+              </button>
+            </div>
           </DialogContent>
         </Dialog>
       )}
-    </CrmShell>
+    </>
   );
 }

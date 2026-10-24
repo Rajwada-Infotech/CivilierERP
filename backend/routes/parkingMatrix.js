@@ -4,6 +4,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 
 router.use(authMiddleware);
@@ -16,7 +17,7 @@ router.get("/projects", requirePageRight("crm-parking-matrix", "view"), cache("p
     const result = await pool.request().query(`
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
-      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0
+      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0${projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -34,9 +35,11 @@ router.get("/blocks", requirePageRight("crm-parking-matrix", "view"), async (req
     const request = pool.request();
     let query = "SELECT Id, BlockName AS Name FROM dbo.BlockMaster WHERE IsActive = 1";
     if (Number.isFinite(projectId)) {
+      if (!assertProjectAllowed(req, res, projectId)) return;
       request.input("pid", sql.Int, projectId);
       query += " AND ProjectId = @pid";
     }
+    query += projectPredicate(req.projectScope, "ProjectId");
     query += " ORDER BY BlockName";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -57,6 +60,8 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
     const pool = getPool();
     const projectId = parseInt(req.query.projectId, 10);
     if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
+    // A user limited to some projects sees only their matrices (any project id used to be served).
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const blockId = parseInt(req.query.blockId, 10);
 
     const request = pool.request().input("pid", sql.Int, projectId);

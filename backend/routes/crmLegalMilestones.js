@@ -171,14 +171,18 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // Rows and total share one set of inputs and conditions (the total used to repeat the filters without the project
+    // scope, so a restricted user's pages didn't add up).
     const req0 = pool.request();
+    const countReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
     const conds = [];
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
@@ -197,21 +201,13 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
+      countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmLegalMilestone m
           JOIN dbo.CrmBooking b ON b.Id = m.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+          ${where}
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });

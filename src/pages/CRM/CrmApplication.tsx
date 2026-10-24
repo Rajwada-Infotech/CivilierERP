@@ -1013,7 +1013,7 @@ const CrmApplication: React.FC = () => {
   const convertedColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary hover:underline">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
         </span>
       ) },
@@ -1034,7 +1034,7 @@ const CrmApplication: React.FC = () => {
     { accessorKey: "BookingNo", header: "Booking", size: 190,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
+          <div className="font-heading tabular-nums text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
           <SheetMark text={i.row.original.BookingStatus || "—"} tone={i.row.original.BookingStatus ? appTone(i.row.original.BookingStatus) : "none"} />
         </div>
       ) },
@@ -1089,7 +1089,7 @@ const CrmApplication: React.FC = () => {
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-foreground hover:underline">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">
           {i.getValue() as string}
         </span>
       ) },
@@ -1150,7 +1150,7 @@ const CrmApplication: React.FC = () => {
                 this isn't the same as an application that was simply rejected
                 pre-booking. */}
             {r.Stage === "NotConverted" && r.BookingNo && (
-              <div className="text-[0.625rem] text-muted-foreground font-mono">
+              <div className="text-[0.625rem] text-muted-foreground font-heading tabular-nums">
                 {r.BookingNo} · {r.BookingStatus}
               </div>
             )}
@@ -1812,13 +1812,13 @@ const CrmApplication: React.FC = () => {
                             {selectedBroker.LHeadPan && (
                               <div>
                                 <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">PAN (Permanent Account Number)</dt>
-                                <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
+                                <dd className="text-foreground font-heading tabular-nums text-xs font-medium mt-0.5 flex items-center gap-1.5"><IdCard size={12} className="text-muted-foreground" />{selectedBroker.LHeadPan}</dd>
                               </div>
                             )}
                             {selectedBroker.LHeadRera && (
                               <div>
                                 <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">RERA No.</dt>
-                                <dd className="text-foreground font-mono text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
+                                <dd className="text-foreground font-heading tabular-nums text-xs font-medium mt-0.5 flex items-center gap-1.5"><FileBadge size={12} className="text-muted-foreground" />{selectedBroker.LHeadRera}</dd>
                               </div>
                             )}
                             {selectedBroker.LHeadPaymentTerms && (
@@ -1935,13 +1935,13 @@ const CrmApplication: React.FC = () => {
                   repeating the same figures right above it. */}
               {selectedUnit && (
                 <div className=" border border-border bg-muted/20 px-3 py-2 text-xs">
-                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><Building2 size={12} className="text-primary" /> Unit & Price</p>
+                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><Building2 size={12} className="text-foreground" /> Unit & Price</p>
                   <p className="text-muted-foreground">{selectedUnit.UnitName} · {selectedUnit.UnitType || "—"} · {selectedUnit.AreaSqFt ? `${selectedUnit.AreaSqFt} sqft` : "—"}</p>
                 </div>
               )}
               {isPlottedProject && selectedPlots.length > 0 && (
                 <div className=" border border-border bg-muted/20 px-3 py-2 text-xs">
-                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><MapPin size={12} className="text-primary" /> Plots & Price</p>
+                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><MapPin size={12} className="text-foreground" /> Plots & Price</p>
                   <p className="text-muted-foreground">{selectedPlots.map((plot: any) => plot.PlotName).join(", ")} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft combined</p>
                 </div>
               )}
@@ -2177,7 +2177,7 @@ const CrmApplication: React.FC = () => {
             <DialogTitle className="font-heading flex items-center gap-2">
               {viewingAppDetail ? (
                 <>
-                  <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
+                  <span className="font-heading tabular-nums text-primary">{viewingAppDetail.application.ApplicationNo}</span>
                   <span>— <ApplicantNames name={viewingAppDetail.application.ApplicantName} bookingId={viewingAppDetail.application.BookingId} applicationId={viewingAppDetail.application.ApplicationId} /></span>
                   {(() => { const s = viewingAppDetail.bookings?.length > 0 ? "Submitted" : viewingAppDetail.application.Status; return <SheetMark text={s} tone={appTone(s)} />; })()}
                 </>
@@ -2219,9 +2219,9 @@ const CrmApplication: React.FC = () => {
                 {/* ── 1. Applicant ── */}
                 <section className=" border border-border overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                    <User size={13} className="text-primary shrink-0" />
+                    <User size={13} className="text-foreground shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Applicant</span>
-                    <span className="ml-auto font-mono text-[0.6875rem] text-muted-foreground">{a.CustomerNo || ""}</span>
+                    <span className="ml-auto font-heading tabular-nums text-[0.6875rem] text-muted-foreground">{a.CustomerNo || ""}</span>
                   </div>
                   <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Name" value={a.ApplicantName} />
@@ -2233,7 +2233,7 @@ const CrmApplication: React.FC = () => {
                   {(viewingAppCoApplicants as any[]).length > 0 && (
                     <div className="px-4 pb-3 pt-0 flex flex-wrap gap-2">
                       {(viewingAppCoApplicants as any[]).map((co: any) => (
-                        <div key={co.Id} className="flex items-center gap-1.5 text-[0.6875rem] bg-muted/60 rounded-full px-2.5 py-1">
+                        <div key={co.Id} className="flex items-center gap-1.5 text-[0.6875rem] bg-muted/60 px-2.5 py-1">
                           <Users2 size={11} className="text-muted-foreground shrink-0" />
                           <span className="font-medium">{co.Name}</span>
                           {co.Relation && <span className="text-muted-foreground">· {co.Relation}</span>}
@@ -2247,7 +2247,7 @@ const CrmApplication: React.FC = () => {
                 {/* ── 2. Property ── */}
                 <section className=" border border-border overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                    <Building2 size={13} className="text-primary shrink-0" />
+                    <Building2 size={13} className="text-foreground shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Property</span>
                     {!!a.UnitUnavailableForBooking && (
                       <span className="ml-auto flex items-center gap-1 text-[0.6875rem] text-destructive"><XCircle size={11} /> Unit unavailable</span>
@@ -2278,7 +2278,7 @@ const CrmApplication: React.FC = () => {
                   {parkingRows.length > 0 && (
                     <div className="px-4 pb-3 flex flex-wrap gap-2">
                       {parkingRows.map((p: any) => (
-                        <span key={p.Id} className="text-[0.6875rem] bg-muted/60 rounded-full px-2.5 py-1 font-medium">
+                        <span key={p.Id} className="text-[0.6875rem] bg-muted/60 px-2.5 py-1 font-medium">
                           {p.CurrentParkingType}{p.SlotNo ? ` — Slot ${p.SlotNo}` : p.Quantity > 1 ? ` ×${p.Quantity}` : ""}
                           {" · "}₹{((Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1)).toLocaleString("en-IN")}
                         </span>
@@ -2290,7 +2290,7 @@ const CrmApplication: React.FC = () => {
                 {/* ── 3. Financials (compact) ── */}
                 <section className=" border border-border overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                    <IndianRupee size={13} className="text-primary shrink-0" />
+                    <IndianRupee size={13} className="text-foreground shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Financials</span>
                     {grandTotal > 0 && (
                       <span className="ml-auto text-xs font-bold text-foreground">₹{grandTotal.toLocaleString("en-IN")}</span>
@@ -2362,7 +2362,7 @@ const CrmApplication: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
-                      <Wallet size={12} className="text-primary shrink-0" />
+                      <Wallet size={12} className="text-foreground shrink-0" />
                       <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Token Payment</span>
                     </div>
                     <div className="px-3 py-2.5 space-y-2">
@@ -2380,7 +2380,7 @@ const CrmApplication: React.FC = () => {
 
                   <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
-                      <Briefcase size={12} className="text-primary shrink-0" />
+                      <Briefcase size={12} className="text-foreground shrink-0" />
                       <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Source</span>
                     </div>
                     <div className="px-3 py-2.5 space-y-2">
@@ -2397,7 +2397,7 @@ const CrmApplication: React.FC = () => {
                 {a.BrokerName && (
                   <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                      <Users2 size={13} className="text-primary shrink-0" />
+                      <Users2 size={13} className="text-foreground shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Broker</span>
                     </div>
                     <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
@@ -2414,7 +2414,7 @@ const CrmApplication: React.FC = () => {
                 {booking && (
                   <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                      <FileText size={13} className="text-primary shrink-0" />
+                      <FileText size={13} className="text-foreground shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Linked Booking</span>
                       <button onClick={() => { closeApplication(); navigate(`/crm/bookings?applicationId=${a.Id}`); }}
                         className="ml-auto text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5">
@@ -2422,7 +2422,7 @@ const CrmApplication: React.FC = () => {
                       </button>
                     </div>
                     <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-                      <Row label="Booking No" value={<span className="font-mono">{booking.BookingNo}</span>} />
+                      <Row label="Booking No" value={<span className="font-heading tabular-nums">{booking.BookingNo}</span>} />
                       <Row label="Status" value={booking.Status} />
                       <Row label="Unit" value={[booking.ProjectName, booking.UnitNo].filter(Boolean).join(" · ")} />
                       <Row label="Value" value={booking.TotalValue ? `₹${Number(booking.TotalValue).toLocaleString("en-IN")}` : null} />
@@ -2434,7 +2434,7 @@ const CrmApplication: React.FC = () => {
                 {booking && (
                   <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                      <FileText size={13} className="text-primary shrink-0" />
+                      <FileText size={13} className="text-foreground shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Invoices</span>
                       <a href={`/crm/invoices?bookingId=${booking.Id}`}
                         className="ml-auto text-[0.6875rem] text-primary hover:underline flex items-center gap-0.5">
@@ -2461,13 +2461,13 @@ const CrmApplication: React.FC = () => {
                 {(viewingAppDetail.statusLog || []).length > 0 && (
                   <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                      <Clock size={13} className="text-primary shrink-0" />
+                      <Clock size={13} className="text-foreground shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Timeline</span>
                     </div>
                     <div className="px-4 py-3 space-y-2">
                       {viewingAppDetail.statusLog.map((s: any, idx: number) => (
                         <div key={s.Id} className="flex items-start gap-2.5">
-                          <div className="mt-1 shrink-0 w-1.5 h-1.5 rounded-full bg-primary/60" />
+                          <div className="mt-1 shrink-0 w-1.5 h-1.5 bg-primary/60" />
                           <div className="flex-1 min-w-0">
                             <span className="text-xs font-medium">{s.FromStatus ? `${s.FromStatus} → ${s.ToStatus}` : s.ToStatus}</span>
                             {s.ActorName && <span className="text-[0.6875rem] text-muted-foreground"> · {s.ActorName}</span>}
@@ -2549,7 +2549,7 @@ const CrmApplication: React.FC = () => {
             <h3 className="text-base font-semibold font-heading">Cancel Application?</h3>
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                <span className="font-mono text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
+                <span className="font-heading tabular-nums text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
                 <span className="font-medium text-foreground"><ApplicantNames name={cancellingApp?.ApplicantName} bookingId={cancellingApp?.BookingId} applicationId={cancellingApp?.ApplicationId} /></span> will be moved to Cancelled.
                 {(cancellingApp?.PreferredUnitName || cancellingApp?.InterestedUnit) && (
                   " Any hold on the picked unit — and any parking slot tied to it — is released immediately, so it's available for another application right away."

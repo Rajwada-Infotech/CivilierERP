@@ -49,17 +49,23 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    // Rows, total and per-status counts share one set of inputs and conditions (the total used to repeat the filters
+    // without the project scope, so a restricted user's pages didn't add up).
+    const reqs = [pool.request(), pool.request(), pool.request()];
+    const req0 = reqs[0];
+    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
     const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
+    // The status counts cover every status under the other filters.
+    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    if (status) { bind("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${LIST_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
@@ -71,28 +77,14 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
+    const FROM = `FROM dbo.CrmBookingAmendmentRequest r JOIN dbo.CrmBooking b ON b.Id = r.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, statusResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.RequestedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmBookingAmendmentRequest r
-          JOIN dbo.CrmBooking b ON b.Id = r.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR r.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
+      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+      reqs[2].query(`SELECT r.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY r.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = Object.fromEntries(statusResult.recordset.map((x) => [x.Status, x.n]));
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-booking-amendments] GET / error:", e.message);
     res.status(500).json({ error: e.message });

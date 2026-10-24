@@ -499,6 +499,8 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const conds = [`ci.RecheckStatus = '${CrmStatus.OPEN}'`];
+    // A user limited to some projects sees only their bookings' flags.
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const req0 = pool.request();
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }

@@ -29,7 +29,7 @@ export const ApplicationFormPdfDialog: React.FC<{ applicationId: number; applica
       <DialogContent className="max-w-3xl rounded-none" style={{ border: RULE }}>
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
-            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> Application Form — {applicationNo}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-foreground" /> Application Form — {applicationNo}</DialogTitle>
             {blobUrl && (
               <a href={blobUrl} download={`${applicationNo}-ApplicationForm.pdf`}
                 className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground font-medium hover:bg-primary/90 flex items-center gap-1.5">

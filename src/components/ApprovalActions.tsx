@@ -124,6 +124,9 @@ interface ApprovalActionsProps {
    *  approvalService.js's transition() now honours the same match. Ignored
    *  when `restricted` is false. */
   workflowVisible?: boolean;
+  /** Draw in the drawing-sheet style even where it can't be detected: inside a dialog, which renders outside the
+   *  page's sheet. */
+  sheet?: boolean;
 }
 
 export function ApprovalActions({
@@ -139,13 +142,14 @@ export function ApprovalActions({
   restricted = false,
   extraSubmitStatuses = [],
   workflowVisible = false,
+  sheet: sheetProp = false,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   // Drawn in ink, squared, on a drawing-sheet page (the Approval Inbox); unchanged elsewhere.
   const rootRef = useRef<HTMLDivElement>(null);
-  const sheet = useInSheet(rootRef);
+  const sheet = useInSheet(rootRef) || sheetProp;
   const SK = "rounded-none h-8 px-3 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] gap-1.5 [&_svg]:size-3.5";
 
   // Fallback: holding "edit" on the "approval-inbox" page via Menu Rights
@@ -288,7 +292,7 @@ export function ApprovalActions({
           ) : (
             <Button
               size="sm"
-              className={sheet ? `${SK} bg-emerald-600 text-white border border-emerald-600 hover:bg-emerald-700` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"}
+              className={sheet ? `${SK} bg-foreground text-card border border-foreground hover:bg-foreground/85` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"}
               disabled={loading !== null}
               onClick={() => handleAction("approve")}
             >
@@ -303,7 +307,7 @@ export function ApprovalActions({
 
           <Button
             size="sm"
-            className={sheet ? `${SK} bg-red-600 text-white border border-red-600 hover:bg-red-700` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"}
+            className={sheet ? `${SK} bg-destructive text-white border border-destructive hover:bg-destructive/85` : "gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-red-600 hover:bg-red-700 text-white border-0 [&_svg]:size-3.5"}
             disabled={loading !== null}
             onClick={() => setRejectOpen(true)}
           >

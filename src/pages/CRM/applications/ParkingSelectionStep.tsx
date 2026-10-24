@@ -150,7 +150,7 @@ export const ParkingSelectionStep: React.FC<{
       {/* Auto-filled charges summary — one brief line, same compact style
           as the Unit price preview on Step 1, instead of a 3-cell grid. */}
       <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-        <IndianRupee size={11} className="text-primary shrink-0" />
+        <IndianRupee size={11} className="text-foreground shrink-0" />
         Unit ₹{computedTotal.toLocaleString("en-IN")}
         {parkingBase > 0 && ` + Parking base ₹${parkingBase.toLocaleString("en-IN")}`}
         {" + GST = "}
@@ -186,13 +186,13 @@ export const ParkingSelectionStep: React.FC<{
                   {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{displayParkingTotal(a).toLocaleString("en-IN")}
                   {a.Kind === "Hold" && (
                     <span title="Reserved — becomes a permanent allotment once this application's booking is created"
-                      className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-foreground/30 bg-card text-foreground">
+                      className="text-[0.625rem] font-semibold px-1.5 py-0.5 border border-foreground/30 bg-card text-foreground">
                       Held
                     </span>
                   )}
                 </span>
                 {canEdit && (
-                  <button onClick={() => handleRemoveParking(a)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                  <button onClick={() => handleRemoveParking(a)} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
                 )}
               </div>
             ))}
@@ -210,7 +210,7 @@ export const ParkingSelectionStep: React.FC<{
       ) : (
         <div className=" border border-border p-3 space-y-3">
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">Parking Type</label>
+            <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Parking Type</label>
             <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)}
               className="w-full text-sm border border-border px-2 py-1.5 bg-background">
               <option value="">— Select a parking type —</option>
@@ -245,7 +245,7 @@ export const ParkingSelectionStep: React.FC<{
 
           {currentType && currentType.HasSlots && (
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Available Slot</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Available Slot</label>
               <select value={selectedSlotId} onChange={(e) => setSelectedSlotId(e.target.value)}
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 <option value="">— Select a slot —</option>
@@ -270,7 +270,7 @@ export const ParkingSelectionStep: React.FC<{
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs text-muted-foreground">
-                  Rate (₹ per unit){currentType.NeedsRate && <span className="text-red-500 ml-0.5">*</span>}
+                  Rate (₹ per unit){currentType.NeedsRate && <span className="text-destructive ml-0.5">*</span>}
                 </label>
                 {!currentType.NeedsRate && (
                   !rateEditing ? (

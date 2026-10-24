@@ -64,7 +64,7 @@ export function PdfPreviewDialog({ pdfUrl, title, subtitle, filename, onClose }:
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <FileText size={16} className="text-primary shrink-0" />
+              <FileText size={16} className="text-foreground shrink-0" />
               <span className="font-medium text-sm truncate">{title}</span>
             </div>
             {subtitle && <p className="text-xs text-muted-foreground mt-0.5 ml-6">{subtitle}</p>}
@@ -144,8 +144,8 @@ export function ParkingVcItem({
       <div className="flex items-start gap-2">
         {locked ? (
           item.IsChecked
-            ? <span className="shrink-0 mt-0.5 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center"><Check size={10} strokeWidth={3} /></span>
-            : <span className="shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 border-dashed border-border" />
+            ? <span className="shrink-0 mt-0.5 w-4 h-4 bg-foreground text-card flex items-center justify-center"><Check size={10} strokeWidth={3} /></span>
+            : <span className="shrink-0 mt-0.5 w-4 h-4 border-2 border-dashed border-border" />
         ) : (
           <input type="checkbox" checked={!!item.IsChecked} disabled={saving || isOpenRecheck}
             onChange={toggle}
@@ -154,7 +154,7 @@ export function ParkingVcItem({
         <div className="flex-1 min-w-0">
           <span className={`text-xs leading-snug ${item.IsChecked ? "text-foreground" : "text-muted-foreground"}`}>{item.Label}</span>
           {isOpenRecheck && (
-            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400">Recheck pending</span>
+            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 bg-card text-foreground border border-foreground/30">Recheck pending</span>
           )}
           {item.Remarks && !showRemarks && (
             <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic truncate">"{item.Remarks}"</p>
@@ -190,11 +190,11 @@ export function ParkingVcSection({
   return (
     <div className="mt-3 pt-3 border-t border-border space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-          <ClipboardCheck size={12} className="text-primary" /> Verify: {sec.label}
+        <h4 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+          <ClipboardCheck size={12} className="text-foreground" /> Verify: {sec.label}
         </h4>
         {sec.complete && (
-          <span className="flex items-center gap-1 text-[0.625rem] font-medium text-emerald-700 dark:text-emerald-400">
+          <span className="flex items-center gap-1 text-[0.625rem] font-medium text-foreground">
             <ShieldCheck size={11} /> Confirmed
           </span>
         )}

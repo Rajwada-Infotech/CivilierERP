@@ -40,18 +40,24 @@ router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    // Rows, total and the status / type counts share one set of inputs and conditions (the total used to repeat the
+    // filters without the project scope, so a restricted user's pages didn't add up).
+    const reqs = [pool.request(), pool.request(), pool.request()];
+    const req0 = reqs[0];
+    const bind = (name, kind, value) => reqs.forEach((r) => r.input(name, kind, value));
     const conds = [];
-    if (type)   { req0.input("t",  sql.NVarChar(30), type);   conds.push("n.NocType = @t"); }
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("n.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
     if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
+    // The counts cover every status and type under the other filters.
+    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    if (type)   { bind("t",  sql.NVarChar(30), type);   conds.push("n.NocType = @t"); }
+    if (status) { bind("st", sql.NVarChar(30), status); conds.push("n.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${NOC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
@@ -63,30 +69,18 @@ router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
+    const FROM = `FROM dbo.CrmNoc n JOIN dbo.CrmBooking b ON b.Id = n.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, groupResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("t2", sql.NVarChar(30), type || null)
-        .input("st2", sql.NVarChar(30), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmNoc n
-          JOIN dbo.CrmBooking b ON b.Id = n.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@t2 IS NULL OR n.NocType = @t2)
-            AND (@st2 IS NULL OR n.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
+      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+      reqs[2].query(`SELECT n.Status, n.NocType, COUNT(*) AS c ${FROM} ${countsWhere} GROUP BY n.Status, n.NocType`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = {}, typeCounts = {};
+    for (const g of groupResult.recordset) {
+      statusCounts[g.Status] = (statusCounts[g.Status] || 0) + g.c;
+      typeCounts[g.NocType] = (typeCounts[g.NocType] || 0) + g.c;
+    }
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts, typeCounts });
   } catch (e) {
     console.error("[crm-noc] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -206,7 +200,7 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId")}
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
         AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
@@ -237,6 +231,8 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking comes in the body, which the path guards don't see.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

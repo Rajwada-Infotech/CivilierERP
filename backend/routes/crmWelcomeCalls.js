@@ -2,6 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const { projectPredicate } = require("../services/projectScope");
 // Project access: a restricted user gets 403 on welcome calls outside their projects.
 // On /:bookingId/bank-preferences/:id the :id is a bank preference, already
 // covered by its :bookingId guard and matched to that booking — so the welcome
@@ -77,6 +78,8 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
       `b.Status = '${CrmStatus.APPROVED}'`, "b.IsActive = 1",
       "(last.Id IS NULL OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE))))",
     ];
+    // A user limited to some projects sees only their bookings (the queue used to list every project's).
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     const req0 = pool.request();
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
@@ -315,15 +318,20 @@ router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) 
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // Rows and total share one set of inputs and conditions, project scope included (both used to list and count
+    // every project's calls).
     const req0 = pool.request();
+    const countReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
     const conds = [];
-    if (bookingId) { req0.input("bid", sql.Int, parseInt(bookingId)); conds.push("wc.BookingId = @bid"); }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (bookingId) { bind("bid", sql.Int, parseInt(bookingId)); conds.push("wc.BookingId = @bid"); }
     if (pending === "1") conds.push("wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)");
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
@@ -339,24 +347,13 @@ router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) 
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("bid2", sql.Int, bookingId ? parseInt(bookingId) : null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
+      countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmWelcomeCall wc
           JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@bid2 IS NULL OR wc.BookingId = @bid2)
-            ${pending === "1" ? "AND wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)" : ""}
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+          ${where}
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });

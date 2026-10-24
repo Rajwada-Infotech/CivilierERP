@@ -5,6 +5,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { KEY_INK, RULE } from "./customers/config";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -35,20 +37,19 @@ const BKG_API = "/api/crm/bookings";
 // (Pending -> Scheduled -> Completed), pill style matching the
 // CrmBooking.tsx / CrmAfsQueryPayment.tsx design system.
 const STATUS_CFG: Record<string, { label: string; cls: string; dot: string }> = {
-  Pending:   { label: "Pending",   cls: "text-amber-600 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800/60 dark:text-amber-400", dot: "bg-amber-500" },
-  Scheduled: { label: "Scheduled", cls: "text-blue-600 bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800/60 dark:text-blue-400",       dot: "bg-blue-500" },
-  Completed: { label: "Completed", cls: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800/60 dark:text-emerald-400", dot: "bg-emerald-500" },
+  Pending:   { label: "Pending",   cls: "text-foreground bg-card border-foreground/30", dot: "bg-foreground" },
+  Scheduled: { label: "Scheduled", cls: "text-foreground bg-card border-foreground/30",       dot: "bg-foreground" },
+  Completed: { label: "Completed", cls: "text-foreground bg-card border-foreground/30", dot: "bg-foreground" },
 };
 
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold", c.cls)}>
-      <span className={cn("w-1.5 h-1.5 rounded-full", c.dot)} />
-      {c.label}
-    </span>
-  );
+  // A sheet mark: settled once Completed, in hand before.
+  return <SheetMark text={c.label} tone={status === "Completed" ? "done" : "waiting"} />;
 }
+
+// Today's date where the user is: toISOString gives the UTC date, a day behind before 05:30 IST.
+const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 function daysSince(dateStr?: string | null): number | null {
   if (!dateStr) return null;
@@ -80,8 +81,8 @@ function Timeline({ row }: { row: any }) {
         <React.Fragment key={s.key}>
           <div className="flex flex-col items-center gap-1 min-w-[68px]">
             <span className={cn(
-              "w-5 h-5 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0",
-              s.done ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground border border-border",
+              "w-5 h-5 flex items-center justify-center text-[0.625rem] font-bold shrink-0",
+              s.done ? "bg-foreground text-card" : "bg-muted text-muted-foreground border border-border",
             )}>
               {s.done ? <Check size={11} /> : idx + 1}
             </span>
@@ -89,7 +90,7 @@ function Timeline({ row }: { row: any }) {
             <span className="text-[0.5625rem] text-muted-foreground">{s.at ? String(s.at).slice(0, 10) : "—"}</span>
           </div>
           {idx < stops.length - 1 && (
-            <div className={cn("h-[2px] flex-1 -mt-4 min-w-[16px]", stops[idx + 1].done ? "bg-emerald-500" : "bg-border")} />
+            <div className={cn("h-[2px] flex-1 -mt-4 min-w-[16px]", stops[idx + 1].done ? "bg-foreground" : "bg-border")} />
           )}
         </React.Fragment>
       ))}
@@ -121,12 +122,12 @@ async function fetchEligibleBookings(): Promise<any[]> {
 // `rows` already fetched for the table, no extra request.
 function StatCard({ label, value, sub, icon: Icon, tint }: { label: string; value: string | number; sub?: string; icon: any; tint: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3">
-      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", tint)}>
+    <div className="border border-border bg-card px-4 py-3 flex items-center gap-3">
+      <div className={cn("w-9 h-9 flex items-center justify-center shrink-0", tint)}>
         <Icon size={16} />
       </div>
       <div className="min-w-0">
-        <p className="text-lg font-bold font-mono leading-none">{value}</p>
+        <p className="text-lg font-bold font-heading tabular-nums leading-none">{value}</p>
         <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate">{label}{sub ? ` · ${sub}` : ""}</p>
       </div>
     </div>
@@ -143,7 +144,8 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = embedded ? null : sp.get("bookingId");
-  const { canCreate } = usePageRights("crm-afs-registry");
+  // Scheduling and completing need the edit right (the routes check it); they were offered to anyone.
+  const { canCreate, canEdit } = usePageRights("crm-afs-registry");
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
 
@@ -332,7 +334,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const columns: ColumnDef<any, unknown>[] = [
     { accessorKey: "AfsRegNo", header: "AREG No", size: 110,
       cell: (i) => (
-        <button onClick={() => setDetailRow(i.row.original)} className="font-mono text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
+        <button onClick={() => setDetailRow(i.row.original)} className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">
           {i.getValue() as string}
         </button>
       ) },
@@ -344,7 +346,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         </div>
       ) },
     { accessorKey: "AgreementNo", header: "Agreement", size: 110,
-      cell: (i) => <span onClick={() => setDetailRow(i.row.original)} className="cursor-pointer text-xs font-mono">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span onClick={() => setDetailRow(i.row.original)} className="cursor-pointer text-xs font-heading tabular-nums">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "AfsRegistrationNo", header: "AFS Reg No", size: 120,
       cell: (i) => <span onClick={() => setDetailRow(i.row.original)} className="cursor-pointer text-xs">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "ScheduledDate", header: "Scheduled", size: 120,
@@ -355,7 +357,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
           <div onClick={() => setDetailRow(r)} className="cursor-pointer">
             <span className="text-xs text-muted-foreground">{r.ScheduledDate ? String(r.ScheduledDate).slice(0, 10) : "—"}</span>
             {overdue && (
-              <div className="flex items-center gap-1 text-[0.625rem] text-rose-600 dark:text-rose-400 mt-0.5">
+              <div className="flex items-center gap-1 text-[0.625rem] text-destructive mt-0.5">
                 <AlertTriangle size={9} /> Appointment date passed
               </div>
             )}
@@ -369,7 +371,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         const r = i.row.original;
         const d = r.Status === "Pending" ? daysSince(r.CreatedAt) : null;
         return d != null && d >= 7 ? (
-          <div onClick={() => setDetailRow(r)} className="cursor-pointer flex items-center gap-1 text-[0.6875rem] text-sky-600 dark:text-sky-400">
+          <div onClick={() => setDetailRow(r)} className="cursor-pointer flex items-center gap-1 text-[0.6875rem] text-foreground">
             <Clock size={10} /> {d}d
           </div>
         ) : <span onClick={() => setDetailRow(r)} className="cursor-pointer text-xs text-muted-foreground">—</span>;
@@ -381,19 +383,19 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
           <div className="flex items-center gap-2">
             {r.Status === "Completed" ? (
               r.AfsRegistrationNo
-                ? <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium"><ShieldCheck size={12} /> Registered</span>
-                : <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 font-medium"><AlertTriangle size={12} /> Enter AFS Reg No</span>
+                ? <span className="flex items-center gap-1 text-xs text-foreground font-medium"><ShieldCheck size={12} /> Registered</span>
+                : <span className="flex items-center gap-1 text-xs text-foreground font-medium"><AlertTriangle size={12} /> Enter AFS Reg No</span>
             ) : (
               <>
                 {r.Status === CrmStatus.PENDING && (
                   <button onClick={() => { setScheduleId(r.Id); setScheduledDate(""); }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border font-medium text-sky-600 border-sky-200 bg-sky-50 dark:bg-sky-900/20 dark:border-sky-800/60 dark:text-sky-400">
+                    className="flex items-center gap-1 text-xs px-2 py-1 border font-medium text-foreground border-foreground/30 bg-card">
                     <CalendarClock size={11} /> Schedule
                   </button>
                 )}
                 {r.Status === "Scheduled" && (
-                  <button onClick={() => { setCompleteId(r.Id); setCompletedDate(new Date().toISOString().slice(0, 10)); }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border font-medium text-emerald-700 border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800/60 dark:text-emerald-400">
+                  <button onClick={() => { setCompleteId(r.Id); setCompletedDate(todayLocal()); }}
+                    className="flex items-center gap-1 text-xs px-2 py-1 border font-medium text-foreground border-foreground/30 bg-card">
                     <CheckCircle2 size={11} /> Mark Completed
                   </button>
                 )}
@@ -403,7 +405,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             <button type="button" data-row-view onClick={() => setDetailRow(r)} aria-label="View details" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
+                <button className="p-1 hover:bg-muted text-muted-foreground" title="More actions">
                   <MoreHorizontal size={15} />
                 </button>
               </DropdownMenuTrigger>
@@ -416,7 +418,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate(`/crm/bookings?view=${r.BookingId}`)} className="gap-2">
-                  <ArrowUpRight size={14} className="text-sky-600 dark:text-sky-400" /> Go to Booking
+                  <ArrowUpRight size={14} className="text-foreground" /> Go to Booking
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -444,7 +446,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         {embeddedLoading ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
         ) : !r ? (
-          <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-3">
+          <div className="border border-dashed border-border p-8 text-center space-y-3">
             <CalendarClock size={24} className="mx-auto text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">AFS Registry not started</p>
             <p className="text-xs text-muted-foreground max-w-sm mx-auto">
@@ -452,16 +454,16 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             </p>
             {canCreate && (
               <button onClick={startEmbedded} disabled={startingEmbedded}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-lg disabled:opacity-40 transition-all">
+                className={`${KEY_INK} h-8 px-3`}>
                 <Plus size={13} /> {startingEmbedded ? "Starting…" : "Start AFS Registry"}
               </button>
             )}
           </div>
         ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="border border-border bg-card overflow-hidden">
             <div className="px-5 pt-5 pb-4 border-b border-border">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold font-mono text-foreground">{r.AfsRegNo}</span>
+                <span className="text-sm font-semibold font-heading tabular-nums text-foreground">{r.AfsRegNo}</span>
                 <StatusBadge status={r.Status} />
                 <button onClick={() => copyToClipboard(r.AfsRegNo, "AREG No.")} className="text-muted-foreground hover:text-foreground" title="Copy AREG No.">
                   <Copy size={11} />
@@ -471,34 +473,34 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             </div>
             <div className="px-5 py-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="rounded-lg border border-border px-3 py-2">
+                <div className="border border-border px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
-                  <p className="font-mono font-medium mt-0.5">{r.AgreementNo || "—"}</p>
+                  <p className="font-heading tabular-nums font-medium mt-0.5">{r.AgreementNo || "—"}</p>
                 </div>
-                <div className="rounded-lg border border-border px-3 py-2">
+                <div className="border border-border px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">AFS Registration No</p>
-                  <p className="font-mono font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
+                  <p className="font-heading tabular-nums font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
                 </div>
               </div>
-              {r.Status === "Pending" && (
+              {canEdit && r.Status === "Pending" && (
                 <button onClick={() => { setScheduleId(r.Id); setScheduledDate(""); }}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md transition-all">
+                  className={`${KEY_INK} h-8 px-3`}>
                   <CalendarClock size={12} /> Schedule Appointment
                 </button>
               )}
-              {r.Status === "Scheduled" && (
-                <button onClick={() => { setCompleteId(r.Id); setCompletedDate(new Date().toISOString().slice(0, 10)); }}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+              {canEdit && r.Status === "Scheduled" && (
+                <button onClick={() => { setCompleteId(r.Id); setCompletedDate(todayLocal()); }}
+                  className={`${KEY_INK} h-9 px-3 w-full`}>
                   <CheckCircle2 size={12} /> Mark Completed
                 </button>
               )}
               {r.Status === "Completed" && (
                 r.AfsRegistrationNo ? (
-                  <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 dark:bg-emerald-900/20 dark:border-emerald-800/60 dark:text-emerald-400">
+                  <div className="flex items-center gap-2 text-sm text-foreground bg-card border border-foreground/30 px-4 py-3">
                     <ShieldCheck size={16} className="shrink-0" /> AFS registered — details recorded on the Agreement.
                   </div>
                 ) : (
-                  <div className="flex items-start gap-2 text-sm text-sky-700 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 dark:bg-sky-900/20 dark:border-sky-800/60 dark:text-sky-400">
+                  <div className="flex items-start gap-2 text-sm text-foreground bg-card border border-foreground/30 px-4 py-3">
                     <AlertTriangle size={16} className="shrink-0 mt-0.5" />
                     <span>Registry visit complete. Now switch to the <strong>Agreement</strong> tab and click <strong>Mark as Registered</strong> — enter the AFS Registration No and date from the Sub-Registrar receipt.</span>
                   </div>
@@ -514,22 +516,22 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
           <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                  <CalendarClock size={16} className="text-blue-600 dark:text-blue-400" />
+                <div className="w-9 h-9 shrink-0 bg-foreground/5 border border-foreground/30 flex items-center justify-center">
+                  <CalendarClock size={16} className="text-foreground" />
                 </div>
                 <DialogTitle className="font-heading text-base">Schedule AFS Registration</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Appointment Date *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Appointment Date *</label>
               <DateInput value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+                className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
               <button onClick={() => setScheduleId(null)}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+                className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted font-medium">Cancel</button>
               <button onClick={handleSchedule}
-                className="px-4 py-1.5 text-sm text-white rounded-lg font-semibold btn-module hover:shadow-lg transition-all">Save</button>
+                className={`${KEY_INK} h-8 px-3`}>Save</button>
             </div>
           </DialogContent>
         </Dialog>
@@ -539,25 +541,25 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
           <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400" />
+                <div className="w-9 h-9 shrink-0 bg-foreground/5 border border-foreground/30 flex items-center justify-center">
+                  <CheckCircle2 size={16} className="text-foreground" />
                 </div>
                 <DialogTitle className="font-heading text-base">Mark AFS Registry Completed</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Completed Date</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Completed Date</label>
               <DateInput value={completedDate} onChange={(e) => setCompletedDate(e.target.value)}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+                className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
               <p className="text-[0.6875rem] text-muted-foreground mt-2">
                 After confirming, switch to the Agreement tab and Mark as Registered.
               </p>
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
               <button onClick={() => setCompleteId(null)}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+                className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted font-medium">Cancel</button>
               <button onClick={handleComplete}
-                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors">Confirm Completed</button>
+                className="px-4 py-1.5 text-sm bg-foreground text-card font-semibold hover:bg-foreground/80 transition-colors">Confirm Completed</button>
             </div>
           </DialogContent>
         </Dialog>
@@ -576,7 +578,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
             {canCreate && (
               <button onClick={() => setDialogOpen(true)}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
+                className={`${KEY_INK} h-8 px-3`}>
                 <Plus size={14} /> Start AFS Registry
               </button>
             )}
@@ -587,19 +589,19 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <StatCard label="Total Trackers" value={(rows as any[]).length} icon={CalendarClock} tint="bg-muted text-foreground" />
           <StatCard label="Pending" value={statusCounts.Pending || 0} icon={Clock} tint="bg-[#ffe2021a] text-amber-600 dark:text-amber-400" />
-          <StatCard label="Scheduled" value={statusCounts.Scheduled || 0} icon={CalendarClock} tint="bg-blue-500/10 text-blue-600 dark:text-blue-400" />
-          <StatCard label="Completed" value={statusCounts.Completed || 0} sub={awaitingRegNo > 0 ? `${awaitingRegNo} awaiting Reg No.` : undefined} icon={CheckCircle2} tint="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
+          <StatCard label="Scheduled" value={statusCounts.Scheduled || 0} icon={CalendarClock} tint="bg-foreground/5 text-foreground" />
+          <StatCard label="Completed" value={statusCounts.Completed || 0} sub={awaitingRegNo > 0 ? `${awaitingRegNo} awaiting Reg No.` : undefined} icon={CheckCircle2} tint="bg-foreground/5 text-foreground" />
         </div>
 
         {/* Search + status filter + table live in one continuous glass card,
             same convention as CrmBooking.tsx / CrmAfsQueryPayment.tsx. */}
-        <div className="rounded-xl overflow-hidden" style={glassStyle}>
+        <div className="overflow-hidden" style={glassStyle}>
           <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
             <div className="relative flex-1 min-w-48">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={search} onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search name, AREG no, booking, unit..."
-                className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+                className="w-full pl-8 pr-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
             </div>
             <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
             <div className="flex items-center gap-2 flex-wrap">
@@ -612,12 +614,12 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                     key={s}
                     onClick={() => setFilterStatus(s)}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
-                      active ? "text-white border-transparent btn-module " : "bg-background border-border text-muted-foreground hover:bg-muted",
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border transition-colors",
+                      active ? "bg-foreground text-card border-foreground" : "bg-background border-border text-muted-foreground hover:bg-muted",
                     )}
                   >
                     {label}
-                    <span className={cn("px-1.5 py-0.5 rounded text-[0.625rem] font-mono", active ? "bg-white/20" : "bg-muted")}>
+                    <span className={cn("px-1.5 py-0.5 text-[0.625rem] font-mono", active ? "bg-white/20" : "bg-muted")}>
                       {count}
                     </span>
                   </button>
@@ -642,11 +644,11 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
         {/* Start dialog */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-          <DialogContent accent="crm" className="max-w-sm p-0 gap-0 overflow-hidden">
+          <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 shrink-0 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
-                  <CalendarClock size={16} className="text-sky-600 dark:text-sky-400" />
+                <div className="w-9 h-9 shrink-0 bg-card border border-foreground/30 flex items-center justify-center">
+                  <CalendarClock size={16} className="text-foreground" />
                 </div>
                 <div>
                   <DialogTitle className="font-heading text-base">Start AFS Registry</DialogTitle>
@@ -655,21 +657,21 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs font-semibold text-foreground block mb-1.5">Booking <span className="text-red-500">*</span></label>
+              <label className="text-xs font-semibold text-foreground block mb-1.5">Booking <span className="text-destructive">*</span></label>
               {eligFetching ? (
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Clock size={12} className="animate-spin" /> Loading eligible bookings…</p>
               ) : startableBookings.length === 0 ? (
-                <div className="text-xs bg-sky-50 border border-sky-200 rounded-lg px-3 py-2.5 space-y-1.5 dark:bg-sky-900/20 dark:border-sky-800/60">
-                  <p className="font-semibold text-sky-800 dark:text-sky-400">No eligible bookings</p>
-                  <p className="text-sky-700 dark:text-sky-500">To start an AFS Registry visit, the booking's AFS Query Payment must be <strong>Confirmed</strong> first.</p>
+                <div className="text-xs bg-card border border-foreground/30 px-3 py-2.5 space-y-1.5">
+                  <p className="font-semibold text-foreground">No eligible bookings</p>
+                  <p className="text-foreground">To start an AFS Registry visit, the booking's AFS Query Payment must be <strong>Confirmed</strong> first.</p>
                   <button onClick={() => { setDialogOpen(false); navigate("/crm/afs-query-payment"); }}
-                    className="flex items-center gap-1 text-blue-600 hover:underline pt-0.5">
+                    className="flex items-center gap-1 text-foreground hover:underline pt-0.5">
                     Go to AFS Query Payment <ChevronRight size={11} />
                   </button>
                 </div>
               ) : (
                 <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)}
-                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40">
+                  className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground">
                   <option value="">Select booking</option>
                   {startableBookings.map((b: any) => (
                     <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ApplicantName} ({b.UnitNo})</option>
@@ -679,9 +681,9 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
               <button onClick={() => { setDialogOpen(false); setBookingId(""); }}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+                className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted font-medium">Cancel</button>
               <button onClick={handleStart} disabled={saving || !bookingId}
-                className="px-4 py-1.5 text-sm text-white rounded-lg font-semibold btn-module hover:shadow-lg disabled:opacity-40 transition-all">
+                className={`${KEY_INK} h-8 px-3`}>
                 {saving ? "Starting..." : "Start"}
               </button>
             </div>
@@ -690,53 +692,53 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
         {/* Schedule dialog */}
         <Dialog open={scheduleId != null} onOpenChange={(o) => !o && setScheduleId(null)}>
-          <DialogContent accent="crm" className="max-w-xs p-0 gap-0 overflow-hidden">
+          <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                  <CalendarClock size={16} className="text-blue-600 dark:text-blue-400" />
+                <div className="w-9 h-9 shrink-0 bg-foreground/5 border border-foreground/30 flex items-center justify-center">
+                  <CalendarClock size={16} className="text-foreground" />
                 </div>
                 <DialogTitle className="font-heading text-base">Schedule AFS Registration</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Appointment Date *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Appointment Date *</label>
               <DateInput value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+                className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
               <button onClick={() => setScheduleId(null)}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+                className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted font-medium">Cancel</button>
               <button onClick={handleSchedule}
-                className="px-4 py-1.5 text-sm text-white rounded-lg font-semibold btn-module hover:shadow-lg transition-all">Save</button>
+                className={`${KEY_INK} h-8 px-3`}>Save</button>
             </div>
           </DialogContent>
         </Dialog>
 
         {/* Complete dialog */}
         <Dialog open={completeId != null} onOpenChange={(o) => !o && setCompleteId(null)}>
-          <DialogContent accent="crm" className="max-w-xs p-0 gap-0 overflow-hidden">
+          <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400" />
+                <div className="w-9 h-9 shrink-0 bg-foreground/5 border border-foreground/30 flex items-center justify-center">
+                  <CheckCircle2 size={16} className="text-foreground" />
                 </div>
                 <DialogTitle className="font-heading text-base">Mark AFS Registry Completed</DialogTitle>
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Completed Date</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Completed Date</label>
               <DateInput value={completedDate} onChange={(e) => setCompletedDate(e.target.value)}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+                className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
               <p className="text-[0.6875rem] text-muted-foreground mt-2">
                 After confirming, enter the AFS Registration No on the Agreement record (Mark Registered).
               </p>
             </div>
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
               <button onClick={() => setCompleteId(null)}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+                className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted font-medium">Cancel</button>
               <button onClick={handleComplete}
-                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors">Confirm Completed</button>
+                className="px-4 py-1.5 text-sm bg-foreground text-card font-semibold hover:bg-foreground/80 transition-colors">Confirm Completed</button>
             </div>
           </DialogContent>
         </Dialog>
@@ -745,19 +747,19 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             list endpoint already returns (there is no GET /:id route on
             this router), so opening it costs no extra request. */}
         <Dialog open={!!detailRow} onOpenChange={(o) => !o && setDetailRow(null)}>
-          <DialogContent accent="crm" className="max-w-md p-0 gap-0 overflow-hidden rounded-xl">
+          <DialogContent className="max-w-md p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
             <DialogTitle className="sr-only">{detailRow ? `${detailRow.AfsRegNo} — AFS Registry` : "AFS Registry"}</DialogTitle>
             <DialogDescription className="sr-only">{detailRow ? `${detailRow.ApplicantName} · ${detailRow.BookingNo}` : "Record detail"}</DialogDescription>
             {detailRow && (
               <>
                 <div className="px-5 pt-5 pb-4 border-b border-border">
                   <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                      <CalendarClock size={16} className="text-sky-600 dark:text-sky-400" />
+                    <div className="w-9 h-9 bg-card flex items-center justify-center shrink-0 mt-0.5">
+                      <CalendarClock size={16} className="text-foreground" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold font-mono text-foreground">{detailRow.AfsRegNo}</span>
+                        <span className="text-sm font-semibold font-heading tabular-nums text-foreground">{detailRow.AfsRegNo}</span>
                         <StatusBadge status={detailRow.Status} />
                         <button onClick={() => copyToClipboard(detailRow.AfsRegNo, "AREG No.")} className="text-muted-foreground hover:text-foreground" title="Copy AREG No.">
                           <Copy size={11} />
@@ -766,7 +768,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                       <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate"><ApplicantNames name={detailRow.ApplicantName} bookingId={detailRow.BookingId} applicationId={detailRow.ApplicationId} /> · {detailRow.BookingNo} · {detailRow.UnitNo}</p>
                     </div>
                     <DialogClose asChild>
-                      <button className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                      <button className="shrink-0 p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                         <X size={14} />
                       </button>
                     </DialogClose>
@@ -776,30 +778,30 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
                 <div className="px-5 py-4 space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="rounded-lg border border-border px-3 py-2">
+                    <div className="border border-border px-3 py-2">
                       <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
-                      <p className="font-mono font-medium mt-0.5">{detailRow.AgreementNo || "—"}</p>
+                      <p className="font-heading tabular-nums font-medium mt-0.5">{detailRow.AgreementNo || "—"}</p>
                     </div>
-                    <div className="rounded-lg border border-border px-3 py-2">
+                    <div className="border border-border px-3 py-2">
                       <p className="text-[0.625rem] text-muted-foreground">AFS Registration No</p>
-                      <p className="font-mono font-medium mt-0.5">{detailRow.AfsRegistrationNo || "—"}</p>
+                      <p className="font-heading tabular-nums font-medium mt-0.5">{detailRow.AfsRegistrationNo || "—"}</p>
                     </div>
                   </div>
 
                   {detailRow.Status === "Completed" && (
                     detailRow.AfsRegistrationNo ? (
-                      <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 dark:bg-emerald-900/20 dark:border-emerald-800/60 dark:text-emerald-400">
+                      <div className="flex items-center gap-2 text-sm text-foreground bg-card border border-foreground/30 px-4 py-3">
                         <ShieldCheck size={16} className="shrink-0" /> AFS registered — details recorded on the Agreement.
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        <div className="flex items-start gap-2 text-sm text-sky-700 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 dark:bg-sky-900/20 dark:border-sky-800/60 dark:text-sky-400">
+                        <div className="flex items-start gap-2 text-sm text-foreground bg-card border border-foreground/30 px-4 py-3">
                           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
                           <span>Registry visit complete. Now open the Agreement and click <strong>Mark as Registered</strong> — enter the AFS Registration No and date from the Sub-Registrar receipt.</span>
                         </div>
                         <button
                           onClick={() => { setDetailRow(null); navigate(`/crm/agreements?bookingId=${detailRow.BookingId}`); }}
-                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors">
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-foreground text-card hover:bg-foreground/80 transition-colors">
                           <ChevronRight size={12} /> Go to Agreement → Mark as Registered
                         </button>
                       </div>
@@ -808,13 +810,13 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
                   {detailRow.Status === "Pending" && (
                     <button onClick={() => { setDetailRow(null); setScheduleId(detailRow.Id); setScheduledDate(""); }}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white rounded-lg btn-module hover:shadow-md transition-all">
+                      className={`${KEY_INK} h-8 px-3`}>
                       <CalendarClock size={12} /> Schedule Appointment
                     </button>
                   )}
                   {detailRow.Status === "Scheduled" && (
-                    <button onClick={() => { setDetailRow(null); setCompleteId(detailRow.Id); setCompletedDate(new Date().toISOString().slice(0, 10)); }}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+                    <button onClick={() => { setDetailRow(null); setCompleteId(detailRow.Id); setCompletedDate(todayLocal()); }}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-foreground text-card hover:bg-foreground/80 transition-colors">
                       <CheckCircle2 size={12} /> Mark Completed
                     </button>
                   )}
@@ -826,10 +828,10 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
                 <div className="px-5 py-3 border-t border-border bg-muted/20 flex items-center justify-between">
                   <button onClick={() => navigate(`/crm/bookings?view=${detailRow.BookingId}`)}
-                    className="flex items-center gap-1 text-xs font-medium text-sky-600 dark:text-sky-400 hover:underline">
+                    className="flex items-center gap-1 text-xs font-medium text-foreground hover:underline">
                     Go to Booking <ChevronRight size={12} />
                   </button>
-                  <button onClick={() => setDetailRow(null)} className="px-3 py-1.5 text-xs font-medium rounded-lg text-muted-foreground hover:bg-muted transition-colors">Close</button>
+                  <button onClick={() => setDetailRow(null)} className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors">Close</button>
                 </div>
               </>
             )}

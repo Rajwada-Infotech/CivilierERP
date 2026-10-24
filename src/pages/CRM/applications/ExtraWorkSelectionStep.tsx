@@ -73,7 +73,7 @@ export const ExtraWorkSelectionStep: React.FC<{
   return (
     <div className="space-y-4">
       <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-        <IndianRupee size={11} className="text-primary shrink-0" />
+        <IndianRupee size={11} className="text-foreground shrink-0" />
         Unit {fmtInr(computedTotal)}
         {chargesTotal > 0 && ` + Extra Charges ${fmtInr(chargesTotal)}`}
         {" — Extra Charges is optional and never affects the Unit+Parking GST bracket, only its own fixed 18% (HSN Master)."}
@@ -99,7 +99,7 @@ export const ExtraWorkSelectionStep: React.FC<{
               <div key={c.Id} className="flex items-center justify-between text-xs bg-muted/30 px-2.5 py-1.5">
                 <span>{c.Description} · {fmtInr(c.Amount)} + GST {fmtInr(c.GstAmount)} = <span className="font-medium">{fmtInr(c.TotalAmount)}</span></span>
                 {canEdit && (
-                  <button onClick={() => handleRemove(c.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                  <button onClick={() => handleRemove(c.Id)} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
                 )}
               </div>
             ))}

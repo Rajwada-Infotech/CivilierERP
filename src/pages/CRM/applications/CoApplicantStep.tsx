@@ -161,7 +161,7 @@ export const CoApplicantStep: React.FC<{
                 </span>
                 <span className="flex items-center gap-2">
                   <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
-                  <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
                 </span>
               </div>
             ))}
