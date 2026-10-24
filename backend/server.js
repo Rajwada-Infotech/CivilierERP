@@ -353,6 +353,7 @@ const ALL_ROUTES = [
   { path: "/api/sa/notifications", file: "./routes/saNotifications" },
   // ── CRM Module ──────────────────────────────────────────────────────────────
   { path: "/api/crm/customers",      file: "./routes/crmCustomers"      },
+  { path: "/api/crm/leads",          file: "./routes/crmLeads"          },
   { path: "/api/crm/applications",   file: "./routes/crmApplications"   },
   { path: "/api/crm/bookings",       file: "./routes/crmBookings"       },
   { path: "/api/crm/loan-summary",   file: "./routes/crmLoanSummary"    },

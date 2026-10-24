@@ -6,7 +6,7 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const router = express.Router();
@@ -585,13 +585,16 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
 
   let wasApproved = false;
   let wasRejected = false;
+  let wasPending = false;
   let beforeSnapshot = null;
   try {
     const currentStatus = await getRecordStatus("work-orders", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "work-order");
-    await guardEdit("work-orders", id, { allowPostApproval });
+    // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+    await guardEditAnyStage("work-orders", id, { allowPostApproval });
     wasApproved = currentStatus === "Approved";
     wasRejected = currentStatus === "Rejected";
+    wasPending = currentStatus === "Pending";
     if (wasApproved) {
       beforeSnapshot = await snapshotRow(getPool(), "dbo.WorkOrderHeader", "Id", id);
     }
@@ -714,6 +717,16 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
         });
       } catch (logErr) {
         console.error("Amendment log error (work-order):", logErr.message);
+      }
+    }
+
+    // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+    // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("work-orders", id, req.user?.email, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[work-orders] could not restart approval cycle after pending edit:", cycleErr.message);
       }
     }
 

@@ -1,722 +1,37 @@
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { CrmShell } from "@/components/crm/CrmShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
-import {
-  Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
-  ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
-  Mail, MapPin, IndianRupee, Users2, Briefcase, X, PlayCircle, Ban, Lock, Wallet, Eye, Download,
-  AlertTriangle,
-} from "lucide-react";
+import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import { useGstRates, computeUnitParkingGst } from "@/lib/crmGst";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-
-const API = "/api/crm/applications";
-const CUSTOMER_API = "/api/crm/customers";
-const COMPANY_API = "/api/business/dropdown";
-const SA_LEADS_API = "/api/sa/leads";
-const UNIT_API = "/api/unit-master";
-const BANK_DETAIL_API = "/api/crm/customer-bank-details";
-const DOC_API = "/api/crm/booking-documents";
-const PARKING_API = "/api/crm/parking";
-const EXTRA_CHARGE_API = "/api/crm/extra-charges";
-const CO_APPLICANT_API = "/api/crm/co-applicants";
-const PROJECT_BANK_API = "/api/crm/project-banks";
-const BANK_MASTER_API = "/api/bank-master";
-const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
-
-const STATUSES = ["Draft", "Pending", "Approved", "Rejected", "Cancelled", "Expired"];
-const DOC_TYPES = ["IdentityProof", "AddressProof", "PhotoID", "IncomeProof", "Other"];
-// Applications no longer have their own verification checklist or approval
-// cycle at all — that logic merged into the Booking's own "Review" workflow
-// stage (see CrmBookingDetail.tsx / crmBookingStageService.js).
-
-const statusColor: Record<string, string> = {
-  Draft:     "text-muted-foreground bg-muted/50 border-border",
-  Pending:   "text-blue-600 bg-blue-50 border-blue-200",
-  // "Booked" is not a real DB Status — it's a derived display label used
-  // when an Application has Status={CrmStatus.PENDING} but a live Booking already
-  // exists (Stage='Converted'). Showing "Pending" in that state misleads
-  // staff into thinking the application still needs action; "Booked" makes
-  // the conversion immediately obvious.
-  Booked:    "text-indigo-600 bg-indigo-50 border-indigo-200",
-  Approved:  "text-green-600 bg-green-50 border-green-200",
-  Rejected:  "text-red-600 bg-red-50 border-red-200",
-  Cancelled: "text-sky-600 bg-sky-50 border-sky-200",
-  Expired:   "text-slate-500 bg-slate-100 border-slate-200",
-};
-
-// Booking status colours — separate from application status so "Cancelled"
-// on a booking always shows orange-red, not the application's own orange.
-const bookingStatusColor: Record<string, string> = {
-  Pending:   "text-amber-600 bg-amber-50 border-amber-200",
-  Review:    "text-blue-600 bg-blue-50 border-blue-200",
-  Approved:  "text-green-600 bg-green-50 border-green-200",
-  Cancelled: "text-red-600 bg-red-50 border-red-200",
-  Rejected:  "text-red-600 bg-red-50 border-red-200",
-  Expired:   "text-slate-500 bg-slate-100 border-slate-200",
-};
-
-const EMPTY_FORM = {
-  CustomerId: "", CompanyId: "",
-  ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitIds: [] as string[], PreferredPlotIds: [] as string[], PaymentPlanId: "",
-  RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
-  Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
-  // ViaBroker is UI-only (never sent to the backend) — it just toggles the
-  // broker sub-block; BrokerId being set is what actually matters server-side.
-  ViaBroker: false, BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime",
-  Notes: "",
-  // Payment Details (Step 6/Details) — these columns already existed on
-  // CrmApplication and were already read by handleCreateBooking's retry
-  // payload, but nothing in the wizard ever captured them until now.
-  TokenType: "Percentage", TokenValue: "", PaymentMode: "", DepositBankId: "",
-  // Payment instrument reference — only meaningful once PaymentMode is
-  // anything other than Cash (see the Payment Details block's dynamic
-  // fields). Stored on CrmCustomerBankDetail, not CrmApplication itself.
-  ChequeNo: "", ChequeDate: "", TransactionRef: "",
-};
-
-const EMPTY_BANK = {
-  BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
-  PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
-};
-
-// Which real company bank account the token payment lands in — scoped to
-// the selected Project (falls back to the open bank list if the project has
-// none tagged), same "Deposited To" pattern CrmBooking.tsx, CrmBookingDetail.tsx
-// and CrmPaymentMilestones.tsx all already use for this exact decision.
-async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (projectId == null) return [];
-  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchAllBanks(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-
-const PAGE_SIZE = 20;
-
-interface ApplicationListFilters {
-  search: string; status: string; displayStage: string;
-  companyId: string; projectId: string; blockId: string;
-}
-
-// The management page's own paginated list — server-side filtered on
-// exactly the same terms the page's UI exposes (search/status/stage/
-// Company/Project/Block), unlike every other page's application-selector
-// dropdown (New Booking, Unit/Parking Matrix, Communication Log), which
-// still calls GET / with no ?page= at all and keeps getting the original
-// bare-array/Converted-excluded-by-default behavior untouched.
-async function fetchApplicationsList(filters: ApplicationListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
-  const q = new URLSearchParams();
-  q.set("page", String(page));
-  q.set("pageSize", String(pageSize));
-  if (filters.search) q.set("search", filters.search);
-  if (filters.status && filters.status !== "All") q.set("status", filters.status);
-  if (filters.displayStage) q.set("displayStage", filters.displayStage);
-  if (filters.companyId) q.set("companyId", filters.companyId);
-  if (filters.projectId) q.set("projectId", filters.projectId);
-  if (filters.blockId) q.set("blockId", filters.blockId);
-  try {
-    const res = await fetchWithAuth(`${API}?${q}`);
-    if (!res.ok) return { rows: [], total: 0 };
-    return res.json();
-  } catch { return { rows: [], total: 0 }; }
-}
-
-// Same filter set as the list above, minus stage itself — for the tab
-// badges, which must reflect the true total under the current
-// search/status/Company/Project/Block filters regardless of which page or
-// stage is currently selected (a page's own row count stopped being usable
-// as "the total" the moment the list became paginated).
-async function fetchStageCounts(filters: Omit<ApplicationListFilters, "displayStage">): Promise<Record<Stage, number>> {
-  const q = new URLSearchParams();
-  if (filters.search) q.set("search", filters.search);
-  if (filters.status && filters.status !== "All") q.set("status", filters.status);
-  if (filters.companyId) q.set("companyId", filters.companyId);
-  if (filters.projectId) q.set("projectId", filters.projectId);
-  if (filters.blockId) q.set("blockId", filters.blockId);
-  try {
-    const res = await fetchWithAuth(`${API}/stage-counts?${q}`);
-    if (!res.ok) return { InProcess: 0, Converted: 0, NotConverted: 0 };
-    return res.json();
-  } catch { return { InProcess: 0, Converted: 0, NotConverted: 0 }; }
-}
-async function fetchAppDetail(id: number): Promise<any> {
-  const r = await fetchWithAuth(`${API}/${id}`);
-  return r.ok ? r.json() : null;
-}
-
-const STAGES = ["InProcess", "Converted", "NotConverted"] as const;
-type Stage = typeof STAGES[number];
-const stageLabel: Record<Stage, string> = { InProcess: "In Process", Converted: "Converted", NotConverted: "Not Converted" };
-const stageIcon: Record<Stage, any> = { InProcess: Clock, Converted: CheckCircle2, NotConverted: XCircle };
-const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-async function fetchCustomers(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(CUSTOMER_API);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
-// Used only to auto-fetch a selected customer's original lead interest/
-// source-chain data (property type, source chain) onto this application —
-// Lead selection itself now happens once, on the Customer record
-// (CrmCustomers.tsx's "Link to Existing Lead" picker on New Customer).
-async function fetchLeadOptions(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(SA_LEADS_API);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
-async function fetchCompanies(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(COMPANY_API);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.companies || []).map((c: any) => ({ Id: c.id, Name: c.name }));
-  } catch { return []; }
-}
-async function fetchProjects(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}/projects`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchUnits(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchPlots(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/plot-master?available=1"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchBrokers(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/account-head?type=BR"); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchPaymentPlans(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/crm/payment-plans"); return r.ok ? r.json() : []; } catch { return []; }
-}
-// Blocks' own tagged PaymentPlanIds — the middle tier of the Project ->
-// Block -> Unit cascade (see crmEntityCreation.js's getApplicablePaymentPlans).
-async function fetchBlockPlanTags(): Promise<any[]> {
-  try { const r = await fetchWithAuth("/api/block-master"); return r.ok ? r.json() : []; } catch { return []; }
-}
-
-// Admin-editable commission tiers (dbo.CrmBrokerageRateTier, see
-// crmBrokerageRateTiers.js / CrmBrokerageRateTiers.tsx) — this is only a
-// staff-facing preview of the same fallback rate the server itself applies
-// (tierBrokeragePercent in crmWorkflowGuards.js) when no explicit override
-// is typed; it's never used to compute what actually gets saved.
-type RateTier = { MinDealValue: number; MaxDealValue: number | null; RatePercent: number; IsActive: boolean };
-async function fetchBrokerageRateTiers(): Promise<RateTier[]> {
-  try { const r = await fetchWithAuth("/api/crm/brokerage-rate-tiers"); return r.ok ? r.json() : []; } catch { return []; }
-}
-
-// Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
-// MilestonesJson column — reused here so the brief plan-preview card below
-// can compute real ₹ figures instead of just repeating raw %s.
-type MilestoneRow = { name: string; pct: number };
-function parseMilestones(json: string | null | undefined): MilestoneRow[] {
-  if (!json) return [];
-  try {
-    const raw = JSON.parse(json);
-    return (raw as any[]).map((r) => ({ name: r.name, pct: Number(r.pct) || 0 }));
-  } catch { return []; }
-}
-
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40 focus:border-sky-500/50";
-const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
-
-// Live "cost + GST" preview shown at every point Unit/Parking/Extra Charges
-// values are picked — Application's Project/Unit and Parking steps, and
-// (via the same component reused in CrmBookingDetail.tsx) the Booking's own
-// Parking & Extra Charges tab. Rate is always fetched live from HSN Master
-// (useGstRates), never hardcoded — this is a preview of the exact same fixed
-// rule the backend enforces (crmGst.js), not a separate/independent guess.
-const GstBreakdownBox: React.FC<{ unitValue: number; parkingBase: number }> = ({ unitValue, parkingBase }) => {
-  const { data: rates, isLoading } = useGstRates();
-  if (isLoading || !rates) {
-    return <p className="text-[0.6875rem] text-muted-foreground">Loading GST rates from HSN Master…</p>;
-  }
-  const gst = computeUnitParkingGst(unitValue, parkingBase, rates);
-  return (
-    <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-sky-800 font-medium">GST ({gst.hsnCode}) — fixed, from HSN Master</span>
-        <span className="text-sky-800 font-semibold">{gst.rate}%</span>
-      </div>
-
-      {/* Follows the exact stated formula, in this exact order:
-          Unit (+ its own GST), Parking (+ its own GST) -> Amount (Unit +
-          Parking, pre-tax) -> GST (combined) -> Total Amount. No row repeats
-          a figure another row already shows. */}
-      <div className="flex items-center justify-between text-sky-700">
-        <span>Unit</span>
-        <span>{fmtInr(gst.unitBase)}</span>
-      </div>
-      <div className="flex items-center justify-between text-sky-700 pl-2">
-        <span>Unit GST ({gst.rate}%)</span>
-        <span>{fmtInr(gst.unitGstAmount)}</span>
-      </div>
-      {gst.parkingBase > 0 && (
-        <>
-          <div className="flex items-center justify-between text-sky-700">
-            <span>Parking</span>
-            <span>{fmtInr(gst.parkingBase)}</span>
-          </div>
-          <div className="flex items-center justify-between text-sky-700 pl-2">
-            <span>Parking GST ({gst.rate}%)</span>
-            <span>{fmtInr(gst.parkingGstAmount)}</span>
-          </div>
-        </>
-      )}
-
-      <div className="flex items-center justify-between border-t border-sky-200 pt-1 text-sky-800">
-        <span>Amount (Unit{gst.parkingBase > 0 ? " + Parking" : ""})</span>
-        <span className="font-medium">{fmtInr(gst.base)}</span>
-      </div>
-      <div className="flex items-center justify-between text-sky-800">
-        <span>GST</span>
-        <span className="font-medium">{fmtInr(gst.gstAmount)}</span>
-      </div>
-      <div className="flex items-center justify-between border-t border-sky-200 pt-1 font-semibold text-sky-900">
-        <span>Total Amount</span>
-        <span>{fmtInr(gst.total)}</span>
-      </div>
-      <p className="text-[0.625rem] text-sky-600">
-        {gst.base <= 4500000
-          ? "At or under ₹45L — 1% bracket applies."
-          : "Over ₹45L — 5% bracket applies."} Crosses automatically as Parking is added or changed — never editable here.
-      </p>
-    </div>
-  );
-};
-
-const GstGrandTotalText: React.FC<{ unitValue: number; parkingBase: number }> = ({ unitValue, parkingBase }) => {
-  const { data: rates } = useGstRates();
-  if (!rates) return <>—</>;
-  const gst = computeUnitParkingGst(unitValue, parkingBase, rates);
-  return <>{fmtInr(gst.total)}</>;
-};
-
-// ── Step 4: Co-Applicant(s) ─────────────────────────────────────────────────────
-// Captured directly against the Application (dbo.CrmCoApplicant, ApplicationId
-// set now, BookingId backfilled later by crmEntityCreation.js) rather than as
-// a single flat name/relation/mobile on CrmCustomer as before — a customer can
-// have a different set of co-applicants on each of their Applications, and a
-// deal can have more than one. See crmCoApplicant.js's /application/:id routes.
-const emptyCoApplicant = () => ({
-  Name: "", Relation: "", Mobile: "", Email: "", PanNo: "", AadhaarNo: "",
-  DateOfBirth: "", Gender: "", Occupation: "", AnnualIncome: "",
-  Address: "", City: "", State: "", Pincode: "", Notes: "",
-});
-
-const CoApplicantStep: React.FC<{
-  applicationId: number;
-  applicantName?: string;
-  applicantAddress?: string;
-  applicantCity?: string;
-  applicantState?: string;
-  applicantPincode?: string;
-}> = ({ applicationId, applicantName, applicantAddress, applicantCity, applicantState, applicantPincode }) => {
-  const { data: coApplicants = [], refetch } = useQuery({
-    queryKey: ["crm-app-co-applicants-edit", applicationId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${applicationId}`);
-      return r.ok ? r.json() : [];
-    },
-  });
-
-  const [editingId, setEditingId] = useState<number | "new" | null>(null);
-  const [draft, setDraft] = useState<any>(emptyCoApplicant());
-  const [saving, setSaving] = useState(false);
-  // Clicking a co-applicant's row (anywhere but Edit/Delete) opens a
-  // read-only details popup — the row itself only ever shows Name/Relation/
-  // Mobile, so this is the only way to see PAN, Aadhaar, DOB, address, etc.
-  // without dropping into edit mode.
-  const [viewingCoApplicant, setViewingCoApplicant] = useState<any | null>(null);
-  // "Same as applicant's address" — same convenience toggle as the Nominee
-  // section: checking it copies the applicant's current Address/City/State/
-  // Pincode in and locks those fields; unchecking hands them back for free
-  // editing. Defaults on if a saved co-applicant's address already matches
-  // the applicant's (e.g. re-opening a previously saved entry).
-  const [sameAsApplicant, setSameAsApplicant] = useState(false);
-
-  const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); setSameAsApplicant(false); };
-  const startEdit = (co: any) => {
-    setDraft({
-      Name: co.Name || "", Relation: co.Relation || "", Mobile: co.Mobile || "",
-      Email: co.Email || "", PanNo: co.PanNo || "", AadhaarNo: co.AadhaarNo || "",
-      DateOfBirth: co.DateOfBirth ? String(co.DateOfBirth).slice(0, 10) : "",
-      Gender: co.Gender || "", Occupation: co.Occupation || "",
-      AnnualIncome: co.AnnualIncome != null ? String(co.AnnualIncome) : "",
-      Address: co.Address || "", City: co.City || "", State: co.State || "",
-      Pincode: co.Pincode || "", Notes: co.Notes || "",
-      CustomerId: co.CustomerId ?? null,
-    });
-    setEditingId(co.Id);
-    setSameAsApplicant(
-      !!applicantAddress && (co.Address || "").trim() === applicantAddress.trim() &&
-      (co.City || "").trim() === (applicantCity || "").trim() &&
-      (co.State || "").trim() === (applicantState || "").trim() &&
-      (co.Pincode || "").trim() === (applicantPincode || "").trim()
-    );
-  };
-  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
-  // An existing customer can be picked as a co-applicant: their details are
-  // filled in and they are linked, never duplicated (the server also refuses
-  // the main applicant or someone already on this application).
-  const { data: customerPool = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000, enabled: editingId !== null });
-  const pickCustomer = (id: string) => {
-    const c = (customerPool as any[]).find((x: any) => String(x.Id) === id);
-    if (!c) { setDraft((d: any) => ({ ...d, CustomerId: null })); return; }
-    setDraft((d: any) => ({
-      ...d, CustomerId: c.Id, Name: c.CustomerName || "", Mobile: c.Mobile || "", Email: c.Email || "",
-      PanNo: c.PanNo || "", AadhaarNo: c.AadhaarNo || "", Occupation: c.Occupation || d.Occupation,
-      DateOfBirth: c.DateOfBirth ? String(c.DateOfBirth).slice(0, 10) : d.DateOfBirth,
-      Address: c.Address || d.Address, City: c.City || d.City, State: c.State || d.State, Pincode: c.Pincode || d.Pincode,
-    }));
-  };
-
-  // While the checkbox is on, keep the draft's address fields in step if
-  // the applicant's own address changes mid-edit.
-  useEffect(() => {
-    if (sameAsApplicant) {
-      setDraft((d: any) => ({
-        ...d,
-        Address: applicantAddress || "", City: applicantCity || "",
-        State: applicantState || "", Pincode: applicantPincode || "",
-      }));
-    }
-  }, [sameAsApplicant, applicantAddress, applicantCity, applicantState, applicantPincode]);
-
-  const handleSave = async () => {
-    if (!draft.Name?.trim()) { toast.error("Name is required"); return; }
-    if (draft.Mobile?.trim() && !/^\d{10}$/.test(draft.Mobile.trim())) { toast.error("Co-applicant mobile must be exactly 10 digits"); return; }
-    if (draft.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.PanNo.trim().toUpperCase())) { toast.error("Co-applicant PAN must be in format ABCDE1234F"); return; }
-    if (draft.AadhaarNo?.trim() && !/^\d{12}$/.test(draft.AadhaarNo.trim())) { toast.error("Co-applicant Aadhaar must be exactly 12 digits"); return; }
-    if (draft.Pincode?.trim() && !/^\d{6}$/.test(draft.Pincode.trim())) { toast.error("Co-applicant Pincode must be exactly 6 digits"); return; }
-    if (draft.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.Email.trim())) { toast.error("Invalid co-applicant email address"); return; }
-    setSaving(true);
-    try {
-      const isNew = editingId === "new";
-      const url = isNew ? `${CO_APPLICANT_API}/application/${applicationId}` : `${CO_APPLICANT_API}/${editingId}`;
-      const res = await fetchWithAuth(url, {
-        method: isNew ? "POST" : "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Save failed");
-      toast.success(isNew ? "Co-applicant added" : "Co-applicant updated");
-      cancelEdit();
-      refetch();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`${CO_APPLICANT_API}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Delete failed");
-      refetch();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Users2 size={13} /> Co-Applicants</label>
-        <p className="text-[0.6875rem] text-muted-foreground">The main applicant is Applicant 1. Each co-applicant is Applicant 2, 3 … and is added to the customer pool (an existing customer with the same mobile, PAN or email is linked, not duplicated).</p>
-        {(coApplicants as any[]).length > 0 ? (
-          <div className="space-y-1.5">
-            {(coApplicants as any[]).map((co: any) => (
-              <div key={co.Id}
-                onClick={() => setViewingCoApplicant(co)}
-                className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50">
-                <span className="flex items-center gap-1.5">
-                  {co.ApplicantNo && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-primary">Applicant {co.ApplicantNo}</span>}
-                  <span className="font-medium text-foreground">{co.Name}</span>
-                  {co.Relation && <span className="text-muted-foreground">({co.Relation})</span>}
-                  {co.Mobile && <span className="text-muted-foreground">— {co.Mobile}</span>}
-                  {co.CustomerNo && <span className="text-muted-foreground">· customer {co.CustomerNo}</span>}
-                </span>
-                <span className="flex items-center gap-2">
-                  <button onClick={(e) => { e.stopPropagation(); startEdit(co); }} className="text-primary hover:underline">Edit</button>
-                  <button onClick={(e) => { e.stopPropagation(); handleDelete(co.Id); }} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No co-applicants added yet — optional.</p>
-        )}
-        {editingId === null && (
-          <button onClick={startAdd}
-            className="text-xs px-3 py-1.5 border border-border rounded-md text-primary hover:bg-muted/40 flex items-center gap-1">
-            <Plus size={12} /> Add Co-Applicant
-          </button>
-        )}
-      </div>
-
-      {editingId !== null && (
-        <div className="rounded-lg border border-border p-3 space-y-3">
-          <div>
-            <label className={labelCls}>Existing customer (optional)</label>
-            <SearchableSelect
-              value={draft.CustomerId != null ? String(draft.CustomerId) : ""}
-              onChange={pickCustomer}
-              placeholder="Pick an existing customer, or fill in a new person below"
-              searchPlaceholder="Search name, mobile or customer no..."
-              options={(customerPool as any[]).map((c: any) => ({ value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · ") }))}
-            />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Name *</label>
-              <input value={draft.Name} onChange={(e) => setDraft((d: any) => ({ ...d, Name: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Relation</label>
-              <select value={draft.Relation} onChange={(e) => setDraft((d: any) => ({ ...d, Relation: e.target.value }))} className={inputCls}>
-                <option value="">Select</option>
-                <option value="Spouse">Spouse</option>
-                <option value="Son">Son</option>
-                <option value="Daughter">Daughter</option>
-                <option value="Father">Father</option>
-                <option value="Mother">Mother</option>
-                <option value="Brother">Brother</option>
-                <option value="Sister">Sister</option>
-                <option value="Friend">Friend</option>
-                <option value="Business Partner">Business Partner</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Mobile</label>
-              <input value={draft.Mobile} onChange={(e) => setDraft((d: any) => ({ ...d, Mobile: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Email</label>
-              <input value={draft.Email} onChange={(e) => setDraft((d: any) => ({ ...d, Email: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>PAN (Permanent Account Number)</label>
-              <input value={draft.PanNo} onChange={(e) => setDraft((d: any) => ({ ...d, PanNo: e.target.value.toUpperCase() }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Aadhaar No.</label>
-              <input value={draft.AadhaarNo} onChange={(e) => setDraft((d: any) => ({ ...d, AadhaarNo: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Date of Birth</label>
-              <DateInput value={draft.DateOfBirth} onChange={(e) => setDraft((d: any) => ({ ...d, DateOfBirth: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Gender</label>
-              <select value={draft.Gender} onChange={(e) => setDraft((d: any) => ({ ...d, Gender: e.target.value }))} className={inputCls}>
-                <option value="">Select</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Occupation</label>
-              <input value={draft.Occupation} onChange={(e) => setDraft((d: any) => ({ ...d, Occupation: e.target.value }))} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>Annual Income</label>
-              <input type="number" value={draft.AnnualIncome} onChange={(e) => setDraft((d: any) => ({ ...d, AnnualIncome: e.target.value }))} className={inputCls} />
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className={labelCls + " mb-0"}>Address</label>
-              {applicantAddress && (
-                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                  <input type="checkbox" checked={sameAsApplicant}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setSameAsApplicant(checked);
-                      if (checked) {
-                        setDraft((d: any) => ({
-                          ...d, Address: applicantAddress || "", City: applicantCity || "",
-                          State: applicantState || "", Pincode: applicantPincode || "",
-                        }));
-                      }
-                    }}
-                    className="rounded border-border" />
-                  Same as {applicantName || "applicant"}'s address
-                </label>
-              )}
-            </div>
-            <input value={draft.Address} readOnly={sameAsApplicant}
-              onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))}
-              className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div>
-              <label className={labelCls}>City</label>
-              <input value={draft.City} readOnly={sameAsApplicant}
-                onChange={(e) => setDraft((d: any) => ({ ...d, City: e.target.value }))}
-                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-            <div>
-              <label className={labelCls}>State</label>
-              <input value={draft.State} readOnly={sameAsApplicant}
-                onChange={(e) => setDraft((d: any) => ({ ...d, State: e.target.value }))}
-                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-            <div>
-              <label className={labelCls}>Pincode</label>
-              <input value={draft.Pincode} readOnly={sameAsApplicant}
-                onChange={(e) => setDraft((d: any) => ({ ...d, Pincode: e.target.value }))}
-                className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>Notes</label>
-            <textarea value={draft.Notes} onChange={(e) => setDraft((d: any) => ({ ...d, Notes: e.target.value }))} rows={2} className={`${inputCls} resize-none`} />
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <button onClick={cancelEdit} className="px-3 py-1.5 text-xs border border-border rounded-md text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving}
-              className="px-3 py-1.5 text-xs btn-module text-white rounded-md font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Plain custom overlay instead of the shadcn/Radix <Dialog> — this
-          popup opens while the wizard's own Dialog is already open, and
-          nesting two Radix Dialogs is a known source of a stuck
-          pointer-events/focus-trap state on the outer dialog once the inner
-          one closes (symptom: buttons like Edit stop responding). A plain
-          div-based overlay sidesteps that entirely. */}
-      {viewingCoApplicant && (
-        <BodyPortal><div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setViewingCoApplicant(null)}
-        >
-          <div
-            className="bg-background border border-border rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-heading text-sm font-semibold text-foreground flex items-center gap-2">
-                <Users2 size={16} />
-                {viewingCoApplicant.Name}
-                {viewingCoApplicant.Relation && (
-                  <span className="text-xs font-normal text-muted-foreground">({viewingCoApplicant.Relation})</span>
-                )}
-              </h3>
-              <button onClick={() => setViewingCoApplicant(null)} className="text-muted-foreground hover:text-foreground">
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <div><span className="text-muted-foreground">Mobile:</span> <span className="text-foreground">{viewingCoApplicant.Mobile || "—"}</span></div>
-              <div><span className="text-muted-foreground">Email:</span> <span className="text-foreground">{viewingCoApplicant.Email || "—"}</span></div>
-              <div><span className="text-muted-foreground">PAN:</span> <span className="text-foreground">{viewingCoApplicant.PanNo || "—"}</span></div>
-              <div><span className="text-muted-foreground">Aadhaar No.:</span> <span className="text-foreground">{viewingCoApplicant.AadhaarNo || "—"}</span></div>
-              <div><span className="text-muted-foreground">Date of Birth:</span> <span className="text-foreground">{viewingCoApplicant.DateOfBirth ? String(viewingCoApplicant.DateOfBirth).slice(0, 10) : "—"}</span></div>
-              <div><span className="text-muted-foreground">Gender:</span> <span className="text-foreground">{viewingCoApplicant.Gender || "—"}</span></div>
-              <div><span className="text-muted-foreground">Occupation:</span> <span className="text-foreground">{viewingCoApplicant.Occupation || "—"}</span></div>
-              <div><span className="text-muted-foreground">Annual Income:</span> <span className="text-foreground">{viewingCoApplicant.AnnualIncome != null && viewingCoApplicant.AnnualIncome !== "" ? viewingCoApplicant.AnnualIncome : "—"}</span></div>
-              <div className="col-span-2"><span className="text-muted-foreground">Address:</span> <span className="text-foreground">{viewingCoApplicant.Address || "—"}</span></div>
-              <div><span className="text-muted-foreground">City:</span> <span className="text-foreground">{viewingCoApplicant.City || "—"}</span></div>
-              <div><span className="text-muted-foreground">State:</span> <span className="text-foreground">{viewingCoApplicant.State || "—"}</span></div>
-              <div><span className="text-muted-foreground">Pincode:</span> <span className="text-foreground">{viewingCoApplicant.Pincode || "—"}</span></div>
-              {viewingCoApplicant.Notes && (
-                <div className="col-span-2"><span className="text-muted-foreground">Notes:</span> <span className="text-foreground">{viewingCoApplicant.Notes}</span></div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 pt-4">
-              <button
-                type="button"
-                onClick={() => { const co = viewingCoApplicant; setViewingCoApplicant(null); startEdit(co); }}
-                className="px-3 py-1.5 text-xs border border-border rounded-md text-primary hover:bg-muted/40">
-                Edit
-              </button>
-              <button type="button" onClick={() => setViewingCoApplicant(null)}
-                className="px-3 py-1.5 text-xs btn-module text-white rounded-md font-medium ">
-                Close
-              </button>
-            </div>
-          </div>
-        </div></BodyPortal>
-      )}
-    </div>
-  );
-};
-
-
-// Same "fetch as blob, preview in an iframe, offer Download" pattern as
-// CrmMoneyReceipts.tsx's ReceiptPdfDialog — so staff can hand a customer
-// both documents the same way, from the same page.
-const ApplicationFormPdfDialog: React.FC<{ applicationId: number; applicationNo: string; onClose: () => void }> = ({ applicationId, applicationNo, onClose }) => {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    fetchWithAuth(`${API}/${applicationId}/pdf`)
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((blob) => {
-        if (cancelled || !blob) return;
-        objectUrl = URL.createObjectURL(blob);
-        setBlobUrl(objectUrl);
-      })
-      .catch(() => setBlobUrl(null));
-    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [applicationId]);
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-3xl">
-        <DialogHeader>
-          <div className="flex items-center justify-between gap-3 pr-6">
-            <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> Application Form — {applicationNo}</DialogTitle>
-            {blobUrl && (
-              <a href={blobUrl} download={`${applicationNo}-ApplicationForm.pdf`}
-                className="shrink-0 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 flex items-center gap-1.5">
-                <Download size={14} /> Download PDF
-              </a>
-            )}
-          </div>
-        </DialogHeader>
-        <div className="flex items-center justify-center min-h-[400px] bg-muted/20 rounded-lg overflow-hidden border border-border">
-          {!blobUrl ? <span className="text-sm text-muted-foreground">Generating preview…</span>
-            : <iframe src={blobUrl} title={applicationNo} className="w-full h-[75vh] border-0" />}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
+import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, parseMilestones, inputCls, labelCls } from "./applications/config";
+import { GstBreakdownBox } from "./applications/GstBreakdown";
+import { CoApplicantStep } from "./applications/CoApplicantStep";
+import { ApplicationFormPdfDialog } from "./applications/ApplicationFormPdfDialog";
+import { BankDetailsStep } from "./applications/BankDetailsStep";
+import { ParkingSelectionStep } from "./applications/ParkingSelectionStep";
+import { ExtraWorkSelectionStep } from "./applications/ExtraWorkSelectionStep";
+import { AttachmentsStep } from "./applications/AttachmentsStep";
 
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
@@ -727,8 +42,6 @@ const CrmApplication: React.FC = () => {
   const canEditApplications = canDoAction("crm-applications", "edit");
   const canCreateApplications = canDoAction("crm-applications", "create");
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const [searchInput, setSearchInput] = useState("");
   // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
@@ -800,7 +113,7 @@ const CrmApplication: React.FC = () => {
   };
 
   const listFilters: ApplicationListFilters = { search, status: statusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
-  const { data: listData, isLoading } = useQuery({
+  const { data: listData, isLoading, isError, error } = useQuery({
     queryKey: ["crm-apps", listFilters, page, pageSize],
     queryFn: () => fetchApplicationsList(listFilters, page, pageSize),
     placeholderData: (prev) => prev,
@@ -872,7 +185,7 @@ const CrmApplication: React.FC = () => {
     enabled: viewingAppBookingId != null,
   });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
-  const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
+  const { data: leads = [] } = useQuery({ queryKey: ["crm-leads-pool"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
   const { data: companies = [] } = useQuery({ queryKey: ["crm-companies-dropdown"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
   // Unlike the other dropdowns below (company/project/plan — slow-changing
@@ -1168,7 +481,7 @@ const CrmApplication: React.FC = () => {
       ChannelPartnerId: f.ChannelPartnerId || (lead.ChannelPartnerId != null ? String(lead.ChannelPartnerId) : ""),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCustomer?.Id, selectedCustomer?.LeadId]);
+  }, [selectedCustomer?.Id, selectedCustomer?.LeadId, leads.length]);
 
   // Rate auto-fills from the unit's own rate if UnitMaster carries one;
   // otherwise stays whatever staff typed (or blank, computed manually).
@@ -1722,7 +1035,7 @@ const CrmApplication: React.FC = () => {
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
-          <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${bookingStatusColor[i.row.original.BookingStatus] || "text-muted-foreground bg-muted/50 border-border"}`}>{i.row.original.BookingStatus}</span>
+          <SheetMark text={i.row.original.BookingStatus || "—"} tone={i.row.original.BookingStatus ? appTone(i.row.original.BookingStatus) : "none"} />
         </div>
       ) },
     { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
@@ -1760,7 +1073,7 @@ const CrmApplication: React.FC = () => {
             && i.row.original.BookingStatus !== CrmStatus.CANCELLED
             && i.row.original.DeedStatus !== "Registered" && (
             <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
-              className="flex items-center gap-1 text-xs text-red-600 hover:underline">
+              className="flex items-center gap-1 text-xs text-destructive hover:underline">
               <Ban size={12} /> Request Cancellation
             </button>
           )}
@@ -1776,7 +1089,7 @@ const CrmApplication: React.FC = () => {
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "ApplicationNo", header: "App No", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
+        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-foreground hover:underline">
           {i.getValue() as string}
         </span>
       ) },
@@ -1831,16 +1144,14 @@ const CrmApplication: React.FC = () => {
         const displayStatus = r.Stage === "Converted" ? "Booked" : r.Status;
         return (
           <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5">
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[displayStatus] || ""}`}>
-              {displayStatus}
-            </span>
+            <SheetMark text={displayStatus} tone={appTone(displayStatus)} />
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
                 pre-booking. */}
             {r.Stage === "NotConverted" && r.BookingNo && (
               <div className="text-[0.625rem] text-muted-foreground font-mono">
-                {r.BookingNo} · <span className={bookingStatusColor[r.BookingStatus] ? `inline-block px-1 rounded border text-[0.5625rem] font-medium ${bookingStatusColor[r.BookingStatus]}` : ""}>{r.BookingStatus}</span>
+                {r.BookingNo} · {r.BookingStatus}
               </div>
             )}
           </div>
@@ -1865,7 +1176,7 @@ const CrmApplication: React.FC = () => {
                     <button
                       onClick={() => loadApplicationIntoWizard(a.Id)}
                       disabled={loadingApplication}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-primary/20 bg-primary/5 text-primary font-medium hover:bg-primary/10 disabled:opacity-40 transition-colors"
+                      className={`${KEY_INK} h-7 px-2`}
                     >
                       <PlayCircle size={12} /> {loadingApplication ? "Loading..." : isResumable(a) ? "Resume" : a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit"}
                     </button>
@@ -1896,14 +1207,14 @@ const CrmApplication: React.FC = () => {
                   {a.Status === CrmStatus.PENDING && a.Stage !== "Converted" && (
                     a.UnitUnavailableForBooking ? (
                       <span
-                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-red-600 border-red-200 bg-red-50 font-medium"
+                        className="flex items-center gap-1 text-[0.6875rem] text-destructive"
                         title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
                       >
                         <XCircle size={12} /> Unit unavailable
                       </span>
                     ) : a.PreferredUnitId == null ? (
                       <span
-                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-sky-600 border-sky-200 bg-sky-50 font-medium"
+                        className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
                         title="No unit was selected in the application — edit the application and pick a unit first."
                       >
                         <AlertTriangle size={12} /> No unit selected
@@ -1912,7 +1223,7 @@ const CrmApplication: React.FC = () => {
                       <button
                         onClick={() => handleCreateBooking(a)}
                         disabled={creatingBookingId === a.Id}
-                        className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-primary border-primary/20 bg-primary/5 font-medium hover:bg-primary/10 disabled:opacity-40"
+                        className={`${KEY_INK} h-7 px-2`}
                       >
                         <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
                       </button>
@@ -1921,7 +1232,7 @@ const CrmApplication: React.FC = () => {
                   {canCancelApplication(a) && (
                     <button
                       onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
                     >
                       <Ban size={12} /> Cancel
                     </button>
@@ -1929,7 +1240,7 @@ const CrmApplication: React.FC = () => {
                   {canDeleteApplication(a) && (
                     <button
                       onClick={() => handleDeleteApplication(a)}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
                     >
                       <Trash2 size={12} /> Delete
                     </button>
@@ -1940,7 +1251,7 @@ const CrmApplication: React.FC = () => {
                   {canCancelApplication(a) && (
                     <button
                       onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
                     >
                       <Ban size={12} /> Cancel
                     </button>
@@ -1948,7 +1259,7 @@ const CrmApplication: React.FC = () => {
                   {canDeleteApplication(a) && (
                     <button
                       onClick={() => handleDeleteApplication(a)}
-                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-600 font-medium hover:bg-red-100 transition-colors"
+                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
                     >
                       <Trash2 size={12} /> Delete
                     </button>
@@ -1962,7 +1273,7 @@ const CrmApplication: React.FC = () => {
                 <button
                   onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })}
                   title="Preview / download Application Form PDF"
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  className={`${KEY_LINE} h-7 px-2`}
                 >
                   <FileText size={12} /> Form
                 </button>
@@ -1974,12 +1285,12 @@ const CrmApplication: React.FC = () => {
                 210px cell) was what made this column look broken. */}
             {/* Status hint — contextual caption below the action buttons */}
             {activeStage === "InProcess" && a.Status === CrmStatus.DRAFT && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-sky-600">
+              <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
                 <Clock size={10} /> Not submitted yet — complete the wizard and submit
               </span>
             )}
             {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId == null && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-sky-600">
+              <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
                 <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
               </span>
             )}
@@ -2000,129 +1311,94 @@ const CrmApplication: React.FC = () => {
       } },
   ];
 
-  const glassStyle: React.CSSProperties = {
-    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-  };
-  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
-
   usePageRights("crm-applications");
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Applications"]} />
-      <CrmShell
-        title="CRM — Applications"
-      subtitle="Every detail captured once, here — Bookings is review-only from this point on"
-      action={
-        canCreateApplications && (
-          <button onClick={() => { resetWizard(); setDialogOpen(true); }}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
-            <Plus size={14} /> New Application
-          </button>
-        )
-      }
-    >
-      {/* ── Pipeline stats ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "In Process", value: stageCounts.InProcess, dot: "bg-blue-400" },
-          { label: "Converted", value: stageCounts.Converted, dot: "bg-green-500" },
-          { label: "Not Converted", value: stageCounts.NotConverted, dot: "bg-red-400" },
-          { label: "Conversion Rate", value: `${conversionRate}%`, dot: "bg-violet-500" },
-        ].map(({ label, value, dot }) => (
-          <div key={label} className="rounded-xl p-3.5" style={glassStyle}>
-            <div className={`w-2 h-2 rounded-full ${dot} mb-2.5`} />
-            <p className="text-xl font-bold font-heading text-foreground leading-none">{value}</p>
-            <p className="text-[0.6875rem] text-muted-foreground mt-1">{label}</p>
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
+        title="Applications"
+        subtitle="Every detail captured once, here. Bookings is review-only from this point on."
+        action={
+          canCreateApplications && (
+            <button onClick={() => { resetWizard(); setDialogOpen(true); }} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+              <Plus size={13} /> New application
+            </button>
+          )
+        }
+      >
+      <div className="space-y-5">
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {[
+              { label: "In process", value: stageCounts.InProcess, note: "Draft or submitted, no booking yet" },
+              { label: "Converted", value: stageCounts.Converted, note: "A booking was made" },
+              { label: "Not converted", value: stageCounts.NotConverted, note: "Rejected, cancelled or expired" },
+              { label: "Conversion rate", value: `${conversionRate}%`, note: "Converted of all closed" },
+            ].map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-
-      {/* ── Stage tabs + filters + table, one continuous card instead of
-          loose elements each carrying their own spacing/borders. ── */}
-      <div className="rounded-xl overflow-hidden" style={glassStyle}>
-        {/* overflow-x-auto alone was silently promoting overflow-y from its
-            default "visible" to "auto" too (CSS overflow spec: an axis left
-            visible force-computes to auto once the other axis isn't visible)
-            — any sub-pixel height overflow from the icon/badge buttons then
-            popped a real, native vertical scrollbar on this row. That was
-            the actual "scroller" bug, not the status <select> (which was a
-            separate, already-fixed issue) or any page/dialog layout
-            overflow. overflow-y-hidden pins the vertical axis so only
-            intentional horizontal scrolling (narrow screens, many stages)
-            can ever occur here. */}
-        <div className="flex items-center gap-1 px-3 pt-2.5 overflow-x-auto overflow-y-hidden border-b" style={{ borderColor }}>
-          {STAGES.map((stg) => {
-            const Icon = stageIcon[stg];
-            const active = activeStage === stg;
-            return (
-              <button key={stg} onClick={() => updateFilter(setActiveStage)(stg)}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-medium border-b-2 -mb-px transition-colors shrink-0 ${
-                  active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}>
-                <Icon size={14} /> {stageLabel[stg]}
-                <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-semibold ${active ? "bg-sky-500/15 text-sky-600 dark:text-sky-400" : "bg-muted text-muted-foreground"}`}>
-                  {stageCounts[stg]}
-                </span>
-              </button>
-            );
-          })}
         </div>
 
-        <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <div className="bg-card" style={{ border: RULE }}>
+          {/* overflow-y-hidden pins the vertical axis: overflow-x-auto alone turns overflow-y to auto too, and a
+              sub-pixel overflow from the badges then showed a native scrollbar on this row. */}
+          <div className="flex items-stretch overflow-x-auto overflow-y-hidden" style={{ borderBottom: RULE }}>
+            {STAGES.map((stg) => {
+              const Icon = stageIcon[stg];
+              const active = activeStage === stg;
+              return (
+                <button key={stg} onClick={() => updateFilter(setActiveStage)(stg)}
+                  className={`inline-flex items-center gap-2 px-4 h-11 font-heading text-[0.6875rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${active ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`}
+                  style={{ borderRight: RULE_SOFT }}>
+                  <Icon size={13} /> {stageLabel[stg]}
+                  <span className="tabular-nums">{stageCounts[stg]}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && updateFilter(setSearch)(searchInput.trim())}
-              placeholder="Search name, mobile, app no..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+              placeholder="Search name, mobile, application no…"
+              className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+            {activeStage !== "Converted" && (
+              <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
+                <SelectTrigger className="w-auto min-w-[140px] h-9 rounded-none border-foreground/40 text-xs">
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All statuses</SelectItem>
+                  {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+            {(search || statusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId) && (
+              <button onClick={() => { updateFilter(setSearchInput)(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
+                className={`${KEY_LINE} h-9 px-3`}>Clear filters</button>
+            )}
           </div>
-          {activeStage !== "Converted" && (
-            <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
-              <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-sky-500/40">
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All Statuses</SelectItem>
-                {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
-          {/* Company -> Project -> Block cascading filter, shared across
-              every CRM list page being migrated to this same pattern — not
-              derived from this page's own (now paginated) applications
-              list, but from lightweight master-data endpoints, so filter
-              options stay correct and cheap regardless of how many
-              applications exist. */}
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-          <button onClick={() => updateFilter(setSearch)(searchInput.trim())}
-            className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
-          {(search || statusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId) && (
-            <button onClick={() => { updateFilter(setSearchInput)(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
-              className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear filters</button>
-          )}
-        </div>
 
-        {/* Table — sortable via DataTable; filtering stays the purpose-built
-            search box + status/stage/Company-Project-Block controls above,
-            so DataTable's own global search is disabled to avoid a second,
-            redundant search box. `apps` is now the current page's already
-            server-filtered rows, not a client-side-filtered full list. */}
-        <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-          data={apps}
-          columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
-          searchable={false}
-          loading={isLoading}
-          emptyMessage={activeStage === "Converted" ? "No converted applications match these filters" : activeStage === "NotConverted" ? "No rejected/cancelled applications match these filters" : "No applications in process match these filters"}
-          className="border-0"
-        />
-        <div className="px-3.5">
+          {isError ? (
+            <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+          ) : (
+            <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
+              data={apps}
+              columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
+              searchable={false}
+              loading={isLoading}
+              emptyMessage={activeStage === "Converted" ? "No converted applications match these filters." : activeStage === "NotConverted" ? "No rejected or cancelled applications match these filters." : "No applications in process match these filters."}
+              className="border-0"
+            />
+          )}
         </div>
       </div>
 
@@ -2130,16 +1406,11 @@ const CrmApplication: React.FC = () => {
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4">
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4 rounded-none" style={{ border: RULE }}>
           <DialogHeader className="space-y-0.5">
-            <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
-              <span className="w-6 h-6 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center">
-                <Building2 size={13} className="text-sky-500" />
-              </span>
-              <span className="bg-gradient-to-r from-sky-400 to-sky-500 bg-clip-text text-transparent">
-                New CRM Application
-              </span>
-              {applicationNo ? <span className="text-muted-foreground font-medium">— {applicationNo}</span> : null}
+            <DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
+              <Building2 size={14} /> New application
+              {applicationNo ? <span className="text-muted-foreground font-medium tabular-nums normal-case tracking-normal text-sm">· {applicationNo}</span> : null}
             </DialogTitle>
           </DialogHeader>
 
@@ -2149,7 +1420,7 @@ const CrmApplication: React.FC = () => {
               and Bank/KYC again. A step beyond what's been reached yet isn't
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
-          <div className="flex items-center gap-2 text-xs flex-wrap">
+          <div className="flex items-stretch flex-wrap" style={{ border: RULE }}>
             {[form.PreferredPlotIds.length ? "Project/Plots" : "Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
               // A plot sale has no parking step.
@@ -2157,16 +1428,16 @@ const CrmApplication: React.FC = () => {
               const reachable = stepNum === 1 || (applicationId != null && stepNum <= maxStepReached);
               return (
                 <React.Fragment key={label}>
-                  {i > 0 && <div className="flex-1 h-px bg-sky-500/20" />}
                   <button
                     type="button"
                     onClick={() => reachable && setStep(stepNum)}
                     disabled={!reachable}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full font-heading font-medium transition-colors ${
+                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap transition-colors ${
                       step === stepNum
-                        ? "text-white shadow-sm btn-module "
-                        : step > stepNum ? "text-green-600" : "text-muted-foreground"
-                    } ${reachable ? "cursor-pointer hover:opacity-80" : "cursor-not-allowed opacity-60"}`}>
+                        ? "bg-foreground text-card"
+                        : step > stepNum ? "text-foreground" : "text-muted-foreground"
+                    } ${reachable ? "cursor-pointer hover:bg-primary/10" : "cursor-not-allowed opacity-50"}`}
+                    style={{ borderRight: RULE_SOFT }}>
                     {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{form.PreferredPlotIds.length && stepNum > 2 ? stepNum - 1 : stepNum}</span>}
                     {label}
                   </button>
@@ -2186,7 +1457,7 @@ const CrmApplication: React.FC = () => {
                 <div className="flex items-center justify-between mb-1">
                   <label className={labelCls}>Customer *</label>
                   <a href="/crm/customers" target="_blank" rel="noreferrer"
-                    className="text-xs text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1">
+                    className="text-xs text-foreground hover:underline flex items-center gap-1">
                     <ExternalLink size={11} /> New Customer
                   </a>
                 </div>
@@ -2203,8 +1474,8 @@ const CrmApplication: React.FC = () => {
                   }))}
                 />
                 {selectedCustomer && (
-                  <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5">
-                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-sky-500" /> {selectedCustomer.CustomerName}</div>
+                  <div className="mt-2 border border-border bg-muted/20 px-3 py-2 text-xs space-y-0.5">
+                    <div className="flex items-center gap-1.5 font-medium text-foreground"><IdCard size={12} className="text-foreground" /> {selectedCustomer.CustomerName}</div>
                     <div className="text-muted-foreground">{selectedCustomer.Mobile}{selectedCustomer.Email ? ` · ${selectedCustomer.Email}` : ""}</div>
                     <div className="text-muted-foreground">PAN: {selectedCustomer.PanNo || "—"} · {selectedCustomer.Address || "No address on file"}</div>
                   </div>
@@ -2227,14 +1498,14 @@ const CrmApplication: React.FC = () => {
                     permanently disabled — a real Booking either exists or
                     is expected the moment it's Approved, so the unit pick
                     can't move anymore. */}
-                <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 space-y-3">
+                <div className=" border border-foreground/30 bg-card p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
                     {applicationId != null && (
                       canEditUnitSelection ? (
                         unitLocked && (
                           <button type="button" onClick={() => setUnitLocked(false)}
-                            className="text-xs text-sky-600 dark:text-sky-400 hover:underline shrink-0">
+                            className="text-xs text-foreground hover:underline shrink-0">
                             Edit
                           </button>
                         )
@@ -2285,7 +1556,7 @@ const CrmApplication: React.FC = () => {
                     {canChooseSaleKind && (
                       <div className="col-span-2">
                         <label className={labelCls}>Selling</label>
-                        <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/30">
+                        <div className="inline-flex border border-border p-0.5 bg-muted/30">
                           {([["plot", "Plot (land)"], ["unit", "Villa / unit"]] as const).map(([k, label]) => (
                             <button key={k} type="button"
                               disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
@@ -2294,7 +1565,7 @@ const CrmApplication: React.FC = () => {
                                 setSaleKindChoice(k);
                                 setForm((f) => ({ ...f, PreferredUnitIds: [], PreferredPlotIds: [], FloorNo: "", PaymentPlanId: "" }));
                               }}
-                              className={`px-3 h-8 text-xs font-semibold rounded-md transition-colors disabled:opacity-50 ${saleKind === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                              className={`px-3 h-8 text-xs font-semibold transition-colors disabled:opacity-50 ${saleKind === k ? "bg-background text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                               {label}
                             </button>
                           ))}
@@ -2366,8 +1637,8 @@ const CrmApplication: React.FC = () => {
                       already visible in the Unit dropdown right above, so
                       this only needs to show the derived ₹ math itself. */}
                   {selectedUnit && (
-                    <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-                      <IndianRupee size={11} className="text-sky-500 shrink-0" />
+                    <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+                      <IndianRupee size={11} className="text-foreground shrink-0" />
                       {form.RatePerSqFt && computedTotal ? (
                         <span>
                           {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
@@ -2378,8 +1649,8 @@ const CrmApplication: React.FC = () => {
                     </div>
                   )}
                   {isPlottedProject && selectedPlots.length > 0 && (
-                    <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-                      <IndianRupee size={11} className="text-sky-500 shrink-0" />
+                    <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+                      <IndianRupee size={11} className="text-foreground shrink-0" />
                       {form.RatePerSqFt && computedTotal ? (
                         <span>{selectedPlots.length} plot{selectedPlots.length === 1 ? "" : "s"} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span></span>
                       ) : <span>Enter Rate (₹/sqft) to see the combined plot price.</span>}
@@ -2411,9 +1682,9 @@ const CrmApplication: React.FC = () => {
                       reading as dead space and tells staff what will
                       appear here. */}
                   {!hasInventorySelection && (
-                    <div className="rounded-xl border border-dashed border-sky-500/30 bg-sky-500/5 p-5 text-center space-y-1.5">
-                      <div className="mx-auto w-9 h-9 rounded-lg bg-sky-500/10 flex items-center justify-center">
-                        <Building2 size={16} className="text-sky-500" />
+                    <div className=" border border-dashed border-foreground/30 bg-card p-5 text-center space-y-1.5">
+                      <div className="mx-auto w-9 h-9 bg-foreground/5 flex items-center justify-center">
+                        <Building2 size={16} className="text-foreground" />
                       </div>
                       <p className="text-xs font-heading font-semibold text-foreground">Pick {isPlottedProject ? "plots" : "a unit"} to continue</p>
                       <p className="text-[0.6875rem] text-muted-foreground leading-relaxed">
@@ -2428,7 +1699,7 @@ const CrmApplication: React.FC = () => {
                       same application, so staff see the real combined
                       bracket from the very start, not just at the very end. */}
                   {form.RatePerSqFt && computedTotal ? (
-                    isPlottedProject ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4"><p className="text-xs font-semibold text-foreground">Land sale</p><p className="mt-1 text-[0.6875rem] text-muted-foreground">Selected plots are sold as land. GST is not applicable to this land value.</p></div>
+                    isPlottedProject ? <div className=" border border-foreground/30 bg-card p-4"><p className="text-xs font-semibold text-foreground">Land sale</p><p className="mt-1 text-[0.6875rem] text-muted-foreground">Selected plots are sold as land. GST is not applicable to this land value.</p></div>
                       : <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
                   ) : null}
 
@@ -2438,13 +1709,13 @@ const CrmApplication: React.FC = () => {
                       is offered instead. Not re-selectable on the Booking
                       page — this is the one place it's chosen. */}
                   {hasInventorySelection && form.PreferredPlotIds.length > 0 && (
-                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <div className=" border border-border bg-muted/20 p-4">
                       <p className="text-xs font-semibold text-foreground">No payment plan</p>
                       <p className="mt-1 text-[0.6875rem] text-muted-foreground">A plot sale is paid as the Booking Amount entered on the payment step, then the balance. With no Booking Amount, the full value is due as one payment.</p>
                     </div>
                   )}
                   {hasInventorySelection && form.PreferredPlotIds.length === 0 && (
-                    <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 space-y-2">
+                    <div className=" border border-foreground/30 bg-card p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
                       <select value={form.PaymentPlanId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
@@ -2470,7 +1741,7 @@ const CrmApplication: React.FC = () => {
                           Booking. Purely a preview here — nothing is saved
                           until the actual Booking is created. */}
                       {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                        <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 space-y-1">
+                        <div className=" border border-foreground/30 bg-card px-3 py-2 space-y-1">
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>Booking</span>
                             <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
@@ -2507,7 +1778,7 @@ const CrmApplication: React.FC = () => {
                       (maybeAutoCreateBrokerage), at which point it's split
                       into one tranche per payment milestone, each unlocking
                       as that milestone is paid — not a manual toggle here. */}
-                  <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 space-y-3">
+                  <div className=" border border-foreground/30 bg-card p-4 space-y-3">
                     <label className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground">
                       <input type="checkbox" checked={form.ViaBroker}
                         onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
@@ -2531,7 +1802,7 @@ const CrmApplication: React.FC = () => {
                             pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
                             Nothing in here is ever an editable input. */}
                         {selectedBroker && (
-                          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
+                          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 bg-muted/20 border border-border p-3 text-sm">
                             {selectedBroker.LHeadPhone && (
                               <div>
                                 <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
@@ -2648,7 +1919,7 @@ const CrmApplication: React.FC = () => {
 
           {step === 7 && (
             <div className="space-y-4">
-              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className=" border border-border bg-muted/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
                   <p className="text-muted-foreground mb-0.5 flex items-center gap-1"><User size={11} /> Assigned Sales Person</p>
                   <p className="font-medium text-foreground">{currentUser?.name || "—"} (you)</p>
@@ -2663,20 +1934,20 @@ const CrmApplication: React.FC = () => {
                   Amount — one single breakdown, not a separate mini-summary
                   repeating the same figures right above it. */}
               {selectedUnit && (
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+                <div className=" border border-border bg-muted/20 px-3 py-2 text-xs">
                   <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><Building2 size={12} className="text-primary" /> Unit & Price</p>
                   <p className="text-muted-foreground">{selectedUnit.UnitName} · {selectedUnit.UnitType || "—"} · {selectedUnit.AreaSqFt ? `${selectedUnit.AreaSqFt} sqft` : "—"}</p>
                 </div>
               )}
               {isPlottedProject && selectedPlots.length > 0 && (
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+                <div className=" border border-border bg-muted/20 px-3 py-2 text-xs">
                   <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><MapPin size={12} className="text-primary" /> Plots & Price</p>
                   <p className="text-muted-foreground">{selectedPlots.map((plot: any) => plot.PlotName).join(", ")} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft combined</p>
                 </div>
               )}
 
               {hasInventorySelection && computedTotal > 0 && (
-                isPlottedProject ? <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs"><p className="font-semibold text-foreground">Land sale</p><p className="mt-0.5 text-muted-foreground">GST not applicable to the selected plot value.</p></div>
+                isPlottedProject ? <div className=" border border-foreground/30 bg-card px-3 py-2 text-xs"><p className="font-semibold text-foreground">Land sale</p><p className="mt-0.5 text-muted-foreground">GST not applicable to the selected plot value.</p></div>
                   : <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
               )}
 
@@ -2685,7 +1956,7 @@ const CrmApplication: React.FC = () => {
                   bracket Unit+Parking lands in), so it's its own summary
                   rather than folded into GstBreakdownBox above. */}
               {(detailExtraCharges as any[]).length > 0 && (
-                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs space-y-1">
+                <div className=" border border-border bg-muted/20 px-3 py-2 text-xs space-y-1">
                   <p className="font-semibold text-foreground">Extra Charges</p>
                   {(detailExtraCharges as any[]).map((c: any) => (
                     <div key={c.Id} className="flex items-center justify-between text-muted-foreground">
@@ -2704,7 +1975,7 @@ const CrmApplication: React.FC = () => {
                   preview (Booking is the plan's own fixed ₹, everything
                   after it splits 100% of Total - Booking). */}
               {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
+                <div className=" border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
                   <p className="font-semibold text-foreground">{selectedPaymentPlan.PlanName} — Payment Breakdown</p>
                   <div className="flex items-center justify-between text-muted-foreground">
                     <span>Booking</span>
@@ -2738,7 +2009,7 @@ const CrmApplication: React.FC = () => {
                   editable (Edit always available) through Draft/Pending;
                   once Approved, canEditUnitSelection goes false and the
                   Edit control disappears for good. */}
-              <div className="rounded-lg border border-border p-3 space-y-2.5">
+              <div className=" border border-border p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-foreground block">Payment Details</label>
                   {applicationId != null && (
@@ -2837,57 +2108,57 @@ const CrmApplication: React.FC = () => {
             </div>
           )}
 
-          <div className="flex justify-between gap-2 pt-3 border-t border-border">
+          <div className="flex justify-between gap-2 pt-3" style={{ borderTop: RULE }}>
             <button
               onClick={() => step > 1 && setStep(step === 3 && form.PreferredPlotIds.length ? 1 : step - 1)}
               disabled={step === 1}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all disabled:opacity-30">
+              className={`${KEY_LINE} h-9 px-3`}>
               <ChevronLeft size={14} /> Back
             </button>
             <div className="flex gap-2">
               <button onClick={() => { setDialogOpen(false); resetWizard(); }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
+                className={`${KEY_LINE} h-9 px-3`}>
                 Cancel
               </button>
               {step === 1 && (
                 <button onClick={handleCreateAndNext} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 2 && (
                 <button onClick={() => advanceStep(3)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 3 && (
                 <button onClick={() => advanceStep(4)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 4 && (
                 <button onClick={handleBankDetailsNext} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   {saving ? "Saving..." : "Next"} <ChevronRight size={14} />
                 </button>
               )}
               {step === 5 && (
                 <button onClick={() => advanceStep(6)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 6 && (
                 <button onClick={() => advanceStep(7)}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   Next <ChevronRight size={14} />
                 </button>
               )}
               {step === 7 && (
                 <button onClick={handleFinalSave} disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
+                  className={`${KEY_INK} h-9 px-4`}>
                   {saving ? "Submitting..." : hasBooking ? "Submit Edits" : "Submit Application"}
                 </button>
               )}
@@ -2901,16 +2172,14 @@ const CrmApplication: React.FC = () => {
           actions that actually change something (Resume, Approve/Reject,
           View Booking) stay on the row itself, not here. ── */}
       <Dialog open={viewingAppId != null} onOpenChange={(o) => { if (!o) closeApplication(); }}>
-        <DialogContent accent="crm" className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-none" style={{ border: RULE }}>
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               {viewingAppDetail ? (
                 <>
                   <span className="font-mono text-primary">{viewingAppDetail.application.ApplicationNo}</span>
                   <span>— <ApplicantNames name={viewingAppDetail.application.ApplicantName} bookingId={viewingAppDetail.application.BookingId} applicationId={viewingAppDetail.application.ApplicationId} /></span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[viewingAppDetail.application.Status] || ""}`}>
-                    {viewingAppDetail.bookings && viewingAppDetail.bookings.length > 0 ? "Submitted" : viewingAppDetail.application.Status}
-                  </span>
+                  {(() => { const s = viewingAppDetail.bookings?.length > 0 ? "Submitted" : viewingAppDetail.application.Status; return <SheetMark text={s} tone={appTone(s)} />; })()}
                 </>
               ) : "Application Details"}
             </DialogTitle>
@@ -2948,7 +2217,7 @@ const CrmApplication: React.FC = () => {
               <div className="space-y-3 text-sm">
 
                 {/* ── 1. Applicant ── */}
-                <section className="rounded-xl border border-border overflow-hidden">
+                <section className=" border border-border overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                     <User size={13} className="text-primary shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Applicant</span>
@@ -2976,12 +2245,12 @@ const CrmApplication: React.FC = () => {
                 </section>
 
                 {/* ── 2. Property ── */}
-                <section className="rounded-xl border border-border overflow-hidden">
+                <section className=" border border-border overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                     <Building2 size={13} className="text-primary shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Property</span>
                     {!!a.UnitUnavailableForBooking && (
-                      <span className="ml-auto flex items-center gap-1 text-[0.6875rem] text-red-500"><XCircle size={11} /> Unit unavailable</span>
+                      <span className="ml-auto flex items-center gap-1 text-[0.6875rem] text-destructive"><XCircle size={11} /> Unit unavailable</span>
                     )}
                   </div>
                   <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
@@ -3019,7 +2288,7 @@ const CrmApplication: React.FC = () => {
                 </section>
 
                 {/* ── 3. Financials (compact) ── */}
-                <section className="rounded-xl border border-border overflow-hidden">
+                <section className=" border border-border overflow-hidden">
                   <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                     <IndianRupee size={13} className="text-primary shrink-0" />
                     <span className="text-xs font-semibold uppercase tracking-wide">Financials</span>
@@ -3091,7 +2360,7 @@ const CrmApplication: React.FC = () => {
 
                 {/* ── 4. Payment + Source in a 2-col row ── */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
                       <Wallet size={12} className="text-primary shrink-0" />
                       <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Token Payment</span>
@@ -3109,7 +2378,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                   </section>
 
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
                       <Briefcase size={12} className="text-primary shrink-0" />
                       <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Source</span>
@@ -3126,7 +2395,7 @@ const CrmApplication: React.FC = () => {
 
                 {/* ── 5. Broker (only if present) ── */}
                 {a.BrokerName && (
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                       <Users2 size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Broker</span>
@@ -3143,7 +2412,7 @@ const CrmApplication: React.FC = () => {
 
                 {/* ── 6. Linked Booking ── */}
                 {booking && (
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                       <FileText size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Linked Booking</span>
@@ -3163,7 +2432,7 @@ const CrmApplication: React.FC = () => {
 
                 {/* ── 6b. Invoices (linked booking) ── */}
                 {booking && (
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                       <FileText size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Invoices</span>
@@ -3180,7 +2449,7 @@ const CrmApplication: React.FC = () => {
 
                 {/* ── 7. Notes ── */}
                 {a.Notes && (
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
                       <span className="text-[0.6875rem] font-semibold uppercase tracking-wide">Notes</span>
                     </div>
@@ -3190,7 +2459,7 @@ const CrmApplication: React.FC = () => {
 
                 {/* ── 8. Status timeline ── */}
                 {(viewingAppDetail.statusLog || []).length > 0 && (
-                  <section className="rounded-xl border border-border overflow-hidden">
+                  <section className=" border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
                       <Clock size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Timeline</span>
@@ -3216,13 +2485,13 @@ const CrmApplication: React.FC = () => {
             );
           })()}
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => closeApplication()} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
+            <button onClick={() => closeApplication()} className={`${KEY_LINE} h-9 px-3`}>
               Close
             </button>
             {viewingAppDetail && canCancelApplication(viewingAppDetail.application) && (
               <button
                 onClick={() => { setCancellingApp(viewingAppDetail.application); setCancelRemarks(""); }}
-                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+                className={`${KEY_LINE} h-9 px-3 !text-destructive !border-destructive`}
               >
                 Cancel Application
               </button>
@@ -3232,20 +2501,20 @@ const CrmApplication: React.FC = () => {
               && viewingAppDetail.application.DeedStatus !== "Registered" && (
               <button
                 onClick={() => navigate(`/crm/cancellations?bookingId=${viewingAppDetail.application.BookingId}`)}
-                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+                className={`${KEY_LINE} h-9 px-3 !text-destructive !border-destructive`}
               >
                 Request Booking Cancellation
               </button>
             )}
             {viewingAppDetail?.application?.DeedStatus === "Registered" && (
-              <span className="px-3 py-1.5 text-sm text-muted-foreground border border-border rounded-lg" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+              <span className="px-3 py-1.5 text-sm text-muted-foreground border border-border" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
                 Deed Registered — cancellation not applicable
               </span>
             )}
             {viewingAppDetail && canDeleteApplication(viewingAppDetail.application) && (
               <button
                 onClick={() => handleDeleteApplication(viewingAppDetail.application)}
-                className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
+                className={`${KEY_LINE} h-9 px-3 !text-destructive !border-destructive`}
               >
                 Delete Application
               </button>
@@ -3254,7 +2523,7 @@ const CrmApplication: React.FC = () => {
               <button
                 onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); setTimeout(() => loadApplicationIntoWizard(id), 180); }}
                 disabled={loadingApplication}
-                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40"
+                className={`${KEY_INK} h-9 px-4`}
               >
                 {loadingApplication
                   ? "Loading..."
@@ -3275,7 +2544,7 @@ const CrmApplication: React.FC = () => {
       {cancellingApp && (
         <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
           onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}>
-          <div className="bg-background border border-border rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
+          <div className="bg-background border border-border w-full max-w-md p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold font-heading">Cancel Application?</h3>
             <div className="space-y-3">
@@ -3301,14 +2570,14 @@ const CrmApplication: React.FC = () => {
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted"
+                className={`${KEY_LINE} h-9 px-3`}
               >
                 Keep Application
               </button>
               <button
                 onClick={handleCancelApplication}
                 disabled={cancelling}
-                className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40"
+                className={`${KEY_RED} h-9 px-4`}
               >
                 {cancelling ? "Cancelling..." : "Cancel Application"}
               </button>
@@ -3323,794 +2592,8 @@ const CrmApplication: React.FC = () => {
           onClose={() => setPdfDialogApp(null)}
         />
       )}
-    </CrmShell>
+    </SheetShell>
     </>
-  );
-};
-
-// ── Step 3: Bank / KYC — identity & bank details only ────────────────────────
-// Identity fields the Customer master already captures at intake — when the
-// KYC form loads with no bank-detail row saved yet, the backend pre-fills
-// these from dbo.CrmCustomer and flags the response _prefilledFrom:
-// "customer". Those (and only those) fields render locked/view-only below,
-// with an explicit "Edit" toggle to recheck and confirm against the
-// customer — never silently editable as if freshly typed. Once this form is
-// saved once, its own CrmCustomerBankDetail row exists going forward, so
-// later loads return real saved data (no _prefilledFrom flag) and every
-// field is a normal, already-unlocked input.
-const KYC_PREFILL_KEYS = ["PanNo", "AccountHolderName", "AadhaarNo", "Occupation", "AnnualIncome"] as const;
-
-// Bank/KYC fields are NOT mandatory — matches the backend's own stance
-// (business decision 2026-09-15, see validateAgreementPreparationPrerequisites
-// in crmWorkflowGuards.js: "Agreement prep no longer requires a
-// CrmCustomerBankDetail row to exist or be filled in", and the PUT
-// /application/:id save route itself never required any of these either).
-// This form used to enforce a stricter client-side rule than the backend
-// ever did — kept "in sync" with a backend constant that had already moved
-// on, so this step blocked staff from proceeding on data nothing downstream
-// actually required. Empty now; format validation (IFSC/PAN/Aadhaar shape)
-// below still applies whenever a value IS provided.
-const BANK_STEP_REQUIRED_FIELDS: [keyof typeof EMPTY_BANK, string][] = [];
-
-const BankDetailsStep: React.FC<{
-  applicationId: number;
-  applicantName?: string;
-  applicantAddress?: string;
-  onRegisterSave?: (fn: null | (() => Promise<void>)) => void;
-}> = ({ applicationId, applicantName, applicantAddress, onRegisterSave }) => {
-  const [bank, setBank] = useState({ ...EMPTY_BANK });
-  const [bankSaving, setBankSaving] = useState(false);
-  const [bankLoaded, setBankLoaded] = useState(false);
-  // Which of KYC_PREFILL_KEYS are currently locked (auto-fetched from the
-  // customer record, not yet reviewed/confirmed by staff this time around).
-  const [kycLocked, setKycLocked] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    let cancelled = false;
-    setBankLoaded(false);
-    setBank({ ...EMPTY_BANK });
-    setKycLocked(new Set());
-    fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (cancelled || !d) return;
-        setBank({
-          BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
-          IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
-          PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
-          Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
-        });
-        if (d._prefilledFrom === "customer") {
-          const locked = new Set<string>();
-          KYC_PREFILL_KEYS.forEach((k) => { if (d[k] !== null && d[k] !== undefined && String(d[k]).trim() !== "") locked.add(k); });
-          setKycLocked(locked);
-        }
-      })
-      .finally(() => { if (!cancelled) setBankLoaded(true); });
-    return () => { cancelled = true; };
-  }, [applicationId]);
-
-  const saveBank = useCallback(async (silent = false) => {
-    // Block here, not just downstream at agreement prep — this is the one
-    // place this data is actually typed in, so a gap caught here is a
-    // one-field fix; the same gap caught later (validateAgreementPreparationPrerequisites
-    // in crmWorkflowGuards.js) reads as "why won't the agreement create" with
-    // no obvious link back to this step, or worse, looks like a fetch bug on
-    // a completely different screen (the Booking-tab Bank Details view).
-    const missing = BANK_STEP_REQUIRED_FIELDS.filter(([key]) => !String((bank as any)[key] || "").trim());
-    if (missing.length) {
-      const msg = `Missing required field(s): ${missing.map(([, label]) => label).join(", ")}`;
-      toast.error(msg);
-      throw new Error(msg);
-    }
-    if ((bank as any).IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test((bank as any).IfscCode.toUpperCase())) {
-      const msg = "Invalid IFSC format (e.g. HDFC0001234)"; toast.error(msg); throw new Error(msg);
-    }
-    if ((bank as any).PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test((bank as any).PanNo.toUpperCase())) {
-      const msg = "Invalid PAN format (e.g. ABCDE1234F)"; toast.error(msg); throw new Error(msg);
-    }
-    if ((bank as any).AadhaarNo && !/^\d{12}$/.test((bank as any).AadhaarNo)) {
-      const msg = "Aadhaar must be exactly 12 digits"; toast.error(msg); throw new Error(msg);
-    }
-    setBankSaving(true);
-    try {
-      const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bank),
-      });
-      if (!res.ok) throw new Error((await res.json()).error || "Save failed");
-      if (!silent) toast.success("Bank/KYC details saved");
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-      throw e;
-    } finally {
-      setBankSaving(false);
-    }
-  }, [applicationId, bank]);
-
-  useEffect(() => {
-    onRegisterSave?.(() => saveBank(true));
-    return () => onRegisterSave?.(null);
-  }, [onRegisterSave, saveBank]);
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border p-3 space-y-3">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-foreground">KYC / Bank Details</label>
-          <button onClick={() => saveBank()} disabled={bankSaving || !bankLoaded}
-            className="text-xs px-2.5 py-1 rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40">
-            {bankSaving ? "Saving..." : "Save"}
-          </button>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {[
-            ["BankName", "Bank Name"], ["BranchName", "Branch"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
-            ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN (Permanent Account Number)"], ["AadhaarNo", "Aadhaar No"],
-            ["Occupation", "Occupation"], ["AnnualIncome", "Annual Income"],
-          ].map(([key, label]) => (
-            <div key={key}>
-              <label className={labelCls}>{label}{BANK_STEP_REQUIRED_FIELDS.some(([rk]) => rk === key) && " *"}</label>
-              {kycLocked.has(key) ? (
-                <div className="flex items-center justify-between gap-2 bg-muted/30 rounded px-2 py-1.5 border border-border">
-                  <span className="text-sm text-foreground truncate">{(bank as any)[key] || "—"} <span className="text-xs text-muted-foreground">(auto-fetched from customer)</span></span>
-                  <button type="button" onClick={() => setKycLocked((s) => { const next = new Set(s); next.delete(key); return next; })}
-                    className="text-xs text-primary hover:underline shrink-0">
-                    Edit
-                  </button>
-                </div>
-              ) : (
-                <input value={(bank as any)[key]}
-                  onChange={(e) => {
-                    const val = ["IfscCode", "PanNo"].includes(key) ? e.target.value.toUpperCase() : e.target.value;
-                    setBank((b) => ({ ...b, [key]: val }));
-                  }}
-                  className={inputCls} />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ── Step 3: Attachments — document upload + parking multi-select ─────────────
-// ── Step 2: Parking Selection ──────────────────────────────────────────────────
-const ParkingSelectionStep: React.FC<{
-  applicationId: number; projectId: string; blockId: string;
-  computedTotal: number;
-  // Same Draft/Pending gate as canEditUnitSelection on the parent — parking
-  // picked here is still just an Application-stage hold (see crmParking.js
-  // POST /standalone), converted into a real CrmParkingAllotment only once
-  // the Application's Booking exists, so it has to stop moving at the exact
-  // same point the unit does: once Approved, a Booking either already exists
-  // or is expected imminently, and the pick can't change out from under it.
-  canEdit: boolean;
-  wizardAppStatus: string | null;
-}> = ({ applicationId, projectId, blockId, computedTotal, canEdit, wizardAppStatus }) => {
-  const { data: allotments = [], refetch: refetchParking } = useQuery({
-    queryKey: ["crm-app-parking", applicationId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${PARKING_API}/application/${applicationId}`);
-      return r.ok ? r.json() : [];
-    },
-  });
-
-  // Truly-available parking, computed server-side against every allotment
-  // and hold system-wide (not just this application's own picks) — see
-  // crmParking.js GET /available. Refetched alongside allotments so a slot
-  // this step itself just took disappears from "available" immediately too.
-  const { data: parkingAvailability, refetch: refetchAvailable } = useQuery({
-    queryKey: ["crm-parking-available", projectId, blockId],
-    queryFn: async () => {
-      if (!projectId) return { rates: [], unratedTypesWithInventory: [] };
-      const params = new URLSearchParams({ projectId });
-      if (blockId) params.set("blockId", blockId);
-      const r = await fetchWithAuth(`${PARKING_API}/available?${params}`);
-      return r.ok ? r.json() : { rates: [], unratedTypesWithInventory: [] };
-    },
-    enabled: !!projectId,
-  });
-  const availableRates = parkingAvailability?.rates || [];
-  // Slot inventory that exists (Parking Slot Master) but has no matching
-  // rate (Parking Rate Master) — distinct from "no parking at all", which
-  // is what the old flat "no parking rates configured" message conflated.
-  const unratedTypesWithInventory: string[] = parkingAvailability?.unratedTypesWithInventory || [];
-
-  const refetchAll = () => { refetchParking(); refetchAvailable(); };
-
-  const [selectedType, setSelectedType] = useState("");
-  const [selectedSlotId, setSelectedSlotId] = useState("");
-  const [rateOverride, setRateOverride] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [rateEditing, setRateEditing] = useState(false);
-
-  // Reset the slot/quantity pick (not the type) whenever the chosen type's
-  // own available list changes under it — e.g. someone else just took the
-  // one slot this staff member had highlighted.
-  const currentType = (availableRates as any[]).find((r: any) => r.ParkingType === selectedType) || null;
-  useEffect(() => {
-    setSelectedSlotId("");
-    const rate = (availableRates as any[]).find((r: any) => r.ParkingType === selectedType);
-    setRateOverride(rate && rate.Charge != null ? String(rate.Charge) : "");
-    // Unrated types have no master price — jump straight to the editable input.
-    setRateEditing(!rate || !!rate.NeedsRate);
-  }, [selectedType]);
-
-  const handleAdd = async () => {
-    if (!currentType) return;
-    if (!currentType.HasSlots) { toast.error("No slots available for this parking type"); return; }
-    if (!selectedSlotId) { toast.error("Select a slot"); return; }
-    if (currentType.NeedsRate && (!rateOverride || Number(rateOverride) <= 0)) {
-      toast.error("Enter a price for this parking type"); return;
-    }
-    setAdding(true);
-    try {
-      const body: any = {
-        ApplicationId: applicationId,
-        ParkingSlotId: parseInt(selectedSlotId), Quantity: 1,
-      };
-      if (currentType.NeedsRate) {
-        // No ParkingMaster row — send type and mandatory price directly.
-        body.ParkingType = currentType.ParkingType;
-        body.RateOverride = rateOverride;
-      } else {
-        body.ParkingMasterId = currentType.ParkingMasterId;
-        // Only send RateOverride when the user explicitly changed it from the master rate.
-        if (rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge)) {
-          body.RateOverride = rateOverride;
-        }
-      }
-      const res = await fetchWithAuth(`${PARKING_API}/standalone`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Failed to add ${currentType.ParkingType}`);
-      const addedBase = Number(
-        currentType.NeedsRate || (rateEditing && rateOverride)
-          ? rateOverride
-          : currentType.Charge
-      ) || 0;
-      const addedTotal = parkingGstRates
-        ? Math.round((addedBase + (addedBase * computeUnitParkingGst(computedTotal, parkingBase + addedBase, parkingGstRates).rate / 100)) * 100) / 100
-        : Number(data.TotalAmount);
-      toast.success(`${currentType.ParkingType} added — ₹${addedTotal.toLocaleString("en-IN")}`);
-      setSelectedType(""); setSelectedSlotId(""); setRateOverride(""); setRateEditing(false);
-      refetchAll();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleRemoveParking = async (a: any) => {
-    try {
-      // A slot pick is only a hold until the Booking is created (see
-      // crmParking.js POST /standalone) — releasing it goes through the
-      // hold-release route, not the allotment DELETE, since there's no
-      // CrmParkingAllotment row yet to delete.
-      const url = a.Kind === "Hold" ? `${PARKING_API}/hold/${a.Id}` : `${PARKING_API}/${a.Id}`;
-      const res = await fetchWithAuth(url, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      refetchAll();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  // Pre-tax base for the GST preview — see RateSnapshot note on the GET
-  // /application/:applicationId route (both Allotment and Hold shapes carry it).
-  const parkingBase = (allotments as any[]).reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
-  const { data: parkingGstRates } = useGstRates();
-  const parkingGstPreview = parkingGstRates ? computeUnitParkingGst(computedTotal, parkingBase, parkingGstRates) : null;
-  const displayParkingTotal = (a: any) => {
-    const base = (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1);
-    if (!parkingGstPreview) return Number(a.TotalAmount || base);
-    return Math.round((base + (base * parkingGstPreview.rate / 100)) * 100) / 100;
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Auto-filled charges summary — one brief line, same compact style
-          as the Unit price preview on Step 1, instead of a 3-cell grid. */}
-      <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-        <IndianRupee size={11} className="text-primary shrink-0" />
-        Unit ₹{computedTotal.toLocaleString("en-IN")}
-        {parkingBase > 0 && ` + Parking base ₹${parkingBase.toLocaleString("en-IN")}`}
-        {" + GST = "}
-        <span className="font-semibold text-foreground">
-          Grand Total <GstGrandTotalText unitValue={computedTotal} parkingBase={parkingBase} />
-        </span>
-      </div>
-
-      {/* GST preview — updates live the instant a parking type is added or
-          removed, since that can cross the ₹45L bracket. */}
-      {computedTotal > 0 && <GstBreakdownBox unitValue={computedTotal} parkingBase={parkingBase} />}
-
-      {/* Already-added allotments */}
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
-          {!canEdit && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-              <Lock size={11} /> {wizardAppStatus === "Approved" ? "Manage from Booking" : `Locked (${wizardAppStatus})`}
-            </span>
-          )}
-        </div>
-        {!canEdit && wizardAppStatus === "Approved" && (
-          <p className="text-[0.6875rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
-            This application has been approved and a Booking has been created. To add, edit, or remove parking slots, open the Booking and go to the <strong>Parking &amp; Extra Charges</strong> tab.
-          </p>
-        )}
-        {(allotments as any[]).length > 0 ? (
-          <div className="space-y-1.5">
-            {(allotments as any[]).map((a: any) => (
-              <div key={`${a.Kind}-${a.Id}`} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-                <span className="flex items-center gap-1.5">
-                  {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{displayParkingTotal(a).toLocaleString("en-IN")}
-                  {a.Kind === "Hold" && (
-                    <span title="Reserved — becomes a permanent allotment once this application's booking is created"
-                      className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-600">
-                      Held
-                    </span>
-                  )}
-                </span>
-                {canEdit && (
-                  <button onClick={() => handleRemoveParking(a)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No parking selected yet — optional.</p>
-        )}
-      </div>
-
-      {/* Add parking — pick a type, then (if it has fixed slots) pick a slot */}
-      {!canEdit ? null : !projectId ? (
-        <p className="text-xs text-muted-foreground">Select a project in Step 1 to choose parking.</p>
-      ) : (availableRates as any[]).length === 0 ? (
-        <p className="text-xs text-muted-foreground">No parking configured for this project.</p>
-      ) : (
-        <div className="rounded-lg border border-border p-3 space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Parking Type</label>
-            <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">— Select a parking type —</option>
-              {(availableRates as any[]).map((r: any) => {
-                // No ParkingSlot rows entered for this type at all yet —
-                // Ops hasn't set up inventory in Parking Slot Master.
-                // Quantity-only selling is no longer offered as a fallback;
-                // this type is simply unavailable until slots exist.
-                const noneInBlock = r.HasSlots && r.AvailableSlots.length === 0;
-                // "Sold out" only when the backend confirms zero slots of
-                // this type are free ANYWHERE in the project (see
-                // SoldOutProjectWide in crmParking.js GET /available).
-                // Basement/Covered-style parking is often reserved
-                // per-block, so a block-scoped zero doesn't necessarily
-                // mean no inventory exists — it may just belong to another
-                // block/tower.
-                const soldOutEverywhere = noneInBlock && r.SoldOutProjectWide;
-                const availableElsewhere = noneInBlock && !r.SoldOutProjectWide;
-                const disabled = r.NoInventory || noneInBlock;
-                return (
-                  <option key={r.ParkingType} value={r.ParkingType} disabled={disabled}>
-                    {r.ParkingType} — {r.NeedsRate ? "price required" : `₹${Number(r.Charge).toLocaleString("en-IN")} each`}
-                    {r.HasSlots ? ` (${r.AvailableSlots.length} available)` : ""}
-                    {r.NoInventory ? " — Not available (no slots set up yet)" : ""}
-                    {soldOutEverywhere ? " — Sold out" : ""}
-                    {availableElsewhere ? ` — None in this block (${r.FreeCountProjectWide} free in other blocks)` : ""}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          {currentType && currentType.HasSlots && (
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Available Slot</label>
-              <select value={selectedSlotId} onChange={(e) => setSelectedSlotId(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">— Select a slot —</option>
-                {currentType.AvailableSlots.map((s: any) => (
-                  <option key={s.Id} value={String(s.Id)}>Slot {s.SlotNo}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Defensive only — the dropdown disables this option, so a
-              no-inventory type shouldn't normally reach here. */}
-          {currentType && !currentType.HasSlots && (
-            <p className="text-xs text-muted-foreground">
-              No slots have been set up for {currentType.ParkingType} parking yet — ask an admin to add them in Parking Slot Master.
-            </p>
-          )}
-
-          {/* Rate — for types with a master rate: locked by default, edit to override.
-              For unrated types (NeedsRate): always editable, price is mandatory. */}
-          {currentType && currentType.HasSlots && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-muted-foreground">
-                  Rate (₹ per unit){currentType.NeedsRate && <span className="text-red-500 ml-0.5">*</span>}
-                </label>
-                {!currentType.NeedsRate && (
-                  !rateEditing ? (
-                    <button
-                      type="button"
-                      onClick={() => setRateEditing(true)}
-                      className="text-[0.6875rem] text-muted-foreground hover:text-primary flex items-center gap-0.5 transition-colors"
-                      title="Override rate for this customer"
-                    >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                      Edit
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => { setRateOverride(currentType ? String(currentType.Charge) : ""); setRateEditing(false); }}
-                      className="text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
-                      title="Reset to master rate"
-                    >
-                      ↺ Reset
-                    </button>
-                  )
-                )}
-              </div>
-              {currentType.NeedsRate || rateEditing ? (
-                <input
-                  type="number" min={0}
-                  value={rateOverride}
-                  onChange={(e) => setRateOverride(e.target.value)}
-                  autoFocus={currentType.NeedsRate}
-                  placeholder={currentType.NeedsRate ? "Enter price…" : ""}
-                  className="w-full text-sm border border-primary rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              ) : (
-                <div
-                  className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/30 flex items-center justify-between cursor-default select-none"
-                  title="Click Edit to change this rate"
-                >
-                  <span className="font-medium tabular-nums">
-                    ₹{Number(rateOverride || currentType.Charge).toLocaleString("en-IN")}
-                  </span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/50"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                </div>
-              )}
-              {currentType.NeedsRate && (
-                <p className="text-[0.6875rem] text-muted-foreground mt-1">
-                  No rate is configured in Parking Rate Master — enter the agreed price manually.
-                </p>
-              )}
-              {!currentType.NeedsRate && rateEditing && rateOverride && Number(rateOverride) !== Number(currentType.Charge) && (
-                <p className="text-[0.6875rem] text-sky-600 mt-1">
-                  Master rate is ₹{Number(currentType.Charge).toLocaleString("en-IN")} — you're overriding to ₹{Number(rateOverride).toLocaleString("en-IN")}.
-                </p>
-              )}
-              {!currentType.NeedsRate && !rateEditing && (
-                <p className="text-[0.6875rem] text-muted-foreground mt-1">
-                  Master rate. Click <span className="font-medium">Edit</span> to set a negotiated price.
-                </p>
-              )}
-            </div>
-          )}
-
-          {currentType && (
-            <button onClick={handleAdd} disabled={adding || !currentType.HasSlots || !selectedSlotId}
-              className="w-full text-xs px-3 py-2 btn-module text-white rounded-md font-medium hover:shadow-lg disabled:opacity-40">
-              {adding ? "Adding..." : `Add ${currentType.ParkingType}`}
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ── Step 3: Extra Charges ──────────────────────────────────────────────────────────
-// Unlike Parking (Step 2), Extra Charges is never tied to a scarce/exclusive
-// resource — no physical slot to hold — so items added here are real
-// dbo.CrmExtraCharge rows straight away (ApplicationId set, BookingId NULL),
-// not a hold-then-convert flow. Non-mandatory, exactly like Parking. Locked
-// the same Draft/Pending way Parking is (canEdit prop, identical gate on the
-// backend) — free to add/remove pre-approval, frozen once Approved.
-const ExtraWorkSelectionStep: React.FC<{
-  applicationId: number;
-  computedTotal: number;
-  canEdit: boolean;
-  wizardAppStatus: string | null;
-}> = ({ applicationId, computedTotal, canEdit, wizardAppStatus }) => {
-  const { data: charges = [], refetch } = useQuery({
-    queryKey: ["crm-app-extra-charges", applicationId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${applicationId}`);
-      return r.ok ? r.json() : [];
-    },
-  });
-  const { data: rates } = useGstRates();
-
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [adding, setAdding] = useState(false);
-
-  const chargesTotal = (charges as any[]).reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
-
-  const handleAdd = async () => {
-    if (!description.trim()) { toast.error("Description is required"); return; }
-    const amt = parseFloat(amount);
-    if (!Number.isFinite(amt) || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    setAdding(true);
-    try {
-      const res = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${applicationId}`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Description: description.trim(), Amount: amt }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add extra work");
-      toast.success(`${description.trim()} added — ${fmtInr(data.TotalAmount)}`);
-      setDescription(""); setAmount("");
-      refetch();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleRemove = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`${EXTRA_CHARGE_API}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      refetch();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  const preview = amount && Number(amount) > 0 && rates ? computeExtraWorkGst(Number(amount), rates) : null;
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
-        <IndianRupee size={11} className="text-primary shrink-0" />
-        Unit {fmtInr(computedTotal)}
-        {chargesTotal > 0 && ` + Extra Charges ${fmtInr(chargesTotal)}`}
-        {" — Extra Charges is optional and never affects the Unit+Parking GST bracket, only its own fixed 18% (HSN Master)."}
-      </div>
-
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Wallet size={13} /> Extra Charges</label>
-          {!canEdit && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-              <Lock size={11} /> {wizardAppStatus === "Approved" ? "Manage from Booking" : `Locked (${wizardAppStatus})`}
-            </span>
-          )}
-        </div>
-        {!canEdit && wizardAppStatus === "Approved" && (
-          <p className="text-[0.6875rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
-            This application has a Booking — add or edit extra charges from the Booking's <strong>Parking &amp; Extra Charges</strong> tab.
-          </p>
-        )}
-        {(charges as any[]).length > 0 ? (
-          <div className="space-y-1.5">
-            {(charges as any[]).map((c: any) => (
-              <div key={c.Id} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-                <span>{c.Description} · {fmtInr(c.Amount)} + GST {fmtInr(c.GstAmount)} = <span className="font-medium">{fmtInr(c.TotalAmount)}</span></span>
-                {canEdit && (
-                  <button onClick={() => handleRemove(c.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No extra work added yet — optional.</p>
-        )}
-      </div>
-
-      {canEdit && (
-        <div className="rounded-lg border border-border p-3 space-y-2">
-          <input placeholder="Description (e.g. Modular Kitchen)" value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          <input type="number" placeholder="Amount" value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          {preview && (
-            <div className="flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-              <span>GST ({preview.rate}%, fixed — HSN Master)</span>
-              <span className="font-semibold">{fmtInr(preview.gstAmount)} → Total {fmtInr(preview.total)}</span>
-            </div>
-          )}
-          <button onClick={handleAdd} disabled={adding || !description.trim() || !amount}
-            className="w-full text-xs px-3 py-2 btn-module text-white rounded-md font-medium hover:shadow-lg disabled:opacity-40">
-            {adding ? "Adding..." : "Add Extra Charges"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ── Step 5: Attachments — document upload only ─────────────────────────────────
-const AttachmentsStep: React.FC<{
-  applicationId: number;
-}> = ({ applicationId }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [docType, setDocType] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
-  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!previewDoc) {
-      setPreviewBlobUrl(null);
-      setPreviewError(null);
-      return;
-    }
-
-    let alive = true;
-    let objectUrl: string | null = null;
-    setPreviewLoading(true);
-    setPreviewError(null);
-    setPreviewBlobUrl(null);
-
-    fetchWithAuth(`${DOC_API}/file/${previewDoc.Id}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error("Preview unavailable");
-        return res.blob();
-      })
-      .then((blob) => {
-        if (!alive) return;
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewBlobUrl(objectUrl);
-      })
-      .catch((e: any) => {
-        if (alive) setPreviewError(e.message || "Preview unavailable");
-      })
-      .finally(() => {
-        if (alive) setPreviewLoading(false);
-      });
-
-    return () => {
-      alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [previewDoc]);
-
-  const { data: docData, refetch: refetchDocs } = useQuery({
-    queryKey: ["crm-app-documents", applicationId],
-    queryFn: async () => {
-      const r = await fetchWithAuth(`${DOC_API}/application/${applicationId}`);
-      return r.ok ? r.json() : { documents: [] };
-    },
-  });
-
-  const handleUploadFiles = async (files: FileList | null) => {
-    if (!files?.length) return;
-    if (!docType) { toast.error("Select a document type before uploading"); return; }
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("DocumentType", docType);
-      Array.from(files).forEach((f) => formData.append("files", f));
-      const res = await fetchWithAuth(`${DOC_API}/application/${applicationId}/upload`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      toast.success(`${data.count} file(s) uploaded`);
-      setDocType("");
-      refetchDocs();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
-
-  const handleRemoveDoc = async (id: number) => {
-    try {
-      const res = await fetchWithAuth(`${DOC_API}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      refetchDocs();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border p-3 space-y-2">
-        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><FileText size={13} /> Documents</label>
-        <div className="flex gap-2">
-          <select value={docType} onChange={(e) => setDocType(e.target.value)} className={`${inputCls} flex-1`}>
-            <option value="">Select document type</option>
-            {DOC_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading || !docType}
-            className="px-3 py-1.5 text-xs bg-primary/10 text-primary rounded-md hover:bg-primary/20 disabled:opacity-40 flex items-center gap-1 whitespace-nowrap">
-            <Upload size={12} /> {uploading ? "Uploading..." : "Upload"}
-          </button>
-          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleUploadFiles(e.target.files)} />
-        </div>
-        <div className="space-y-1">
-          {(docData?.documents || []).map((d: any) => {
-            const fileUrl = `${DOC_API}/file/${d.Id}`;
-            const previewable = /\.(jpe?g|png|gif|webp|bmp|svg|pdf)$/i.test(d.FileName || "");
-            
-
-  return (
-              <div key={d.Id} className="flex items-center justify-between gap-2 text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
-                <span className="truncate flex-1">{d.DocumentType} — {d.FileName}</span>
-                <div className="flex items-center gap-1 shrink-0">
-                  {previewable && (
-                    <button data-row-view type="button" title="Preview" onClick={() => setPreviewDoc(d)}
-                      className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
-                      <Eye size={12} />
-                    </button>
-                  )}
-                  <a href={fileUrl} download={d.FileName}
-                    className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
-                    <Download size={12} />
-                  </a>
-                  <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
-                </div>
-              </div>
-            );
-          })}
-          {(!docData?.documents || docData.documents.length === 0) && (
-            <p className="text-xs text-muted-foreground">No documents uploaded yet.</p>
-          )}
-        </div>
-      </div>
-      {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
-          (this preview opens while the parent wizard Dialog is still open). */}
-      {previewDoc && (
-        <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setPreviewDoc(null)}>
-          <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
-              <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                <FileText size={15} className="text-primary shrink-0" />
-                <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
-              </span>
-              <div className="flex items-center gap-2 shrink-0">
-                <a href={previewBlobUrl || "#"} download={previewDoc.FileName}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg font-medium ${!previewBlobUrl ? "opacity-50 pointer-events-none" : "hover:bg-muted"}`}>
-                  <Download size={13} /> {previewBlobUrl ? "Download" : "Loading..."}
-                </a>
-                <button onClick={() => setPreviewDoc(null)} className="p-1 rounded-md hover:bg-muted text-muted-foreground"><X size={16} /></button>
-              </div>
-            </div>
-            <div className="flex-1 h-[76vh] bg-neutral-950 flex items-center justify-center">
-              {previewLoading ? (
-                <div className="text-xs text-neutral-300">Loading preview...</div>
-              ) : previewError ? (
-                <div className="text-center space-y-2 px-4">
-                  <p className="text-sm text-neutral-100">{previewError}</p>
-                  <a href={previewBlobUrl || `${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
-                    <Download size={13} /> Download file
-                  </a>
-                </div>
-              ) : !previewBlobUrl ? null : /\.pdf$/i.test(previewDoc.FileName || "") ? (
-                <iframe src={previewBlobUrl} title={previewDoc.FileName} className="w-full h-full border-0 bg-white" />
-              ) : (
-                <img src={previewBlobUrl} alt={previewDoc.FileName} className="max-w-full max-h-full object-contain" />
-              )}
-            </div>
-          </div>
-        </div></BodyPortal>
-      )}
-    </div>
   );
 };
 

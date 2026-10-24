@@ -269,23 +269,29 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    // Rows, total and per-status counts share one set of inputs and conditions (the total used to repeat the
+    // filters without the project scope, so a restricted user's pages didn't add up).
+    const reqs = [pool.request(), pool.request(), pool.request()];
+    const req0 = reqs[0];
+    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
     const showDeleted = deleted === "1" || deleted === "true";
     const conds = [showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"];
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (applicationId) { bind("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (search) {
+      bind("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR COALESCE(um.UnitName, b.UnitNo) LIKE @search)");
+    }
+    // The status counts cover every status under the other filters, so the figures don't change with the status pick.
+    const countsWhere = `WHERE ${conds.join(" AND ")}`;
     if (status) {
-      req0.input("st", sql.NVarChar(30), status);
+      bind("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
     } else if (!includeCancelled) {
       conds.push(`b.Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
-    }
-    if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR COALESCE(um.UnitName, b.UnitNo) LIKE @search)");
     }
     const where = `WHERE ${conds.join(" AND ")}`;
 
@@ -297,30 +303,15 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
+    const FROM = `FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, statusResult] = await Promise.all([
       req0.query(`${BOOKING_SELECT} ${where} ORDER BY b.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(30), status || null)
-        .input("appId2", sql.Int, applicationId ? parseInt(applicationId) : null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmBooking b
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE ${showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"}
-            AND (@st2 IS NULL AND (${includeCancelled ? "1=1" : "b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')"}) OR b.Status = @st2)
-            AND (@appId2 IS NULL OR b.ApplicationId = @appId2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR COALESCE(um.UnitName, b.UnitNo) LIKE @search2))
-        `),
+      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+      reqs[2].query(`SELECT b.Status, COUNT(*) AS n, SUM(CASE WHEN b.IsFrozen = 1 THEN 1 ELSE 0 END) AS frozen ${FROM} ${countsWhere} GROUP BY b.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = Object.fromEntries(statusResult.recordset.map((r) => [r.Status, r.n]));
+    const frozen = statusResult.recordset.reduce((s, r) => s + (r.frozen || 0), 0);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts, frozen });
   } catch (e) {
     console.error("[crm-bookings] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });

@@ -1,4 +1,4 @@
-// Sign in. Parts under ./login: config (the sheet look, public figures type) · LoginHero · LoginCard · WelcomeBack · CivilScene
+// Sign in. Parts under ./login: config (the look, public figures type) · LoginCard · LoginPhoto · WelcomeBack
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { LOGIN_CSS, type PublicStats } from "./login/config";
-import { LoginHero } from "./login/LoginHero";
+import { LoginPhoto } from "./login/LoginPhoto";
 import { LoginCard } from "./login/LoginCard";
 import { WelcomeBack } from "./login/WelcomeBack";
 
@@ -67,27 +67,24 @@ export default function Login() {
   return (
     <div
       className="login-page login-sheet min-h-screen w-full overflow-x-hidden overflow-y-auto relative"
-      style={{ background: "var(--ground)" }}
+      style={{ background: "var(--page)" }}
     >
       <style>{LOGIN_CSS}</style>
 
-      {/* The drawing grid, and a still wash of violet in the top corner */}
-      <div
-        className="absolute inset-0 z-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            "radial-gradient(60% 50% at 0% 0%, rgba(124,58,237,0.22), transparent 70%), linear-gradient(rgba(167,139,250,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(167,139,250,0.07) 1px, transparent 1px)",
-          backgroundSize: "auto, 28px 28px, 28px 28px",
-        }}
-      />
-
       <AnimatePresence>{loginSuccess && <WelcomeBack name={loginName} />}</AnimatePresence>
 
-      {/* The whole screen: headline and figures on the left, the sign-in panel on the right */}
-      <div className="bw-login-lift relative z-10 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,34%)] min-h-screen">
-          <LoginHero stats={stats} />
-
-          <div className="flex justify-center items-center px-5 py-10 sm:px-10 lg:border-l" style={{ borderColor: "var(--rule)", background: "rgba(20,16,42,0.78)" }}>
+      {/* One white panel on the grey page: the form on the left, the photo on the right (hidden on a phone). The form
+          stays the last child in the markup (the photo moves right with order): the black-and-white theme keeps the
+          logo in colour through it. */}
+      <div className="min-h-screen flex items-stretch sm:items-center justify-center sm:p-5 lg:p-[min(2rem,3vh)]">
+        <div
+          className="bw-login-lift relative z-10 w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-6 sm:rounded-[28px] p-3 sm:p-4"
+          style={{ background: "var(--frame)", minHeight: "min(860px, calc(100vh - 6vh))", boxShadow: "0 1px 2px rgba(16,19,18,0.04), 0 24px 60px -24px rgba(16,19,18,0.18)" }}
+        >
+          <div className="hidden lg:block lg:order-2">
+            <LoginPhoto stats={stats} />
+          </div>
+          <div className="flex justify-center items-center px-2 sm:px-8" style={{ paddingBlock: "min(2.5rem, 3vh)" }}>
             <LoginCard
               email={email}
               password={password}
@@ -107,6 +104,7 @@ export default function Login() {
               onNavigate={(path) => navigate(path)}
             />
           </div>
+        </div>
       </div>
     </div>
   );

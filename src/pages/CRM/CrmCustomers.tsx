@@ -1,705 +1,90 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
-import { AutoInput } from "@/components/ui/date-input";
+// CRM Customers: the identity record every application is built on (name, KYC, address, billing mode). Parts under
+// ./customers: config (API, form, checks, styles) · CustomerFields · NewCustomerDialog · CustomerDialog.
+// Opens a customer from ?customerId= (kept in the URL so a refresh or a shared link comes back to it) and a new
+// customer from a lead from ?leadId= (CRM Leads' "Create customer").
+import React, { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
-import { usePageRights } from "@/hooks/usePageRights";
+import { BookUser, Check, PenSquare, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import {
-  Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
-  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle, Trash2, Check, X,
-  Upload,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { SearchableSelect } from "@/components/SearchableSelect";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-import { CrmCustomerImportDialog } from "./CrmCustomerImportDialog";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { translateError } from "@/lib/translateError";
+import { CrmCustomerImportDialog } from "./CrmCustomerImportDialog";
+import { API, KEY_INK, KEY_LINE, PAGE_SIZE, RULE, fetchCustomersList, fetchLeadPool, type CustomerListFilters } from "./customers/config";
+import { NewCustomerDialog } from "./customers/NewCustomerDialog";
+import { CustomerDialog } from "./customers/CustomerDialog";
 
-const API = "/api/crm/customers";
-const SA_LEADS_API = "/api/sa/leads";
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
-const EMPTY_FORM = {
-  LeadId: "", CustomerName: "", Mobile: "", AltMobile: "", Email: "",
-  PanNo: "", GstNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", DateOfBirth: "",
-  PermanentAddress: "", PermanentCity: "", PermanentState: "", PermanentPincode: "",
-  IsCurrentSameAsPermanent: true,
-  CurrentAddress: "", CurrentCity: "", CurrentState: "", CurrentPincode: "",
-  CoApplicantName: "", CoApplicantMobile: "", CoApplicantPanNo: "", CoApplicantRelation: "",
-  InvoiceMode: "NonInvoice" as "Invoice" | "NonInvoice",
-  Notes: "",
-};
-
-const PAGE_SIZE = 20;
-interface CustomerListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchCustomersList(filters: CustomerListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const res = await fetchWithAuth(`${API}?${params}`);
-    if (!res.ok) return { rows: [], total: 0 };
-    const data = await res.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
-}
-// Only converted leads are offered here — this dropdown IS the real "only a
-// converted lead may enter the CRM module" gate now (Leads -> Customer ->
-// Application; see the matching check in crmCustomers.js POST /). Further
-// narrowed client-side (below, availableLeads) to ones not already linked to
-// another customer.
-async function fetchLeadOptions(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(`${SA_LEADS_API}?status=Converted`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
-
-// Shared block: Permanent Address (always required + visible) followed by a
-// "Current address same as permanent" toggle that reveals a second,
-// independent set of fields only when unchecked. Used identically by both
-// the New Customer dialog and the Edit dialog so the two never drift.
-function AddressFields({
-  form, setForm, readOnly, inputCls,
-}: {
-  form: any;
-  setForm: (updater: (f: any) => any) => void;
-  readOnly: boolean;
-  inputCls: string;
-}) {
-  return (
-    <>
-      <div>
-        <label className="text-xs text-muted-foreground block mb-1">Permanent Address</label>
-        <textarea value={form.PermanentAddress} readOnly={readOnly}
-          onChange={(e) => setForm((f: any) => ({ ...f, PermanentAddress: e.target.value }))}
-          rows={2} className={`${inputCls} resize-none`} />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {([
-          { key: "PermanentCity", label: "City" },
-          { key: "PermanentState", label: "State" },
-          { key: "PermanentPincode", label: "Pincode" },
-        ] as const).map(({ key, label }) => (
-          <div key={key}>
-            <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-            <input type="text" value={form[key]} readOnly={readOnly}
-              onChange={(e) => setForm((f: any) => ({ ...f, [key]: e.target.value }))}
-              className={inputCls} />
-          </div>
-        ))}
-      </div>
-
-      <label className="flex items-center gap-2 text-xs text-foreground">
-        <input
-          type="checkbox"
-          checked={form.IsCurrentSameAsPermanent}
-          disabled={readOnly}
-          onChange={(e) => setForm((f: any) => ({ ...f, IsCurrentSameAsPermanent: e.target.checked }))}
-        />
-        Current address same as permanent
-      </label>
-
-      {!form.IsCurrentSameAsPermanent && (
-        <>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Current Address</label>
-            <textarea value={form.CurrentAddress} readOnly={readOnly}
-              onChange={(e) => setForm((f: any) => ({ ...f, CurrentAddress: e.target.value }))}
-              rows={2} className={`${inputCls} resize-none`} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {([
-              { key: "CurrentCity", label: "City" },
-              { key: "CurrentState", label: "State" },
-              { key: "CurrentPincode", label: "Pincode" },
-            ] as const).map(({ key, label }) => (
-              <div key={key}>
-                <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input type="text" value={form[key]} readOnly={readOnly}
-                  onChange={(e) => setForm((f: any) => ({ ...f, [key]: e.target.value }))}
-                  className={inputCls} />
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </>
-  );
-}
-
-function EditCustomerDialog({ customer, canDelete = false, startEditing = false, onClose, onSaved, onDeleted }: { customer: any; canDelete?: boolean; startEditing?: boolean; onClose: () => void; onSaved: () => void; onDeleted?: () => void }) {
-  const [form, setForm] = useState({
-    CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
-    AltMobile: customer.AltMobile || "", Email: customer.Email || "",
-    PanNo: customer.PanNo || "", GstNo: customer.GstNo || "", AadhaarNo: customer.AadhaarNo || "",
-    Occupation: customer.Occupation || "", AnnualIncome: customer.AnnualIncome != null ? String(customer.AnnualIncome) : "",
-    PermanentAddress: customer.PermanentAddress || "",
-    PermanentCity: customer.PermanentCity || "", PermanentState: customer.PermanentState || "", PermanentPincode: customer.PermanentPincode || "",
-    IsCurrentSameAsPermanent: customer.IsCurrentSameAsPermanent !== false,
-    CurrentAddress: customer.CurrentAddress || "",
-    CurrentCity: customer.CurrentCity || "", CurrentState: customer.CurrentState || "", CurrentPincode: customer.CurrentPincode || "",
-    DateOfBirth: customer.DateOfBirth ? String(customer.DateOfBirth).slice(0, 10) : "",
-    CoApplicantName: customer.CoApplicantName || "", CoApplicantMobile: customer.CoApplicantMobile || "",
-    CoApplicantPanNo: customer.CoApplicantPanNo || "", CoApplicantRelation: customer.CoApplicantRelation || "",
-    InvoiceMode: (customer.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice") as "Invoice" | "NonInvoice",
-    Notes: customer.Notes || "",
-  });
-  const [saving, setSaving] = useState(false);
-  // Opens read-only every time — an explicit "Edit" click is required before
-  // any field becomes editable, and a successful save re-locks it. Prevents
-  // the classic "clicked a row to look, accidentally fat-fingered a field,
-  // hit Save without noticing" class of data-corruption mistake on a record
-  // this central (every Application/Booking reads its KYC off this row).
-  // The table's Edit action opens it already unlocked (an explicit Edit click, same intent).
-  const [locked, setLocked] = useState(!startEditing);
-  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
-
-  const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  // Client-side mirror of the server guard: a customer can be deleted only when
-  // none of their bookings are still live (Approved / Pending / in-approval).
-  // Backend re-checks and is the real authority — this just gates the button.
-  const blockingBookings = (customer.applications || []).filter(
-    (a: any) => a.BookingStatus && !["Cancelled", "Rejected", "Expired"].includes(a.BookingStatus),
-  );
-  const deleteBlocked = blockingBookings.length > 0;
-
-  const handleDelete = async () => {
-    setDeleting(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${customer.Id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete customer");
-      toast.success(`${customer.CustomerNo} deleted`);
-      onDeleted?.();
-      onClose();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-      setConfirmDelete(false);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!form.CustomerName?.trim()) { toast.error("Customer Name is required"); return; }
-    if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
-      toast.error("Mobile must be exactly 10 digits"); return;
-    }
-    if (form.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
-      toast.error("PAN must be in format ABCDE1234F"); return;
-    }
-    if (String(form.GstNo || "").trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$/.test(String(form.GstNo).replace(/\s+/g, "").toUpperCase())) {
-      toast.error("GSTIN must be 15 characters, like 27AAPFU0939F1ZV"); return;
-    }
-    if (form.AadhaarNo?.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
-      toast.error("Aadhaar must be exactly 12 digits"); return;
-    }
-    if (form.Email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
-      toast.error("Please enter a valid email address"); return;
-    }
-    if (form.PermanentPincode?.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
-      toast.error("Pincode must be exactly 6 digits"); return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${customer.Id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer updated");
-      setLocked(true);
-      onSaved();
-      onClose();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
-        <DialogHeader className="space-y-0.5">
-          <DialogTitle className="font-heading text-base font-bold flex items-center justify-between gap-2 pr-6">
-            <span className="flex items-center gap-2">
-              <IdCard size={16} className="text-sky-500" /> {customer.CustomerNo} — {locked ? "View" : "Edit"} Customer
-            </span>
-            {/* Edit / Delete live in the table's Actions column — a row click opens this read-only. */}
-            {!locked && (
-              <span className="flex items-center gap-1 text-xs font-medium text-sky-600 shrink-0">
-                <Pencil size={12} /> Editing
-              </span>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-
-        {locked && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
-            <Lock size={11} /> View only — use Edit (pencil) in the table's Actions column to make changes.
-          </div>
-        )}
-
-        {/* Core identity fields — same compact two-column layout as New
-            Customer: Personal + Financial merged into one 3-col section on
-            the left, Address + Notes on the right, so the fixed field set
-            fits on one screen. */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <div className="rounded-xl border border-border p-3 space-y-2">
-            <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-              <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {[
-                { key: "CustomerName", label: "Customer Name", type: "text", required: true },
-                { key: "Mobile", label: "Mobile", type: "text" },
-                { key: "AltMobile", label: "Alternate Mobile", type: "text" },
-                { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" }, { key: "GstNo", label: "GSTIN (only if the buyer is GST-registered)", type: "text" },
-                { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
-                { key: "DateOfBirth", label: "Date of Birth", type: "date" },
-                { key: "Occupation", label: "Occupation", type: "text" },
-                { key: "AnnualIncome", label: "Annual Income", type: "number" },
-              ].map(({ key, label, type, required }) => (
-                <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
-                  <AutoInput type={type} value={(form as any)[key]} readOnly={locked}
-                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className={inputCls} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="rounded-xl border border-border p-3 space-y-2">
-              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <MapPin size={13} className="text-sky-500" /> Address
-              </h3>
-              <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
-            </div>
-
-            {/* Co-applicants are now managed at the Application level, not on the Customer record.
-                 Each Application has its own independent co-applicants — use the Co-Applicant
-                 tab in the Application wizard to add them. */}
-
-            <div className="rounded-xl border border-border p-3 space-y-2">
-              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <FileText size={13} className="text-sky-500" /> Billing
-              </h3>
-              <p className="text-[0.6875rem] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
-              <div className="flex items-center gap-4">
-                {(["NonInvoice", "Invoice"] as const).map((mode) => (
-                  <label key={mode} className={`flex items-center gap-1.5 text-sm ${locked ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}>
-                    <input type="radio" name="invoiceMode" disabled={locked} checked={form.InvoiceMode === mode}
-                      onChange={() => setForm((f) => ({ ...f, InvoiceMode: mode }))} />
-                    {mode === "NonInvoice" ? "Non-Invoice" : "Invoice"}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-border p-3 space-y-2">
-              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <FileText size={13} className="text-sky-500" /> Notes
-              </h3>
-              <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className={`${inputCls} resize-none`} />
-            </div>
-          </div>
-        </div>
-
-        {/* Outstanding + Applications side by side (not stacked, and not
-            crammed into the right column above) — this is what was still
-            forcing a scroller: two variable-height blocks stacking under an
-            already-full-height column. Applications also scrolls internally
-            past a handful of rows instead of growing the dialog further. */}
-        {(customer.outstanding && Number(customer.outstanding.TotalDue) > 0) || customer.applications?.length > 0 ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 ? (
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-sky-700 dark:text-sky-400"><IndianRupee size={13} /> Outstanding</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
-                  <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
-                  <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
-                  <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-sky-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
-                </div>
-              </div>
-            ) : <div />}
-
-            {customer.applications?.length > 0 && (
-              <div className="rounded-xl border border-border p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} className="text-sky-500" /> Applications ({customer.applications.length})</h3>
-                <div className="space-y-1.5 max-h-20 overflow-y-auto thin-scroll">
-                  {customer.applications.map((a: any) => (
-                    <div key={a.Id} className="flex items-center justify-between text-xs">
-                      <span className="font-mono text-sky-600 dark:text-sky-400">{a.ApplicationNo}</span>
-                      <span className="text-muted-foreground">{a.Status}</span>
-                      {a.BookingNo && <span className="text-green-600">→ {a.BookingNo}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        <div className="flex justify-between items-center gap-2 pt-2.5 border-t border-border">
-          <div />
-          {locked ? (
-            <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          ) : (
-            <>
-              <button onClick={() => { setLocked(true); onClose(); }}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleSave} disabled={saving}
-                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                {saving ? "Saving..." : "Save Changes"}
-              </button>
-            </>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-const CrmCustomers: React.FC = () => {
+export default function CrmCustomers() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { canCreate, canEdit, canDelete } = usePageRights("crm-customers");
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  // Actions column: open the dialog in edit mode / inline delete confirmation.
   const [startEditing, setStartEditing] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
 
-  // Row clicks only ever set local state — the URL stayed plain
-  // /crm/customers, so a refresh lost the open detail dialog and there was
-  // nothing to copy/bookmark/share to jump straight back to this customer.
-  // Kept in sync with ?customerId= the same way the deep-link read effect
-  // below already reads it, instead of a one-shot self-clearing param.
+  // Searches as you type (after a short pause); Enter searches at once.
+  useSearchAsYouType(searchInput, (v) => { setSearch(v); setPage(1); });
+
+  const openId = Number(searchParams.get("customerId")) || null;
+  const leadId = searchParams.get("leadId");
   const openCustomer = (id: number, edit = false) => {
     setStartEditing(edit);
-    setEditingId(id);
     setSearchParams((sp) => { sp.set("customerId", String(id)); return sp; }, { replace: true });
   };
-  const closeCustomer = () => {
-    setEditingId(null);
-    setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
-  };
-  const [saving, setSaving] = useState(false);
-  // Duplicate detection: populated by the /suggest endpoint when Mobile or
-  // PAN is filled in. Shown as an inline warning card above the form footer.
-  const [dupSuggestions, setDupSuggestions] = useState<any[]>([]);
-  const [dupChecking, setDupChecking] = useState(false);
-  const dupDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Hits the /suggest endpoint with the current Mobile + PAN + Name values.
-  // Debounced 400ms so it doesn't fire on every keystroke.
-  const checkDuplicates = useCallback(async (mobile: string, pan: string, name: string) => {
-    if (dupDebounce.current) clearTimeout(dupDebounce.current);
-    const mob = mobile.trim();
-    const panVal = pan.trim().toUpperCase();
-    const nm = name.trim();
-    if (!mob && !panVal && !nm) { setDupSuggestions([]); return; }
-    dupDebounce.current = setTimeout(async () => {
-      try {
-        setDupChecking(true);
-        const params = new URLSearchParams();
-        if (mob) params.set("mobile", mob);
-        if (panVal) params.set("pan", panVal);
-        if (nm) params.set("name", nm);
-        const res = await fetchWithAuth(`${API}/suggest?${params}`);
-        if (res.ok) setDupSuggestions(await res.json());
-      } catch { /* non-blocking */ }
-      finally { setDupChecking(false); }
-    }, 400);
-  }, []);
-
-  const handleCreate = async () => {
-    if (!form.CustomerName.trim()) { toast.error("Customer Name is required"); return; }
-    if (form.Mobile.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
-      toast.error("Mobile must be exactly 10 digits"); return;
-    }
-    if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
-      toast.error("Alternate mobile must be exactly 10 digits"); return;
-    }
-    if (form.PanNo.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
-      toast.error("PAN must be in format ABCDE1234F"); return;
-    }
-    if (String(form.GstNo || "").trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$/.test(String(form.GstNo).replace(/\s+/g, "").toUpperCase())) {
-      toast.error("GSTIN must be 15 characters, like 27AAPFU0939F1ZV"); return;
-    }
-    if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
-      toast.error("Aadhaar must be exactly 12 digits"); return;
-    }
-    if (form.Email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.Email.trim())) {
-      toast.error("Please enter a valid email address"); return;
-    }
-    if (form.PermanentPincode.trim() && !/^\d{6}$/.test(form.PermanentPincode.trim())) {
-      toast.error("Pincode must be exactly 6 digits"); return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, LeadId: form.LeadId || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        // When the backend returns a 409 with an existingCustomerId, surface an
-        // inline warning with a "View Customer" link instead of just a toast —
-        // so staff can open the existing record directly without hunting for it.
-        if (res.status === 409 && data.existingCustomerId) {
-          setDupSuggestions((prev) => {
-            const already = prev.some((d) => d.Id === data.existingCustomerId);
-            if (already) return prev;
-            return [{ Id: data.existingCustomerId, _fromError: true, _errorMsg: data.error }, ...prev];
-          });
-          toast.warning("A matching customer already exists — see the warning below");
-          return;
-        }
-        throw new Error(data.error);
-      }
-      toast.success(`Customer ${data.CustomerNo} registered`);
-      setDialogOpen(false);
-      setDupSuggestions([]);
-      setForm({ ...EMPTY_FORM });
-      qc.invalidateQueries({ queryKey: ["crm-customers"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
+  const closeCustomer = () => setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
+  const closeNew = () => {
+    setNewOpen(false);
+    if (leadId) setSearchParams((sp) => { sp.delete("leadId"); return sp; }, { replace: true });
   };
 
-  const listFilters: CustomerListFilters = useMemo(
-    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, cpb]
-  );
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-customers", listFilters, page, pageSize],
-    queryFn: () => fetchCustomersList(listFilters, page, pageSize),
+  const filters: CustomerListFilters = useMemo(() => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }), [search, cpb]);
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ["crm-customers", filters, page, pageSize],
+    queryFn: () => fetchCustomersList(filters, page, pageSize),
     staleTime: 30_000,
   });
-  const customers = listResult?.rows ?? [];
-  const total = listResult?.total ?? 0;
-  const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
+  const rows = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const anyFilter = !!(search || cpb.companyId || cpb.projectId || cpb.blockId);
 
-  // Deep-link from CrmLeads.tsx's "Create Customer" action
-  // (/crm/customers?leadId=X) — opens the New Customer dialog with that
-  // converted lead pre-selected, same as picking it by hand from "Link to
-  // Existing Lead" below. Waits for the leads list to load so
-  // handleLeadChange can actually find the row to prefill from.
-  useEffect(() => {
-    const leadId = searchParams.get("leadId");
-    if (!leadId || !(leads as any[]).length) return;
-    setForm({ ...EMPTY_FORM });
-    handleLeadChange(leadId);
-    setDialogOpen(true);
-    setSearchParams((sp) => { sp.delete("leadId"); return sp; }, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, leads]);
+  const { data: pool = [] } = useQuery({ queryKey: ["crm-leads-pool"], queryFn: fetchLeadPool, staleTime: 30_000 });
+  const leadsWaiting = pool.filter((l) => !l.CustomerId).length;
 
-  // Deep-link from CrmLeads.tsx's "View Customer" action (a converted lead
-  // already linked to a customer) — opens that customer's detail dialog
-  // directly instead of the list-only page.
-  const [custDeepLinkOpened, setCustDeepLinkOpened] = useState(false);
-  useEffect(() => {
-    if (custDeepLinkOpened) return;
-    const customerId = searchParams.get("customerId");
-    if (!customerId) return;
-    const id = parseInt(customerId, 10);
-    if (id > 0) {
-      setCustDeepLinkOpened(true);
-      setEditingId(id);
-    } else {
-      // Invalid param (0 or NaN) — clear it so the URL doesn't stay dirty
-      setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
-    }
-  }, [searchParams, custDeepLinkOpened]);
-
-  // Converted leads not yet linked to another (active) customer — the
-  // "already used" half of the gate, mirroring the LeadId uniqueness check
-  // in crmCustomers.js POST /.
-  const availableLeads = useMemo(() => {
-    const usedLeadIds = new Set((customers as any[]).map((c: any) => c.LeadId).filter(Boolean));
-    return (leads as any[]).filter((l: any) => !usedLeadIds.has(l.Id));
-  }, [leads, customers]);
-
-  const { data: editingCustomer } = useQuery({
-    queryKey: ["crm-customer-detail", editingId],
+  const { data: opened } = useQuery({
+    queryKey: ["crm-customer-detail", openId],
     queryFn: async () => {
-      const r = await fetchWithAuth(`${API}/${editingId}`);
+      const r = await fetchWithAuth(`${API}/${openId}`);
       return r.ok ? r.json() : null;
     },
-    enabled: editingId != null,
+    enabled: openId != null,
   });
 
-  const handleLeadChange = (leadId: string) => {
-    const lead = (leads as any[]).find((l: any) => String(l.Id) === leadId);
-    if (lead) {
-      setForm((f) => ({
-        ...f,
-        LeadId: leadId,
-        CustomerName: lead.CustomerName || "",
-        Mobile: lead.Mobile || "",
-        AltMobile: lead.AltMobile || "",
-        Email: lead.Email || "",
-      }));
-    } else {
-      setForm((f) => ({ ...f, LeadId: "" }));
-    }
-  };
-
-
-
-  const filtered = useMemo(() => customers as any[], [customers]);
-
-  // Every column's cell is wrapped with the same row-click handler so the
-  // whole row stays clickable to open the edit dialog, matching the old
-  // hand-rolled <tr onClick={...}> behavior.
-  const { canCreate, canEdit, canDelete } = usePageRights("crm-customers");
-  const customerColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "CustomerNo", header: "Customer No", size: 110,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs font-semibold text-primary">
-          {i.getValue() as string}
-        </div>
-      ) },
-    { accessorKey: "CustomerName", header: "Name", size: 160,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground">{i.row.original.CustomerName}</div>
-          {i.row.original.LeadUid && <div className="text-xs text-muted-foreground">Lead: {i.row.original.LeadUid}</div>}
-        </div>
-      ) },
-    { accessorKey: "Mobile", header: "Mobile", size: 110,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-muted-foreground">
-          {i.getValue() as string}
-        </div>
-      ) },
-    { accessorKey: "PanNo", header: "PAN (Permanent Account Number)", size: 100,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer font-mono text-xs">
-          {(i.getValue() as string) || "—"}
-        </div>
-      ) },
-    { id: "location", header: "Address", size: 130, enableSorting: false,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs">
-          {[i.row.original.PermanentCity, i.row.original.PermanentState].filter(Boolean).join(", ") || "—"}
-        </div>
-      ) },
-    { accessorKey: "CoApplicantName", header: "Co-Applicant", size: 120,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs">
-          {(i.getValue() as string) || "—"}
-        </div>
-      ) },
-    { id: "projects", header: "Projects", size: 170, enableSorting: false,
-      cell: (i) => {
-        const names = String(i.row.original.ProjectNames || "").split("|").filter(Boolean);
-        if (!names.length) return <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">—</div>;
-        // Two shown; the rest behind a "+N" chip, all of them on hover.
-        const shown = names.slice(0, 2);
-        const more = names.length - shown.length;
-        return (
-          <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer flex flex-wrap gap-1" title={names.join(", ")}>
-            {shown.map((n) => (
-              <span key={n} className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-950/40 dark:border-emerald-800 max-w-[150px] truncate">
-                {n}
-              </span>
-            ))}
-            {more > 0 && (
-              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted border-border">
-                +{more} more
-              </span>
-            )}
-          </div>
-        );
-      } },
-    { accessorKey: "ApplicationCount", header: "Applications", size: 120,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer">
-          <span className="text-xs px-2 py-0.5 rounded-full border font-medium text-blue-600 bg-blue-50 border-blue-200">
-            {i.row.original.ApplicationCount} application{i.row.original.ApplicationCount === 1 ? "" : "s"}
-          </span>
-        </div>
-      ) },
-    { accessorKey: "CreatedAt", header: "Registered", size: 100,
-      cell: (i) => (
-        <div onClick={() => openCustomer(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
-          {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
-        </div>
-      ) },
-    { id: "actions", header: "Actions", size: 96, enableSorting: false,
-      meta: { align: "right", className: "text-right" },
-      cell: (i) => {
-        const c = i.row.original;
-        if (deleteConfirmId === c.Id) {
-          return (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-[0.6875rem] text-muted-foreground mr-1">Delete?</span>
-              <button onClick={() => deleteCustomer(c)} disabled={deletingId === c.Id} className="p-1 rounded text-destructive hover:bg-destructive/10 disabled:opacity-40" title="Confirm delete"><Check size={13} /></button>
-              <button onClick={() => setDeleteConfirmId(null)} disabled={deletingId === c.Id} className="p-1 rounded text-muted-foreground hover:bg-muted" title="Cancel"><X size={13} /></button>
-            </div>
-          );
-        }
-        return (
-          <div className="flex items-center justify-end gap-2">
-            {canEdit && <button onClick={() => openCustomer(c.Id, true)} className="p-1 rounded text-blue-400 hover:bg-blue-400/10" title="Edit"><Pencil size={15} /></button>}
-            {canDelete && <button onClick={() => setDeleteConfirmId(c.Id)} className="p-1 rounded text-destructive hover:bg-destructive/10" title="Delete"><Trash2 size={15} /></button>}
-          </div>
-        );
-      } },
-  ];
-
-  // Same DELETE the detail dialog uses; the server refuses while the customer has live bookings.
   async function deleteCustomer(c: any) {
     setDeletingId(c.Id);
     try {
       const res = await fetchWithAuth(`${API}/${c.Id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete customer");
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Could not delete the customer.");
       toast.success(`${c.CustomerNo} deleted`);
-      qc.invalidateQueries({ queryKey: ["crm-customers"] });
+      ["crm-customers", "crm-leads-pool"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -708,11 +93,68 @@ const CrmCustomers: React.FC = () => {
     }
   }
 
+  const columns: ColumnDef<any, unknown>[] = [
+    {
+      accessorKey: "CustomerNo", header: "Customer", size: 220,
+      cell: ({ row: { original: c } }) => (
+        <div className="leading-tight min-w-0">
+          <p className="text-sm font-medium text-foreground truncate">{c.CustomerName}</p>
+          <p className="text-[0.6875rem] text-muted-foreground font-heading tabular-nums truncate">{c.CustomerNo}{c.LeadUid ? ` · from ${c.LeadUid}` : ""}</p>
+        </div>
+      ),
+    },
+    {
+      accessorKey: "Mobile", header: "Contact", size: 170,
+      cell: ({ row: { original: c } }) => (
+        <div className="leading-tight text-xs">
+          <p className="text-foreground tabular-nums">{c.Mobile || "—"}</p>
+          <p className="text-muted-foreground font-heading tabular-nums">{c.PanNo || "No PAN"}</p>
+        </div>
+      ),
+    },
+    {
+      id: "location", header: "City", size: 140, enableSorting: false,
+      cell: ({ row: { original: c } }) => <span className="text-xs">{[c.PermanentCity, c.PermanentState].filter(Boolean).join(", ") || "—"}</span>,
+    },
+    {
+      id: "projects", header: "Projects", size: 200, enableSorting: false,
+      cell: ({ row: { original: c } }) => {
+        const names = String(c.ProjectNames || "").split("|").filter(Boolean);
+        return names.length ? (
+          <span className="text-xs block truncate max-w-[200px]" title={names.join(", ")}>
+            {names.slice(0, 2).join(", ")}{names.length > 2 ? ` +${names.length - 2}` : ""}
+          </span>
+        ) : <span className="text-xs text-muted-foreground">None yet</span>;
+      },
+    },
+    {
+      accessorKey: "ApplicationCount", header: () => <span className="block text-right">Applications</span>, size: 110,
+      cell: ({ getValue }) => <span className="block text-right text-sm font-heading tabular-nums">{Number(getValue() || 0)}</span>,
+    },
+    { accessorKey: "CreatedAt", header: "Registered", size: 110, cell: ({ getValue }) => <span className="text-xs tabular-nums whitespace-nowrap">{fmtDate(getValue() as string)}</span> },
+    {
+      id: "actions", header: "", size: 110, enableSorting: false,
+      cell: ({ row: { original: c } }) =>
+        deleteConfirmId === c.Id ? (
+          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            <span className="text-[0.6875rem] text-muted-foreground mr-1">Delete?</span>
+            <button onClick={() => deleteCustomer(c)} disabled={deletingId === c.Id} className="p-1 text-destructive disabled:opacity-40" title="Delete for good"><Check size={14} /></button>
+            <button onClick={() => setDeleteConfirmId(null)} className="p-1 text-muted-foreground hover:text-foreground" title="Keep"><X size={14} /></button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+            {canEdit && <button onClick={() => openCustomer(c.Id, true)} className="p-1.5 text-muted-foreground hover:text-foreground" title="Edit"><PenSquare size={13} /></button>}
+            {canDelete && <button onClick={() => setDeleteConfirmId(c.Id)} className="p-1.5 text-muted-foreground hover:text-destructive" title="Delete"><Trash2 size={13} /></button>}
+          </div>
+        ),
+    },
+  ];
+
   const exportColumns: ExportColumn[] = [
     { header: "Customer No", accessor: "CustomerNo" },
     { header: "Name", accessor: "CustomerName" },
     { header: "Mobile", accessor: "Mobile" },
-    { header: "PAN (Permanent Account Number)", accessor: "PanNo" },
+    { header: "PAN", accessor: "PanNo" },
     { header: "Address", accessor: (r) => [r.PermanentCity, r.PermanentState].filter(Boolean).join(", ") },
     { header: "Co-Applicant", accessor: "CoApplicantName" },
     { header: "Projects", accessor: (r) => String(r.ProjectNames || "").split("|").filter(Boolean).join(", ") },
@@ -720,248 +162,95 @@ const CrmCustomers: React.FC = () => {
     { header: "Registered", accessor: (r) => (r.CreatedAt ? String(r.CreatedAt).slice(0, 10) : "") },
   ];
 
-  const fetchAllCustomersForExport = async () => {
-    const { rows } = await fetchCustomersList(listFilters, 1, Math.max(total, PAGE_SIZE));
-    return rows as Record<string, unknown>[];
-  };
+  const stats = [
+    { label: "Customers", value: total, note: anyFilter ? "matching the filters" : "registered" },
+    { label: "Leads waiting", value: leadsWaiting, note: "converted leads with no customer yet", go: leadsWaiting ? () => navigate("/crm/leads") : undefined },
+    { label: "On this page", value: rows.length, note: `of ${total}` },
+  ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Customers"]} />
-      <CrmShell
-        title="CRM — Customers"
-      subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
-      action={
-        <div className="flex items-center gap-2">
-          <ExportMenu
-            data={filtered as unknown as Record<string, unknown>[]}
-            fetchData={fetchAllCustomersForExport}
-            columns={exportColumns}
-            title="CRM Customers"
-            filename="crm-customers"
-          />
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          {canCreate && (
-            <button onClick={() => setImportOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
-              <Upload size={14} /> Import
-            </button>
-          )}
-          <button onClick={() => navigate("/masters/customers")}
-            title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
-            <BookUser size={14} /> Customer Ledger (Master)
-          </button>
-          {canCreate && <button onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
-            <Plus size={14} /> New Customer
-          </button>}
-        </div>
-      }
-    >
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative flex-1 min-w-48 max-w-md">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search name, mobile, PAN, customer no..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
-        </div>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
-
-      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-        data={filtered}
-        columns={customerColumns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage="No customers found"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-
-      {/* New Customer Dialog — wide two-column layout, compact enough to
-          fit the whole field set on one screen without an inner scroller. */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setDupSuggestions([]); } }}>
-        <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
-          <DialogHeader className="space-y-0.5">
-            <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
-              <UserPlus size={16} className="text-sky-500" /> New Customer
-            </DialogTitle>
-          </DialogHeader>
-
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Link to Existing Lead (optional)</label>
-            {/* Searchable: type a lead's name, mobile or lead id. */}
-            <SearchableSelect
-              value={form.LeadId}
-              onChange={(v) => handleLeadChange(v)}
-              placeholder="— Walk-in / New Customer —"
-              searchPlaceholder="Search name, mobile or lead id..."
-              options={[
-                { value: "", label: "— Walk-in / New Customer —" },
-                ...availableLeads.map((l: any) => ({ value: String(l.Id), label: [l.CustomerName, l.Mobile, l.LeadUid].filter(Boolean).join(" · ") })),
-              ]}
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
+        title="Customers"
+        subtitle="The record every application is built on: name, KYC, address and billing mode. Each customer also keeps a ledger head in Finance."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            <ExportMenu
+              data={rows as Record<string, unknown>[]}
+              fetchData={async () => (await fetchCustomersList(filters, 1, Math.max(total, PAGE_SIZE))).rows as Record<string, unknown>[]}
+              columns={exportColumns}
+              title="CRM Customers"
+              filename="crm-customers"
             />
-            {form.LeadId && <p className="text-xs text-green-600 mt-1">Name, mobile and email prefilled from lead — only converted leads are listed</p>}
+            <button onClick={() => navigate("/masters/customers")} className={`${KEY_LINE} h-9 px-3`} title="Every CRM customer keeps a matching ledger head there for Finance">
+              <BookUser size={13} /> <span className="hidden sm:inline">Ledger heads</span>
+            </button>
+            {canCreate && (
+              <>
+                <button onClick={() => setImportOpen(true)} className={`${KEY_LINE} h-9 px-3`}><Upload size={13} /> <span className="hidden sm:inline">Import</span></button>
+                <button onClick={() => setNewOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New customer</button>
+              </>
+            )}
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {/* Left column: identity + financial profile, merged into one
-                3-column section — 9 fields fit in 3 rows instead of the old
-                2-column layout's 4+1 rows across two separate cards. */}
-            <div className="rounded-xl border border-border p-3 space-y-2">
-              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                {[
-                  { key: "CustomerName", label: "Customer Name", type: "text", required: true },
-                  { key: "Mobile", label: "Mobile", type: "text" },
-                  { key: "AltMobile", label: "Alternate Mobile", type: "text" },
-                  { key: "Email", label: "Email", type: "email" },
-                  { key: "PanNo", label: "PAN (Permanent Account Number)", type: "text" }, { key: "GstNo", label: "GSTIN (only if the buyer is GST-registered)", type: "text" },
-                  { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
-                  { key: "DateOfBirth", label: "Date of Birth", type: "date" },
-                  { key: "Occupation", label: "Occupation", type: "text" },
-                  { key: "AnnualIncome", label: "Annual Income", type: "number" },
-                ].map(({ key, label, type, required }) => (
-                  <div key={key}>
-                    <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
-                    <AutoInput type={type} value={(form as any)[key]}
-                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                      onBlur={() => {
-                        // Trigger duplicate check when Mobile or PAN loses focus —
-                        // these are the two highest-confidence dedup signals.
-                        if (key === "Mobile" || key === "PanNo") {
-                          checkDuplicates(form.Mobile, form.PanNo, form.CustomerName);
-                        }
-                      }}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
-                  </div>
-                ))}
-
-              </div>
-            </div>
-
-            {/* Right column: address + notes */}
-            <div className="space-y-3">
-              <div className="rounded-xl border border-border p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <MapPin size={13} className="text-sky-500" /> Address
-                </h3>
-                <AddressFields
-                  form={form}
-                  setForm={setForm}
-                  readOnly={false}
-                  inputCls="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40"
-                />
-              </div>
-
-              {/* Co-applicants moved to the Application wizard — Add Co-Applicant tab */}
-
-              <div className="rounded-xl border border-border p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <FileText size={13} className="text-sky-500" /> Billing
-                </h3>
-                <p className="text-[0.6875rem] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
-                <div className="flex items-center gap-4">
-                  {(["NonInvoice", "Invoice"] as const).map((mode) => (
-                    <label key={mode} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                      <input type="radio" name="newCustomerInvoiceMode" checked={form.InvoiceMode === mode}
-                        onChange={() => setForm((f) => ({ ...f, InvoiceMode: mode }))} />
-                      {mode === "NonInvoice" ? "Non-Invoice" : "Invoice"}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <FileText size={13} className="text-sky-500" /> Notes
-                </h3>
-                <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
-              </div>
-            </div>
-          </div>
-
-          {/* Duplicate warning banner — shown when the /suggest endpoint finds
-              existing customers that match the entered Mobile, PAN, or Name.
-              Each candidate is shown as a compact card; staff can dismiss
-              individual cards or open the existing record directly. */}
-          {(dupChecking || dupSuggestions.length > 0) && (
-            <div className="rounded-xl border border-sky-400/40 bg-sky-50/60 dark:bg-sky-900/10 p-3 space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400">
-                <AlertTriangle size={13} />
-                {dupChecking ? "Checking for duplicates…" : `${dupSuggestions.length} possible duplicate${dupSuggestions.length > 1 ? "s" : ""} found — verify before registering`}
-              </div>
-              {dupSuggestions.map((d: any) => (
-                <div key={d.Id} className="flex items-start justify-between gap-2 rounded-lg border border-sky-300/50 bg-white dark:bg-card px-3 py-2 text-xs">
-                  <div className="space-y-0.5 min-w-0">
-                    {d._fromError ? (
-                      <p className="font-medium text-red-600">{d._errorMsg}</p>
-                    ) : (
-                      <>
-                        <p className="font-semibold text-foreground truncate">{d.CustomerName} <span className="font-normal text-muted-foreground">· {d.CustomerNo}</span></p>
-                        <p className="text-muted-foreground">{[d.Mobile, d.PanNo, d.PermanentCity].filter(Boolean).join(" · ")}</p>
-                        {d.ApplicationCount > 0 && <p className="text-indigo-600">{d.ApplicationCount} application{d.ApplicationCount > 1 ? "s" : ""}</p>}
-                      </>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => { setDialogOpen(false); setDupSuggestions([]); setForm({ ...EMPTY_FORM }); openCustomer(d.Id); }}
-                      className="px-2 py-1 rounded-md text-xs font-medium border border-sky-400/60 text-sky-700 hover:bg-sky-100 dark:hover:bg-sky-900/20 transition-colors"
-                    >
-                      View Customer
-                    </button>
-                    <button
-                      onClick={() => setDupSuggestions((p) => p.filter((x) => x.Id !== d.Id))}
-                      className="text-muted-foreground hover:text-foreground transition-colors"
-                      title="Dismiss"
-                    >✕</button>
-                  </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow" style={{ padding: "16px 16px 18px" }}>
+              {stats.map((x) => (
+                <div key={x.label}>
+                  {x.go ? <button onClick={x.go} className="label link">{x.label}</button> : <p className="label">{x.label}</p>}
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
                 </div>
               ))}
             </div>
-          )}
-
-          <div className="flex justify-end gap-2 pt-2.5 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setDupSuggestions([]); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
-              Cancel
-            </button>
-            <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
-              {saving ? "Registering..." : "Register Customer"}
-            </button>
           </div>
 
-        </DialogContent>
-      </Dialog>
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setPage(1); } }}
+                placeholder="Search name, mobile, PAN, customer no…"
+                className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none"
+              />
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
+            </div>
+            {isError ? (
+              <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : (
+              <DataTable
+                serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
+                data={rows}
+                columns={columns}
+                searchable={false}
+                loading={isLoading}
+                onRowClick={(row) => openCustomer(row.original.Id)}
+                getRowId={(c: any) => String(c.Id)}
+                emptyMessage={anyFilter ? "No customers match these filters." : "No customers yet. Register one with New customer, or from a lead on Leads."}
+              />
+            )}
+          </div>
+        </div>
+      </SheetShell>
 
-      {editingId != null && editingCustomer && (
-        <EditCustomerDialog
-          customer={editingCustomer}
-          canDelete={canDelete}
-          startEditing={startEditing}
-          onClose={closeCustomer}
-          onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
-          onDeleted={() => { qc.invalidateQueries({ queryKey: ["crm-customers"] }); closeCustomer(); }}
-        />
+      {(newOpen || leadId) && canCreate && (
+        <NewCustomerDialog key={leadId ?? "new"} leadId={leadId} onClose={closeNew} onOpenCustomer={(id) => openCustomer(id)} />
+      )}
+      {openId != null && opened && (
+        <CustomerDialog key={`${opened.Id}-${startEditing}`} customer={opened} canEdit={canEdit} canDelete={canDelete} startEditing={startEditing} onClose={closeCustomer} />
       )}
       {importOpen && (
         <CrmCustomerImportDialog
           onClose={() => setImportOpen(false)}
-          onImported={() => {
-            qc.invalidateQueries({ queryKey: ["crm-customers"] });
-            refetch();
-          }}
+          onImported={() => ["crm-customers", "crm-leads-pool"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }))}
         />
       )}
-    </CrmShell>
     </>
   );
-};
-
-export default CrmCustomers;
+}
