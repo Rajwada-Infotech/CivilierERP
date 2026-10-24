@@ -2660,6 +2660,13 @@ router.post("/villas/:unitId/villa-type", requirePageRight("crm-auto-project-set
     if (!vt) return fail(400, "Select an active villa type");
     if (vt.ProjectId !== unit.ProjectId) return fail(400, "That villa type belongs to a different project");
     if (!vt.LayoutLabel) return fail(400, `${vt.Name} has no rooms yet — set them with Rooms in Villa types first`);
+    // Same booking/hold/application lock every other structural change in
+    // this file checks first (block delete, plot unconvert, …) — without
+    // it, a villa's type/layout/DPR plan could be swapped out from under
+    // an active sale with no error and no record that the sold layout
+    // changed.
+    const lock = await getUnitLockReason(tx, unitId);
+    if (lock) return fail(409, `${unit.UnitName} ${lock} — its type can't be changed now`);
     const work = (await q(`
       SELECT
         (SELECT COUNT(*) FROM dbo.DependencyActivityAssignment a
