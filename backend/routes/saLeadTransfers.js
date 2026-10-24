@@ -185,14 +185,25 @@ router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async
         .input("RequestId", sql.Int, id)
         .query("SELECT LeadId FROM dbo.SaLeadTransferRequestItem WHERE TransferRequestId = @RequestId");
 
-      // Reassign each lead: AssignedToUserId = ToTeamLeadId (TL re-distributes via Distribution module)
+      // Reassign each lead to the destination TL and clear the salesperson —
+      // the TL re-distributes via the Distribution module. AssignedToUserId
+      // doesn't exist anywhere else in the app (saLeads.js, saDashboard.js,
+      // and the scope-check helper saAccess.js all read AssignedTeamLeadId/
+      // AssignedSalespersonId) — writing it there made approval a no-op:
+      // the request flipped to Approved, but the lead never actually moved
+      // and stayed invisible to the new TL's scope query. Clearing
+      // AssignedSalespersonId also matters: saAccess.js's scope check gives
+      // the OLD salesperson access via that column regardless of
+      // AssignedTeamLeadId, so leaving it set would keep them seeing a lead
+      // that's supposed to be the new TL's to redistribute.
       for (const item of items.recordset) {
         await tx.request()
           .input("LeadId", sql.Int, item.LeadId)
           .input("ToTLId", sql.Int, tfReq.ToTeamLeadId)
           .query(`
             UPDATE dbo.SaLead SET
-              AssignedToUserId = @ToTLId,
+              AssignedTeamLeadId   = @ToTLId,
+              AssignedSalespersonId = NULL,
               UpdatedAt        = GETDATE()
             WHERE Id = @LeadId
           `);

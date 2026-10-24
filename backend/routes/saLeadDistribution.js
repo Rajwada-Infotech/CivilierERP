@@ -81,9 +81,23 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
     const tx = pool.transaction();
     await tx.begin();
     try {
+      const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
       for (const asgn of assignments) {
         const { userId, leadIdList } = asgn;
         for (const lid of leadIdList) {
+          // A double-submit (double-click, retry) — or a leadId appearing in
+          // two different assignment buckets in the same payload — could
+          // insert a second SaLeadDistribution history row for the same
+          // lead/level. The history is what the round-robin deficit count
+          // (saDistributionEngine.js) treats as ground truth, so a duplicate
+          // row permanently skews fairness even though only the last UPDATE
+          // actually sticks. Lock the lead row and skip the whole write
+          // (history + assignment) when it's already assigned to this exact
+          // target at this level.
+          const cur = await tx.request().input("lid", sql.Int, lid)
+            .query(`SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid`);
+          if (!cur.recordset.length || cur.recordset[0].assignedTo === userId) continue;
+
           await tx.request()
             .input("lid", sql.Int, lid)
             .input("fuid", sql.Int, distributedBy || null)
@@ -97,17 +111,10 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
               VALUES (@lid, @fuid, @tuid, @lvl, @mth, SYSDATETIME(), @dby)
             `);
 
-          if (level === 1) {
-            await tx.request()
-              .input("lid", sql.Int, lid)
-              .input("tuid", sql.Int, userId)
-              .query("UPDATE dbo.SaLead SET AssignedTeamLeadId = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid");
-          } else {
-            await tx.request()
-              .input("lid", sql.Int, lid)
-              .input("tuid", sql.Int, userId)
-              .query("UPDATE dbo.SaLead SET AssignedSalespersonId = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid");
-          }
+          await tx.request()
+            .input("lid", sql.Int, lid)
+            .input("tuid", sql.Int, userId)
+            .query(`UPDATE dbo.SaLead SET ${assignedCol} = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
         }
       }
       await tx.commit();

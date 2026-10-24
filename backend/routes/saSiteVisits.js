@@ -45,6 +45,24 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
     const b = req.body;
     if (!b.LeadId) return res.status(400).json({ error: "LeadId required" });
 
+    // No conflict check existed at all — two different leads could be
+    // scheduled to the same executive at the same date+time with nothing
+    // to catch it.
+    if (b.ExecutiveId && b.PreferredDate && b.PreferredTime) {
+      const clash = await pool.request()
+        .input("eid", sql.Int, parseInt(b.ExecutiveId))
+        .input("pd", sql.Date, b.PreferredDate)
+        .input("pt", sql.NVarChar(20), b.PreferredTime)
+        .query(`
+          SELECT TOP 1 Id FROM dbo.SaSiteVisit
+          WHERE ExecutiveId = @eid AND PreferredDate = @pd AND PreferredTime = @pt
+            AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Completed')
+        `);
+      if (clash.recordset.length) {
+        return res.status(409).json({ error: "This executive already has a site visit booked for that date and time." });
+      }
+    }
+
     await pool.request()
       .input("lid", sql.Int, parseInt(b.LeadId))
       .input("pn", sql.NVarChar(200), b.ProjectName || null)
@@ -81,6 +99,17 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
     const b = req.body;
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
+
+    // GET / scopes by applyLeadScope so a sales_person/team_lead only ever
+    // sees their own leads' visits — PUT/DELETE never checked that, letting
+    // anyone with the edit/delete page right mark or remove another
+    // salesperson's visit (including triggering the Completed auto-promote
+    // below) by id alone.
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("id", sql.Int, id)
+      .query(`SELECT 1 AS ok FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId WHERE v.Id = @id AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
 
     await pool.request()
       .input("id", sql.Int, id)
@@ -133,8 +162,14 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
 router.delete("/:id", requirePageRight("sa-site-visits", "delete"), async (req, res) => {
   try {
     const pool = getPool();
+    const id = parseInt(req.params.id);
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("id", sql.Int, id)
+      .query(`SELECT 1 AS ok FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId WHERE v.Id = @id AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
     await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, id)
       .query("UPDATE dbo.SaSiteVisit SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {
