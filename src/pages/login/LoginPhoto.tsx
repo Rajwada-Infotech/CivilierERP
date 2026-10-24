@@ -107,7 +107,7 @@ export function LoginPhoto({ stats }: { stats: PublicStats | null }) {
         {figures.length > 0 && (
           <motion.div
             className="mt-5 inline-flex flex-wrap justify-end gap-x-6 gap-y-3 px-5 py-3.5 rounded-2xl"
-            style={{ background: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.8)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
+            style={{ background: "rgba(248,244,236,0.6)", border: "1px solid rgba(252,250,245,0.85)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}
             variants={cascade(0.15, 0.1)}
             initial="hidden"
             animate="show"

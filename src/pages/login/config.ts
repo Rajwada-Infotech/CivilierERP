@@ -15,16 +15,18 @@ export const LOGIN_PHOTO = "/login-photo.webp";
 
 export const LOGIN_CSS = `
 .login-sheet {
-  --page: #e9ecea;
-  --frame: #ffffff;
+  --page: #e8e3d9;
+  --frame: #f8f4ec; /* bone / cream white */
+  --frame-hi: #fcfaf5;
   --ink: #101312;
   --ink-2: #4a4f4c;
-  --muted: #8b918d;
-  --field: #f2f4f3;
-  --line: #dfe3e0;
+  --muted: #8f8c84;
+  --field: #efe9de;
+  --line: #e2dacb;
   --brand: #1c4d35;
   --brand-hover: #153c29;
   --brand-ring: rgba(28, 77, 53, 0.18);
+  --green: #2f7a4f; /* the tick on "Welcome back" */
   --notch: 34px;
   color: var(--ink);
   font-family: "DM Sans", "Noto Sans", sans-serif;
@@ -34,7 +36,7 @@ export const LOGIN_CSS = `
    card over the full-screen backdrop (LoginBackdrop). */
 .login-sheet .ls-form-side {
   width: 100%; max-width: 460px; margin-inline: auto; padding: 4px 4px 8px;
-  background: rgba(255, 255, 255, 0.66); border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 26px;
+  background: rgba(248, 244, 236, 0.7); border: 1px solid rgba(252, 250, 245, 0.85); border-radius: 26px;
   backdrop-filter: blur(9px) saturate(1.25); -webkit-backdrop-filter: blur(9px) saturate(1.25);
   box-shadow: 0 1px 2px rgba(16,19,18,0.05), 0 30px 60px -28px rgba(16,19,18,0.35);
 }
@@ -50,10 +52,13 @@ export const LOGIN_CSS = `
   }
 }
 /* The fields read as filled on the frosted card too */
-@media (max-width: 1023px) { .login-sheet .ls-field { background: rgba(242, 244, 243, 0.9); } }
+@media (max-width: 1023px) { .login-sheet .ls-field { background: rgba(239, 233, 222, 0.9); } }
 
 /* Decoration stays grey under the black-and-white theme like everything but the logo */
 [data-theme="bw"] .login-sheet .ls-bits { filter: grayscale(1); }
+
+/* The "Welcome back" card shown after signing in */
+.login-sheet .ls-card { background: var(--frame-hi); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 24px 50px -24px rgba(40,32,18,0.3); }
 
 /* Filled field with its label inside. Clicking into one gives it a little squish and makes its label hop. */
 @keyframes ls-squish { 0% { transform: scale(1); } 35% { transform: scale(1.025, 0.96); } 65% { transform: scale(0.99, 1.02); } 100% { transform: scale(1); } }
@@ -65,11 +70,11 @@ export const LOGIN_CSS = `
   position: relative; display: block; background: var(--field); border: 1px solid transparent; border-radius: 10px;
   padding: 9px 14px 8px; transition: border-color .15s, box-shadow .15s, background-color .15s;
 }
-.login-sheet .ls-field:hover { background: #eceeed; }
-.login-sheet .ls-field:focus-within { background: #fff; border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-ring); }
+.login-sheet .ls-field:hover { background: #ebe4d8; }
+.login-sheet .ls-field:focus-within { background: var(--frame-hi); border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-ring); }
 .login-sheet .ls-field > span { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.2; }
 .login-sheet .ls-field input { width: 100%; background: transparent; border: 0; outline: none; font-size: 15px; color: var(--ink); padding: 2px 0 0; }
-.login-sheet .ls-field input::placeholder { color: #b3b8b5; }
+.login-sheet .ls-field input::placeholder { color: #b8b2a6; }
 
 .login-sheet .ls-btn {
   width: 100%; height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -82,10 +87,10 @@ export const LOGIN_CSS = `
 
 .login-sheet .ls-outline {
   width: 100%; height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; font-weight: 500;
+  background: var(--frame-hi); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; font-weight: 500;
   transition: border-color .15s, background-color .15s;
 }
-.login-sheet .ls-outline:hover { border-color: #b9c0bc; background: #fafbfa; }
+.login-sheet .ls-outline:hover { border-color: #c9bfae; background: #f3eee4; }
 .login-sheet .ls-link { color: var(--brand); font-weight: 600; text-underline-offset: 3px; }
 .login-sheet .ls-link:hover { text-decoration: underline; }
 .login-sheet .ls-eye { color: var(--muted); transition: color .15s; }
