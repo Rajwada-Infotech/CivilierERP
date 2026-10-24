@@ -4,7 +4,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { convertLead } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
@@ -113,8 +113,9 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
   }
 });
 
-// GET /users — dropdown for assigning leads (SA roles only)
-router.get("/users", requirePageRight("sa-leads", "view"), async (req, res) => {
+// GET /users — dropdown for assigning leads (SA roles only). CRM Bookings' "Assigned To" reads it too, so a CRM user
+// without Sales Automation's right still gets the list.
+router.get("/users", requireAnyPageRight(["sa-leads", "crm-bookings"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const r = await pool.request().query(`

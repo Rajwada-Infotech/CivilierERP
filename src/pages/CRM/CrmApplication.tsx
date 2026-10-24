@@ -1498,7 +1498,7 @@ const CrmApplication: React.FC = () => {
                     permanently disabled — a real Booking either exists or
                     is expected the moment it's Approved, so the unit pick
                     can't move anymore. */}
-                <div className=" border border-foreground/30 bg-card0/5 p-4 space-y-3">
+                <div className=" border border-foreground/30 bg-card p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
                     {applicationId != null && (
@@ -1682,8 +1682,8 @@ const CrmApplication: React.FC = () => {
                       reading as dead space and tells staff what will
                       appear here. */}
                   {!hasInventorySelection && (
-                    <div className=" border border-dashed border-foreground/30 bg-card0/5 p-5 text-center space-y-1.5">
-                      <div className="mx-auto w-9 h-9 bg-card0/10 flex items-center justify-center">
+                    <div className=" border border-dashed border-foreground/30 bg-card p-5 text-center space-y-1.5">
+                      <div className="mx-auto w-9 h-9 bg-foreground/5 flex items-center justify-center">
                         <Building2 size={16} className="text-foreground" />
                       </div>
                       <p className="text-xs font-heading font-semibold text-foreground">Pick {isPlottedProject ? "plots" : "a unit"} to continue</p>
@@ -1715,7 +1715,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                   )}
                   {hasInventorySelection && form.PreferredPlotIds.length === 0 && (
-                    <div className=" border border-foreground/30 bg-card0/5 p-4 space-y-2">
+                    <div className=" border border-foreground/30 bg-card p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
                       <select value={form.PaymentPlanId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
@@ -1741,7 +1741,7 @@ const CrmApplication: React.FC = () => {
                           Booking. Purely a preview here — nothing is saved
                           until the actual Booking is created. */}
                       {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                        <div className=" border border-foreground/30 bg-card0/5 px-3 py-2 space-y-1">
+                        <div className=" border border-foreground/30 bg-card px-3 py-2 space-y-1">
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>Booking</span>
                             <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
@@ -1778,7 +1778,7 @@ const CrmApplication: React.FC = () => {
                       (maybeAutoCreateBrokerage), at which point it's split
                       into one tranche per payment milestone, each unlocking
                       as that milestone is paid — not a manual toggle here. */}
-                  <div className=" border border-foreground/30 bg-card0/5 p-4 space-y-3">
+                  <div className=" border border-foreground/30 bg-card p-4 space-y-3">
                     <label className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground">
                       <input type="checkbox" checked={form.ViaBroker}
                         onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
