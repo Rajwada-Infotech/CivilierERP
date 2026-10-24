@@ -26,6 +26,30 @@ import {
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 
+// ─── Responsive columns ────────────────────────────────────────────────────────
+// A column can hide itself below a breakpoint through its meta className ("hidden lg:table-cell"). The table's
+// minimum width must leave such a column out while it's hidden; otherwise a narrow screen gets a table as wide as
+// every column put together, with the few shown ones stretched across it and the rest blank.
+const BREAKPOINTS: Record<string, number> = { sm: 640, md: 768, lg: 1024, xl: 1280, "2xl": 1536 };
+
+/** Whether a column with this meta className is showing at a viewport of `width` px. */
+export function columnShownAt(className: string | undefined, width: number): boolean {
+  const cls = (className ?? "").split(/\s+/);
+  if (!cls.includes("hidden")) return true;
+  const at = cls.map((c) => /^(sm|md|lg|xl|2xl):(table-cell|block|flex|inline|inline-block|grid)$/.exec(c)?.[1]).find(Boolean);
+  return at ? width >= BREAKPOINTS[at] : false;
+}
+
+function useViewportWidth() {
+  const [width, setWidth] = useState(() => (typeof window === "undefined" ? 1280 : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
 // ─── Re-export ColumnDef so pages only import from here ──────────────────────
 export type { ColumnDef };
 export type { ExportColumn };
@@ -119,6 +143,7 @@ export function DataTable<TData extends RowData>({
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
+  const viewportWidth = useViewportWidth();
   // Horizontal-scroll edge fades: shown only while there's more table to
   // scroll to on that side.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -293,7 +318,10 @@ export function DataTable<TData extends RowData>({
           // width exceed the container so the wrapper's overflow-x-auto can
           // actually kick in; min-width:100% keeps narrow tables filling
           // the container exactly as before.
-          const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
+          // Only the columns showing at this width count (see columnShownAt).
+          const totalSize = allCols
+            .filter((c) => columnShownAt((c.columnDef.meta as { className?: string } | undefined)?.className, viewportWidth))
+            .reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
           // Column sizes are authored in px but applied in rem (size / 16) so
           // they scale together with the rem-based text (e.g. the laptop
           // 110% root size) instead of the text outgrowing its column and
