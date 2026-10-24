@@ -54,7 +54,8 @@ export function GRNItemsSummary({
                           </span>
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-xs" style={{ minWidth: 720 }}>
+                          {/* 720px only once every column shows (md); narrower, the hidden columns would leave it wide and empty */}
+                          <table className="w-full text-xs md:min-w-[720px]">
                             <thead>
                               <tr className="bg-muted/20 border-b border-foreground/40">
                                 <th className="px-3 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[0.625rem]">
