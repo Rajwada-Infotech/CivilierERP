@@ -58,9 +58,7 @@ const tenantUpdateSchema = z.object({
 // PATCH /:id/status — suspend / activate
 const tenantPatchStatusSchema = z.object({
   status: z.enum(VALID_STATUSES, {
-    errorMap: () => ({
-      message: `status must be one of: ${VALID_STATUSES.join(", ")}`,
-    }),
+    error: `status must be one of: ${VALID_STATUSES.join(", ")}`,
   }),
 });
 
