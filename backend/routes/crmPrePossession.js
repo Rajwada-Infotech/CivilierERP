@@ -285,6 +285,8 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking comes in the body, which the path guards don't see.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

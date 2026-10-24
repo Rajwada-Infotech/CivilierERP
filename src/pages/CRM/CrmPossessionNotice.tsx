@@ -1,71 +1,75 @@
+// CRM Possession Notice: the formal offer of possession to a buyer. Draft, then sent, then the customer acknowledges
+// (or disputes); an acknowledged notice lets Handover be scheduled. Issued once the Pre-Possession check is Ready and
+// the OC / CC received.
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import {
-  Plus, AlertTriangle, RotateCcw, UserCircle2,
-  CheckCircle2, Send, ShieldAlert, Loader2,
-  ChevronRight, FileText, Pencil, Trash2,
-  CalendarDays, Clock, ArrowRight, StickyNote,
-} from "lucide-react";
-import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { promptNextStep } from "@/lib/workflowNav";
-import { usePageRights } from "@/hooks/usePageRights";
+import {
+  AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, FileText, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Send,
+  ShieldAlert, StickyNote, Trash2, UserCircle2,
+} from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { cn } from "@/lib/utils";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableSelect } from "@/components/SearchableSelect";
+import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { CrmCompanyProjectBlockFilter } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmDataTable, CrmRowMenu, type CrmColumn, type RowMenuItem } from "@/components/crm/CrmDataTable";
 import { CrmListToolbar, type CrmStatusTab } from "@/components/crm/CrmListToolbar";
-import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
-import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { useCrmListState, useSticky, listParams, type CrmListQuery } from "@/hooks/useCrmListState";
+import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { promptNextStep } from "@/lib/workflowNav";
+import { translateError } from "@/lib/translateError";
+import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
+const MODE_LABEL: Record<string, string> = { Email: "Email", Post: "Post", Courier: "Courier", InPerson: "In person" };
 const EMPTY_EDIT = { OfferedDate: "", ResponseDeadline: "", DeliveryMode: "", Notes: "" };
 
-const todayISO    = () => new Date().toISOString().slice(0, 10);
-const deadlineISO = () => { const d = new Date(); d.setDate(d.getDate() + 15); return d.toISOString().slice(0, 10); };
-const EMPTY_FORM  = { BookingId: "", OfferedDate: todayISO(), ResponseDeadline: deadlineISO(), DeliveryMode: "Courier", Notes: "" };
+// Dates where the user is (toISOString gives the UTC date, a day behind before 05:30 IST), worked out when a notice
+// is opened rather than once when the page first loaded.
+const localDay = (offsetDays = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const RESPONSE_DAYS = 15;
+const newForm = (bookingId = "") => ({ BookingId: bookingId, OfferedDate: localDay(), ResponseDeadline: localDay(RESPONSE_DAYS), DeliveryMode: "Courier", Notes: "" });
+
+const INP = "w-full h-9 border border-foreground/40 focus:border-foreground bg-card px-2.5 text-sm text-foreground outline-none";
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+// A sent notice's deadline: overdue in red, a week or less left noted.
 function deadlineInfo(dl?: string | null, status?: string) {
   if (!dl || status !== "Sent") return null;
   const diff = Math.ceil((new Date(dl).getTime() - Date.now()) / 86_400_000);
-  if (diff < 0)  return { label: `Overdue by ${Math.abs(diff)}d`, cls: "text-red-600 bg-red-50 border-red-200" };
-  if (diff <= 3) return { label: `${diff}d left`, cls: "text-sky-600 bg-sky-50 border-sky-200" };
-  if (diff <= 7) return { label: `${diff}d left`, cls: "text-sky-600 bg-sky-50 border-sky-200" };
+  if (diff < 0) return { label: `${Math.abs(diff)}d overdue`, late: true };
+  if (diff <= 7) return { label: `${diff}d left`, late: false };
   return null;
 }
 
-// ── Status config ─────────────────────────────────────────────────────────────
-const STATUS_CONFIG: Record<string, { label: string; badgeCls: string; accent: string; Icon: React.ElementType }> = {
-  Draft:        { label: "Draft",        badgeCls: "text-slate-600 bg-slate-100 border-slate-300", accent: "border-l-slate-300", Icon: FileText      },
-  Sent:         { label: "Sent",         badgeCls: "text-blue-600 bg-blue-50 border-blue-200",     accent: "border-l-blue-400",  Icon: Send          },
-  Acknowledged: { label: "Acknowledged", badgeCls: "text-green-700 bg-green-50 border-green-200",  accent: "border-l-green-500", Icon: CheckCircle2  },
-  Disputed:     { label: "Disputed",     badgeCls: "text-red-600 bg-red-50 border-red-200",        accent: "border-l-red-500",   Icon: AlertTriangle },
+const STATUS_CONFIG: Record<string, { label: string; tone: "done" | "waiting" | "stopped"; accent: string }> = {
+  Draft:        { label: "Draft",        tone: "waiting", accent: "border-l-foreground/20" },
+  Sent:         { label: "Sent",         tone: "waiting", accent: "border-l-foreground/50" },
+  Acknowledged: { label: "Acknowledged", tone: "done",    accent: "border-l-foreground" },
+  Disputed:     { label: "Disputed",     tone: "stopped", accent: "border-l-destructive" },
 };
 
-const moneyCompact = new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 });
-
-// ── Fetchers ──────────────────────────────────────────────────────────────────
-// Server-side paging: rows for one page + per-status counts (counts ignore the
-// status filter so the tabs stay stable while you switch between them).
 interface NoticePage { rows: any[]; total: number; counts: Record<string, number> }
 async function fetchPage(q: CrmListQuery): Promise<NoticePage> {
   const r = await fetchWithAuth(`${API}?${listParams(q)}`);
-  if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `HTTP ${r.status}`); }
+  if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `Could not load the notices (${r.status}).`); }
   const d = await r.json();
   return { rows: d.rows ?? [], total: d.total ?? 0, counts: d.counts ?? {} };
 }
@@ -73,36 +77,44 @@ async function fetchEligible(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-// ── Delivery mode ─────────────────────────────────────────────────────────────
-const MODE_ICON: Record<string, string> = { Email: "✉", Post: "📮", Courier: "📦", InPerson: "🤝" };
-function ModeBadge({ mode }: { mode?: string | null }) {
-  if (!mode) return <span className="text-xs text-muted-foreground">—</span>;
-  return <span className="text-xs text-muted-foreground whitespace-nowrap">{MODE_ICON[mode] ?? "📄"} {mode}</span>;
-}
+// The response deadline can't come before the offer.
+const checkDates = (offered: string, deadline: string) => (offered && deadline && deadline < offered ? "The response deadline can't be before the offered date." : null);
+
+const ModePicker: React.FC<{ value: string; onChange: (m: string) => void }> = ({ value, onChange }) => (
+  <div className="grid grid-cols-2 sm:grid-cols-4">
+    {DELIVERY_MODES.map((m) => (
+      <button key={m} type="button" onClick={() => onChange(m)} className={`${value === m ? KEY_INK : KEY_LINE} h-9`}>{MODE_LABEL[m]}</button>
+    ))}
+  </div>
+);
+
+const Head: React.FC<{ icon: React.ReactNode; title: string; destructive?: boolean }> = ({ icon, title, destructive }) => (
+  <DialogHeader>
+    <DialogTitle className={`font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2 ${destructive ? "text-destructive" : ""}`}>{icon} {title}</DialogTitle>
+  </DialogHeader>
+);
+const Foot: React.FC<{ children: React.ReactNode }> = ({ children }) => <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>{children}</div>;
+const Field: React.FC<{ label: string; children: React.ReactNode; hint?: React.ReactNode }> = ({ label, children, hint }) => (
+  <label className="block space-y-1"><span className={`block ${LBL}`}>{label}</span>{children}{hint && <span className="block text-[0.6875rem] text-muted-foreground">{hint}</span>}</label>
+);
 
 // ── New notice dialog ─────────────────────────────────────────────────────────
-interface CreateDialogProps { onClose: () => void; onCreated: () => void; navigate: ReturnType<typeof useNavigate>; prefillBookingId?: string; }
-function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: CreateDialogProps) {
-  const [form, setForm] = useState({ ...EMPTY_FORM, BookingId: prefillBookingId ?? "" });
+function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: {
+  onClose: () => void; onCreated: () => void; navigate: ReturnType<typeof useNavigate>; prefillBookingId?: string;
+}) {
+  const [form, setForm] = useState(() => newForm(prefillBookingId ?? ""));
   const [saving, setSaving] = useState(false);
-
-  const { data: eligible = [], isFetching } = useQuery({
-    queryKey: ["crm-possession-notice-eligible"],
-    queryFn: fetchEligible,
-    staleTime: 0,
-  });
+  const { data: eligible = [], isFetching } = useQuery({ queryKey: ["crm-possession-notice-eligible"], queryFn: fetchEligible, staleTime: 0 });
 
   const handleCreate = async () => {
-    if (!form.BookingId) { toast.error("Select a booking"); return; }
+    if (!form.BookingId) return void toast.error("Select a booking.");
+    const problem = checkDates(form.OfferedDate, form.ResponseDeadline);
+    if (problem) return void toast.error(problem);
     setSaving(true);
     try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, BookingId: parseInt(form.BookingId) }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, BookingId: parseInt(form.BookingId) }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not create the notice.");
       toast.success(`Notice ${data.NoticeNo} created`);
       onCreated();
       onClose();
@@ -115,129 +127,50 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent accent="crm" className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="font-heading text-base flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
-              <FileText size={14} className="text-primary" />
+      <DialogContent className="max-w-lg p-5 gap-4 rounded-none" style={{ border: RULE }}>
+        <Head icon={<FileText size={14} />} title="New possession notice" />
+        <p className="text-xs text-muted-foreground -mt-2">A formal offer of possession; the customer acknowledges it by the response deadline.</p>
+        {isFetching ? (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 size={12} className="animate-spin" /> Loading eligible bookings…</p>
+        ) : noEligible ? (
+          <div className="text-xs px-3 py-2.5 space-y-2" style={{ border: RULE_SOFT }}>
+            <p className="font-semibold flex items-center gap-1.5"><ShieldAlert size={13} /> No booking can be sent a notice yet</p>
+            <ul className="space-y-1 text-muted-foreground list-disc pl-4">
+              <li><strong className="text-foreground">Pre-Possession Ready:</strong> all four checks passed.</li>
+              <li><strong className="text-foreground">OC / CC received</strong> for the project or block.</li>
+            </ul>
+            <p className="text-muted-foreground">A notice may go out with dues outstanding (it carries a dues statement); every due must be cleared before Handover.</p>
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => { onClose(); navigate("/crm/pre-possession"); }} className={`${KEY_LINE} h-8 px-3`}>Pre-Possession <ChevronRight size={11} /></button>
+              <button onClick={() => { onClose(); navigate("/crm/oc-cc"); }} className={`${KEY_LINE} h-8 px-3`}>OC / CC <ChevronRight size={11} /></button>
             </div>
-            New Possession Notice
-          </DialogTitle>
-          <p className="text-xs text-muted-foreground mt-0.5 ml-9">Creates a formal offer of possession — customer must acknowledge within the response deadline</p>
-        </DialogHeader>
-
-        <div className="space-y-4 pt-1">
-          {/* Booking */}
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Booking *</label>
-            {isFetching ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-                <Loader2 size={12} className="animate-spin" /> Loading eligible bookings…
-              </div>
-            ) : noEligible ? (
-              <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2.5">
-                <p className="text-sm font-semibold text-sky-800 flex items-center gap-2">
-                  <ShieldAlert size={15} /> No eligible bookings
-                </p>
-                <p className="text-xs text-sky-700 leading-relaxed">Both gates must be cleared before a notice can be issued:</p>
-                <ul className="space-y-1.5 text-xs text-sky-700">
-                  <li className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-sky-200 text-sky-800 font-bold text-[0.625rem] flex items-center justify-center shrink-0 mt-0.5">1</span>
-                    <span><strong>Pre-Possession Ready</strong> — all 4 checks must pass (Dues, Documentation, Quality, Utility)</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-sky-200 text-sky-800 font-bold text-[0.625rem] flex items-center justify-center shrink-0 mt-0.5">2</span>
-                    <span><strong>OC/CC Received</strong> — project Occupancy or Completion Certificate must be on file</span>
-                  </li>
-                </ul>
-                <p className="text-[0.625rem] text-sky-600 pt-1 leading-relaxed">
-                  Note: the notice may be issued even if dues are outstanding — it serves as a formal offer with a dues statement attached. All dues must be cleared before the actual <strong>Handover</strong>.
-                </p>
-                <div className="flex gap-4 pt-1">
-                  <button onClick={() => { onClose(); navigate("/crm/pre-possession"); }}
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold">
-                    Pre-Possession Check <ChevronRight size={11} />
-                  </button>
-                  <button onClick={() => { onClose(); navigate("/crm/oc-cc"); }}
-                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold">
-                    OC / CC <ChevronRight size={11} />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
-                <option value="">Select booking…</option>
-                {(eligible as any[]).map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>
-                    {b.BookingNo} — <ApplicantNames name={b.ApplicantName} bookingId={b.BookingId} applicationId={b.ApplicationId} /> ({b.UnitNo})
-                  </option>
-                ))}
-              </SearchableNativeSelect>
-            )}
           </div>
-
-          {!noEligible && form.BookingId && (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
-                    <CalendarDays size={10} className="inline mr-1" />Offered Date
-                  </label>
-                  <DateInput value={form.OfferedDate}
-                    onChange={(e) => setForm((f) => ({ ...f, OfferedDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
+        ) : (
+          <>
+            {/* Plain text options: a component inside an option rendered no name. */}
+            <Field label="Booking *">
+              <SearchableSelect value={form.BookingId} onChange={(v) => setForm((f) => ({ ...f, BookingId: v }))} placeholder="Select booking"
+                searchPlaceholder="Search booking, customer or unit…"
+                options={(eligible as any[]).map((b: any) => ({ value: String(b.Id), label: [b.BookingNo, b.ApplicantName, b.UnitNo].filter(Boolean).join(" · ") }))} />
+            </Field>
+            {form.BookingId && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Offered on"><DateInput value={form.OfferedDate} onChange={(e) => setForm((f) => ({ ...f, OfferedDate: e.target.value }))} className={INP} /></Field>
+                  <Field label="Respond by"><DateInput value={form.ResponseDeadline} onChange={(e) => setForm((f) => ({ ...f, ResponseDeadline: e.target.value }))} className={INP} /></Field>
                 </div>
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
-                    <Clock size={10} className="inline mr-1" />Response Deadline
-                  </label>
-                  <DateInput value={form.ResponseDeadline}
-                    onChange={(e) => setForm((f) => ({ ...f, ResponseDeadline: e.target.value }))}
-                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Delivery Mode</label>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                  {DELIVERY_MODES.map((m) => (
-                    <button key={m} type="button" onClick={() => setForm((f) => ({ ...f, DeliveryMode: m }))}
-                      className={cn(
-                        "text-xs font-medium py-2 rounded-lg border transition-colors text-center",
-                        form.DeliveryMode === m
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border hover:bg-muted text-muted-foreground",
-                      )}>
-                      {MODE_ICON[m]} {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Notes (optional)</label>
-                <textarea value={form.Notes} rows={2}
-                  onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                  placeholder="Any remarks about this notice…"
-                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none" />
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
-          <button onClick={onClose}
-            className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">
-            Cancel
-          </button>
-          {!noEligible && (
-            <button onClick={handleCreate} disabled={saving || !form.BookingId}
-              className="px-5 py-2 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40">
-              {saving ? "Creating…" : "Create Notice"}
-            </button>
-          )}
-        </div>
+                <Field label="Delivery"><ModePicker value={form.DeliveryMode} onChange={(m) => setForm((f) => ({ ...f, DeliveryMode: m }))} /></Field>
+                <Field label="Notes">
+                  <textarea value={form.Notes} rows={2} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} placeholder="Remarks about this notice" className={`${INP} h-auto py-2 resize-none`} />
+                </Field>
+              </>
+            )}
+          </>
+        )}
+        <Foot>
+          <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+          {!noEligible && <button onClick={handleCreate} disabled={saving || !form.BookingId} className={`${KEY_INK} h-9 px-4`}>{saving ? "Creating…" : "Create notice"}</button>}
+        </Foot>
       </DialogContent>
     </Dialog>
   );
@@ -248,28 +181,32 @@ const CrmPossessionNotice: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
-  usePageRights("crm-possession-notice");
+  // New notice needs the create right; every action on a notice the edit right (the server checks both; the page
+  // offered them to anyone).
+  const { canCreate, canEdit } = usePageRights("crm-possession-notice");
 
   const prefillBookingId = sp.get("bookingId") ?? undefined;
-  const [createOpen,           setCreateOpen]           = useState(() => sp.get("open") === "1");
-  const [editTarget,           setEditTarget]           = useState<any | null>(null);
-  const [editForm,             setEditForm]             = useState({ ...EMPTY_EDIT });
-  const [editSaving,           setEditSaving]           = useState(false);
-  const [deleteTarget,         setDeleteTarget]         = useState<any | null>(null);
-  const [deleteSaving,         setDeleteSaving]         = useState(false);
-  const [sentTarget,           setSentTarget]           = useState<any | null>(null);
-  const [sentMode,             setSentMode]             = useState("");
-  const [sentSaving,           setSentSaving]           = useState(false);
-  const [disputeDialog,        setDisputeDialog]        = useState<number | null>(null);
-  const [disputeReason,        setDisputeReason]        = useState("");
-  const [retractDialog,        setRetractDialog]        = useState<number | null>(null);
-  const [retractReason,        setRetractReason]        = useState("");
-  const [proxyAckTarget,       setProxyAckTarget]       = useState<number | null>(null);
-  const [proxyDisputeTarget,   setProxyDisputeTarget]   = useState<number | null>(null);
-  const [proxySaving,          setProxySaving]          = useState(false);
+  const [createOpen, setCreateOpen] = useState(() => sp.get("open") === "1");
+  const [editTarget, setEditTarget] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ ...EMPTY_EDIT });
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [sentTarget, setSentTarget] = useState<any | null>(null);
+  const [sentMode, setSentMode] = useState("");
+  const [sentSaving, setSentSaving] = useState(false);
+  const [ackTarget, setAckTarget] = useState<any | null>(null);
+  const [ackSaving, setAckSaving] = useState(false);
+  const [disputeDialog, setDisputeDialog] = useState<number | null>(null);
+  const [disputeReason, setDisputeReason] = useState("");
+  const [retractDialog, setRetractDialog] = useState<number | null>(null);
+  const [retractReason, setRetractReason] = useState("");
+  const [proxyAckTarget, setProxyAckTarget] = useState<number | null>(null);
+  const [proxyDisputeTarget, setProxyDisputeTarget] = useState<number | null>(null);
+  const [proxySaving, setProxySaving] = useState(false);
 
   const list = useCrmListState({ pageSize: 25, defaultSort: { key: "CreatedAt", dir: "desc" } });
-  const { data, isLoading, isError, error, dataUpdatedAt, isFetching, refetch } =
+  const { data, isLoading, isError, error, isFetching, refetch } =
     useQuery({ queryKey: ["crm-possession-notice", list.query], queryFn: () => fetchPage(list.query), staleTime: 30_000 });
   const pageData = useSticky(data);
   const rows = pageData?.rows ?? [];
@@ -277,40 +214,37 @@ const CrmPossessionNotice: React.FC = () => {
   const counts = pageData?.counts ?? {};
   const showOnboarding = !isLoading && !isError && (counts.All ?? 0) === 0 && !list.hasFilters;
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
-    qc.invalidateQueries({ queryKey: ["crm-possession-notice-eligible"] });
-    qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
-    qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
+  const invalidate = () => ["crm-possession-notice", "crm-possession-notice-eligible", "crm-booking-lifecycle", "crm-dashboard", "crm-legal-milestones", "crm-handover"]
+    .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+
+  // One call shape for every action: the server's message on refusal.
+  const act = async (url: string, method: string, body?: unknown) => {
+    const res = await fetchWithAuth(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || "The notice could not be changed.");
+    return d;
   };
 
   const openEdit = (n: any) => {
     setEditTarget(n);
     setEditForm({
-      OfferedDate:      n.OfferedDate      ? String(n.OfferedDate).slice(0, 10) : "",
+      OfferedDate: n.OfferedDate ? String(n.OfferedDate).slice(0, 10) : "",
       ResponseDeadline: n.ResponseDeadline ? String(n.ResponseDeadline).slice(0, 10) : "",
-      DeliveryMode:     n.DeliveryMode     || "",
-      Notes:            n.Notes            || "",
+      DeliveryMode: n.DeliveryMode || "", Notes: n.Notes || "",
     });
   };
 
   const handleEdit = async () => {
     if (!editTarget) return;
+    const problem = checkDates(editForm.OfferedDate, editForm.ResponseDeadline);
+    if (problem) return void toast.error(problem);
     setEditSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${editTarget.Id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          OfferedDate:      editForm.OfferedDate      || undefined,
-          ResponseDeadline: editForm.ResponseDeadline || undefined,
-          DeliveryMode:     editForm.DeliveryMode     || undefined,
-          Notes:            editForm.Notes,
-        }),
+      await act(`${API}/${editTarget.Id}`, "PUT", {
+        OfferedDate: editForm.OfferedDate || undefined, ResponseDeadline: editForm.ResponseDeadline || undefined,
+        DeliveryMode: editForm.DeliveryMode || undefined, Notes: editForm.Notes,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Notice updated");
+      toast.success("Notice saved");
       setEditTarget(null);
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
@@ -321,9 +255,7 @@ const CrmPossessionNotice: React.FC = () => {
     if (!deleteTarget) return;
     setDeleteSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${deleteTarget.Id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await act(`${API}/${deleteTarget.Id}`, "DELETE");
       toast.success(`Notice ${deleteTarget.NoticeNo} deleted`);
       setDeleteTarget(null);
       invalidate();
@@ -334,146 +266,95 @@ const CrmPossessionNotice: React.FC = () => {
   const handleMarkSent = async () => {
     if (!sentTarget) return;
     const mode = sentMode || sentTarget.DeliveryMode;
-    if (!mode) { toast.error("Select a delivery mode before marking sent"); return; }
+    if (!mode) return void toast.error("Pick how it was sent.");
     setSentSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${sentTarget.Id}/mark-sent`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ DeliveryMode: mode }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Notice marked Sent");
+      await act(`${API}/${sentTarget.Id}/mark-sent`, "PUT", { DeliveryMode: mode });
+      toast.success("Notice marked sent");
       setSentTarget(null); setSentMode("");
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSentSaving(false); }
   };
 
-  const handleMarkAcknowledged = async (id: number) => {
+  // Acknowledging opens the way to Handover, so it asks first (it went through on one click).
+  const handleMarkAcknowledged = async () => {
+    if (!ackTarget) return;
+    setAckSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${id}/mark-acknowledged`, { method: "PUT" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await act(`${API}/${ackTarget.Id}/mark-acknowledged`, "PUT");
       toast.success("Notice acknowledged");
-      promptNextStep(navigate, "Possession notice acknowledged — handover can now be scheduled.", "/crm/handover", "Go to Handover");
+      setAckTarget(null);
       invalidate();
+      promptNextStep(navigate, "Possession notice acknowledged: handover can now be scheduled.", "/crm/handover", "Go to Handover");
     } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setAckSaving(false); }
   };
 
   const handleMarkDisputed = async () => {
-    if (!disputeDialog || !disputeReason.trim()) { toast.error("Dispute reason is required"); return; }
+    if (!disputeDialog || !disputeReason.trim()) return void toast.error("Enter the customer's objection.");
     try {
-      const res = await fetchWithAuth(`${API}/${disputeDialog}/mark-disputed`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ DisputeReason: disputeReason.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Notice marked Disputed");
+      await act(`${API}/${disputeDialog}/mark-disputed`, "PUT", { DisputeReason: disputeReason.trim() });
+      toast.success("Notice marked disputed");
       setDisputeDialog(null); setDisputeReason("");
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
   const handleRetractDispute = async () => {
-    if (!retractDialog || !retractReason.trim()) { toast.error("Retract reason is required"); return; }
+    if (!retractDialog || !retractReason.trim()) return void toast.error("Enter how it was resolved.");
     try {
-      const res = await fetchWithAuth(`${API}/${retractDialog}/retract-dispute`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ RetractReason: retractReason.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Dispute retracted — notice returned to Draft");
+      await act(`${API}/${retractDialog}/retract-dispute`, "PUT", { RetractReason: retractReason.trim() });
+      toast.success("Dispute withdrawn; the notice is back to Draft");
       setRetractDialog(null); setRetractReason("");
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
-  const handleProxyAcknowledge = async (method: ProxyMethod, remarks: string) => {
-    if (!proxyAckTarget) return;
+  const proxy = (path: "proxy-acknowledge" | "proxy-dispute") => async (method: ProxyMethod, remarks: string) => {
+    const id = path === "proxy-acknowledge" ? proxyAckTarget : proxyDisputeTarget;
+    if (!id) return;
     setProxySaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${proxyAckTarget}/proxy-acknowledge`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer acknowledgement recorded");
-      setProxyAckTarget(null); invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-    finally { setProxySaving(false); }
-  };
-
-  const handleProxyDispute = async (method: ProxyMethod, remarks: string) => {
-    if (!proxyDisputeTarget) return;
-    setProxySaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${proxyDisputeTarget}/proxy-dispute`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProxyMethod: method, ProxyRemarks: remarks }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Customer dispute recorded");
-      setProxyDisputeTarget(null); invalidate();
+      await act(`${API}/${id}/${path}`, "PUT", { ProxyMethod: method, ProxyRemarks: remarks });
+      toast.success(path === "proxy-acknowledge" ? "Customer's acknowledgement recorded" : "Customer's dispute recorded");
+      setProxyAckTarget(null); setProxyDisputeTarget(null);
+      invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setProxySaving(false); }
   };
 
   const tabs: CrmStatusTab[] = [
-    { key: "All",           label: "All",          count: counts.All ?? 0 },
-    { key: CrmStatus.DRAFT, label: "Draft",        count: counts[CrmStatus.DRAFT] ?? 0, dot: "bg-slate-400" },
-    { key: "Sent",          label: "Sent",         count: counts.Sent ?? 0,             dot: "bg-blue-500"  },
-    { key: "Acknowledged",  label: "Acknowledged", count: counts.Acknowledged ?? 0,     dot: "bg-green-500" },
-    { key: "Disputed",      label: "Disputed",     count: counts.Disputed ?? 0,         dot: "bg-red-500"   },
+    { key: "All", label: "All", count: counts.All ?? 0 },
+    { key: CrmStatus.DRAFT, label: "Draft", count: counts[CrmStatus.DRAFT] ?? 0, dot: "bg-foreground/20" },
+    { key: "Sent", label: "Sent", count: counts.Sent ?? 0, dot: "bg-foreground/50" },
+    { key: "Acknowledged", label: "Acknowledged", count: counts.Acknowledged ?? 0, dot: "bg-foreground" },
+    { key: "Disputed", label: "Disputed", count: counts.Disputed ?? 0, dot: "bg-destructive" },
   ];
 
-  // One primary action per row; everything else lives in the ⋯ menu.
+  // One main action per row; the rest in the ⋯ menu. All need the edit right.
   const renderActions = (n: any) => {
-    const btn = "inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-md transition-colors whitespace-nowrap";
     let primary: React.ReactNode = null;
     let items: RowMenuItem[] = [];
-
-    if (n.Status === CrmStatus.DRAFT) {
-      primary = (
-        <button onClick={() => { setSentTarget(n); setSentMode(n.DeliveryMode || ""); }}
-          className={cn(btn, "bg-blue-600 text-white hover:bg-blue-700")}><Send size={11} /> Mark sent</button>
-      );
+    if (canEdit && n.Status === CrmStatus.DRAFT) {
+      primary = <button onClick={() => { setSentTarget(n); setSentMode(n.DeliveryMode || ""); }} className={`${KEY_INK} h-7 px-2.5`}><Send size={11} /> Mark sent</button>;
       items = [
-        { label: "Edit",   icon: Pencil, onClick: () => openEdit(n) },
+        { label: "Edit", icon: Pencil, onClick: () => openEdit(n) },
         { label: "Delete", icon: Trash2, danger: true, onClick: () => setDeleteTarget(n) },
       ];
-    } else if (n.Status === "Sent") {
-      primary = (
-        <button onClick={() => handleMarkAcknowledged(n.Id)}
-          className={cn(btn, "bg-green-600 text-white hover:bg-green-700")}><CheckCircle2 size={11} /> Acknowledge</button>
-      );
+    } else if (canEdit && n.Status === "Sent") {
+      primary = <button onClick={() => setAckTarget(n)} className={`${KEY_INK} h-7 px-2.5`}><CheckCircle2 size={11} /> Acknowledge</button>;
       items = [
         { label: "Mark disputed", icon: AlertTriangle, onClick: () => { setDisputeDialog(n.Id); setDisputeReason(""); } },
-        { heading: "Customer replied off-portal" },
+        { heading: "Customer replied off the portal" },
         { label: "Record acknowledgement", icon: UserCircle2, onClick: () => setProxyAckTarget(n.Id) },
-        { label: "Record dispute",         icon: UserCircle2, onClick: () => setProxyDisputeTarget(n.Id) },
+        { label: "Record dispute", icon: UserCircle2, onClick: () => setProxyDisputeTarget(n.Id) },
       ];
-    } else if (n.Status === "Disputed") {
-      primary = (
-        <button onClick={() => { setRetractDialog(n.Id); setRetractReason(""); }}
-          className={cn(btn, "bg-sky-500 text-white hover:bg-sky-600")}><RotateCcw size={11} /> Retract</button>
-      );
+    } else if (canEdit && n.Status === "Disputed") {
+      primary = <button onClick={() => { setRetractDialog(n.Id); setRetractReason(""); }} className={`${KEY_LINE} h-7 px-2.5`}><RotateCcw size={11} /> Withdraw dispute</button>;
     } else if (n.Status === "Acknowledged") {
-      primary = (
-        <button onClick={() => navigate(`/crm/handover?bookingId=${n.BookingId}`)}
-          className={cn(btn, "bg-primary text-primary-foreground hover:bg-primary/90")}>Handover <ArrowRight size={11} /></button>
-      );
+      primary = <button onClick={() => navigate(`/crm/handover?bookingId=${n.BookingId}`)} className={`${KEY_LINE} h-7 px-2.5`}>Handover <ArrowRight size={11} /></button>;
     }
-
     return (
       <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
         {primary}
@@ -485,341 +366,206 @@ const CrmPossessionNotice: React.FC = () => {
   const columns: CrmColumn<any>[] = [
     { key: "notice", header: "Notice", sortKey: "NoticeNo", cell: (n) => (
       <span className="inline-flex items-center gap-1.5">
-        <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{n.NoticeNo}</span>
+        <span className="font-heading text-xs font-semibold tabular-nums whitespace-nowrap">{n.NoticeNo}</span>
         {n.Notes && <span title={n.Notes}><StickyNote size={11} className="text-muted-foreground" /></span>}
       </span>
     ) },
-    { key: "applicant", header: "Applicant", sortKey: "ApplicantName", cell: (n) => (
+    { key: "applicant", header: "Customer", sortKey: "ApplicantName", cell: (n) => (
       <span className="font-medium block truncate max-w-[220px]" title={n.ApplicantName}><ApplicantNames name={n.ApplicantName} bookingId={n.BookingId} applicationId={n.ApplicationId} /></span>
     ) },
     { key: "booking", header: "Booking", sortKey: "BookingNo", className: "hidden md:table-cell",
-      cell: (n) => <span className="text-xs text-muted-foreground whitespace-nowrap">{n.BookingNo}</span> },
-    { key: "unit", header: "Unit", className: "hidden md:table-cell",
-      cell: (n) => <span className="text-xs whitespace-nowrap">{n.UnitNo}</span> },
+      cell: (n) => <span className="font-heading text-xs tabular-nums text-muted-foreground whitespace-nowrap">{n.BookingNo}</span> },
+    { key: "unit", header: "Unit", className: "hidden md:table-cell", cell: (n) => <span className="text-xs whitespace-nowrap">{n.UnitNo}</span> },
     { key: "status", header: "Status", sortKey: "Status", cell: (n) => {
       const cfg = STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft;
-      return (
-        <span className={cn("inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap", cfg.badgeCls)}>
-          <cfg.Icon size={10} />{cfg.label}
-        </span>
-      );
+      return <SheetMark text={cfg.label} tone={cfg.tone} />;
     } },
-    { key: "mode", header: "Mode", className: "hidden xl:table-cell", cell: (n) => <ModeBadge mode={n.DeliveryMode} /> },
-    { key: "offered", header: "Offered", sortKey: "OfferedDate", className: "hidden lg:table-cell",
-      cell: (n) => <span className="text-xs whitespace-nowrap">{fmtDate(n.OfferedDate)}</span> },
-    { key: "deadline", header: "Deadline", sortKey: "ResponseDeadline", cell: (n) => {
+    { key: "mode", header: "Sent by", className: "hidden xl:table-cell", cell: (n) => <span className="text-xs text-muted-foreground whitespace-nowrap">{n.DeliveryMode ? MODE_LABEL[n.DeliveryMode] ?? n.DeliveryMode : "—"}</span> },
+    { key: "offered", header: "Offered", sortKey: "OfferedDate", className: "hidden lg:table-cell", cell: (n) => <span className="text-xs whitespace-nowrap tabular-nums">{fmtDate(n.OfferedDate)}</span> },
+    { key: "deadline", header: "Respond by", sortKey: "ResponseDeadline", cell: (n) => {
       const dl = deadlineInfo(n.ResponseDeadline, n.Status);
       return (
-        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums">
           <span className="text-xs">{fmtDate(n.ResponseDeadline)}</span>
-          {dl && <span className={cn("text-[0.625rem] font-semibold px-1.5 py-0.5 rounded border", dl.cls)}>{dl.label}</span>}
+          {dl && <span className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em] ${dl.late ? "text-destructive" : "text-muted-foreground"}`}>{dl.label}</span>}
         </span>
       );
     } },
     { key: "dues", header: "Dues", align: "right", cell: (n) => n.OutstandingMilestones > 0 ? (
-      <span className="text-xs font-semibold text-red-600 tabular-nums whitespace-nowrap"
-        title={`${n.OutstandingMilestones} milestone(s) outstanding · ₹${Math.round(n.OutstandingBalance).toLocaleString("en-IN")} — must be cleared before Handover`}>
-        ₹{moneyCompact.format(n.OutstandingBalance)}
-      </span>
-    ) : (
-      <span title="All dues cleared"><CheckCircle2 size={14} className="text-green-600 inline" /></span>
-    ) },
+      <span className="font-heading text-xs font-bold text-destructive tabular-nums whitespace-nowrap"
+        title={`${n.OutstandingMilestones} milestone(s) outstanding: to be cleared before Handover`}>{fmtRupees(n.OutstandingBalance)}</span>
+    ) : <span className="text-xs text-muted-foreground" title="All dues cleared">Clear</span> },
     { key: "actions", header: <span className="sr-only">Actions</span>, align: "right", className: "w-px whitespace-nowrap", cell: renderActions },
+  ];
+
+  const openNew = () => { setSp({}, { replace: true }); setCreateOpen(true); };
+  const figures = [
+    { label: "Notices", value: counts.All ?? 0, note: `${counts[CrmStatus.DRAFT] ?? 0} still in draft`, go: "All" },
+    { label: "Sent", value: counts.Sent ?? 0, note: "Waiting for the customer", go: "Sent" },
+    { label: "Acknowledged", value: counts.Acknowledged ?? 0, note: "Handover can be scheduled", go: "Acknowledged" },
+    { label: "Disputed", value: counts.Disputed ?? 0, note: "Objection to settle", go: "Disputed" },
   ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Possession Notice"]} />
-      <CrmShell
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Possession"
         title="Possession Notice"
-        subtitle="Formal offer of possession to buyers — must be acknowledged before Handover is scheduled"
+        subtitle="The formal offer of possession to a buyer. It must be acknowledged before Handover is scheduled."
         action={
-          <div className="flex items-center gap-3">
-            <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            <button onClick={() => { setSp({}, { replace: true }); setCreateOpen(true); }}
-              className="flex items-center gap-1.5 px-4 py-2 btn-module text-white text-sm font-semibold rounded-lg ">
-              <Plus size={14} /> New Notice
-            </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {canCreate && <button onClick={openNew} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New notice</button>}
           </div>
         }
       >
-        {!showOnboarding && (
-          <div className="space-y-3">
-            <CrmListToolbar
-              tabs={tabs} status={list.status} onStatus={list.setStatus}
-              searchValue={list.searchInput} onSearch={list.setSearchInput}
-              placeholder="Search notice, applicant, booking, unit…">
-              <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
-            </CrmListToolbar>
-
-            <CrmDataTable
-              columns={columns}
-              rows={rows}
-              rowKey={(n) => n.Id}
-              loading={isLoading}
-              fetching={isFetching}
-              error={isError ? (error as Error)?.message : null}
-              onRetry={() => refetch()}
-              sort={list.sort}
-              onSort={list.toggleSort}
-              rowAccent={(n) => (STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft).accent}
-              empty={<>No notices match these filters. <button onClick={list.reset} className="text-primary hover:underline ml-1">Clear filters</button></>}
-              page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
-            />
-          </div>
-        )}
-
-        {/* Empty state */}
-        {showOnboarding && (
-          <div className="space-y-4">
-            <div className="p-8 rounded-xl border-2 border-dashed border-border bg-muted/10 text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
-                <FileText size={26} className="text-primary" />
-              </div>
-              <div>
-                <p className="font-semibold text-foreground">No possession notices yet</p>
-                <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto leading-relaxed">
-                  Issue a notice after the Pre-Possession Check is <strong>Ready</strong> and the project has a received OC/CC.
-                </p>
-              </div>
-              <div className="flex justify-center gap-4 pt-1">
-                <button onClick={() => navigate("/crm/pre-possession")}
-                  className="flex items-center gap-1 text-sm text-primary hover:underline font-medium">
-                  Pre-Possession <ChevronRight size={14} />
-                </button>
-                <button onClick={() => { setSp({}, { replace: true }); setCreateOpen(true); }}
-                  className="flex items-center gap-1.5 text-sm px-4 py-2 btn-module text-white rounded-lg font-semibold ">
-                  <Plus size={13} /> New Notice
-                </button>
-              </div>
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={() => list.setStatus(x.go)} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
             </div>
+          </div>
 
-            {/* Workflow steps */}
-            <div className="rounded-xl border border-border bg-card p-5">
-              <p className="text-xs font-bold text-muted-foreground mb-4 uppercase tracking-wider">Notice Workflow</p>
-              <div className="flex items-start gap-2 flex-wrap sm:flex-nowrap">
-                {[
-                  { label: "Draft",        sub: "Fill details & delivery mode",    cls: "bg-slate-100 border-slate-300 text-slate-700" },
-                  { label: "Mark Sent",    sub: "Dispatch via chosen channel",     cls: "bg-blue-50 border-blue-200 text-blue-700" },
-                  { label: "Customer Acts", sub: "Acknowledges or raises dispute",  cls: "bg-sky-50 border-sky-200 text-sky-700" },
-                  { label: "Acknowledged", sub: "Handover can now be scheduled",   cls: "bg-green-50 border-green-200 text-green-700" },
-                ].map(({ label, sub, cls }, idx, arr) => (
-                  <React.Fragment key={label}>
-                    <div className="flex-1 min-w-[80px]">
-                      <div className={cn("text-xs font-bold px-2.5 py-1 rounded-lg border text-center mb-1", cls)}>{label}</div>
-                      <div className="text-[0.625rem] text-muted-foreground text-center leading-tight">{sub}</div>
-                    </div>
-                    {idx < arr.length - 1 && (
-                      <ArrowRight size={14} className="text-muted-foreground/40 shrink-0 mt-2 hidden sm:block" />
-                    )}
-                  </React.Fragment>
+          {showOnboarding ? (
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="py-10 text-center space-y-3 px-4" style={{ borderBottom: RULE }}>
+                <FileText size={22} className="mx-auto text-muted-foreground" />
+                <p className="font-medium text-foreground">No possession notices yet</p>
+                <p className="text-sm text-muted-foreground max-w-sm mx-auto">Issue one once the Pre-Possession check is Ready and the project's OC / CC is received.</p>
+                <div className="flex justify-center gap-2">
+                  <button onClick={() => navigate("/crm/pre-possession")} className={`${KEY_LINE} h-9 px-3`}>Pre-Possession <ChevronRight size={12} /></button>
+                  {canCreate && <button onClick={openNew} className={`${KEY_INK} h-9 px-3`}><Plus size={12} /> New notice</button>}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4">
+                {[["Draft", "Dates and delivery"], ["Sent", "Sent by the chosen means"], ["Customer replies", "Acknowledges or objects"], ["Acknowledged", "Handover can be scheduled"]].map(([t, s], i) => (
+                  <div key={t} className="px-4 py-3" style={i < 3 ? { borderRight: RULE_SOFT } : undefined}>
+                    <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.1em]"><span className="tabular-nums text-muted-foreground mr-1.5">{i + 1}</span>{t}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{s}</p>
+                  </div>
                 ))}
               </div>
             </div>
+          ) : (
+            <div className="space-y-3">
+              <CrmListToolbar tabs={tabs} status={list.status} onStatus={list.setStatus}
+                searchValue={list.searchInput} onSearch={list.setSearchInput} placeholder="Search notice, customer, booking, unit…">
+                <CrmCompanyProjectBlockFilter value={list.cpb} onChange={list.setCpb} />
+              </CrmListToolbar>
+              <CrmDataTable
+                columns={columns} rows={rows} rowKey={(n) => n.Id}
+                loading={isLoading} fetching={isFetching}
+                error={isError ? (error as Error)?.message : null} onRetry={() => refetch()}
+                sort={list.sort} onSort={list.toggleSort}
+                rowAccent={(n) => (STATUS_CONFIG[n.Status] ?? STATUS_CONFIG.Draft).accent}
+                empty={<>No notice matches these filters. <button onClick={list.reset} className="font-semibold text-foreground hover:underline ml-1">Clear filters</button></>}
+                page={list.page} pageSize={list.pageSize} total={total} onPage={list.setPage}
+              />
+            </div>
+          )}
+        </div>
+      </SheetShell>
+
+      <Dialog open={!!sentTarget} onOpenChange={(o) => { if (!o) { setSentTarget(null); setSentMode(""); } }}>
+        <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Head icon={<Send size={14} />} title="Mark sent" />
+          {sentTarget && <p className="text-xs text-muted-foreground -mt-2 tabular-nums">{sentTarget.NoticeNo} · {sentTarget.ApplicantName}</p>}
+          <Field label="Sent by *"><ModePicker value={sentMode} onChange={setSentMode} /></Field>
+          <Foot>
+            <button onClick={() => { setSentTarget(null); setSentMode(""); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleMarkSent} disabled={sentSaving || !sentMode} className={`${KEY_INK} h-9 px-4`}>{sentSaving ? "Marking…" : "Mark sent"}</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!ackTarget} onOpenChange={(o) => { if (!o) setAckTarget(null); }}>
+        <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Head icon={<CheckCircle2 size={14} />} title="Acknowledge notice" />
+          {ackTarget && <p className="text-sm">The customer has accepted <span className="font-heading font-bold tabular-nums">{ackTarget.NoticeNo}</span> ({ackTarget.ApplicantName}). Handover can then be scheduled.</p>}
+          <Foot>
+            <button onClick={() => setAckTarget(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleMarkAcknowledged} disabled={ackSaving} className={`${KEY_INK} h-9 px-4`}>{ackSaving ? "Saving…" : "Acknowledge"}</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
+        <DialogContent className="max-w-md p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Head icon={<Pencil size={14} />} title={`Edit draft · ${editTarget?.NoticeNo ?? ""}`} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Offered on"><DateInput value={editForm.OfferedDate} onChange={(e) => setEditForm((f) => ({ ...f, OfferedDate: e.target.value }))} className={INP} /></Field>
+            <Field label="Respond by"><DateInput value={editForm.ResponseDeadline} onChange={(e) => setEditForm((f) => ({ ...f, ResponseDeadline: e.target.value }))} className={INP} /></Field>
           </div>
-        )}
+          <Field label="Delivery"><ModePicker value={editForm.DeliveryMode} onChange={(m) => setEditForm((f) => ({ ...f, DeliveryMode: m }))} /></Field>
+          <Field label="Notes">
+            <textarea value={editForm.Notes} rows={2} onChange={(e) => setEditForm((f) => ({ ...f, Notes: e.target.value }))} className={`${INP} h-auto py-2 resize-none`} />
+          </Field>
+          <Foot>
+            <button onClick={() => setEditTarget(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleEdit} disabled={editSaving} className={`${KEY_INK} h-9 px-4`}>{editSaving ? "Saving…" : "Save"}</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
 
-        {/* ── Mark-Sent dialog ── */}
-        <Dialog open={!!sentTarget} onOpenChange={(o) => { if (!o) { setSentTarget(null); setSentMode(""); } }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-2 text-base">
-                <Send size={16} className="text-blue-600" /> Mark Notice Sent
-              </DialogTitle>
-            </DialogHeader>
-            {sentTarget && (
-              <div className="rounded-lg bg-muted/30 border border-border px-3 py-2 text-xs text-muted-foreground">
-                {sentTarget.NoticeNo} · <ApplicantNames name={sentTarget.ApplicantName} bookingId={sentTarget.BookingId} applicationId={sentTarget.ApplicationId} />
-              </div>
-            )}
-            <p className="text-sm text-muted-foreground">Confirm the channel used to dispatch this notice.</p>
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Delivery Mode *</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {DELIVERY_MODES.map((m) => (
-                  <button key={m} type="button" onClick={() => setSentMode(m)}
-                    className={cn(
-                      "flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors",
-                      sentMode === m ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground",
-                    )}>
-                    <span>{MODE_ICON[m]}</span> {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => { setSentTarget(null); setSentMode(""); }}
-                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleMarkSent} disabled={sentSaving || !sentMode}
-                className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-40">
-                {sentSaving ? "Marking…" : "Mark Sent"}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Head icon={<Trash2 size={14} />} title="Delete notice" destructive />
+          <p className="text-sm">Delete <span className="font-heading font-bold tabular-nums">{deleteTarget?.NoticeNo}</span> ({deleteTarget?.ApplicantName}) for good? A new notice can then be issued for the booking. Only drafts can be deleted.</p>
+          <Foot>
+            <button onClick={() => setDeleteTarget(null)} className={`${KEY_LINE} h-9 px-4`}>Keep</button>
+            <button onClick={handleDelete} disabled={deleteSaving} className={`${KEY_RED} h-9 px-4`}>{deleteSaving ? "Deleting…" : "Delete"}</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
 
-        {/* ── Edit dialog ── */}
-        <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
-          <DialogContent accent="crm" className="max-w-md">
-            <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-2 text-base">
-                <Pencil size={15} /> Edit Draft — {editTarget?.NoticeNo}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Offered Date</label>
-                  <DateInput value={editForm.OfferedDate}
-                    onChange={(e) => setEditForm((f) => ({ ...f, OfferedDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Response Deadline</label>
-                  <DateInput value={editForm.ResponseDeadline}
-                    onChange={(e) => setEditForm((f) => ({ ...f, ResponseDeadline: e.target.value }))}
-                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Delivery Mode</label>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                  {DELIVERY_MODES.map((m) => (
-                    <button key={m} type="button" onClick={() => setEditForm((f) => ({ ...f, DeliveryMode: m }))}
-                      className={cn(
-                        "text-xs font-medium py-2 rounded-lg border transition-colors text-center",
-                        editForm.DeliveryMode === m ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted text-muted-foreground",
-                      )}>
-                      {MODE_ICON[m]} {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Notes</label>
-                <textarea value={editForm.Notes} rows={2}
-                  onChange={(e) => setEditForm((f) => ({ ...f, Notes: e.target.value }))}
-                  className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none" />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => setEditTarget(null)}
-                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleEdit} disabled={editSaving}
-                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40">
-                {editSaving ? "Saving…" : "Save Changes"}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      <Dialog open={!!disputeDialog} onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
+        <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Head icon={<AlertTriangle size={14} />} title="Mark disputed" destructive />
+          <p className="text-xs text-muted-foreground -mt-2">The notice stays disputed until the objection is settled and it is withdrawn and sent again.</p>
+          <Field label="Customer's objection *">
+            <textarea value={disputeReason} onChange={(e) => setDisputeReason(e.target.value)} rows={3} placeholder="What the customer objects to" className={`${INP} h-auto py-2 resize-none`} />
+          </Field>
+          <Foot>
+            <button onClick={() => { setDisputeDialog(null); setDisputeReason(""); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleMarkDisputed} disabled={!disputeReason.trim()} className={`${KEY_RED} h-9 px-4`}>Mark disputed</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
 
-        {/* ── Delete confirmation ── */}
-        <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-2 text-base text-red-600">
-                <Trash2 size={16} /> Delete Notice
-              </DialogTitle>
-            </DialogHeader>
-            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-              {deleteTarget?.NoticeNo} · <ApplicantNames name={deleteTarget?.ApplicantName} bookingId={deleteTarget?.BookingId} applicationId={deleteTarget?.ApplicationId} />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              This will permanently remove the notice and allow a new one to be issued for this booking. Only Draft notices can be deleted.
-            </p>
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleDelete} disabled={deleteSaving}
-                className="px-5 py-2 text-sm bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-40">
-                {deleteSaving ? "Deleting…" : "Delete Notice"}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      <Dialog open={!!retractDialog} onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
+        <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Head icon={<RotateCcw size={14} />} title="Withdraw dispute" />
+          <p className="text-xs text-muted-foreground -mt-2">The notice goes back to Draft so it can be revised and sent again.</p>
+          <Field label="How it was settled *">
+            <textarea value={retractReason} onChange={(e) => setRetractReason(e.target.value)} rows={3} placeholder="How the objection was resolved" className={`${INP} h-auto py-2 resize-none`} />
+          </Field>
+          <Foot>
+            <button onClick={() => { setRetractDialog(null); setRetractReason(""); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleRetractDispute} disabled={!retractReason.trim()} className={`${KEY_INK} h-9 px-4`}>Back to draft</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
 
-        {/* ── Dispute dialog ── */}
-        <Dialog open={!!disputeDialog} onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-2 text-base">
-                <AlertTriangle size={16} className="text-red-500" /> Mark Disputed
-              </DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">Record the customer's objection. The notice stays Disputed until you retract and re-issue.</p>
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Dispute Reason *</label>
-              <textarea value={disputeReason} onChange={(e) => setDisputeReason(e.target.value)}
-                rows={3} placeholder="Describe the customer's objection in detail…"
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none" />
-            </div>
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => { setDisputeDialog(null); setDisputeReason(""); }}
-                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleMarkDisputed} disabled={!disputeReason.trim()}
-                className="px-5 py-2 text-sm bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 disabled:opacity-40">
-                Mark Disputed
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
+      {proxyAckTarget !== null && (
+        <ProxyActionDialog title="Record customer's acknowledgement"
+          description="The customer acknowledged the possession notice without using their portal."
+          confirmLabel="Record acknowledgement" saving={proxySaving} onClose={() => setProxyAckTarget(null)} onConfirm={proxy("proxy-acknowledge")} />
+      )}
+      {proxyDisputeTarget !== null && (
+        <ProxyActionDialog title="Record customer's dispute"
+          description="The customer disputed the possession notice without using their portal. Put their reason in the notes."
+          confirmLabel="Record dispute" saving={proxySaving} onClose={() => setProxyDisputeTarget(null)} onConfirm={proxy("proxy-dispute")} />
+      )}
 
-        {/* ── Retract dispute ── */}
-        <Dialog open={!!retractDialog} onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-2 text-base">
-                <RotateCcw size={16} className="text-sky-600" /> Retract Dispute
-              </DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">Returns the notice to Draft so it can be revised and re-sent. Document the resolution.</p>
-            <div>
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Resolution Notes *</label>
-              <textarea value={retractReason} onChange={(e) => setRetractReason(e.target.value)}
-                rows={3} placeholder="How was the customer's dispute resolved?"
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none" />
-            </div>
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <button onClick={() => { setRetractDialog(null); setRetractReason(""); }}
-                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleRetractDispute} disabled={!retractReason.trim()}
-                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40">
-                Retract &amp; Return to Draft
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* ── Proxy dialogs ── */}
-        {proxyAckTarget !== null && (
-          <ProxyActionDialog
-            title="Record Customer Acknowledgement"
-            description="You are recording that the customer acknowledged the possession notice without logging into their portal."
-            confirmLabel="Record Acknowledgement"
-            saving={proxySaving}
-            onClose={() => setProxyAckTarget(null)}
-            onConfirm={handleProxyAcknowledge}
-          />
-        )}
-        {proxyDisputeTarget !== null && (
-          <ProxyActionDialog
-            title="Record Customer Dispute"
-            description="You are recording that the customer disputed the possession notice without using the portal. Include their reason in the notes."
-            confirmLabel="Record Dispute"
-            saving={proxySaving}
-            onClose={() => setProxyDisputeTarget(null)}
-            onConfirm={handleProxyDispute}
-          />
-        )}
-      </CrmShell>
-
-      {createOpen && (
-        <CreateDialog
-          onClose={() => { setCreateOpen(false); setSp({}, { replace: true }); }}
-          onCreated={invalidate}
-          navigate={navigate}
-          prefillBookingId={prefillBookingId}
-        />
+      {createOpen && canCreate && (
+        <CreateDialog onClose={() => { setCreateOpen(false); setSp({}, { replace: true }); }} onCreated={invalidate} navigate={navigate} prefillBookingId={prefillBookingId} />
       )}
     </>
   );

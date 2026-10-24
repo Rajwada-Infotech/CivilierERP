@@ -46,7 +46,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
         SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
       ) bv
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId")}
         AND EXISTS (
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
@@ -173,6 +173,7 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
