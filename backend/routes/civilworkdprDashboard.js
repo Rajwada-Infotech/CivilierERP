@@ -119,7 +119,7 @@ router.get("/", async (req, res) => {
         JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
         LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
-        WHERE 1=1${dmProject}
+        WHERE daa.IsCurrent = 1${dmProject}
         ORDER BY daa.UpdatedAt DESC
       `),
 
