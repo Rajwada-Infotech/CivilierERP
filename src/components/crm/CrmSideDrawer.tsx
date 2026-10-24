@@ -52,7 +52,8 @@ export function CrmSideDrawer({ open, onClose, title, subtitle, badge, children,
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-40">
+    // Above the top bar (z-50), at the dialogs' level: at z-40 the bar covered the panel's header.
+    <div className="fixed inset-0 z-[60]">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/30 transition-opacity duration-200"
