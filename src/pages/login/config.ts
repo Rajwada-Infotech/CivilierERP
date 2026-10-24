@@ -10,8 +10,8 @@ export interface PublicStats {
   quotations: number;
 }
 
-/** Your own site photo goes here (public/login-photo.jpg). Until it exists the panel shows a deep green instead. */
-export const LOGIN_PHOTO = "/login-photo.jpg";
+/** The building on the right: a cut-out (transparent background) with the old orange shape behind it removed. */
+export const LOGIN_PHOTO = "/login-photo.webp";
 
 export const LOGIN_CSS = `
 .login-sheet {

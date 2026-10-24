@@ -1,5 +1,5 @@
-// Right of the sign-in page: the site photo with notched corners, the line over it and the company's figures on a
-// frosted card. Until public/login-photo.jpg exists it shows a deep green with a faint grid instead.
+// Right of the sign-in page: the building (a cut-out, public/login-photo.webp) standing at the foot of a soft sky in a
+// panel with notched corners, with the line and the company's figures in the sky above it.
 import React, { useState } from "react";
 import { LOGIN_PHOTO, type PublicStats } from "./config";
 
@@ -17,21 +17,20 @@ export function LoginPhoto({ stats }: { stats: PublicStats | null }) {
     : [];
 
   return (
-    <div className="ls-photo h-full min-h-[520px]" style={{ background: "linear-gradient(160deg, #24603f 0%, #163d2a 55%, #0e2a1c 100%)" }}>
-      {hasPhoto ? (
-        <img src={LOGIN_PHOTO} alt="" onError={() => setHasPhoto(false)} className="absolute inset-0 w-full h-full object-cover" />
-      ) : (
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              "radial-gradient(70% 60% at 75% 30%, rgba(132,204,22,0.18), transparent 70%), linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)",
-            backgroundSize: "auto, 40px 40px, 40px 40px",
-          }}
+    <div className="ls-photo h-full min-h-[520px]" style={{ background: "linear-gradient(180deg, #cfdfe6 0%, #e6ebe6 38%, #f3e8da 72%, #ead7c0 100%)" }}>
+      {/* A low sun behind the buildings */}
+      <div className="absolute inset-0" style={{ background: "radial-gradient(55% 40% at 70% 78%, rgba(255,214,160,0.55), transparent 70%)" }} />
+
+      {hasPhoto && (
+        <img
+          src={LOGIN_PHOTO}
+          alt=""
+          onError={() => setHasPhoto(false)}
+          className="absolute select-none pointer-events-none"
+          style={{ left: "46%", bottom: "-2%", width: "142%", maxWidth: "none", transform: "translateX(-50%)" }}
+          draggable={false}
         />
       )}
-      {/* Shade at the top and bottom so the words read over any photo */}
-      <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.38) 0%, rgba(0,0,0,0) 34%, rgba(0,0,0,0) 62%, rgba(0,0,0,0.42) 100%)" }} />
 
       <span className="ls-bite tl" />
       <span className="ls-corner tl-a" />
@@ -40,22 +39,23 @@ export function LoginPhoto({ stats }: { stats: PublicStats | null }) {
       <span className="ls-corner br-a" />
       <span className="ls-corner br-b" />
 
-      <p className="absolute z-[3] text-right font-heading font-semibold text-white ls-in"
-        style={{ top: "6%", right: "6%", left: "40%", fontSize: "clamp(18px, 1.6vw, 24px)", lineHeight: 1.3, textWrap: "balance", animationDelay: "120ms" }}>
-        Manage smarter, build better. Built for civil contractors.
-      </p>
-
-      {figures.length > 0 && (
-        <div className="absolute z-[3] grid grid-cols-2 gap-x-6 gap-y-3 px-5 py-4 rounded-2xl ls-in"
-          style={{ left: "5%", bottom: "5%", maxWidth: "62%", background: "rgba(255,255,255,0.14)", border: "1px solid rgba(255,255,255,0.22)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", animationDelay: "180ms" }}>
-          {figures.map(([v, label]) => (
-            <div key={label} className="text-white">
-              <p className="font-heading font-semibold tabular-nums" style={{ fontSize: "clamp(20px, 1.6vw, 26px)", lineHeight: 1 }}>{v}</p>
-              <p className="text-[12px] mt-1 opacity-80">{label}</p>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* The line and the figures, in the sky to the right of the top notch */}
+      <div className="absolute z-[3] text-right ls-in" style={{ top: "6%", right: "6%", left: "40%", animationDelay: "120ms" }}>
+        <p className="font-heading font-semibold" style={{ fontSize: "clamp(18px, 1.6vw, 25px)", lineHeight: 1.3, color: "#1d2a24", textWrap: "balance" }}>
+          Manage smarter, build better. Built for civil contractors.
+        </p>
+        {figures.length > 0 && (
+          <div className="mt-5 inline-flex flex-wrap justify-end gap-x-6 gap-y-3 px-5 py-3.5 rounded-2xl"
+            style={{ background: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.8)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)" }}>
+            {figures.map(([v, label]) => (
+              <div key={label} className="text-left">
+                <p className="font-heading font-semibold tabular-nums" style={{ fontSize: "clamp(18px, 1.4vw, 23px)", lineHeight: 1, color: "var(--brand)" }}>{v}</p>
+                <p className="text-[11.5px] mt-1" style={{ color: "#55625b" }}>{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
