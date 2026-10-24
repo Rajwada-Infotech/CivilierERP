@@ -113,10 +113,10 @@ export function LoginCard(p: LoginCardProps) {
           </div>
           <div className="mt-[min(1.25rem,2.2vh)] space-y-3">
             <button type="button" onClick={() => p.onNavigate("/supplier-login")} className="ls-outline" title="Vendor & order portal">
-              <Truck size={17} style={{ color: "var(--brand)" }} /> Continue to the Supplier portal
+              <Truck size={17} style={{ color: "var(--brand)" }} /> Supplier Portal
             </button>
             <button type="button" onClick={() => p.onNavigate("/crm-client-portal/login")} className="ls-outline" title="Booking & owner portal">
-              <Building2 size={17} style={{ color: "var(--brand)" }} /> Continue to the Customer portal
+              <Building2 size={17} style={{ color: "var(--brand)" }} /> Customer Portal
             </button>
           </div>
         </div>
