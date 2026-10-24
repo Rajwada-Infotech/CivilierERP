@@ -112,7 +112,7 @@ export const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onC
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
-            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
+            <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
           </DialogTitle>
         </DialogHeader>
 
@@ -229,7 +229,7 @@ export const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onC
             )}
             {!!doc.FilePath && (
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Remarks {doc.Status !== "Verified" ? "(required to reject)" : ""}</label>
+                <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Remarks {doc.Status !== "Verified" ? "(required to reject)" : ""}</label>
                 <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2}
                   placeholder="Reason for rejection, or any note for the record..."
                   className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />

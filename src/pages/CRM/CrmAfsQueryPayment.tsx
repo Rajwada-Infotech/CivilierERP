@@ -74,7 +74,7 @@ function Timeline({ detail }: { detail: any }) {
         <React.Fragment key={s.key}>
           <div className="flex flex-col items-center gap-1 min-w-[64px]">
             <span className={cn(
-              "w-5 h-5 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0",
+              "w-5 h-5 flex items-center justify-center text-[0.625rem] font-bold shrink-0",
               s.done ? "bg-foreground text-card" : "bg-muted text-muted-foreground border border-border",
             )}>
               {s.done ? <Check size={11} /> : idx + 1}
@@ -112,7 +112,7 @@ function StepTabs({ step, onChange, confirmed }: { step: number; onChange: (s: n
             )}
           >
             <span className={cn(
-              "w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-semibold shrink-0",
+              "w-4 h-4 flex items-center justify-center text-[0.625rem] font-semibold shrink-0",
               done ? "bg-foreground text-card" : active ? "bg-foreground text-card" : "bg-muted text-muted-foreground",
             )}>
               {done ? <Check size={10} /> : s.id}
@@ -241,11 +241,11 @@ function AmountEditor({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <label className="text-[0.625rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
-            <Input type="number" className="h-8 font-mono text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={stamp} onChange={(e) => setStamp(e.target.value)} />
+            <Input type="number" className="h-8 font-heading tabular-nums text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={stamp} onChange={(e) => setStamp(e.target.value)} />
           </div>
           <div>
             <label className="text-[0.625rem] text-muted-foreground block mb-1">Registration Fee (₹)</label>
-            <Input type="number" className="h-8 font-mono text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={regFee} onChange={(e) => setRegFee(e.target.value)} />
+            <Input type="number" className="h-8 font-heading tabular-nums text-xs focus-visible:ring-foreground/30" placeholder="Optional" value={regFee} onChange={(e) => setRegFee(e.target.value)} />
           </div>
         </div>
         <div>
@@ -266,11 +266,11 @@ function AmountEditor({
     <div className="mt-3">
       {detail.RequiredAmount > 0 ? (
         <div className="flex items-center gap-2 flex-wrap text-[0.6875rem] text-muted-foreground">
-          <span className="px-2 py-0.5 bg-muted font-mono">Stamp {formatINR(detail.StampDuty)}</span>
+          <span className="px-2 py-0.5 bg-muted font-heading tabular-nums">Stamp {formatINR(detail.StampDuty)}</span>
           <span className="text-muted-foreground/50">+</span>
-          <span className="px-2 py-0.5 bg-muted font-mono">Reg. Fee {formatINR(detail.RegistrationFee)}</span>
+          <span className="px-2 py-0.5 bg-muted font-heading tabular-nums">Reg. Fee {formatINR(detail.RegistrationFee)}</span>
           <span className="text-muted-foreground/50">=</span>
-          <span className="px-2 py-0.5 bg-card text-foreground font-semibold font-mono">{formatINR(detail.RequiredAmount)}</span>
+          <span className="px-2 py-0.5 bg-card text-foreground font-semibold font-heading tabular-nums">{formatINR(detail.RequiredAmount)}</span>
           {canEditNow && (
             <button onClick={startEdit} className="ml-1 flex items-center gap-1 text-foreground hover:underline font-medium">
               <Pencil size={10} /> Edit
@@ -344,7 +344,7 @@ function StatCard({ label, value, sub, icon: Icon, tint }: { label: string; valu
         <Icon size={16} />
       </div>
       <div className="min-w-0">
-        <p className="text-lg font-bold font-mono leading-none">{value}</p>
+        <p className="text-lg font-bold font-heading tabular-nums leading-none">{value}</p>
         <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate">{label}{sub ? ` · ${sub}` : ""}</p>
       </div>
     </div>
@@ -651,7 +651,7 @@ const CrmAfsQueryPayment: React.FC<{
   const columns: ColumnDef<any, unknown>[] = [
     { accessorKey: "AfsQPNo", header: "AQP No", size: 120,
       cell: (i) => (
-        <button onClick={() => setSelectedId(i.row.original.Id)} className="font-mono text-xs font-semibold text-foreground hover:underline">
+        <button onClick={() => setSelectedId(i.row.original.Id)} className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">
           {i.getValue() as string}
         </button>
       ) },
@@ -663,12 +663,12 @@ const CrmAfsQueryPayment: React.FC<{
         </div>
       ) },
     { accessorKey: "AgreementNo", header: "Agreement", size: 110,
-      cell: (i) => <span onClick={() => setSelectedId(i.row.original.Id)} className="cursor-pointer text-xs font-mono">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span onClick={() => setSelectedId(i.row.original.Id)} className="cursor-pointer text-xs font-heading tabular-nums">{(i.getValue() as string) || "—"}</span> },
     { id: "amount", header: "Amount", size: 120,
       cell: (i) => {
         const r = i.row.original;
         return r.RequiredAmount ? (
-          <span onClick={() => setSelectedId(r.Id)} className="cursor-pointer text-xs font-mono font-medium">{formatINR(r.RequiredAmount)}</span>
+          <span onClick={() => setSelectedId(r.Id)} className="cursor-pointer text-xs font-heading tabular-nums font-medium">{formatINR(r.RequiredAmount)}</span>
         ) : (
           <span onClick={() => setSelectedId(r.Id)} className="cursor-pointer text-xs text-muted-foreground">—</span>
         );
@@ -748,7 +748,7 @@ const CrmAfsQueryPayment: React.FC<{
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-mono text-sm font-bold">{detail.AfsQPNo}</span>
+              <span className="font-heading tabular-nums text-sm font-bold">{detail.AfsQPNo}</span>
               <StatusBadge status={detail.Status} />
             </div>
             <p className="text-[0.6875rem] text-muted-foreground mt-0.5"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /> · {detail.BookingNo} · {detail.UnitNo}</p>
@@ -801,7 +801,7 @@ const CrmAfsQueryPayment: React.FC<{
             {/* Step 1: Send paperwork */}
             <div className={`px-5 py-4 space-y-3 ${step === 1 ? "" : "opacity-60 pointer-events-none"}`}>
               <div className="flex items-center gap-2">
-                <span className={`w-5 h-5 rounded-full text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step > 1 ? "bg-foreground text-card" : "bg-foreground text-card"}`}>
+                <span className={`w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step > 1 ? "bg-foreground text-card" : "bg-foreground text-card"}`}>
                   {step > 1 ? <Check size={10} /> : "1"}
                 </span>
                 <p className="text-sm font-semibold">Send Fee Breakdown to Customer</p>
@@ -825,7 +825,7 @@ const CrmAfsQueryPayment: React.FC<{
                         )}
                         <span className="truncate flex-1">{f.name}</span>
                         <span className="text-muted-foreground shrink-0 text-[0.625rem]">{(f.size / 1024).toFixed(0)} KB</span>
-                        <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-rose-600 shrink-0"><X size={11} /></button>
+                        <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-destructive shrink-0"><X size={11} /></button>
                       </li>
                     ))}
                   </ul>
@@ -864,7 +864,7 @@ const CrmAfsQueryPayment: React.FC<{
             <div className={`px-5 py-4 space-y-3 ${step === 2 ? "" : "opacity-60"}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span className={`w-5 h-5 rounded-full text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-foreground text-card" : "bg-muted text-muted-foreground"}`}>2</span>
+                  <span className={`w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-foreground text-card" : "bg-muted text-muted-foreground"}`}>2</span>
                   <p className="text-sm font-semibold">Confirm Customer Paid the Government</p>
                 </div>
                 {step !== 2 && (
@@ -880,7 +880,7 @@ const CrmAfsQueryPayment: React.FC<{
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[0.6875rem] text-muted-foreground block mb-1">Amount Actually Paid (₹)</label>
-                      <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-foreground/30" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
+                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
                     </div>
                     <div>
                       <label className="text-[0.6875rem] text-muted-foreground block mb-1">Remarks</label>
@@ -897,7 +897,7 @@ const CrmAfsQueryPayment: React.FC<{
                           <div className="w-7 h-7 bg-muted flex items-center justify-center shrink-0"><FileText size={12} /></div>
                         )}
                         <span className="truncate flex-1">{proofFile.name}</span>
-                        <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-600 shrink-0"><X size={11} /></button>
+                        <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-destructive shrink-0"><X size={11} /></button>
                       </div>
                     ) : (
                       <>
@@ -945,7 +945,7 @@ const CrmAfsQueryPayment: React.FC<{
           InlineDetail()
         ) : registered ? (
           <div className="border border-foreground/30 bg-foreground/5 px-5 py-5 flex items-start gap-4">
-            <div className="w-10 h-10 shrink-0 rounded-full bg-card border-2 border-foreground/30 flex items-center justify-center">
+            <div className="w-10 h-10 shrink-0 bg-card border-2 border-foreground/30 flex items-center justify-center">
               <CheckCircle2 size={18} className="text-foreground" />
             </div>
             <div>
@@ -973,12 +973,12 @@ const CrmAfsQueryPayment: React.FC<{
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                  <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-foreground/30" placeholder="e.g. 50000"
+                  <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 50000"
                     value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1.5">Registration Fee (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                  <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-foreground/30" placeholder="e.g. 30000"
+                  <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 30000"
                     value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                 </div>
               </div>
@@ -1041,7 +1041,7 @@ const CrmAfsQueryPayment: React.FC<{
             {deepLinkedBooking?.AgreementStatus === "Registered" && !deepLinkedRow && (
               <div className="border border-foreground/30 bg-foreground/5 overflow-hidden">
                 <div className="px-5 py-5 flex items-start gap-4">
-                  <div className="w-10 h-10 shrink-0 rounded-full bg-card border-2 border-foreground/30 flex items-center justify-center">
+                  <div className="w-10 h-10 shrink-0 bg-card border-2 border-foreground/30 flex items-center justify-center">
                     <CheckCircle2 size={18} className="text-foreground" />
                   </div>
                   <div>
@@ -1068,12 +1068,12 @@ const CrmAfsQueryPayment: React.FC<{
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                      <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-foreground/30" placeholder="e.g. 50000"
+                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 50000"
                         value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-foreground block mb-1.5">Registration Fee (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
-                      <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-foreground/30" placeholder="e.g. 30000"
+                      <Input type="number" className="h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30" placeholder="e.g. 30000"
                         value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                     </div>
                   </div>
@@ -1203,13 +1203,13 @@ const CrmAfsQueryPayment: React.FC<{
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-[0.6875rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
-                        <Input type="number" className={`h-9 font-mono text-sm focus-visible:ring-foreground/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
+                        <Input type="number" className={`h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
                           value={newForm.StampDuty} readOnly={dialogFeesLocked}
                           onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
                       </div>
                       <div>
                         <label className="text-[0.6875rem] text-muted-foreground block mb-1">Registration Fee (₹)</label>
-                        <Input type="number" className={`h-9 font-mono text-sm focus-visible:ring-foreground/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
+                        <Input type="number" className={`h-9 font-heading tabular-nums text-sm focus-visible:ring-foreground/30 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"
                           value={newForm.RegistrationFee} readOnly={dialogFeesLocked}
                           onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
                       </div>
@@ -1246,7 +1246,7 @@ const CrmAfsQueryPayment: React.FC<{
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold font-mono text-foreground">{detail.AfsQPNo}</span>
+                            <span className="text-sm font-semibold font-heading tabular-nums text-foreground">{detail.AfsQPNo}</span>
                             <StatusBadge status={detail.Status} />
                             <button onClick={() => copyToClipboard(detail.AfsQPNo, "AQP No.")} className="text-muted-foreground hover:text-foreground" title="Copy AQP No.">
                               <Copy size={11} />
@@ -1322,7 +1322,7 @@ const CrmAfsQueryPayment: React.FC<{
                                           <div className="w-7 h-7 bg-muted flex items-center justify-center shrink-0"><FileText size={12} /></div>
                                         )}
                                         <span className="truncate flex-1 font-medium">{f.name}</span>
-                                        <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-rose-500 shrink-0 p-0.5 hover:bg-destructive/10">
+                                        <button onClick={() => removeStagedFile(idx)} className="text-muted-foreground hover:text-destructive shrink-0 p-0.5 hover:bg-destructive/10">
                                           <X size={11} />
                                         </button>
                                       </li>
@@ -1353,14 +1353,14 @@ const CrmAfsQueryPayment: React.FC<{
                               <p className="text-xs text-muted-foreground">Once the customer has paid at the Sub-Registrar, confirm receipt here to advance the record.</p>
                               <div>
                                 <label className="text-[0.6875rem] font-medium text-muted-foreground mb-1 block">Amount paid (optional)</label>
-                                <Input type="number" className="h-9 font-mono focus-visible:ring-foreground/30" placeholder="e.g. 16500" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
+                                <Input type="number" className="h-9 font-heading tabular-nums focus-visible:ring-foreground/30" placeholder="e.g. 16500" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
                               </div>
                               <input type="file" ref={proofInputRef} className="hidden" onChange={(e) => stageProofFile(e.target.files)} />
                               {proofFile ? (
                                 <div className="flex items-center gap-2 text-xs bg-muted/40 border border-border px-2.5 py-1.5">
                                   <FileText size={12} className="text-muted-foreground shrink-0" />
                                   <span className="truncate flex-1">{proofFile.name}</span>
-                                  <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-500 shrink-0"><X size={11} /></button>
+                                  <button onClick={() => { setProofFile(null); if (proofInputRef.current) proofInputRef.current.value = ""; }} className="text-muted-foreground hover:text-destructive shrink-0"><X size={11} /></button>
                                 </div>
                               ) : (
                                 <button onClick={() => proofInputRef.current?.click()} className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs border border-dashed border-border hover:bg-muted text-muted-foreground transition-colors">

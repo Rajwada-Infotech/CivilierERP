@@ -81,7 +81,7 @@ function Timeline({ row }: { row: any }) {
         <React.Fragment key={s.key}>
           <div className="flex flex-col items-center gap-1 min-w-[68px]">
             <span className={cn(
-              "w-5 h-5 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0",
+              "w-5 h-5 flex items-center justify-center text-[0.625rem] font-bold shrink-0",
               s.done ? "bg-foreground text-card" : "bg-muted text-muted-foreground border border-border",
             )}>
               {s.done ? <Check size={11} /> : idx + 1}
@@ -127,7 +127,7 @@ function StatCard({ label, value, sub, icon: Icon, tint }: { label: string; valu
         <Icon size={16} />
       </div>
       <div className="min-w-0">
-        <p className="text-lg font-bold font-mono leading-none">{value}</p>
+        <p className="text-lg font-bold font-heading tabular-nums leading-none">{value}</p>
         <p className="text-[0.6875rem] text-muted-foreground mt-1 truncate">{label}{sub ? ` · ${sub}` : ""}</p>
       </div>
     </div>
@@ -334,7 +334,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const columns: ColumnDef<any, unknown>[] = [
     { accessorKey: "AfsRegNo", header: "AREG No", size: 110,
       cell: (i) => (
-        <button onClick={() => setDetailRow(i.row.original)} className="font-mono text-xs font-semibold text-foreground hover:underline">
+        <button onClick={() => setDetailRow(i.row.original)} className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">
           {i.getValue() as string}
         </button>
       ) },
@@ -346,7 +346,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         </div>
       ) },
     { accessorKey: "AgreementNo", header: "Agreement", size: 110,
-      cell: (i) => <span onClick={() => setDetailRow(i.row.original)} className="cursor-pointer text-xs font-mono">{(i.getValue() as string) || "—"}</span> },
+      cell: (i) => <span onClick={() => setDetailRow(i.row.original)} className="cursor-pointer text-xs font-heading tabular-nums">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "AfsRegistrationNo", header: "AFS Reg No", size: 120,
       cell: (i) => <span onClick={() => setDetailRow(i.row.original)} className="cursor-pointer text-xs">{(i.getValue() as string) || "—"}</span> },
     { accessorKey: "ScheduledDate", header: "Scheduled", size: 120,
@@ -463,7 +463,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
           <div className="border border-border bg-card overflow-hidden">
             <div className="px-5 pt-5 pb-4 border-b border-border">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-semibold font-mono text-foreground">{r.AfsRegNo}</span>
+                <span className="text-sm font-semibold font-heading tabular-nums text-foreground">{r.AfsRegNo}</span>
                 <StatusBadge status={r.Status} />
                 <button onClick={() => copyToClipboard(r.AfsRegNo, "AREG No.")} className="text-muted-foreground hover:text-foreground" title="Copy AREG No.">
                   <Copy size={11} />
@@ -475,11 +475,11 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div className="border border-border px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
-                  <p className="font-mono font-medium mt-0.5">{r.AgreementNo || "—"}</p>
+                  <p className="font-heading tabular-nums font-medium mt-0.5">{r.AgreementNo || "—"}</p>
                 </div>
                 <div className="border border-border px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">AFS Registration No</p>
-                  <p className="font-mono font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
+                  <p className="font-heading tabular-nums font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
                 </div>
               </div>
               {canEdit && r.Status === "Pending" && (
@@ -523,7 +523,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Appointment Date *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Appointment Date *</label>
               <DateInput value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
                 className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
             </div>
@@ -548,7 +548,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Completed Date</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Completed Date</label>
               <DateInput value={completedDate} onChange={(e) => setCompletedDate(e.target.value)}
                 className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
               <p className="text-[0.6875rem] text-muted-foreground mt-2">
@@ -702,7 +702,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Appointment Date *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Appointment Date *</label>
               <DateInput value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
                 className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
             </div>
@@ -727,7 +727,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               </div>
             </DialogHeader>
             <div className="px-5 py-4">
-              <label className="text-xs text-muted-foreground block mb-1">Completed Date</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Completed Date</label>
               <DateInput value={completedDate} onChange={(e) => setCompletedDate(e.target.value)}
                 className="w-full text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:border-foreground" />
               <p className="text-[0.6875rem] text-muted-foreground mt-2">
@@ -759,7 +759,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold font-mono text-foreground">{detailRow.AfsRegNo}</span>
+                        <span className="text-sm font-semibold font-heading tabular-nums text-foreground">{detailRow.AfsRegNo}</span>
                         <StatusBadge status={detailRow.Status} />
                         <button onClick={() => copyToClipboard(detailRow.AfsRegNo, "AREG No.")} className="text-muted-foreground hover:text-foreground" title="Copy AREG No.">
                           <Copy size={11} />
@@ -780,11 +780,11 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     <div className="border border-border px-3 py-2">
                       <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
-                      <p className="font-mono font-medium mt-0.5">{detailRow.AgreementNo || "—"}</p>
+                      <p className="font-heading tabular-nums font-medium mt-0.5">{detailRow.AgreementNo || "—"}</p>
                     </div>
                     <div className="border border-border px-3 py-2">
                       <p className="text-[0.625rem] text-muted-foreground">AFS Registration No</p>
-                      <p className="font-mono font-medium mt-0.5">{detailRow.AfsRegistrationNo || "—"}</p>
+                      <p className="font-heading tabular-nums font-medium mt-0.5">{detailRow.AfsRegistrationNo || "—"}</p>
                     </div>
                   </div>
 

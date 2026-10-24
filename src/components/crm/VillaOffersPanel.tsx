@@ -26,8 +26,8 @@ export function VillaOffersPanel() {
   });
   if (!data.length) return null;
   return (
-    <section className="rounded-lg border border-amber-300/60 bg-amber-50/40 dark:bg-amber-950/20 px-3 py-2.5 space-y-2" aria-label="Villas ready to offer to plot owners">
-      <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+    <section className="border border-foreground/30 bg-card px-3 py-2.5 space-y-2" aria-label="Villas ready to offer to plot owners">
+      <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-foreground flex items-center gap-1.5">
         <Home size={11} /> Villa ready — offer to plot owner ({data.length})
       </p>
       <p className="text-[0.6875rem] text-muted-foreground">
@@ -58,7 +58,7 @@ export function VillaOffersPanel() {
                 <td className="py-1 pl-2 whitespace-nowrap">
                   <Link
                     to={`/crm/applications?newVilla=${o.UnitId}&customer=${o.CustomerId}&project=${o.ProjectId}&company=${o.CompanyId ?? ""}&block=${o.BlockId ?? ""}`}
-                    className="inline-flex items-center rounded-md border border-primary/40 px-2 py-0.5 font-medium text-primary hover:bg-primary/10">
+                    className="inline-flex items-center border border-primary/40 px-2 py-0.5 font-medium text-primary hover:bg-primary/10">
                     Start villa application
                   </Link>
                 </td>

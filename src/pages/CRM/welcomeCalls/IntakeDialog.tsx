@@ -567,8 +567,8 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
             <div className="border border-border p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                    <Phone size={14} className="text-primary" /> {isEditingCall ? "Edit Call Log" : "Log This Call"}
+                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                    <Phone size={14} className="text-foreground" /> {isEditingCall ? "Edit Call Log" : "Log This Call"}
                   </h3>
                   {isEditingCall && (
                     <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
@@ -583,10 +583,10 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                     logging a call that's happening right now. */}
                 {!isEditingCall && (
                   <div className="flex items-center gap-2">
-                    {timerRunning && <span className="font-mono text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
+                    {timerRunning && <span className="font-heading tabular-nums text-sm font-semibold text-primary tabular-nums">{fmtTimer(timerSeconds)}</span>}
                     <button type="button" onClick={() => setTimerRunning((r) => !r)}
                       className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 border font-medium ${
-                        timerRunning ? "border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive/10" : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        timerRunning ? "border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive/10" : "border-foreground/30 bg-card text-foreground hover:bg-primary/10"
                       }`}>
                       <Timer size={13} /> {timerRunning ? "Stop Timer" : "Start Call Timer"}
                     </button>
@@ -596,7 +596,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Called By</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Called By</label>
                   {isEditingCall ? (
                     <div className="bg-muted/30 px-2 py-1.5 border border-border">
                       <span className="text-sm text-foreground truncate">{editingCall.CalledByName || "—"}</span>
@@ -615,7 +615,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   )}
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Call Date & Time</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Call Date & Time</label>
                   {isEditingCall ? (
                     <div className="bg-muted/30 px-2 py-1.5 border border-border">
                       <span className="text-sm text-foreground">{form.CallDate ? form.CallDate.replace("T", " ") : "—"}</span>
@@ -627,8 +627,8 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   )}
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Duration {!isEditingCall && timerSeconds > 0 && !form.DurationSeconds ? <span className="text-emerald-600">(from timer — edit if needed)</span> : ""}
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">
+                    Duration {!isEditingCall && timerSeconds > 0 && !form.DurationSeconds ? <span className="text-foreground">(from timer — edit if needed)</span> : ""}
                   </label>
                   {isEditingCall ? (
                     <div className="bg-muted/30 px-2 py-1.5 border border-border inline-block">
@@ -669,7 +669,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
 
               {/* Quick-pick outcome keys: one tap instead of a dropdown; the picked one is inked. */}
               <div>
-                <label className="text-xs text-muted-foreground block mb-1.5">Outcome</label>
+                <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Outcome</label>
                 <div className="flex flex-wrap gap-1.5">
                   {OUTCOMES.map((o) => (
                     <button key={o} type="button" onClick={() => setForm((f) => ({ ...f, Outcome: o }))}
@@ -686,14 +686,14 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   (not answered) is valid — not every call reaches this question. */}
               {!isEditingCall && (
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1.5">Payment Plan Confirmed by Customer?</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5">Payment Plan Confirmed by Customer?</label>
                   <div className="flex items-center gap-2">
                     {([true, false] as const).map((v) => (
                       <button key={String(v)} type="button"
                         onClick={() => { setPaymentPlanConfirmed((prev) => prev === v ? null : v); if (v === true) setPaymentPlanDisputeReason(""); }}
                         className={`text-xs px-3 py-1.5 border font-medium transition-colors ${
                           paymentPlanConfirmed === v
-                            ? v ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-destructive/40 bg-destructive/5 text-destructive"
+                            ? v ? "border-foreground/30 bg-card text-foreground" : "border-destructive/40 bg-destructive/5 text-destructive"
                             : "border-border text-muted-foreground hover:bg-muted/40"
                         }`}>
                         {paymentPlanConfirmed === v && <Check size={11} className="inline mr-1 -mt-0.5" />}{v ? "Yes — confirmed" : "No — disputed"}
@@ -760,7 +760,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                       onChange={(e) => setCustomFields((cf) => cf.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
                       className="flex-1 text-sm border border-border px-2 py-1.5 bg-background" />
                     <button onClick={() => setCustomFields((cf) => cf.filter((_, j) => j !== i))}
-                      className="text-muted-foreground hover:text-red-600 shrink-0">
+                      className="text-muted-foreground hover:text-destructive shrink-0">
                       <X size={14} />
                     </button>
                   </div>
@@ -771,7 +771,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                 <div className="flex items-center justify-between gap-2 pt-1">
                   {rights.canDelete && (
                     <button onClick={handleDeleteEditedCall} disabled={deletingCall || saving}
-                      className="text-xs px-3 py-1.5 border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40">
+                      className="text-xs px-3 py-1.5 border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-40">
                       {deletingCall ? "Removing..." : "Delete Call"}
                     </button>
                   )}
@@ -820,25 +820,25 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                 to the customer, the tick for that exact fact is right there
                 to hit immediately, not scrolled off in a separate list. ── */}
             <div className="border border-border p-4 space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users size={14} className="text-primary" /> Customer</h3>
+              <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Users size={14} className="text-foreground" /> Customer</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Name</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Name</label>
                   <div className="text-sm font-medium truncate">{callContext?.customer?.CustomerName || booking.ApplicantName || "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "applicant_name")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Mobile</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Mobile</label>
                   <div className="text-sm font-medium truncate">{callContext?.customer?.Mobile || booking.Mobile || "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "mobile_number")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Email</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Email</label>
                   <div className="text-sm font-medium truncate">{callContext?.customer?.Email || "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "email")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative col-span-2 md:col-span-1">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Address</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Address</label>
                   <div className="text-sm font-medium truncate" title={[callContext?.customer?.Address, callContext?.customer?.City, callContext?.customer?.State, callContext?.customer?.Pincode].filter(Boolean).join(", ")}>
                     {[callContext?.customer?.Address, callContext?.customer?.City].filter(Boolean).join(", ") || "—"}
                   </div>
@@ -849,25 +849,25 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
 
             {/* ── Application & Booking details — same pairing pattern ── */}
             <div className="border border-border p-4 space-y-3">
-              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Building2 size={14} className="text-primary" /> Application &amp; Booking</h3>
+              <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Building2 size={14} className="text-foreground" /> Application &amp; Booking</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Project</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Project</label>
                   <div className="text-sm font-medium truncate">{callContext?.booking?.ProjectName || booking.ProjectName || "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "project_name")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">{callContext?.booking?.IsPlotSale ? "Plots" : "Unit"}</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">{callContext?.booking?.IsPlotSale ? "Plots" : "Unit"}</label>
                   <div className="text-sm font-medium truncate">{callContext?.booking?.UnitNo || booking.UnitNo || "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "unit_no")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Booking Date</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Booking Date</label>
                   <div className="text-sm font-medium truncate">{callContext?.booking?.BookingDate ? new Date(callContext.booking.BookingDate).toLocaleDateString("en-IN") : "—"}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "booking_date")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
                 <div className="relative">
-                  <label className="text-[0.6875rem] text-muted-foreground block">Total Value</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Total Value</label>
                   <div className="text-sm font-medium truncate">{fmt(callContext?.booking?.GrandTotal ?? callContext?.booking?.TotalValue)}</div>
                   <InlineVerify item={vcState.vc?.items.find((i: VcItem) => i.ItemKey === "total_value")} bookingId={booking.BookingId} locked={vcState.locked} onChanged={vcState.refetch} />
                 </div>
@@ -934,15 +934,15 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                         <div key={m.Id} className="text-[0.6875rem] space-y-0.5">
                           <div className="flex items-center justify-between gap-1.5">
                             <span className="text-foreground/90 truncate">{m.MilestoneNo}. {m.MilestoneName}</span>
-                            <span className={`shrink-0 px-1.5 py-0.5 rounded-full border font-medium ${
-                              isDone ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                            <span className={`shrink-0 px-1.5 py-0.5 border font-medium ${
+                              isDone ? "text-foreground bg-card border-foreground/30"
                                 : paid > 0 ? "text-foreground bg-card border-foreground/30"
                                 : "text-muted-foreground bg-muted/40 border-border"
                             }`}>{label}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <span>Due {fmt(due)}</span>
-                            {paid > 0 && <span className="text-emerald-700">Paid {fmt(paid)}</span>}
+                            {paid > 0 && <span className="text-foreground">Paid {fmt(paid)}</span>}
                             {!isDone && balance > 0 && <span className="text-foreground">Balance {fmt(balance)}</span>}
                           </div>
                         </div>
@@ -983,7 +983,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                           <div className="flex justify-between"><span className="text-muted-foreground">Disbursed</span><span className="font-medium">{fmt(loanDetail.DisbursedAmount)}</span></div>
                         )}
                         {loanDetail.LoanAccountNo && (
-                          <div className="flex justify-between"><span className="text-muted-foreground">Loan A/c No.</span><span className="font-medium font-mono">{loanDetail.LoanAccountNo}</span></div>
+                          <div className="flex justify-between"><span className="text-muted-foreground">Loan A/c No.</span><span className="font-medium font-heading tabular-nums">{loanDetail.LoanAccountNo}</span></div>
                         )}
                         {loanDetail.RmName && (
                           <div className="flex justify-between"><span className="text-muted-foreground">RM</span><span className="font-medium">{loanDetail.RmName}{loanDetail.RmContact ? ` · ${loanDetail.RmContact}` : ""}</span></div>
@@ -1000,7 +1000,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   <div className="flex flex-wrap gap-1">
                     {callContext.invoices.map((inv: any) => (
                       <button key={inv.InvoiceNo} type="button" onClick={() => handleViewInvoice(inv.InvoiceNo)}
-                        className="inline-block px-1.5 py-0.5 border border-border font-mono text-[0.6875rem] hover:bg-muted hover:border-foreground">
+                        className="inline-block px-1.5 py-0.5 border border-border font-heading tabular-nums text-[0.6875rem] hover:bg-muted hover:border-foreground">
                         {inv.InvoiceNo} ({fmt(inv.Amount)})
                       </button>
                     ))}
@@ -1018,7 +1018,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                 booking really has a parking allotment / extra charge on
                 file. Nothing to verify → no checkbox, not a forced "N/A" tick. */}
             <div className="border border-border p-3.5 space-y-2.5">
-              <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">{callContext?.booking?.IsPlotSale ? "Extra Charges" : <>Parking &amp; Extra Charges</>}</h4>
+              <h4 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{callContext?.booking?.IsPlotSale ? "Extra Charges" : <>Parking &amp; Extra Charges</>}</h4>
               {/* A plot (land) sale has no parking. */}
               {!callContext?.booking?.IsPlotSale && (
               <div className="relative space-y-1">
@@ -1055,7 +1055,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
         <div className="space-y-4 pt-1">
             {/* ── Document Verification ── */}
             <div className="border border-border p-4 space-y-2">
-              <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
+              <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><FileCheck size={14} /> Document & Attachment Verification</h3>
 
               {docData.documents.map((d: any) => (
                 <div key={d.Id} className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0 gap-2">
@@ -1074,12 +1074,12 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                   <div className="flex items-center gap-2 shrink-0">
                     {rights.canEdit && (
                       <button onClick={() => handleVerifyDoc(d.Id, !d.IsVerified)}
-                        className={`text-xs px-2 py-0.5 rounded-full border font-medium ${d.IsVerified ? "text-green-600 bg-green-50 border-green-200" : "text-foreground bg-card border-foreground/30"}`}>
+                        className={`text-xs px-2 py-0.5 border font-medium ${d.IsVerified ? "text-foreground bg-card border-foreground/30" : "text-foreground bg-card border-foreground/30"}`}>
                         {d.IsVerified ? "Verified" : "Mark Verified"}
                       </button>
                     )}
                     {rights.canDelete && (
-                      <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600">
+                      <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-destructive">
                         <Trash2 size={13} />
                       </button>
                     )}
@@ -1124,7 +1124,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
         <div className="space-y-4 pt-1">
             {/* ── Co-Applicant — full detail cards, not a one-line summary ── */}
             <div className="border border-border p-4 space-y-2.5">
-              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users size={14} /> Co-Applicant</h3>
+              <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Users size={14} /> Co-Applicant</h3>
               {coApplicants.length === 0 && !addingCo && (
                 <p className="text-xs text-muted-foreground">No co-applicant on this booking yet.</p>
               )}
@@ -1137,10 +1137,10 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                     )}
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 mt-2 text-xs">
-                    <div><span className="text-muted-foreground block">Mobile</span>{c.Mobile || "—"}</div>
-                    <div><span className="text-muted-foreground block">Email</span>{c.Email || "—"}</div>
-                    <div><span className="text-muted-foreground block">PAN (Permanent Account Number)</span>{c.PanNo || "—"}</div>
-                    <div><span className="text-muted-foreground block">Aadhaar</span>{c.AadhaarNo || "—"}</div>
+                    <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Mobile</span>{c.Mobile || "—"}</div>
+                    <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Email</span>{c.Email || "—"}</div>
+                    <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">PAN (Permanent Account Number)</span>{c.PanNo || "—"}</div>
+                    <div><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Aadhaar</span>{c.AadhaarNo || "—"}</div>
                   </div>
                 </div>
               ))}
@@ -1193,8 +1193,8 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
           {/* ── How is this purchase being financed? ── */}
           <div className="border border-border p-4 space-y-3">
             <div>
-              <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                <Wallet size={14} className="text-primary" /> How is this purchase being financed?
+              <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                <Wallet size={14} className="text-foreground" /> How is this purchase being financed?
               </h3>
               <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Ask the customer during the call — this unlocks the loan-tracking step and prefills Bank &amp; KYC.
@@ -1215,8 +1215,8 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                         : "border-border bg-background hover:bg-muted/40"
                     } ${ftSaving ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
                   >
-                    <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${isSelected ? "border-primary" : "border-muted-foreground/40"}`}>
-                      {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-primary block" />}
+                    <span className={`w-3.5 h-3.5 border-2 shrink-0 flex items-center justify-center ${isSelected ? "border-primary" : "border-muted-foreground/40"}`}>
+                      {isSelected && <span className="w-1.5 h-1.5 bg-primary block" />}
                     </span>
                     {opt === "SelfFunded" ? "Self-funded" : "Home Loan"}
                   </button>
@@ -1233,7 +1233,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
           {/* ── Bank Preference ── */}
           <div className="border border-border p-4 space-y-4">
             <div>
-              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} className="text-primary" /> Customer's Preferred Banks (Home Loan)</h3>
+              <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><Landmark size={14} className="text-foreground" /> Customer's Preferred Banks (Home Loan)</h3>
               <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {callContext?.financingType === "SelfFunded"
                   ? "Customer is self-funded — bank preferences are optional but can still be recorded."
@@ -1264,7 +1264,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
                       <button
                         type="button"
                         onClick={() => handleRemoveBankPreference(bp.Id, bp.BankName)}
-                        className="text-muted-foreground hover:text-red-600 shrink-0 mt-0.5"
+                        className="text-muted-foreground hover:text-destructive shrink-0 mt-0.5"
                         title="Remove this bank preference"
                       >
                         <X size={14} />

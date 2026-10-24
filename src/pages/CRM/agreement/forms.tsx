@@ -27,9 +27,9 @@ export const EMPTY_DOC_REQUEST_FORM = {
 
 export function mimeIcon(mime: string | null | undefined) {
   if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
-  if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
-  if (mime === "application/pdf") return <FileText size={16} className="text-red-500 shrink-0" />;
-  if (mime.includes("sheet") || mime.includes("excel")) return <FileSpreadsheet size={16} className="text-emerald-500 shrink-0" />;
+  if (mime.startsWith("image/")) return <FileImage size={16} className="text-foreground shrink-0" />;
+  if (mime === "application/pdf") return <FileText size={16} className="text-destructive shrink-0" />;
+  if (mime.includes("sheet") || mime.includes("excel")) return <FileSpreadsheet size={16} className="text-foreground shrink-0" />;
   return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
 }
 export function fmtBytes(n: number | null | undefined) {

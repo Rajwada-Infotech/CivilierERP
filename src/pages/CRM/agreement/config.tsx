@@ -27,7 +27,7 @@ export const DATE_BADGE_COLORS: Record<string, string> = {
 export function DateStatusBadge({ label, date, color, active }: { label: string; date?: string | null; color: "purple" | "blue" | "green"; active: boolean }) {
   if (!active) return null;
   return (
-    <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium ${DATE_BADGE_COLORS[color]}`}>
+    <span className={`text-[0.6875rem] px-2 py-0.5 border font-medium ${DATE_BADGE_COLORS[color]}`}>
       {label}{date ? `: ${String(date).slice(0, 10)}` : ""}
     </span>
   );

@@ -133,7 +133,7 @@ export const AttachmentsStep: React.FC<{
                     className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
                     <Download size={12} />
                   </a>
-                  <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-red-600"><Trash2 size={12} /></button>
+                  <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
                 </div>
               </div>
             );
@@ -152,7 +152,7 @@ export const AttachmentsStep: React.FC<{
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
               <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                <FileText size={15} className="text-primary shrink-0" />
+                <FileText size={15} className="text-foreground shrink-0" />
                 <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
               </span>
               <div className="flex items-center gap-2 shrink-0">

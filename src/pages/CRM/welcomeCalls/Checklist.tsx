@@ -23,11 +23,11 @@ export const VerifyCheckbox: React.FC<{
 }> = ({ checked, locked, disabled, onChange }) => {
   if (locked) {
     return checked ? (
-      <span className="shrink-0 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center">
+      <span className="shrink-0 w-4 h-4 bg-foreground text-card flex items-center justify-center">
         <Check size={11} strokeWidth={3} />
       </span>
     ) : (
-      <span className="shrink-0 w-4 h-4 rounded-full border-2 border-dashed border-border" />
+      <span className="shrink-0 w-4 h-4 border-2 border-dashed border-border" />
     );
   }
   return (
@@ -136,7 +136,7 @@ export const ChecklistItemRow: React.FC<{
 
   return (
     <div className={`border p-2.5 space-y-1.5 ${
-      isOpenRecheck ? "border-destructive/40 bg-red-50/50" : item.IsChecked ? "border-emerald-200 bg-emerald-50/30" : "border-border"
+      isOpenRecheck ? "border-destructive/40 bg-destructive/5" : item.IsChecked ? "border-foreground/30 bg-card" : "border-border"
     }`}>
       <div className="flex items-start gap-2">
         <div className="mt-0.5">
@@ -146,11 +146,11 @@ export const ChecklistItemRow: React.FC<{
           <div className="flex items-center justify-between gap-2">
             <span className={`text-sm ${item.IsChecked ? "text-foreground" : "text-foreground/90"}`}>{item.Label}</span>
             {isOpenRecheck ? (
-              <span className="shrink-0 flex items-center gap-1 text-[0.625rem] font-medium text-destructive bg-destructive/5 border border-destructive/40 rounded-full px-2 py-0.5">
+              <span className="shrink-0 flex items-center gap-1 text-[0.625rem] font-medium text-destructive bg-destructive/5 border border-destructive/40 px-2 py-0.5">
                 <ShieldAlert size={10} /> Recheck Open
               </span>
             ) : item.IsChecked ? (
-              <span className="shrink-0 flex items-center gap-1 text-[0.625rem] font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+              <span className="shrink-0 flex items-center gap-1 text-[0.625rem] font-medium text-foreground bg-card border border-foreground/30 px-2 py-0.5">
                 <ShieldCheck size={10} /> Verified
               </span>
             ) : null}
@@ -200,7 +200,7 @@ export const ChecklistItemRow: React.FC<{
                     placeholder="What doesn't match / what's the conflict with the customer's data..."
                     rows={2} className="w-full text-xs border border-destructive/40 px-2 py-1.5 bg-background resize-none" />
                   <button type="button" onClick={handleSendRecheck} disabled={flagging || !recheckReason.trim()}
-                    className="text-[0.6875rem] font-medium px-2 py-1 bg-red-500 text-white disabled:opacity-40 hover:bg-red-600">
+                    className="text-[0.6875rem] font-medium px-2 py-1 bg-destructive text-white disabled:opacity-40 hover:bg-destructive/80">
                     {flagging ? "Sending..." : "Confirm — flag for recheck"}
                   </button>
                 </div>
@@ -320,7 +320,7 @@ export const InlineVerify: React.FC<{
 
   if (isOpenRecheck) {
     return (
-      <div className="mt-1 flex items-start gap-1.5 text-[0.6875rem] text-destructive bg-red-50/50 border border-destructive/40 px-2 py-1">
+      <div className="mt-1 flex items-start gap-1.5 text-[0.6875rem] text-destructive bg-destructive/5 border border-destructive/40 px-2 py-1">
         <ShieldAlert size={12} className="shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <span className="font-medium">Flagged:</span> {item.RecheckReason}
@@ -339,7 +339,7 @@ export const InlineVerify: React.FC<{
       <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
         <VerifyCheckbox checked={item.IsChecked} locked={locked} disabled={saving || !rights.canEdit} onChange={handleToggleChecked} />
         {label && <span className="text-muted-foreground">{label}</span>}
-        <span className={item.IsChecked ? "text-emerald-700 font-medium" : "text-muted-foreground"}>
+        <span className={item.IsChecked ? "text-foreground font-medium" : "text-muted-foreground"}>
           {item.IsChecked ? "Verified" : "Verify"}
         </span>
       </label>
@@ -372,7 +372,7 @@ export const InlineVerify: React.FC<{
                 placeholder="What doesn't match / what's the conflict with the customer's data..."
                 rows={2} className="w-full text-xs border border-destructive/40 px-2 py-1.5 bg-background resize-none" />
               <button type="button" onClick={handleSendRecheck} disabled={flagging || !recheckReason.trim()}
-                className="text-[0.6875rem] font-medium px-2 py-1 bg-red-500 text-white disabled:opacity-40 hover:bg-red-600">
+                className="text-[0.6875rem] font-medium px-2 py-1 bg-destructive text-white disabled:opacity-40 hover:bg-destructive/80">
                 {flagging ? "Sending..." : "Confirm — flag for recheck"}
               </button>
             </div>
@@ -445,16 +445,16 @@ export const ChecklistProgressBar: React.FC<{ vc: any; bookingId: number }> = ({
   return (
     <div className="border border-border p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardList size={14} className="text-foreground" /> Verification Checklist</h3>
+        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><ClipboardList size={14} className="text-foreground" /> Verification Checklist</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground">{vc.checkedCount}/{vc.totalCount} verified</span>
           {vc.openRecheckCount > 0 && (
-            <span className="flex items-center gap-1 font-medium text-destructive bg-destructive/5 border border-destructive/40 rounded-full px-2 py-0.5">
+            <span className="flex items-center gap-1 font-medium text-destructive bg-destructive/5 border border-destructive/40 px-2 py-0.5">
               <ShieldAlert size={11} /> {vc.openRecheckCount} in recheck
             </span>
           )}
           {vc.submission?.IsLocked && (
-            <span className="flex items-center gap-1 font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+            <span className="flex items-center gap-1 font-medium text-foreground bg-card border border-foreground/30 px-2 py-0.5">
               <Lock size={11} /> Locked
             </span>
           )}
@@ -477,10 +477,10 @@ export const ChecklistSectionBlock: React.FC<{
   return (
     <div className="border border-border p-3.5 space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-          <ClipboardCheck size={12} className="text-primary" /> Verify: {s.label}
+        <h4 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+          <ClipboardCheck size={12} className="text-foreground" /> Verify: {s.label}
         </h4>
-        {s.complete && <span className="flex items-center gap-1 text-[0.625rem] font-medium text-emerald-700"><ShieldCheck size={11} /> Complete</span>}
+        {s.complete && <span className="flex items-center gap-1 text-[0.625rem] font-medium text-foreground"><ShieldCheck size={11} /> Complete</span>}
       </div>
       <div className="space-y-1.5">
         {s.items.map((item: VcItem) => (
@@ -505,18 +505,18 @@ export const ChecklistSubmitFooter: React.FC<{
   return (
     <div className="border border-border p-3.5 space-y-2 bg-muted/10">
       {locked ? (
-        <div className="flex items-center justify-between border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+        <div className="flex items-center justify-between border border-foreground/30 bg-card px-3 py-2 text-xs text-foreground">
           <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${fmtIstIso(vc.submission.SubmittedAt)}` : ""}</span>
           <div className="flex items-center gap-3">
             {onPreviewPdf && (
               <button type="button" onClick={onPreviewPdf}
-                className="flex items-center gap-1 font-medium text-emerald-700 hover:underline">
+                className="flex items-center gap-1 font-medium text-foreground hover:underline">
                 <FileCheck size={12} /> View PDF
               </button>
             )}
             {rights.canEdit && (
               <button type="button" onClick={onReopen} disabled={reopening}
-                className="flex items-center gap-1 font-medium text-emerald-700 hover:underline disabled:opacity-40">
+                className="flex items-center gap-1 font-medium text-foreground hover:underline disabled:opacity-40">
                 <Unlock size={12} /> {reopening ? "Reopening..." : "Reopen"}
               </button>
             )}
@@ -531,7 +531,7 @@ export const ChecklistSubmitFooter: React.FC<{
           </p>
           {rights.canEdit && (
             <button type="button" onClick={onSubmit} disabled={!vc.canSubmit || !vc.hasWelcomedCall || submitting}
-              className="px-4 py-1.5 text-sm bg-emerald-600 text-white font-medium hover:bg-emerald-700 disabled:opacity-40 shrink-0">
+              className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 shrink-0">
               {submitting ? "Submitting..." : "Submit Verification"}
             </button>
           )}

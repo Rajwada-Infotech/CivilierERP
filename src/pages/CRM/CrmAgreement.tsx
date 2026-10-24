@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
-import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
+import { FinancialStatusBar, fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
@@ -909,27 +909,27 @@ const CrmAgreement: React.FC = () => {
                     ["Aadhaar",          detail.agreement?.AadhaarNo || detail.agreement?.CustomerAadhaarNo || "—"],
                   ].map(([k, v]) => (
                     <div key={k}>
-                      <span className="text-[0.6875rem] text-muted-foreground block">{k}</span>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">{k}</span>
                       <span className="font-medium text-sm">{v}</span>
                     </div>
                   ))}
                   {detail.agreement?.LegalAddress && (
                     <div className="col-span-2">
-                      <span className="text-[0.6875rem] text-muted-foreground block">Legal Address</span>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Legal Address</span>
                       <span className="text-sm text-muted-foreground">{detail.agreement.LegalAddress}</span>
                     </div>
                   )}
                   <div className="col-span-2 pt-1 border-t border-border/60">
-                    <span className="text-[0.6875rem] text-muted-foreground block">{detail.agreement?.IsPlotSale ? "Total Value (land — no GST)" : "Total Value (incl. GST)"}</span>
-                    <span className="text-sm font-bold font-mono">
-                      {detail.agreement?.GrandTotal ? `₹${Number(detail.agreement.GrandTotal).toLocaleString("en-IN")}` : "—"}
+                    <span className={`block ${LBL}`}>{detail.agreement?.IsPlotSale ? "Total value (land, no GST)" : "Total value (incl. GST)"}</span>
+                    <span className="block font-heading text-xl font-bold tabular-nums text-foreground mt-1">
+                      {detail.agreement?.GrandTotal ? fmtRupees(detail.agreement.GrandTotal) : "—"}
                     </span>
                     {detail.agreement?.GrandTotal > 0 && (
-                      <span className="text-[0.6875rem] text-muted-foreground block mt-0.5">
-                        {detail.agreement?.IsPlotSale ? "Land" : "Unit"} ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
-                        {detail.agreement?.UnitGstAmount > 0 && ` + GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
-                        {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}`}
-                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}`}
+                      <span className="text-[0.6875rem] text-muted-foreground block mt-0.5 tabular-nums">
+                        {detail.agreement?.IsPlotSale ? "Land" : "Unit"} {fmtRupees(detail.agreement.TotalValue)}
+                        {detail.agreement?.UnitGstAmount > 0 && ` + GST ${fmtRupees(detail.agreement.UnitGstAmount)}`}
+                        {detail.agreement?.ParkingTotal > 0 && ` + Parking ${fmtRupees(detail.agreement.ParkingTotal)}`}
+                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra ${fmtRupees(detail.agreement.ExtraChargesTotal)}`}
                       </span>
                     )}
                   </div>
@@ -960,23 +960,23 @@ const CrmAgreement: React.FC = () => {
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                       <div>
-                        <span className="text-[0.6875rem] text-muted-foreground block">Doc No.</span>
-                        <span className="font-semibold font-mono">{detail.agreement.AfsRegistrationNo || "—"}</span>
+                        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Doc No.</span>
+                        <span className="font-semibold font-heading tabular-nums">{detail.agreement.AfsRegistrationNo || "—"}</span>
                       </div>
                       <div>
-                        <span className="text-[0.6875rem] text-muted-foreground block">Registration Date</span>
+                        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Registration Date</span>
                         <span className="font-semibold">{detail.agreement.AfsRegistrationDate ? String(detail.agreement.AfsRegistrationDate).slice(0, 10) : "—"}</span>
                       </div>
                       {detail.agreement.AfsStampDuty != null && (
                         <div>
-                          <span className="text-[0.6875rem] text-muted-foreground block">Stamp Duty Paid</span>
-                          <span className="font-semibold font-mono">{Number(detail.agreement.AfsStampDuty).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
+                          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Stamp Duty Paid</span>
+                          <span className="font-semibold font-heading tabular-nums">{Number(detail.agreement.AfsStampDuty).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
                         </div>
                       )}
                       {detail.agreement.AfsRegistrationFee != null && (
                         <div>
-                          <span className="text-[0.6875rem] text-muted-foreground block">Registration Fee</span>
-                          <span className="font-semibold font-mono">{Number(detail.agreement.AfsRegistrationFee).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
+                          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Registration Fee</span>
+                          <span className="font-semibold font-heading tabular-nums">{Number(detail.agreement.AfsRegistrationFee).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
                         </div>
                       )}
                     </div>
@@ -990,7 +990,7 @@ const CrmAgreement: React.FC = () => {
                       {(revisions as any[]).map((r) => (
                         <div key={r.Id} className="border border-border p-2.5 bg-muted/20">
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <span className="px-1.5 py-0.5 rounded-full border border-foreground/30 bg-card text-foreground text-[0.625rem] font-medium">v{r.VersionNo}</span>
+                            <span className="px-1.5 py-0.5 border border-foreground/30 bg-card text-foreground text-[0.625rem] font-medium">v{r.VersionNo}</span>
                             <span>{r.Reason}</span>
                             <span className="text-[0.625rem]">({fmtIstIso(r.CreatedAt)}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
                           </div>
@@ -1034,12 +1034,12 @@ const CrmAgreement: React.FC = () => {
                   <div className="space-y-4">
                     <div className="border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <UserCircle2 size={15} className="text-primary" /> Legal Executive
+                        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                          <UserCircle2 size={15} className="text-foreground" /> Legal Executive
                         </h3>
                         {legalAssigned
-                          ? <span className="text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
-                          : <span className="text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
+                          ? <span className="text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-2 py-0.5 font-semibold">Assigned</span>
+                          : <span className="text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-2 py-0.5 font-semibold">Unassigned</span>
                         }
                       </div>
                       <div className="px-4 py-3 space-y-2">
@@ -1047,7 +1047,7 @@ const CrmAgreement: React.FC = () => {
                         {a?.LegalExecutiveId != null && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border px-3 py-1.5">
-                              <UserCircle2 size={14} className="text-primary shrink-0" />
+                              <UserCircle2 size={14} className="text-foreground shrink-0" />
                               <span className="text-sm font-medium">{a.LegalExecutiveName}</span>
                               <Lock size={11} className="text-muted-foreground ml-auto shrink-0" />
                             </div>
@@ -1089,13 +1089,13 @@ const CrmAgreement: React.FC = () => {
 
                     <div className="border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <ShieldAlert size={15} className="text-primary" /> Approval Timeline
+                        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                          <ShieldAlert size={15} className="text-foreground" /> Approval Timeline
                         </h3>
                         <div className="flex items-center gap-2">
                           <div className="flex gap-1">
                             {[0,1,2,3,4].map((i) => (
-                              <div key={i} className={`w-2 h-2 rounded-full ${i < stepsComplete ? "bg-foreground" : "bg-muted"}`} />
+                              <div key={i} className={`w-2 h-2 ${i < stepsComplete ? "bg-foreground" : "bg-muted"}`} />
                             ))}
                           </div>
                           <span className="text-xs text-muted-foreground">{stepsComplete}/5</span>
@@ -1103,13 +1103,13 @@ const CrmAgreement: React.FC = () => {
                       </div>
 
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-foreground/5" : seniorRejected ? "bg-destructive/5" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
                           {seniorApproved ? <Check size={14} /> : seniorRejected ? <AlertCircle size={13} /> : 1}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Senior Review</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
                               seniorApproved ? "text-foreground bg-card border-foreground/30"
                               : seniorRejected ? "text-destructive bg-destructive/5 border-destructive/40"
                               : "text-foreground bg-card border-foreground/30"
@@ -1148,13 +1148,13 @@ const CrmAgreement: React.FC = () => {
                       </div>
 
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "bg-foreground/5" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
                           {sent ? <Check size={14} /> : 2}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Shared with Customer</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
                               sent ? "text-foreground bg-card border-foreground/30" : "text-muted-foreground bg-muted/30 border-border"
                             }`}>{sent ? "Sent" : "Not sent"}</span>
                           </div>
@@ -1187,13 +1187,13 @@ const CrmAgreement: React.FC = () => {
                       </div>
 
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "bg-foreground/5" : custRecheck ? "bg-destructive/5" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
                           {custApproved ? <Check size={14} /> : custRecheck ? <AlertCircle size={13} /> : 3}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Customer Approval</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
                               custApproved ? "text-foreground bg-card border-foreground/30"
                               : custRecheck ? "text-destructive bg-destructive/5 border-destructive/40"
                               : "text-foreground bg-card border-foreground/30"
@@ -1235,22 +1235,22 @@ const CrmAgreement: React.FC = () => {
                       </div>
 
                       <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "bg-foreground/5" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
                           {dated ? <Check size={14} /> : <CalendarDays size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Agreement Date</span>
                             {dated ? (
-                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-foreground bg-card border-foreground/30">
+                              <span className="text-[0.6875rem] px-2 py-0.5 border font-semibold text-foreground bg-card border-foreground/30">
                                 Confirmed: {String(a.AgreementDate).slice(0,10)}
                               </span>
                             ) : a?.ProposedDate ? (
-                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-foreground bg-card border-foreground/30">
+                              <span className="text-[0.6875rem] px-2 py-0.5 border font-semibold text-foreground bg-card border-foreground/30">
                                 Proposed: {String(a.ProposedDate).slice(0,10)}
                               </span>
                             ) : (
-                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
+                              <span className="text-[0.6875rem] px-2 py-0.5 border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground">
@@ -1314,7 +1314,7 @@ const CrmAgreement: React.FC = () => {
                               <p className="text-[0.6875rem] text-muted-foreground font-medium flex items-center gap-1"><FolderClock size={11} /> Negotiation history</p>
                               {(dateHistory as any[]).map((h) => (
                                 <div key={h.Id} className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
-                                  <span className={`px-1.5 py-0.5 rounded-full border font-medium ${h.ProposedBy === "Company" ? "text-foreground bg-card border-foreground/30" : "text-foreground bg-card border-foreground/30"}`}>
+                                  <span className={`px-1.5 py-0.5 border font-medium ${h.ProposedBy === "Company" ? "text-foreground bg-card border-foreground/30" : "text-foreground bg-card border-foreground/30"}`}>
                                     {h.ProposedBy}
                                   </span>
                                   proposed {String(h.ProposedDate).slice(0,10)}
@@ -1327,13 +1327,13 @@ const CrmAgreement: React.FC = () => {
                       </div>
 
                       <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "bg-foreground/5" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
                           {a?.Status === CrmStatus.REGISTERED ? <Check size={14} /> : <BarChart3 size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Execution &amp; Registration</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
                               a?.Status === CrmStatus.REGISTERED ? "text-foreground bg-card border-foreground/30"
                               : a?.Status === CrmStatus.EXECUTED ? "text-foreground bg-card border-foreground/30"
                               : "text-muted-foreground bg-muted/30 border-border"
@@ -1366,7 +1366,7 @@ const CrmAgreement: React.FC = () => {
               <div className="border border-border overflow-hidden">
                 <div className="px-4 py-3 bg-muted/30 border-b border-border space-y-2">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ScrollText size={15} className="text-primary" /> Agreement Documents ({detail.documents?.length || 0})</h3>
+                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><ScrollText size={15} className="text-foreground" /> Agreement Documents ({detail.documents?.length || 0})</h3>
                     <div className="flex items-center gap-3">
                       <button onClick={() => setDocRequestDialog(true)}
                         className="flex items-center gap-1 text-xs text-primary hover:underline">
@@ -1384,9 +1384,9 @@ const CrmAgreement: React.FC = () => {
                         <span className="text-muted-foreground">Mandatory docs: {fp.uploaded}/{fp.required} uploaded{allVerified ? "" : ` · ${(detail.documents || []).filter((d: any) => d.IsMandatory && d.Status === "Verified").length} verified`}</span>
                         <span className={`font-semibold ${fp.percent === 100 && allVerified ? "text-foreground" : fp.percent === 100 ? "text-foreground" : "text-muted-foreground"}`}>{fp.percent}%</span>
                       </div>
-                      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-muted overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${
+                          className={`h-full transition-all ${
                             allVerified ? "bg-foreground" : fp.percent === 100 ? "bg-foreground/60" : "bg-foreground/40"
                           }`}
                           style={{ width: `${fp.percent}%` }}
@@ -1402,7 +1402,7 @@ const CrmAgreement: React.FC = () => {
                   const awaitingCustomer = awaitingUpload && d.UploadedByType === "Customer";
                   const awaitingStaff = awaitingUpload && d.UploadedByType !== "Customer";
                   const statusBg = d.Status === "Verified" ? "bg-foreground/5" : d.Status === "Rejected" ? "bg-destructive/5" : "";
-                  const docRail = d.Status === "Verified" ? "#22c55e" : d.Status === "Rejected" ? "#ef4444" : d.Status === "Uploaded" || d.Status === "Submitted" ? "#3b82f6" : awaitingUpload ? "#f59e0b" : "var(--border)";
+                  const docRail = d.Status === "Verified" ? "hsl(var(--foreground))" : d.Status === "Rejected" ? "hsl(var(--destructive))" : d.Status === "Uploaded" || d.Status === "Submitted" ? "hsl(var(--foreground) / 0.5)" : awaitingUpload ? "hsl(var(--foreground) / 0.35)" : "var(--border)";
                   return (
                     <div key={d.Id} className={`border-b border-border last:border-0 flex ${statusBg}`}>
                       <div className="w-[3px] shrink-0 self-stretch" style={{ background: docRail }} />
@@ -1529,7 +1529,7 @@ const CrmAgreement: React.FC = () => {
           <DialogHeader><DialogTitle className="font-heading">New Agreement</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Booking *</label>
               <SearchableNativeSelect value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({
                   ...f,
                   BookingId: e.target.value,
@@ -1555,7 +1555,7 @@ const CrmAgreement: React.FC = () => {
               )}
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
               <SearchableNativeSelect value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
@@ -1569,7 +1569,7 @@ const CrmAgreement: React.FC = () => {
                 { key: "AadhaarNo",    label: "Aadhaar No",      type: "text" },
               ].map(({ key, label, type }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">{label}</label>
                   <AutoInput type={type} value={agrForm[key as keyof typeof agrForm]}
                     onChange={(e) => setAgrForm((f) => ({ ...f, [key]: key === "PanNo" ? e.target.value.toUpperCase() : e.target.value }))}
                     className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
@@ -1577,12 +1577,12 @@ const CrmAgreement: React.FC = () => {
               ))}
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Address</label>
               <textarea value={agrForm.LegalAddress} onChange={(e) => setAgrForm((f) => ({ ...f, LegalAddress: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Notes</label>
               <textarea value={agrForm.Notes} onChange={(e) => setAgrForm((f) => ({ ...f, Notes: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
             </div>
@@ -1607,7 +1607,7 @@ const CrmAgreement: React.FC = () => {
               The customer will be able to review this agreement and its documents from their portal, and either approve it or request a recheck.
             </p>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date (optional)</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Proposed Agreement Date (optional)</label>
               <DateInput value={sendDate} onChange={(e) => setSendDate(e.target.value)}
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
               <p className="text-[0.6875rem] text-muted-foreground mt-1">If the customer proposes the same date, it's confirmed automatically as the Agreement Date.</p>
@@ -1676,7 +1676,7 @@ const CrmAgreement: React.FC = () => {
               This date goes to the customer for their review. They can accept it as-is, or propose a different one back to you.
             </p>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Proposed Agreement Date</label>
               <DateInput value={sendDate} onChange={(e) => setSendDate(e.target.value)}
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
               {preferredAgrDate && sendDate === preferredAgrDate && (
@@ -1755,7 +1755,7 @@ const CrmAgreement: React.FC = () => {
                     value={regForm.AfsStampDuty}
                     readOnly={regFeesLocked}
                     onChange={(e) => setRegForm((f) => ({ ...f, AfsStampDuty: e.target.value }))}
-                    className={`w-full text-sm border px-2 py-1.5 font-mono ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
+                    className={`w-full text-sm border px-2 py-1.5 font-heading tabular-nums ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
                   />
                 </div>
                 <div>
@@ -1765,7 +1765,7 @@ const CrmAgreement: React.FC = () => {
                     value={regForm.AfsRegistrationFee}
                     readOnly={regFeesLocked}
                     onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationFee: e.target.value }))}
-                    className={`w-full text-sm border px-2 py-1.5 font-mono ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
+                    className={`w-full text-sm border px-2 py-1.5 font-heading tabular-nums ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
                   />
                 </div>
               </div>
@@ -1788,20 +1788,20 @@ const CrmAgreement: React.FC = () => {
           <DialogHeader><DialogTitle className="font-heading">Add Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Document Type *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Document Type *</label>
               <select value={docForm.DocumentType} onChange={(e) => setDocForm((f) => ({ ...f, DocumentType: e.target.value }))}
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Issued By</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Issued By</label>
               <input type="text" value={docForm.IssuedBy} onChange={(e) => setDocForm((f) => ({ ...f, IssuedBy: e.target.value }))}
                 placeholder="e.g. Legal team, Bank, Registrar office"
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Remarks (optional)</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Remarks (optional)</label>
               <textarea value={docForm.Remarks} onChange={(e) => setDocForm((f) => ({ ...f, Remarks: e.target.value }))}
                 rows={2} className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
             </div>
@@ -1842,14 +1842,14 @@ const CrmAgreement: React.FC = () => {
           <DialogHeader><DialogTitle className="font-heading">Request Document from Customer</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Document Type *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Document Type *</label>
               <select value={docRequestForm.DocumentType} onChange={(e) => setDocRequestForm((f) => ({ ...f, DocumentType: e.target.value }))}
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Label shown to customer (optional)</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Label shown to customer (optional)</label>
               <input type="text" value={docRequestForm.Label} onChange={(e) => setDocRequestForm((f) => ({ ...f, Label: e.target.value }))}
                 placeholder="e.g. Latest bank statement"
                 className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
@@ -1929,7 +1929,7 @@ const CrmAgreement: React.FC = () => {
                 ) : null}
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
                     <SearchableNativeSelect value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                       className={editInputCls}>
                       <option value="">— Unassigned —</option>
@@ -1938,23 +1938,23 @@ const CrmAgreement: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Name</label>
                       <input type="text" value={editForm.LegalName} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
                         className={editInputCls} />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">PAN (Permanent Account Number)</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">PAN (Permanent Account Number)</label>
                       <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
                         className={editInputCls} />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Aadhaar No.</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Aadhaar No.</label>
                       <input type="text" value={editForm.AadhaarNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
                         className={editInputCls} />
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
+                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Address</label>
                     <textarea value={editForm.LegalAddress} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
                       rows={2} className={`${editInputCls} resize-none`} />
                   </div>

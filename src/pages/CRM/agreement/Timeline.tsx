@@ -19,9 +19,9 @@ export function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { l
                 : s.state === "current"
                 ? "bg-card text-foreground border-foreground border-2"
                 : "bg-card text-muted-foreground border-foreground/25"}`}>
-              {s.state === "done" ? <Check size={11} /> : i + 1}
+              {s.state === "done" ? <Check size={11} /> : <span className="font-heading tabular-nums">{i + 1}</span>}
             </span>
-            <span className={`text-[0.6875rem] font-semibold whitespace-nowrap leading-tight ${
+            <span className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap leading-tight ${
               s.state === "done" ? "text-foreground"
               : s.state === "current" ? "text-foreground"
               : "text-muted-foreground/60"}`}>
@@ -58,23 +58,20 @@ export function TlRow({ n, title, detailText, state, badge, onJump, last }: {
   return (
     <button onClick={onJump} className="w-full text-left flex gap-3 group">
       <div className="flex flex-col items-center">
-        <span className={`w-7 h-7 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 ${ring}`}>
+        <span className={`w-7 h-7 flex items-center justify-center font-heading text-[0.6875rem] font-bold tabular-nums shrink-0 ${ring}`}>
           {state === "done" ? <Check size={13} /> : n}
         </span>
         {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-foreground" : "bg-foreground/20"}`} />}
       </div>
       <div className={`flex-1 min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-sm font-semibold ${
-            state === "done" ? "text-foreground"
-            : state === "current" ? "text-foreground"
-            : "text-muted-foreground"}`}>{title}</span>
+          <span className={`font-heading text-[0.75rem] font-bold uppercase tracking-[0.1em] ${state === "upcoming" || state === "blocked" ? "text-muted-foreground" : "text-foreground"}`}>{title}</span>
           {badge && (
             <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-foreground/30 text-muted-foreground">{badge}</span>
           )}
           <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
-        {detailText && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detailText}</p>}
+        {detailText && <p className="text-xs text-muted-foreground mt-1">{detailText}</p>}
       </div>
     </button>
   );
@@ -144,11 +141,11 @@ export function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay 
     .map((r, i) => ({ ...r, n: i + 1 }));
 
   return (
-    <div className="border border-border bg-card p-5">
-      <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
-        <BarChart3 size={15} className="text-primary" /> Workflow Timeline
+    <div className="bg-card" style={{ border: "1px solid hsl(var(--foreground))" }}>
+      <h3 className="px-4 py-2.5 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+        <BarChart3 size={13} /> Workflow timeline
       </h3>
-      <div>
+      <div className="p-4">
         {rows.map((r, i) => (
           <TlRow key={r.n} n={r.n} title={r.title} detailText={r.detailText}
             state={r.state} badge={r.badge} onJump={() => onJump(r.tab)} last={i === rows.length - 1} />
