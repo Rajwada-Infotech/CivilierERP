@@ -30,6 +30,28 @@ export const LOGIN_CSS = `
   font-family: "DM Sans", "Noto Sans", sans-serif;
 }
 
+/* Wide: the white panel holding the form and the photo. Narrower: the panel is clear and the form sits in a frosted
+   card over the full-screen backdrop (LoginBackdrop). */
+.login-sheet .ls-form-side {
+  width: 100%; max-width: 460px; margin-inline: auto; padding: 4px 4px 8px;
+  background: rgba(255, 255, 255, 0.66); border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 26px;
+  backdrop-filter: blur(9px) saturate(1.25); -webkit-backdrop-filter: blur(9px) saturate(1.25);
+  box-shadow: 0 1px 2px rgba(16,19,18,0.05), 0 30px 60px -28px rgba(16,19,18,0.35);
+}
+@media (min-width: 640px) { .login-sheet .ls-form-side { padding: 40px 36px; } }
+@media (min-width: 1024px) {
+  .login-sheet .ls-panel {
+    background: var(--frame); min-height: min(860px, calc(100vh - 6vh));
+    box-shadow: 0 1px 2px rgba(16,19,18,0.04), 0 24px 60px -24px rgba(16,19,18,0.18);
+  }
+  .login-sheet .ls-form-side {
+    max-width: none; margin: 0; padding: min(2.5rem, 3vh) 2rem; background: none; border: 0; border-radius: 0;
+    backdrop-filter: none; -webkit-backdrop-filter: none; box-shadow: none;
+  }
+}
+/* The fields read as filled on the frosted card too */
+@media (max-width: 1023px) { .login-sheet .ls-field { background: rgba(242, 244, 243, 0.9); } }
+
 /* Filled field with its label inside */
 .login-sheet .ls-field {
   position: relative; display: block; background: var(--field); border: 1px solid transparent; border-radius: 10px;
@@ -75,7 +97,32 @@ export const LOGIN_CSS = `
 .login-sheet .ls-corner.br-a { bottom: 12%; right: -2px; width: calc(var(--notch) + 2px); height: var(--notch); background: radial-gradient(circle at 0% 0%, transparent calc(var(--notch) - 0.5px), var(--frame) var(--notch)); }
 .login-sheet .ls-corner.br-b { bottom: -2px; right: 26%; width: var(--notch); height: calc(var(--notch) + 2px); background: radial-gradient(circle at 0% 0%, transparent calc(var(--notch) - 0.5px), var(--frame) var(--notch)); }
 
-@keyframes ls-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.login-sheet .ls-in { animation: ls-rise .6s cubic-bezier(.16, 1, .3, 1) both; }
-@media (prefers-reduced-motion: reduce) { .login-sheet .ls-in { animation: none; } }
+/* Motion (the springy entrances are framer-motion, see ./motion): clouds drift across the sky, the sun breathes, and a
+   light sweeps across the Sign in button now and then. All of it stops for anyone who asks for reduced motion. */
+.login-sheet .ls-cloud {
+  position: absolute; left: -30%; z-index: 1; border-radius: 999px; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(255,255,255,0.95), rgba(255,255,255,0.55) 60%, rgba(255,255,255,0));
+  filter: blur(6px); animation: ls-drift linear infinite;
+}
+/* Across the panel, left edge to right edge, bobbing a little on the way */
+@keyframes ls-drift {
+  0%   { left: -30%; transform: translateY(0); }
+  50%  { transform: translateY(-8px); }
+  100% { left: 105%; transform: translateY(0); }
+}
+.login-sheet .ls-sun { animation: ls-breathe 7s ease-in-out infinite; }
+@keyframes ls-breathe { 0%, 100% { opacity: 0.85; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
+
+.login-sheet .ls-shine { position: relative; overflow: hidden; }
+.login-sheet .ls-shine::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,0.28) 50%, transparent 65%);
+  transform: translateX(-120%); animation: ls-sweep 4.5s ease-in-out 1.6s infinite;
+}
+.login-sheet .ls-shine:disabled::after { animation: none; }
+@keyframes ls-sweep { 0% { transform: translateX(-120%); } 30%, 100% { transform: translateX(120%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-sheet .ls-cloud, .login-sheet .ls-sun, .login-sheet .ls-shine::after { animation: none; }
+}
 `;
