@@ -82,7 +82,9 @@ function OcccCard({ row, onClick }: { row: any; onClick: () => void }) {
   const late = !isReceived && appDays != null && appDays > LATE_DAYS && !overdue;
   const waiting = row.BookingsAwaitingPossession ?? 0;
   return (
-    <button onClick={onClick} className="text-left bg-card hover:bg-primary/5 transition-colors"
+    // A column laid out from the top with the footer pinned to the bottom: a button centres its content, so a card
+    // without a certificate number floated in the middle of its row.
+    <button onClick={onClick} className="text-left bg-card hover:bg-primary/5 transition-colors flex flex-col h-full"
       style={{ border: RULE, borderLeft: `3px solid ${overdue ? "hsl(var(--destructive))" : isReceived ? "hsl(var(--foreground))" : "hsl(var(--foreground) / 0.3)"}` }}>
       <div className="px-4 py-3 flex items-start justify-between gap-3" style={{ borderBottom: RULE_SOFT }}>
         <div className="min-w-0">
@@ -91,7 +93,7 @@ function OcccCard({ row, onClick }: { row: any; onClick: () => void }) {
         </div>
         <span className="shrink-0 font-heading text-[0.625rem] font-bold uppercase tracking-[0.1em] px-1.5 py-0.5" style={{ border: RULE }}>{row.CertType}</span>
       </div>
-      <div className="px-4 py-3 space-y-3">
+      <div className="px-4 py-3 space-y-3 flex-1">
         <Steps status={row.Status} />
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -111,17 +113,15 @@ function OcccCard({ row, onClick }: { row: any; onClick: () => void }) {
               </p>
             </div>
           )}
-          {row.CertificateNo && (
-            <div className="col-span-2">
-              <p className={LBL}>Certificate no</p>
-              <p className="font-heading text-sm font-bold tabular-nums mt-0.5">{row.CertificateNo}</p>
-            </div>
-          )}
+          <div className="col-span-2">
+            <p className={LBL}>Certificate no</p>
+            <p className={`font-heading text-sm font-bold tabular-nums mt-0.5 ${row.CertificateNo ? "" : "text-muted-foreground"}`}>{row.CertificateNo || "—"}</p>
+          </div>
         </div>
       </div>
       <div className="px-4 py-2.5 flex items-center justify-between gap-2 flex-wrap" style={{ borderTop: RULE_SOFT }}>
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-          <Users size={11} /> {row.BookingCount ?? 0} bookings{waiting > 0 ? ` · ${waiting} ${isReceived ? "ready for possession" : "waiting on this"}` : ""}
+          <Users size={11} /> {row.BookingCount ?? 0} booking{(row.BookingCount ?? 0) === 1 ? "" : "s"}{waiting > 0 ? ` · ${waiting} ${isReceived ? "ready for possession" : "waiting on this"}` : ""}
         </span>
         <Gate received={isReceived} />
       </div>
