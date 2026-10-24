@@ -15,8 +15,11 @@ interface Props {
 /** Right-hand detail/edit panel so list rows stay one line tall. Esc or backdrop click closes. */
 export function CrmSideDrawer({ open, onClose, title, subtitle, badge, children, footer }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
 
   // Mount → next frame → slide in; close → slide out → unmount
   useEffect(() => {
@@ -40,14 +43,43 @@ export function CrmSideDrawer({ open, onClose, title, subtitle, badge, children,
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
-  // Keyboard: Esc closes
+  // Keep keyboard focus inside the modal and return it to the opener on close.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !mounted) return;
+    const previouslyFocused = document.activeElement;
     panelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )).filter((element) => element.offsetParent !== null);
+      if (!focusable.length) {
+        e.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !panel.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !panel.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) previouslyFocused.focus();
+    };
+  }, [open, mounted]);
 
   if (!mounted) return null;
 

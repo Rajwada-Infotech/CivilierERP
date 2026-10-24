@@ -10,6 +10,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
 const { applyPagination } = require("../services/crmListPagination");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -60,15 +61,9 @@ const LM_SELECT = `
     -- CrmLegalMilestones.tsx and getProjectSaleGate in crmWorkflowGuards.js.
     -- Never waives Agreement/AFS — that stays mandatory for every booking.
     proj.entity_type AS ProjectType, proj.status AS ProjectStatus,
-    -- Mirrors crmHandover.js POST /'s exact dues gate (same columns, same
-    -- condition) so the Handover stage here can't show "unlocked" for a
-    -- booking the real Handover page would reject for an outstanding balance.
-    CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmPaymentMilestone pm
-      WHERE pm.BookingId = m.BookingId
-        AND pm.Status NOT IN ('Paid', 'Waived')
-        AND pm.AmountDue > ISNULL(pm.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS HasOutstandingDues,
+    -- Mirror the Handover net-funding gate so the legal workflow indicator
+    -- cannot disagree with the action page about on-account funds.
+    CASE WHEN ${bookingFullyFundedSql("m.BookingId")} THEN 0 ELSE 1 END AS HasOutstandingDues,
     -- No Objection Certificate is a SINGLE step per booking, not two — the
     -- bank's NOC and the developer's NOC serve the same purpose (clearing
     -- the booking for Possession/Handover); a booking only ever needs one,

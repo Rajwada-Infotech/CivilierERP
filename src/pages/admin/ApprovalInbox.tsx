@@ -144,6 +144,8 @@ const ApprovalInbox: React.FC = () => {
     queryClient.invalidateQueries({ queryKey: ["crm-booking-detail"], exact: false });
     queryClient.invalidateQueries({ queryKey: ["crm-booking-money-receipts"], exact: false });
     queryClient.invalidateQueries({ queryKey: ["crm-booking-on-account"], exact: false });
+    queryClient.invalidateQueries({ queryKey: ["crm-milestones"], exact: false });
+    queryClient.invalidateQueries({ queryKey: ["crm-on-account"], exact: false });
     // Signal sidebar to immediately re-poll the pending-count badge.
     window.dispatchEvent(new CustomEvent("approval-action"));
   };

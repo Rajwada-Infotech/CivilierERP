@@ -17,7 +17,7 @@ const { advanceApplicationStatus, logStatusChange } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule, generateMilestonesForBooking } = require("../services/crmEntityCreation");
 const { recalculateBookingGst } = require("../services/crmGst");
 const { assertVillaBuyerOwnsLand, VillaLandError } = require("../services/villaLand");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
@@ -784,9 +784,36 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       const hasBooking = (await pool0.request().input("aid", sql.Int, id)
         .query("SELECT TOP 1 1 AS x FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset.length > 0;
       const ap = (await pool0.request().input("id", sql.Int, id)
-        .query("SELECT PreferredUnitId, RatePerSqFt FROM dbo.CrmApplication WHERE Id = @id")).recordset[0];
+        .query("SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @id")).recordset[0];
+      const plotIds0 = await getApplicationPlotIds(pool0, id);
+      if (hasBooking && ap && !plotIds0.length) {
+        const existing = (await pool0.request().input("aid", sql.Int, id)
+          .query("SELECT TOP 1 Id, UnitId, PaymentPlanId, TotalValue FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset[0];
+        const planChanged = Number(ap.PaymentPlanId ?? -1) !== Number(existing?.PaymentPlanId ?? -1);
+        if (existing && planChanged) {
+          if (ap.PaymentPlanId == null) {
+            return res.status(400).json({ error: "A unit booking must keep a payment plan. Select a valid plan before resubmitting." });
+          }
+          try {
+            await resolveApplicationPaymentPlan(pool0, { preferredUnitId: existing.UnitId, paymentPlanId: ap.PaymentPlanId });
+          } catch (e) {
+            return res.status(e.status || 400).json({ error: e.message });
+          }
+          const newPlanAmount = (await pool0.request().input("pid", sql.Int, ap.PaymentPlanId)
+            .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount;
+          if (newPlanAmount != null && Number(newPlanAmount) > Number(existing.TotalValue || 0)) {
+            return res.status(400).json({ error: "The selected plan's Booking Amount is greater than this booking's value. Correct the plan amount before resubmitting." });
+          }
+          const history = (await pool0.request().input("bid", sql.Int, existing.Id).query(`
+            SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+            WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))
+          `)).recordset[0]?.Cnt || 0;
+          if (history > 0) {
+            return res.status(400).json({ error: "The payment plan cannot be changed after a milestone payment or waiver. Update the Application without changing its plan, or use the Booking payment-plan workflow before any payment is recorded." });
+          }
+        }
+      }
       if (!hasBooking && ap) {
-        const plotIds0 = await getApplicationPlotIds(pool0, id);
         const unitIds0 = plotIds0.length ? [] : await getApplicationUnitIds(pool0, id, ap.PreferredUnitId);
         const ids0 = plotIds0.length ? plotIds0 : unitIds0;
         if (ids0.length) {
@@ -860,7 +887,28 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         await tx.begin();
         try {
           const before = (await tx.request().input("bid", sql.Int, booking.id)
-            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue, BookingAmount, UnitId, PaymentPlanId FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+          const paymentPlanChanged = Number(a.PaymentPlanId ?? -1) !== Number(before?.PaymentPlanId ?? -1);
+          let planBookingAmount = null;
+          if (paymentPlanChanged && a.PaymentPlanId != null) {
+            planBookingAmount = (await tx.request().input("pid", sql.Int, a.PaymentPlanId)
+              .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount ?? null;
+          }
+          const newRateForValidation = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
+          const prospectiveTotal = newRateForValidation != null
+            && Number(before?.RatePerSqFt) !== newRateForValidation && Number(before?.AreaSqFt) > 0
+            ? Math.round(Number(before.AreaSqFt) * newRateForValidation * 100) / 100
+            : Number(before?.TotalValue || 0);
+          const effectiveBookingAmount = planBookingAmount != null
+            ? Number(planBookingAmount)
+            : a.BookingAmount != null ? Number(a.BookingAmount)
+              : before?.BookingAmount != null ? Number(before.BookingAmount) : null;
+          if (effectiveBookingAmount != null && (!Number.isFinite(effectiveBookingAmount) || effectiveBookingAmount < 0)) {
+            throw Object.assign(new Error("Booking Amount must be a valid non-negative number"), { status: 400 });
+          }
+          if (effectiveBookingAmount != null && effectiveBookingAmount > prospectiveTotal) {
+            throw Object.assign(new Error("Booking Amount cannot exceed the booking value"), { status: 400 });
+          }
           await tx.request()
             .input("bid", sql.Int, booking.id)
             .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
@@ -868,7 +916,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
             .input("BookingDate", sql.Date, a.DateOfApply)
             .input("TokenType", sql.NVarChar(50), a.TokenType)
             .input("TokenValue", sql.Decimal(18, 2), a.TokenValue)
-            .input("BookingAmount", sql.Decimal(18, 2), a.BookingAmount)
+            .input("BookingAmount", sql.Decimal(18, 2), effectiveBookingAmount)
             .input("PaymentMode", sql.NVarChar(50), a.PaymentMode)
             .input("DepositBankId", sql.Int, a.DepositBankId)
             .input("AssignedTo", sql.Int, a.AssignedTo)
@@ -883,7 +931,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
                   BookingDate = COALESCE(@BookingDate, BookingDate),
                   TokenType = @TokenType,
                   TokenValue = @TokenValue,
-                  BookingAmount = @BookingAmount,
+                  BookingAmount = COALESCE(@BookingAmount, BookingAmount),
                   PaymentMode = @PaymentMode,
                   AssignedTo = @AssignedTo,
                   Notes = @Notes,
@@ -911,13 +959,26 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           // value and Booking Amount instead of patching Milestone 1.
           const land = await rebuildLandSchedule(tx, booking.id, actor);
 
+          if (paymentPlanChanged && land.reason === "not a plot sale") {
+            const bookingAmount = effectiveBookingAmount;
+            await tx.request().input("bid", sql.Int, booking.id).input("bamt", sql.Decimal(18, 2), bookingAmount).query(`
+              UPDATE dbo.CrmBooking SET BookingAmount = @bamt, UpdatedAt = SYSDATETIME() WHERE Id = @bid
+            `);
+            await tx.request().input("bid", sql.Int, booking.id)
+              .query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+            const currentBooking = (await tx.request().input("bid", sql.Int, booking.id)
+              .query("SELECT TotalValue, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+            await generateMilestonesForBooking(tx, booking.id, Number(currentBooking?.TotalValue || 0), a.PaymentPlanId,
+              currentBooking?.BookingDate, actor, bookingAmount);
+          }
+
           // Resync Milestone #1 (Booking Amount) to match the updated
           // BookingAmount. Without this, editing the application's
           // token/booking amount and re-submitting would update the
           // CrmBooking row but leave the milestone's AmountDue stale.
-          if (land.reason === "not a plot sale" && a.BookingAmount) {
+          if (!paymentPlanChanged && land.reason === "not a plot sale" && a.BookingAmount != null) {
             const m1Res = await tx.request().input("bid", sql.Int, booking.id)
-              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
             const m1 = m1Res.recordset[0];
             if (m1 && m1.Status !== "Waived") {
               const newAmountDue = Math.max(parseFloat(a.BookingAmount), Number(m1.AmountPaid || 0));
@@ -931,6 +992,12 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
                 .input("pct", sql.Decimal(5, 2), newPercent)
                 .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct,
                   Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  DemandStatus = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  DemandNo = CASE WHEN AmountPaid >= @amt THEN DemandNo ELSE NULL END,
+                  DemandRaisedOn = CASE WHEN AmountPaid >= @amt THEN DemandRaisedOn ELSE NULL END,
+                  DemandNotes = CASE WHEN AmountPaid >= @amt THEN DemandNotes ELSE NULL END,
+                  DemandRaisedAt = CASE WHEN AmountPaid >= @amt THEN DemandRaisedAt ELSE NULL END,
+                  PaidDate = CASE WHEN AmountPaid >= @amt THEN PaidDate ELSE NULL END,
                   UpdatedAt = SYSDATETIME() WHERE Id = @id`);
               await recalculateRemainingMilestones(tx, booking.id, { fixedMilestoneId: m1.Id });
             }

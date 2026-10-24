@@ -62,7 +62,7 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
         ((SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))
-        + (SELECT ISNULL(SUM(oa.Amount - ISNULL(oa.AppliedAmount,0)), 0)
+        + (SELECT ISNULL(SUM(CASE WHEN ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND oa.Amount > ISNULL(oa.AppliedAmount,0) THEN oa.Amount - ISNULL(oa.AppliedAmount,0) ELSE 0 END), 0)
           FROM dbo.CrmOnAccountPayment oa JOIN dbo.CrmBooking b ON b.Id = oa.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))) AS TotalPaid,
         (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
@@ -176,8 +176,9 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
                -- Plus unswept On Account balance — same reasoning as the
                -- customer-level TotalPaid above.
                (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
-                 + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS TotalPaid,
-               (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
+                 + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount,0)
+                     THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS TotalPaid,
+               (SELECT ISNULL(SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
                CASE WHEN b.Status IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE
                  (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
                   FROM dbo.CrmPaymentMilestone m2 WHERE m2.BookingId = b.Id)

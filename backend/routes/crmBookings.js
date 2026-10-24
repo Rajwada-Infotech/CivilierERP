@@ -33,6 +33,49 @@ const { recordGLPosting } = require("../services/approvalService");
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
 const { logStatusChange, syncApplicationOnBookingTerminal } = require("../services/crmApplicationWorkflow");
+const { getBookingFunding } = require("../services/crmPaymentFunding");
+
+// Keep the fixed Booking Amount line aligned with CrmBooking.BookingAmount.
+// recalculateRemainingMilestones intentionally excludes Milestone 1, so this
+// explicit update must happen before redistributing the later installments.
+async function syncBookingAmountMilestone(poolOrTx, bookingId) {
+  const booking = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT BookingAmount, ISNULL(NULLIF(GrandTotal, 0), TotalValue) AS GrandTotal
+    FROM dbo.CrmBooking WHERE Id = @bid
+  `)).recordset[0];
+  const amount = Number(booking?.BookingAmount || 0);
+  const grandTotal = Number(booking?.GrandTotal || 0);
+  const milestone = (await poolOrTx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Id, AmountPaid, Status
+    FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND MilestoneNo = 1
+      AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+    ORDER BY Id
+  `)).recordset[0];
+  if (!milestone || milestone.Status === "Waived") return false;
+
+  const amountDue = Math.max(amount, Number(milestone.AmountPaid || 0));
+  const percent = grandTotal > 0 ? Math.round((amountDue / grandTotal) * 10000) / 100 : 0;
+  await poolOrTx.request()
+    .input("id", sql.Int, milestone.Id)
+    .input("amount", sql.Decimal(18, 2), amountDue)
+    .input("percent", sql.Decimal(5, 2), percent)
+    .query(`
+      UPDATE dbo.CrmPaymentMilestone SET
+        AmountDue = @amount,
+        [Percent] = @percent,
+        Status = CASE WHEN AmountPaid >= @amount THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+        DemandStatus = CASE WHEN AmountPaid >= @amount THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+        DemandNo = CASE WHEN AmountPaid >= @amount THEN DemandNo ELSE NULL END,
+        DemandRaisedOn = CASE WHEN AmountPaid >= @amount THEN DemandRaisedOn ELSE NULL END,
+        DemandNotes = CASE WHEN AmountPaid >= @amount THEN DemandNotes ELSE NULL END,
+        DemandRaisedAt = CASE WHEN AmountPaid >= @amount THEN DemandRaisedAt ELSE NULL END,
+        PaidDate = CASE WHEN AmountPaid >= @amount THEN PaidDate ELSE NULL END,
+        UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+  return milestone.Id;
+}
 const {
   getStageState,
   submitForApproval,
@@ -178,16 +221,18 @@ const BOOKING_SELECT = `
     -- The list's "next step" chip must not offer Agreement before Milestone 1
     -- (Booking Amount) is actually Paid — validateAgreementPreparationPrerequisites
     -- (crmWorkflowGuards.js) hard-blocks agreement prep on exactly this.
-    (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
+    (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Status,
     -- The real ledger sweep (Status='Paid') only fires automatically once the
     -- WHOLE booking is funded, but the customer's money for Milestone 1 is
     -- genuinely in hand the moment on-account covers its own amount — the
     -- same virtual-coverage check validateAgreementPreparationPrerequisites
     -- uses, so the chip and the actual gate never disagree.
     CAST(CASE WHEN EXISTS (
-       SELECT 1 FROM dbo.CrmPaymentMilestone m1 WHERE m1.BookingId = b.Id AND m1.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+       SELECT 1 FROM dbo.CrmPaymentMilestone m1 WHERE m1.BookingId = b.Id AND m1.MilestoneNo = 1 AND m1.ExtraChargeId IS NULL AND m1.ParkingAllotmentId IS NULL
          AND (m1.Status IN ('${CrmStatus.PAID}', 'Waived')
-              OR ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) >= ISNULL(m1.AmountDue, 0))
+              OR ISNULL(m1.AmountPaid, 0) + ISNULL((SELECT SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
+                THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END) FROM dbo.CrmOnAccountPayment
+                WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')), 0) >= ISNULL(m1.AmountDue, 0))
      ) THEN 1 ELSE 0 END AS BIT) AS Milestone1VirtuallyCovered,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
@@ -203,7 +248,8 @@ const BOOKING_SELECT = `
     -- CrmOnAccountPayment row for the exact same money — adding them
     -- double-counted every on-account deposit (confirmed: booking 77 showed
     -- ₹20,000 on-account for a real ₹10,000 deposit).
-    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
+    (SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount,0) THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END),0) FROM dbo.CrmOnAccountPayment
+      WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')) AS ApprovedOnAccount,
     -- Post-agreement lifecycle flags — mirror GET /:id/lifecycle's own gates
     -- exactly (agRegistered/sdDone/hoDone/regDone/mutDone there) so this
     -- list's "next step" chip stops falsely declaring "All Steps Complete"
@@ -529,6 +575,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const hasPlanId = (v) => v !== null && v !== undefined && v !== "";
     const newPlanId = b.PaymentPlanId !== undefined ? (hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null) : undefined;
     const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
+    let selectedPlanBookingAmount = null;
     if (planIsChanging && hasPlanId(newPlanId)) {
       const plotLine = await pool.request().input("bid", sql.Int, id)
         .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
@@ -546,6 +593,9 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         } catch (e) {
           return res.status(e.status || 400).json({ error: e.message });
         }
+        const planAmountResult = await pool.request().input("pid", sql.Int, newPlanId)
+          .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+        selectedPlanBookingAmount = planAmountResult.recordset[0]?.BookingAmount ?? null;
       }
       const paid = await pool.request().input("bid", sql.Int, id).query(`
         SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
@@ -553,6 +603,25 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       `);
       if (paid.recordset[0]?.Cnt > 0) {
         return res.status(400).json({ error: "Cannot change payment plan — payments have already been recorded against the existing schedule" });
+      }
+    }
+
+    // A plan's configured Booking Amount is the fixed first milestone for a
+    // unit booking. Keep the booking header and the regenerated schedule in
+    // sync when the plan changes, unless the request explicitly overrides it.
+    // A selected unit plan owns its fixed Booking Amount. An explicit value
+    // may correct an existing booking, but it cannot override a newly chosen
+    // plan and then disagree with generateMilestonesForBooking.
+    const effectiveBookingAmount = planIsChanging && newPlanId != null && selectedPlanBookingAmount != null
+      ? Number(selectedPlanBookingAmount)
+      : b.BookingAmount != null ? parseFloat(b.BookingAmount) : null;
+    if (effectiveBookingAmount != null) {
+      const effectiveTotal = total ?? Number(oldRow.TotalValue || 0);
+      if (!Number.isFinite(effectiveBookingAmount) || effectiveBookingAmount < 0) {
+        return res.status(400).json({ error: "Booking Amount must be a valid non-negative number" });
+      }
+      if (effectiveBookingAmount > effectiveTotal) {
+        return res.status(400).json({ error: "Booking Amount cannot be more than the booking value" });
       }
     }
 
@@ -573,11 +642,12 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         .input("flr",   sql.NVarChar(100), b.FloorName   || null)
         .input("rate",  sql.Decimal(18,2), rate)
         .input("tot",   sql.Decimal(18,2), total)
-        .input("bamt",  sql.Decimal(18,2), b.BookingAmount  != null ? parseFloat(b.BookingAmount) : null)
+        .input("bamt",  sql.Decimal(18,2), effectiveBookingAmount)
         .input("bdate", sql.Date,          b.BookingDate || null)
         .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
         .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
         .input("ppid",  sql.Int,           hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null)
+        .input("ppSet", sql.Bit,           b.PaymentPlanId !== undefined ? 1 : 0)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
         .input("blkSet", sql.Bit, "BlockName" in b ? 1 : 0)
         .input("flrSet", sql.Bit, "FloorName" in b ? 1 : 0)
@@ -594,7 +664,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
             BookingAmount = ISNULL(@bamt, BookingAmount),
             BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
             AssignedTo = ISNULL(@asgn, AssignedTo),
-            PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+            PaymentPlanId = CASE WHEN @ppSet = 1 THEN @ppid ELSE PaymentPlanId END,
             -- HsnCode is no longer settable here — it's fully auto-resolved by
             -- recalculateBookingGst below (Unit+Parking value decides 1% vs
             -- 5%), never a manual per-booking input. See migration 283.
@@ -620,7 +690,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       ]);
 
       const totalChanged = total != null && Number(total) !== Number(oldRow.TotalValue);
-      const bookingAmountChanged = b.BookingAmount != null && Number(b.BookingAmount) !== Number(oldRow.BookingAmount || 0);
+      const bookingAmountChanged = effectiveBookingAmount != null && Number(effectiveBookingAmount) !== Number(oldRow.BookingAmount || 0);
       const land = (totalChanged || bookingAmountChanged) ? await rebuildLandSchedule(tx, id, actor) : { rebuilt: false };
       if (land.rebuilt) {
         // Plot sale: schedule re-derived from the new value / Booking Amount.
@@ -629,22 +699,27 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         if (totalChanged) await recalculateRemainingMilestones(tx, id);
       } else if (planIsChanging) {
         await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-        const effectiveTotal = total || oldRow.TotalValue;
-        const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
-        await generateMilestonesForBooking(tx, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
-      } else if (totalChanged && !(await tx.request().input("bid", sql.Int, id)
+        const effectiveTotal = total ?? oldRow.TotalValue;
+        await generateMilestonesForBooking(tx, id, effectiveTotal, newPlanId, b.BookingDate || null, actor,
+          effectiveBookingAmount != null ? effectiveBookingAmount : oldRow.BookingAmount);
+      } else if ((totalChanged || bookingAmountChanged) && !(await tx.request().input("bid", sql.Int, id)
           .query("SELECT TOP 1 1 AS x FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid")).recordset.length) {
         // No schedule at all (e.g. it was booked before it had a price) — the
         // new price gets the schedule booking creation would have made.
         const cur = (await tx.request().input("bid", sql.Int, id)
-          .query("SELECT PaymentPlanId, BookingAmount, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
-        await generateMilestonesForBooking(tx, id, Number(total), cur.PaymentPlanId, cur.BookingDate, actor, Number(cur.BookingAmount || 0));
+          .query("SELECT PaymentPlanId, BookingAmount, BookingDate, TotalValue FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+        await generateMilestonesForBooking(tx, id, Number(total ?? cur.TotalValue), cur.PaymentPlanId, cur.BookingDate, actor, Number(cur.BookingAmount || 0));
       } else if (total != null && total !== oldRow.TotalValue) {
         // TotalValue moved (rate correction) without a plan switch — the
         // existing schedule's ₹/% no longer add up to what's actually owed.
         // A plan switch already regenerates the whole schedule from scratch
         // above, so this only fires on the "same plan, new total" path.
         await recalculateRemainingMilestones(tx, id);
+      }
+
+      if (bookingAmountChanged && !planIsChanging && !land.rebuilt && land.reason !== "money is already recorded against the schedule") {
+        const fixedMilestoneId = await syncBookingAmountMilestone(tx, id);
+        if (fixedMilestoneId) await recalculateRemainingMilestones(tx, id, { fixedMilestoneId });
       }
 
       await tx.commit();
@@ -1620,7 +1695,7 @@ router.get("/:id/loan", requirePageRight("crm-loan-details", "view"), async (req
                 JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
                 WHERE m.BookingId = @bid AND r.PaymentMode = 'Home Loan'), 0)
         +
-        ISNULL((SELECT SUM(o.Amount) FROM dbo.CrmOnAccountPayment o
+        ISNULL((SELECT SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END) FROM dbo.CrmOnAccountPayment o
                 WHERE o.BookingId = @bid AND o.PaymentMode = 'Home Loan'), 0)
         AS DisbursedAmount
     `);
@@ -1841,15 +1916,9 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       // (Sale of Flat/Parking — see postCrmInvoiceToGL in crmLedger.js).
       // Deliberately checked against the booking's total, not this one
       // milestone's own AmountDue/AmountPaid.
-      const fullyPaidCheck = await pool.request().input("bid", sql.Int, id).query(`
-        SELECT bk.GrandTotal, ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared
-        FROM dbo.CrmBooking bk WHERE bk.Id = @bid
-      `);
-      const fp = fullyPaidCheck.recordset[0];
-      const grandTotal = Number(fp?.GrandTotal || 0);
-      const totalCleared = Number(fp?.TotalCleared || 0);
-      if (totalCleared < grandTotal) {
-        const shortfall = grandTotal - totalCleared;
+      const funding = await getBookingFunding(pool, id);
+      if (funding.totalFunded + 0.005 < funding.requiredAmount) {
+        const shortfall = funding.shortfall;
         return res.status(400).json({
           error: `This booking must be fully paid before any invoice can be generated — ₹${shortfall.toLocaleString("en-IN")} still outstanding.`,
         });
@@ -2024,15 +2093,9 @@ async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, 
   // that route's comment for the business rationale. Duplicated here rather
   // than shared because this function and that route were already two
   // independent invoice-creation implementations before this change.
-  const fullyPaidCheck = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT bk.GrandTotal, ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared
-    FROM dbo.CrmBooking bk WHERE bk.Id = @bid
-  `);
-  const fp = fullyPaidCheck.recordset[0];
-  const grandTotal = Number(fp?.GrandTotal || 0);
-  const totalCleared = Number(fp?.TotalCleared || 0);
-  if (totalCleared < grandTotal) {
-    const shortfall = grandTotal - totalCleared;
+  const funding = await getBookingFunding(pool, bookingId);
+  if (funding.totalFunded + 0.005 < funding.requiredAmount) {
+    const shortfall = funding.shortfall;
     const e = new Error(`This booking must be fully paid before any invoice can be generated — ₹${shortfall.toLocaleString("en-IN")} still outstanding.`);
     e.status = 400; throw e;
   }
@@ -2120,13 +2183,15 @@ async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
   }
   const bk = (await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT bk.BookingNo, bk.GrandTotal,
-           ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared,
            (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id AND Status NOT IN ('Paid', 'Waived')) AS OpenMilestones
     FROM dbo.CrmBooking bk WHERE bk.Id = @bid`)).recordset[0];
   const grandTotal = Number(bk?.GrandTotal || 0);
   if (!(grandTotal > 0)) { const e = new Error("This booking has no grand total to invoice"); e.status = 400; throw e; }
-  if (Number(bk.TotalCleared) < grandTotal || bk.OpenMilestones > 0) {
-    const shortfall = Math.max(grandTotal - Number(bk.TotalCleared), 0);
+  const funding = await getBookingFunding(pool, bookingId);
+  const invoiceAmount = funding.requiredAmount;
+  if (!(invoiceAmount > 0)) { const e = new Error("All booking milestone dues have been waived; there is no amount to invoice"); e.status = 400; throw e; }
+  if (funding.totalFunded + 0.005 < funding.requiredAmount || bk.OpenMilestones > 0) {
+    const shortfall = funding.shortfall;
     const e = new Error(`The final invoice is generated once everything is paid — ₹${shortfall.toLocaleString("en-IN")} still outstanding${bk.OpenMilestones ? ` (${bk.OpenMilestones} milestone(s) open)` : ""}.`);
     e.status = 400; throw e;
   }
@@ -2144,8 +2209,8 @@ async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
   const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
   const result = await pool.request()
     .input("no", sql.NVarChar(30), invoiceNo).input("bid", sql.Int, bookingId)
-    .input("amt", sql.Decimal(18, 2), grandTotal)
-    .input("desc", sql.NVarChar(500), `Final invoice — ${bk.BookingNo}, grand total`)
+    .input("amt", sql.Decimal(18, 2), invoiceAmount)
+    .input("desc", sql.NVarChar(500), `Final invoice — ${bk.BookingNo}, after waived milestones`)
     .input("cb", sql.Int, actorUserId)
     .query(`INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt)
             OUTPUT INSERTED.Id
@@ -2161,7 +2226,7 @@ async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
     console.error("[crm-bookings] final invoice GL posting failed:", glErr.message);
     await recordGLPosting("crm-invoice", invoiceId, { failed: true, reason: glErr.message }, actorEmail);
   }
-  return { id: invoiceId, InvoiceNo: invoiceNo, Amount: grandTotal };
+  return { id: invoiceId, InvoiceNo: invoiceNo, Amount: invoiceAmount };
 }
 
 // POST /:id/invoices/final — the one final invoice of a Non-Invoice booking.
@@ -2351,17 +2416,34 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
     if (land.reason !== "not a plot sale") return res.status(400).json({ error: `The schedule can't be rebuilt — ${land.reason}.` });
 
     const bk = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingAmount, GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @id");
+      .query("SELECT BookingAmount, GrandTotal, TotalValue, PaymentPlanId, BookingDate FROM dbo.CrmBooking WHERE Id = @id");
     if (!bk.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const booking = bk.recordset[0];
     const bookingAmount = Number(booking.BookingAmount || 0);
     if (!bookingAmount) return res.status(400).json({ error: "This booking has no BookingAmount recorded — nothing to resync against" });
     const grandTotal = Number(booking.GrandTotal || booking.TotalValue || 0);
     if (!grandTotal) return res.status(400).json({ error: "This booking has no total value set" });
+    if (bookingAmount > grandTotal) return res.status(400).json({ error: "Booking Amount cannot exceed the booking total" });
 
     const m1Res = await pool.request().input("bid", sql.Int, id)
-      .query("SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
-    if (!m1Res.recordset.length) return res.status(400).json({ error: "No milestones found on this booking" });
+      .query("SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
+    if (!m1Res.recordset.length) {
+      const existingCount = (await pool.request().input("bid", sql.Int, id)
+        .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid")).recordset[0]?.Cnt || 0;
+      if (existingCount > 0) {
+        return res.status(409).json({ error: "This booking has milestone rows but no core Booking Amount milestone. The existing schedule needs review before it can be safely rebuilt." });
+      }
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await generateMilestonesForBooking(tx, id, grandTotal, booking.PaymentPlanId, booking.BookingDate, actorId(req), bookingAmount);
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* transaction may already be closed */ }
+        throw txErr;
+      }
+      return res.json({ success: true, changed: true, generated: true });
+    }
     const m1 = m1Res.recordset[0];
     if (m1.Status === "Waived") return res.status(400).json({ error: "Milestone 1 has been waived — nothing to resync" });
 
@@ -2371,7 +2453,10 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
 
     const newAmountDue = Math.max(bookingAmount, Number(m1.AmountPaid || 0));
     const newPercent = Math.round((newAmountDue / grandTotal) * 10000) / 100;
-    await pool.request()
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    await tx.request()
       .input("id", sql.Int, m1.Id)
       .input("amt", sql.Decimal(18, 2), newAmountDue)
       .input("pct", sql.Decimal(5, 2), newPercent)
@@ -2388,11 +2473,21 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
           -- honestly against the just-updated amount every time instead —
           -- never silently mask a real shortfall.
           Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+          DemandStatus = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+          DemandNo = CASE WHEN AmountPaid >= @amt THEN DemandNo ELSE NULL END,
+          DemandRaisedOn = CASE WHEN AmountPaid >= @amt THEN DemandRaisedOn ELSE NULL END,
+          DemandNotes = CASE WHEN AmountPaid >= @amt THEN DemandNotes ELSE NULL END,
+          DemandRaisedAt = CASE WHEN AmountPaid >= @amt THEN DemandRaisedAt ELSE NULL END,
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
 
-    await recalculateRemainingMilestones(pool, id, { fixedMilestoneId: m1.Id });
+    await recalculateRemainingMilestones(tx, id, { fixedMilestoneId: m1.Id });
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* transaction may already be closed */ }
+      throw txErr;
+    }
 
     res.json({ success: true, changed: true });
   } catch (e) {

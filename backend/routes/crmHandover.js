@@ -12,6 +12,7 @@ const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { getBookingFunding, bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -173,13 +174,8 @@ router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), asy
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status IN ('Pending','Approved')
         )
-        -- 4. No outstanding payment dues
-        AND NOT EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m
-          WHERE m.BookingId = b.Id
-            AND m.Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-        )
+        -- 4. Net booking funding covers every non-waived due.
+        AND (${bookingFullyFundedSql("b.Id")})
       ORDER BY b.BookingNo
     `);
 
@@ -261,18 +257,13 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: `Handover requires the ${openNoc.recordset[0].NocType} NOC to be issued first (currently ${openNoc.recordset[0].Status})` });
     }
 
-    // Workflow guard: all payment milestones must be paid or waived — no
-    // outstanding balance should remain at possession time.
-    const unpaid = await pool.request().input("bid", sql.Int, parseInt(b.BookingId)).query(`
-      SELECT COUNT(*) AS Cnt, ISNULL(SUM(AmountDue - ISNULL(AmountPaid, 0)), 0) AS Balance
-      FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-        AND AmountDue > ISNULL(AmountPaid, 0)
-    `);
-    const unpaidRow = unpaid.recordset[0];
-    if (unpaidRow.Cnt > 0) {
-      const bal = Math.round(unpaidRow.Balance);
-      return res.status(400).json({ error: `Handover cannot be scheduled — ${unpaidRow.Cnt} milestone(s) have an outstanding balance of ₹${bal.toLocaleString("en-IN")}` });
+    // Under the full-booking hold rule, milestone rows can remain unpaid while
+    // valid customer funds are still available On Account. Gate on net booking
+    // funding so those funds count once and invalid deposits never clear dues.
+    const funding = await getBookingFunding(pool, b.BookingId);
+    if (funding.shortfall > 0.009) {
+      const bal = Math.round(funding.shortfall);
+      return res.status(400).json({ error: `Handover cannot be scheduled — the booking has an outstanding balance of ₹${bal.toLocaleString("en-IN")}` });
     }
 
     const result = await pool.request()
@@ -359,15 +350,12 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       if (!b.FinalDuesCleared) {
         return res.status(400).json({ error: "FinalDuesCleared must be confirmed before completing handover" });
       }
-      // The tick is staff's word; the balance is checked too — a charge, parking
-      // or a bounced payment can appear after the handover was scheduled.
+      // Recheck net funding at completion because new charges or a bounced
+      // receipt can change the balance after the handover was scheduled.
       {
-        const due = (await pool.request().input("hid", sql.Int, id).query(`
-          SELECT COUNT(*) AS Cnt, ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) AS Balance
-          FROM dbo.CrmHandover h JOIN dbo.CrmPaymentMilestone m ON m.BookingId = h.BookingId
-          WHERE h.Id = @hid AND m.Status NOT IN ('Paid', 'Waived') AND m.AmountDue > ISNULL(m.AmountPaid, 0)`)).recordset[0];
-        if (due.Cnt > 0) {
-          return res.status(400).json({ error: `Cannot complete handover — ${due.Cnt} milestone(s) still owe ₹${Math.round(due.Balance).toLocaleString("en-IN")}` });
+        const funding = await getBookingFunding(pool, cur0.recordset[0].BookingId);
+        if (funding.shortfall > 0.009) {
+          return res.status(400).json({ error: `Cannot complete handover — the booking still owes ₹${Math.round(funding.shortfall).toLocaleString("en-IN")}` });
         }
       }
       if (!b.CustomerAcknowledged) {

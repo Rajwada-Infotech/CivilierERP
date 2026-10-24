@@ -28,6 +28,7 @@
 // the stage field + log + remarks here and let that engine stamp the audit
 // trail in ApprovalAuditLog exactly like every other approve in the app.
 const { sql } = require("../db");
+const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 const { transition: approvalTransition } = require("./approvalService");
 const { ensureChecklistRows } = require("./crmApplicationChecklist");
 const { ensurePortalUser } = require("./crmPortalProvision");
@@ -223,10 +224,11 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     .input("bid", sql.Int, bookingId)
     .query(`SELECT TOP 1 AmountPaid, AmountDue, Status 
             FROM dbo.CrmPaymentMilestone 
-            WHERE BookingId = @bid 
-            ORDER BY MilestoneNo ASC`);
+            WHERE BookingId = @bid AND MilestoneNo = 1
+              AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+            ORDER BY Id`);
   const milestone1 = m1.recordset[0];
-  if (!milestone1 || (milestone1.Status !== "Paid" && milestone1.AmountPaid < milestone1.AmountDue)) {
+  if (!milestone1 || (milestone1.Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
     throw Object.assign(new Error("Milestone 1 (token payment) must be paid before submitting for approval"), { status: 400 });
   }
 

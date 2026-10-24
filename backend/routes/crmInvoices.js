@@ -60,9 +60,9 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       if (dateFrom) { where += " AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv3 WHERE inv3.BookingId = b.Id AND inv3.InvoiceDate >= @df)"; req_.input("df", sql.Date, dateFrom); }
       if (dateTo)   { where += " AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv4 WHERE inv4.BookingId = b.Id AND inv4.InvoiceDate <= @dt)"; req_.input("dt", sql.Date, dateTo); }
 
-      // MilestoneTotal counts ALL milestones (including MilestoneNo=1, the
-      // Booking Amount) — the Booking Amount invoice is now visible and
-      // generatable from this page as well as the Booking page.
+      // MilestoneTotal counts every billable milestone (including MilestoneNo=1,
+      // the Booking Amount); waived milestones are excluded because they do
+      // not have an invoice to generate.
       // SQL Server can't reference a SELECT-list alias for a correlated
       // subquery inside HAVING — wrap in a derived table and filter with
       // a plain WHERE instead.
@@ -79,9 +79,9 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
                  COALESCE(proj.name, b.ProjectName) AS ProjectName,
                  COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
                  a.ApplicantName, a.Mobile,
-                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS MilestoneTotal,
+                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status <> 'Waived') AS MilestoneTotal,
                  (SELECT COUNT(DISTINCT m.Id) FROM dbo.CrmPaymentMilestone m
-                   WHERE m.BookingId = b.Id
+                   WHERE m.BookingId = b.Id AND m.Status <> 'Waived'
                      AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv WHERE inv.MilestoneId = m.Id AND inv.Status <> 'Void')
                  ) AS MilestoneInvoiced
           FROM dbo.CrmBooking b
@@ -116,9 +116,9 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       const countResult = await countReq.query(`
         SELECT COUNT(*) AS Total FROM (
           SELECT b.Id,
-                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS MilestoneTotal,
+                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status <> 'Waived') AS MilestoneTotal,
                  (SELECT COUNT(DISTINCT m.Id) FROM dbo.CrmPaymentMilestone m
-                   WHERE m.BookingId = b.Id
+                   WHERE m.BookingId = b.Id AND m.Status <> 'Waived'
                      AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv WHERE inv.MilestoneId = m.Id AND inv.Status <> 'Void')
                  ) AS MilestoneInvoiced
           FROM dbo.CrmBooking b

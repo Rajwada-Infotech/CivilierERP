@@ -495,7 +495,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchMoneyReceipts(bookingId),
     enabled: bookingId != null,
   });
-  const { data: onAccountData } = useQuery({
+  const { data: onAccountData, isLoading: onAccountLoading, isError: onAccountError } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
     enabled: bookingId != null,
@@ -928,24 +928,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // item guarantees this always resolves to the real Booking Amount
   // milestone, not whichever row a plain `.find` happens to hit first.
   const milestoneList = (data?.milestones || []) as any[];
-  const firstMilestone = milestoneList.find((m: any) => Number(m.MilestoneNo) === 1 && !m.ParkingAllotmentId && !m.ExtraChargeId)
-    || milestoneList.find((m: any) => Number(m.MilestoneNo) === 1)
-    || milestoneList[0];
+  const firstMilestone = milestoneList.find((m: any) => Number(m.MilestoneNo) === 1 && !m.ParkingAllotmentId && !m.ExtraChargeId);
   const bookingAmountDue = Number(firstMilestone?.AmountDue || booking?.BookingAmount || 0);
   const bookingAmountPaid = Number(firstMilestone?.AmountPaid || booking?.BookingAmountPaid || 0);
-  const bookingAmountBalance = Math.max(0, bookingAmountDue - bookingAmountPaid);
+  // The On Account balance is real money received but not yet swept onto a
+  // milestone. Count it as virtual coverage for this first milestone so the
+  // page doesn't invite a duplicate Booking Amount payment.
+  const bookingOnAccountBalance = Number(onAccountData?.availableBalance || 0);
+  const bookingAmountOnAccountCover = firstMilestone && firstMilestone.Status !== "Waived"
+    ? Math.min(bookingOnAccountBalance, Math.max(0, bookingAmountDue - bookingAmountPaid))
+    : 0;
+  const bookingAmountBalance = firstMilestone?.Status === "Waived"
+    ? 0
+    : Math.max(0, bookingAmountDue - bookingAmountPaid - bookingAmountOnAccountCover);
   const totalCleared = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
   const grandTotal = Number(booking?.GrandTotal ?? 0) > 0
     ? Number(booking?.GrandTotal)
     : Number(booking?.TotalValue || 0) + Number(booking?.UnitGstAmount || 0) + Number(booking?.ParkingTotal || 0) + Number(booking?.ExtraChargesTotal || 0);
-  // Real, tracked on-account credit for this booking — CrmOnAccountPayment
-  // rows submitted separately from milestone payments (their own approval,
-  // their own OACC-xxxx doc, their own Applied/Pending state), NOT something
-  // derivable from Milestone 1's own Paid vs Due. A customer can be exactly
-  // paid-in-full on the Booking Amount and still be sitting on an unrelated
-  // on-account deposit — the two numbers are independent.
-  const bookingOnAccountBalance = Number(onAccountData?.availableBalance || 0);
-  const bookingAmountPaidInFull = bookingAmountDue > 0 && bookingAmountBalance < 1;
+  // A waived Booking Amount is settled without cash; otherwise virtual
+  // coverage reflects milestone-paid plus valid available on-account funds.
+  const bookingAmountCoveredInFull = !!firstMilestone && (firstMilestone.Status === "Waived"
+    || (bookingAmountDue > 0 && bookingAmountBalance < 1));
   // "Unit confirmed" / "Plan confirmed" are no longer separate booking
   // columns — they ARE the Data Review checklist's own ProjectUnitRate /
   // PaymentPlanAmounts items being Checked. One source of truth for both
@@ -1788,8 +1791,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   const parkingRows = milestoneList.filter((m: any) => !!m.ParkingAllotmentId);
                   const extraRows = milestoneList.filter((m: any) => !!m.ExtraChargeId);
                   if (!milestoneList.length) return null;
-                  const totalDue = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
+                  const liveMilestones = milestoneList.filter((m: any) => m.Status !== "Waived");
+                  const waivedMilestones = milestoneList.filter((m: any) => m.Status === "Waived");
+                  const totalDue = liveMilestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
                   const totalPaid = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+                  const totalWaived = waivedMilestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
                   // Use the real on-account pool balance (not MR-total minus paid, which double-counts deposits)
                   const mrOnAccount = Number(onAccountData?.availableBalance || 0);
                   const firstUnpaidId = milestoneList.find((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived")?.Id;
@@ -1805,7 +1811,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         const isFirstUnpaid = m.Id === firstUnpaidId;
                         const mrForThis = isFirstUnpaid ? mrOnAccount : 0;
                         const effectivePaid = paid + mrForThis;
-                        const bal = Math.max(0, due - effectivePaid);
+                        const bal = m.Status === "Waived" ? 0 : Math.max(0, due - effectivePaid);
                         const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
                         return (
                         <tr key={m.Id} className={`border-b border-border ${isOverdue ? "bg-red-50/30 dark:bg-red-950/20" : ""}`}>
@@ -1815,7 +1821,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           </td>
                           <td className="px-2.5 py-1.5 text-right text-xs text-muted-foreground">{m.Percent != null ? `${m.Percent}%` : "—"}</td>
                           <td className="px-2.5 py-1.5 text-right font-medium">
-                            {fmt(due)}
+                            {fmt(due)}{m.Status === "Waived" && <span className="ml-1 text-[0.625rem] text-muted-foreground">(waived)</span>}
                             {due > 0 && (
                               <div className="text-[0.625rem] text-muted-foreground font-normal leading-tight mt-0.5">
                                 Prin {fmt(due / (1 + (m.ExtraChargeId ? 18 : Number(booking?.UnitParkingGstRate || 0)) / 100))}<br/>
@@ -1893,7 +1899,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-sky-600 dark:text-sky-400" /> Payment Breakdown</h3>
                         <span className="text-xs text-muted-foreground">
-                          {fmt(totalPaid)} of {fmt(totalDue)} cleared
+                          {fmt(totalPaid)} collected · {fmt(totalDue)} due
+                          {waivedMilestones.length > 0 && <span className="text-muted-foreground"> · {fmt(totalWaived)} waived</span>}
                           {mrOnAccount > 0 && <span className="text-blue-600"> · {fmt(mrOnAccount)} on account</span>}
                         </span>
                       </div>
@@ -1936,12 +1943,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="space-y-3 pt-2">
                 <div className="rounded-xl border border-border p-4 space-y-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5"><CreditCard size={15} className="text-sky-600 dark:text-sky-400" /> Booking Amount</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">{bookingAmountDue > 0 ? fmt(bookingAmountDue) : "Not set"}</span></div>
-                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Paid on milestone</span><span className="font-semibold text-emerald-700">{fmt(bookingAmountPaid)}</span></div>
+                    <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">On-account cover</span><span className="font-semibold text-sky-700">{fmt(bookingAmountOnAccountCover)}</span></div>
                     <div className="rounded-lg border border-border px-3 py-2"><span className="text-muted-foreground block">Due Remaining</span><span className="font-semibold text-amber-700">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
                     {firstMilestone?.DueDate && (() => {
-                      const isM1Overdue = firstMilestone.Status !== CrmStatus.PAID && firstMilestone.Status !== "Waived" && new Date(firstMilestone.DueDate) < new Date();
+                      const isM1Overdue = bookingAmountBalance > 0 && firstMilestone.Status !== CrmStatus.PAID
+                        && firstMilestone.Status !== "Waived" && new Date(firstMilestone.DueDate) < new Date();
                       return (
                         <div className={`rounded-lg border px-3 py-2 ${isM1Overdue ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/20" : "border-border"}`}>
                           <span className="text-muted-foreground block">Due Date</span>
@@ -2048,8 +2057,17 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   {bookingAmountDue <= 0 && (
                     <p className="text-[0.6875rem] text-muted-foreground">Booking Amount not set on the payment plan — open the Payment Plan Master and set a fixed Booking Amount.</p>
                   )}
-                  {bookingAmountPaidInFull && (
-                    <p className="text-[0.6875rem] text-emerald-700">Booking Amount fully paid.</p>
+                  {!firstMilestone && bookingAmountDue > 0 && (
+                    <p role="alert" className="text-[0.6875rem] text-amber-700">The Booking Amount milestone is missing. Open Payment Milestones and resync the schedule before submitting a payment.</p>
+                  )}
+                  {bookingAmountCoveredInFull && (
+                    <p className="text-[0.6875rem] text-emerald-700">Booking Amount covered{bookingAmountOnAccountCover > 0 ? " by valid on-account funds" : ""}.</p>
+                  )}
+                  {onAccountLoading && (
+                    <p className="text-[0.6875rem] text-muted-foreground">Checking the current on-account balance…</p>
+                  )}
+                  {onAccountError && (
+                    <p role="alert" className="text-[0.6875rem] text-amber-700">Could not verify on-account coverage. Refresh this booking before submitting another Booking Amount payment.</p>
                   )}
                 </div>
 
@@ -2136,7 +2154,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     for bookings that had already moved past Review before
                     this feature shipped, so the auto-create trigger never
                     fired for them. */}
-                {canEdit && booking.Status !== CrmStatus.APPROVED && !bookingAmountPaidInFull && bookingAmountDue > 0
+                {canEdit && !!firstMilestone && booking.Status !== CrmStatus.APPROVED && !onAccountLoading && !onAccountError
+                  && !bookingAmountCoveredInFull && bookingAmountDue > 0
                   && !(Number(firstMilestone?.PendingVerificationAmount) > 0)
                   && currentStage !== "Review" && moneyReceipts.length === 0 && (
                   <div className="rounded-xl border border-border p-4 space-y-2">

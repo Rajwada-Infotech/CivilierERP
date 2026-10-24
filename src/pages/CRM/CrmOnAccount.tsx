@@ -13,7 +13,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, ChevronRight as CRight,
   ArrowRightLeft, CheckCircle2, Clock, SplitSquareHorizontal,
   Building2, User, CreditCard, CalendarDays, ExternalLink, ReceiptText,
-  Filter, X, BadgeIndianRupee,
+  Filter, X, BadgeIndianRupee, CircleAlert,
 } from "lucide-react";
 
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
@@ -25,7 +25,7 @@ const API = "/api/crm/payments";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type DepositStatus = "Unapplied" | "PartiallyApplied" | "Applied";
+type DepositStatus = "Unapplied" | "PartiallyApplied" | "Applied" | "Bounced";
 
 interface Deposit {
   Id: number;
@@ -61,6 +61,7 @@ interface Summary {
   UnappliedCount: number;
   PartialCount: number;
   AppliedCount: number;
+  BouncedCount?: number;
   UnappliedBalance: number;
   PartialBalance: number;
 }
@@ -72,11 +73,12 @@ interface Milestone {
   AmountDue: number;
   AmountPaid: number;
   Status: string;
+  DemandStatus?: string;
   DueDate: string | null;
 }
 
 interface BookingDetail {
-  booking: { BookingNo: string; ApplicantName: string; ProjectName: string; UnitNo: string; GrandTotal: number; OnAccountTotalReceived?: number };
+  booking: { BookingNo: string; ApplicantName: string; ProjectName: string; UnitNo: string; GrandTotal: number; OnAccountTotalReceived?: number; OnAccountAvailable?: number };
   milestones: Milestone[];
   summary: { totalDue: number; totalPaid: number; balance: number; overdue: number };
 }
@@ -101,9 +103,12 @@ const statusAccent: Record<DepositStatus, string> = {
   Unapplied: "#0284c7",
   PartiallyApplied: "#2563eb",
   Applied: "#059669",
+  Bounced: "#dc2626",
 };
 
 function StatusChip({ s }: { s: DepositStatus }) {
+  if (s === "Bounced")
+    return <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700 dark:bg-red-950/30 dark:border-red-700 dark:text-red-300 whitespace-nowrap"><CircleAlert size={9} />Bounced</span>;
   if (s === "Applied")
     return <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300 whitespace-nowrap"><CheckCircle2 size={9} />Applied</span>;
   if (s === "PartiallyApplied")
@@ -129,30 +134,43 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
   });
 
   const outstanding = useMemo(() =>
-    (bk?.milestones || []).filter(
-      (m) => m.Status !== "Paid" && m.Status !== "Waived" &&
-             Number(m.AmountDue) - Number(m.AmountPaid) > 0
-    ), [bk]);
+    {
+      const next = [...(bk?.milestones || [])]
+        .sort((a, b) => Number(a.MilestoneNo) - Number(b.MilestoneNo))
+        .find((m) => m.Status !== "Paid" && m.Status !== "Waived");
+      return next && Number(next.AmountDue) - Number(next.AmountPaid) > 0 && next.DemandStatus !== "Pending"
+        ? [next]
+        : [];
+    }, [bk]);
 
-  // On Account Adjustment is a full-booking hold: the sweep won't settle any
-  // milestone until the on-account pool covers the booking's entire
-  // GrandTotal, so the button is disabled (with an explanatory banner) until
-  // that's true — matches the backend gate in applyOnAccountToMilestone.
-  const bookingGrandTotal = Number(bk?.booking?.GrandTotal) || 0;
-  const bookingOnAccountReceived = Number(bk?.booking?.OnAccountTotalReceived) || 0;
-  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
-  const fullPaymentShortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
+  // Count settled milestone receipts and remaining valid on-account funds.
+  // Applied deposits already appear in totalPaid, so only their unapplied
+  // balance is added here. Waived milestone dues are excluded by totalDue.
+  const bookingRequiredAmount = bk?.milestones?.length
+    ? Number(bk.summary.totalDue || 0)
+    : Number(bk?.booking?.GrandTotal) || 0;
+  const bookingFundsOnHand = Number(bk?.summary?.totalPaid || 0) + Number(bk?.booking?.OnAccountAvailable || 0);
+  const notFullyPaid = bookingRequiredAmount > 0 && bookingFundsOnHand + 0.005 < bookingRequiredAmount;
+  const fullPaymentShortfall = Math.max(0, Math.round((bookingRequiredAmount - bookingFundsOnHand) * 100) / 100);
+  const nextMilestone = [...(bk?.milestones || [])]
+    .sort((a, b) => Number(a.MilestoneNo) - Number(b.MilestoneNo))
+    .find((m) => m.Status !== "Paid" && m.Status !== "Waived");
 
   const sel = outstanding.find((m) => m.Id === selId);
   const maxAmt = sel
-    ? Math.min(Number(deposit.AvailableBalance), Number(sel.AmountDue) - Number(sel.AmountPaid))
+    ? Math.max(0, Math.min(Number(deposit.AvailableBalance), Number(sel.AmountDue) - Number(sel.AmountPaid)))
     : Number(deposit.AvailableBalance);
 
   async function apply() {
+    if (deposit.Status === "Bounced") { toast.error("This deposit was bounced and cannot be applied"); return; }
+    if (notFullyPaid) { toast.error(`${formatINR(fullPaymentShortfall)} more must be received on-account before adjustment`); return; }
+    if (!outstanding.length) { toast.error("The next milestone must be eligible and have its Demand raised before adjustment"); return; }
     if (selId == null) { toast.error("Select a milestone first"); return; }
+    if (!sel) { toast.error("The selected milestone is no longer eligible. Refresh and select the next outstanding milestone."); return; }
     const n = amt ? parseFloat(amt) : undefined;
     if (n !== undefined && (isNaN(n) || n <= 0)) { toast.error("Enter a valid amount"); return; }
     if (n && n > deposit.AvailableBalance) { toast.error(`Max: ${formatINR(deposit.AvailableBalance)}`); return; }
+    if (n && n > maxAmt) { toast.error(`Maximum applicable amount: ${formatINR(maxAmt)}`); return; }
     setBusy(true);
     try {
       const res = await fetchWithAuth(`${API}/on-account/${deposit.Id}/apply`, {
@@ -210,15 +228,20 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
                   <Wallet size={11} className="text-blue-600 dark:text-blue-400" /> Held on-account — auto-settles once fully funded
                 </span>
                 <span className="text-muted-foreground tabular-nums">
-                  {formatINR(bookingOnAccountReceived)} of {formatINR(bookingGrandTotal)}
+                  {formatINR(bookingFundsOnHand)} of {formatINR(bookingRequiredAmount)}
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
+                <div className="h-full rounded-full bg-blue-500" style={{ width: `${bookingRequiredAmount > 0 ? Math.min(100, (bookingFundsOnHand / bookingRequiredAmount) * 100) : 0}%` }} />
               </div>
               <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
-                No action needed — ₹{fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will automatically settle every eligible milestone, in order. Manual Apply below is a fallback only.
+                No action needed — ₹{fullPaymentShortfall.toLocaleString("en-IN")} more in valid payments is needed to fund the remaining dues. Eligible milestones then settle in order.
               </div>
+            </div>
+          )}
+          {!notFullyPaid && nextMilestone?.DemandStatus === "Pending" && (
+            <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[0.6875rem] text-amber-900">
+              Raise the Demand for {nextMilestone.MilestoneName} before applying on-account funds.
             </div>
           )}
 
@@ -241,9 +264,9 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
                   const overdue = m.DueDate && new Date(m.DueDate) < new Date() && m.Status !== "Paid";
                   const sel = selId === m.Id;
                   return (
-                    <button key={m.Id}
+                    <button key={m.Id} disabled={notFullyPaid || deposit.Status === "Bounced"}
                       onClick={() => { setSelId(m.Id); setAmt(String(Math.min(deposit.AvailableBalance, due))); }}
-                      className={`w-full text-left rounded-lg border px-2.5 py-2 transition-all relative overflow-hidden ${sel ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/40 hover:bg-muted/20"}`}
+                      className={`w-full text-left rounded-lg border px-2.5 py-2 transition-all relative overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed ${sel ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/40 hover:bg-muted/20"}`}
                     >
                       {sel && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary" />}
                       <div className="flex items-center justify-between mb-1">
@@ -285,7 +308,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose} className="px-3.5 py-1.5 text-sm rounded-lg border border-border hover:bg-muted">Cancel</button>
-            <button onClick={apply} disabled={selId == null || busy}
+            <button onClick={apply} disabled={selId == null || !sel || busy || deposit.Status === "Bounced" || notFullyPaid || outstanding.length === 0}
               className="px-3.5 py-1.5 text-sm rounded-lg btn-module text-white hover:shadow-lg disabled:opacity-50 flex items-center gap-2">
               {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply Manually</>}
             </button>
@@ -465,8 +488,8 @@ export default function CrmOnAccount() {
   const totalPages = Math.ceil(total / PAGE);
 
   // page-level totals for footer
-  const pageCR  = deposits.reduce((s, d) => s + Number(d.Amount), 0);
-  const pageDR  = deposits.reduce((s, d) => s + Number(d.AppliedAmount), 0);
+  const pageCR  = deposits.reduce((s, d) => s + (["Bounced", "Held", "Void", "Cancelled", "Refunded"].includes(d.Status) ? 0 : Number(d.Amount)), 0);
+  const pageDR  = deposits.reduce((s, d) => s + (["Bounced", "Held", "Void", "Cancelled", "Refunded"].includes(d.Status) ? 0 : Number(d.AppliedAmount)), 0);
   const pageBAL = deposits.reduce((s, d) => s + Number(d.AvailableBalance), 0);
 
   const util = summary && summary.TotalReceived > 0
@@ -501,7 +524,7 @@ export default function CrmOnAccount() {
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
             <CrmGlassCard
               label="Total Received" icon={BadgeIndianRupee} accentColor="#0ea5e9"
-              value={formatINR(summary.TotalReceived)} sub={`${summary.TotalCount} deposits`}
+              value={formatINR(summary.TotalReceived)} sub={`${summary.TotalCount} deposits${summary.BouncedCount ? ` · ${summary.BouncedCount} bounced` : ""}`}
             />
             <CrmGlassCard
               label="Total Applied" icon={TrendingUp} accentColor={statusAccent.Applied} trend="up"
@@ -548,6 +571,7 @@ export default function CrmOnAccount() {
                 <SelectItem value="Unapplied">Unapplied</SelectItem>
                 <SelectItem value="PartiallyApplied">Partial</SelectItem>
                 <SelectItem value="Applied">Applied</SelectItem>
+                <SelectItem value="Bounced">Bounced</SelectItem>
               </SelectContent>
             </Select>
 
@@ -615,7 +639,7 @@ export default function CrmOnAccount() {
                   </td></tr>
                 ) : deposits.map((d) => {
                   const isExp = expanded.has(d.Id);
-                  const pct   = d.Amount > 0 ? (d.AppliedAmount / d.Amount) * 100 : 0;
+                  const pct   = d.Amount > 0 && d.Status !== "Bounced" ? (d.AppliedAmount / d.Amount) * 100 : 0;
                   const cls   = modeColor[d.PaymentMode || ""] || "bg-muted/50 text-muted-foreground";
                   const accent = statusAccent[d.Status];
                   const isApplied = d.Status === "Applied";
@@ -665,7 +689,7 @@ export default function CrmOnAccount() {
 
                         {/* CR */}
                         <td className="px-2.5 py-2 text-right">
-                          <div className="font-semibold text-[0.8125rem] text-emerald-700 dark:text-emerald-400 font-mono">{formatINR(d.Amount)}</div>
+                          <div className={`font-semibold text-[0.8125rem] font-mono ${d.Status === "Bounced" ? "text-red-700 dark:text-red-400 line-through" : "text-emerald-700 dark:text-emerald-400"}`}>{formatINR(d.Amount)}</div>
                           <div className="mt-1 h-1 w-20 ml-auto rounded-full bg-muted overflow-hidden">
                             <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-emerald-500" : pct > 0 ? "bg-blue-500" : "bg-muted-foreground/20"}`}
                               style={{ width: `${Math.min(100, pct)}%` }} />
@@ -674,7 +698,7 @@ export default function CrmOnAccount() {
 
                         {/* DR */}
                         <td className="px-2.5 py-2 text-right font-mono text-[0.8125rem]">
-                          {d.AppliedAmount > 0
+                          {d.AppliedAmount > 0 && d.Status !== "Bounced"
                             ? <span className="text-sky-600 dark:text-sky-400 font-semibold">{formatINR(d.AppliedAmount)}</span>
                             : <span className="text-muted-foreground">—</span>}
                         </td>
@@ -692,7 +716,7 @@ export default function CrmOnAccount() {
                         {/* Actions */}
                         <td className="px-2.5 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1.5">
-                            {canEdit && d.Status !== "Applied" && (
+            {canEdit && d.Status !== "Applied" && d.Status !== "Bounced" && d.AvailableBalance > 0 && (
                               <button onClick={() => setAdjusting(d)}
                                 className="text-[0.6875rem] px-2 py-1 rounded-lg border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 font-medium transition-colors whitespace-nowrap">
                                 Adjust

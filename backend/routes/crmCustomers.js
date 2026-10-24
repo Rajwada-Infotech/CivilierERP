@@ -308,8 +308,15 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
       pool.request().input("id", sql.Int, id).query(`
         SELECT
           ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0) AS TotalOutstanding,
-          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS TotalPaid,
-          ISNULL(SUM(m.AmountDue), 0) AS TotalDue
+          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) + ISNULL((
+            SELECT SUM(CASE WHEN ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+              AND oa.Amount > ISNULL(oa.AppliedAmount, 0) THEN oa.Amount - ISNULL(oa.AppliedAmount, 0) ELSE 0 END)
+            FROM dbo.CrmOnAccountPayment oa
+            JOIN dbo.CrmBooking ob ON ob.Id = oa.BookingId
+            JOIN dbo.CrmApplication oapp ON oapp.Id = ob.ApplicationId
+            WHERE oapp.CustomerId = @id AND ob.IsActive = 1 AND ob.Status NOT IN ${DEAD_BOOKING_SQL}
+          ), 0) AS TotalPaid,
+          ISNULL(SUM(CASE WHEN m.Status <> 'Waived' THEN m.AmountDue ELSE 0 END), 0) AS TotalDue
         FROM dbo.CrmPaymentMilestone m
         JOIN dbo.CrmBooking b ON b.Id = m.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId

@@ -11,14 +11,14 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-// DuesClearedCheck is computed live from CrmPaymentMilestone.DemandStatus —
-// the stored BIT column is intentionally not read (schema artefact; auto-derive
-// is the source of truth). OutstandingDemandCount is included so the frontend
-// can show "N demands outstanding" without a second round-trip.
+// DuesClearedCheck is computed live from net booking funding; the stored BIT
+// column is intentionally not read. OutstandingDemandCount lets the frontend
+// show the remaining count without another round-trip.
 const PP_SELECT = `
   SELECT
     p.Id, p.BookingId,
@@ -27,19 +27,12 @@ const PP_SELECT = `
     p.Status, p.Notes, p.CreatedAt, p.UpdatedAt,
     b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
     a.ApplicantName, a.Mobile,
-    -- Auto-derived dues status: 1 when no milestone has an outstanding balance.
-    -- Uses the same AmountDue/AmountPaid check as Handover — consistent source of truth.
-    CASE WHEN NOT EXISTS (
-      SELECT 1 FROM dbo.CrmPaymentMilestone m
-      WHERE m.BookingId = p.BookingId
-        AND m.Status NOT IN ('Paid', 'Waived')
-        AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS DuesClearedCheck,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = p.BookingId
-       AND m.Status NOT IN ('Paid', 'Waived')
-       AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-    ) AS OutstandingDemandCount
+    -- Auto-derived dues status mirrors the net-funding check used by Handover.
+    CAST(CASE WHEN ${bookingFullyFundedSql("p.BookingId")} THEN 1 ELSE 0 END AS BIT) AS DuesClearedCheck,
+    CASE WHEN ${bookingFullyFundedSql("p.BookingId")} THEN 0 ELSE
+      (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
+       WHERE m.BookingId = p.BookingId AND m.Status NOT IN ('Paid', 'Waived')
+         AND m.AmountDue > ISNULL(m.AmountPaid, 0)) END AS OutstandingDemandCount
   FROM dbo.CrmPrePossession p
   JOIN dbo.CrmBooking b ON b.Id = p.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -371,12 +364,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
 
         -- Dues clearance: computed live — true when no milestone has an outstanding balance.
         -- Consistent with the Handover payment gate (AmountDue/AmountPaid check).
-        DECLARE @dues_cleared BIT = CASE WHEN NOT EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m
-          WHERE m.BookingId = @bid
-            AND m.Status NOT IN ('Paid', 'Waived')
-            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-        ) THEN 1 ELSE 0 END;
+        DECLARE @dues_cleared BIT = CASE WHEN ${bookingFullyFundedSql("@bid")} THEN 1 ELSE 0 END;
 
         DECLARE @new_status NVARCHAR(30) =
           CASE

@@ -217,7 +217,9 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // is best-effort and can silently fail (missing bank, DB hiccup), so this
   // is checked independently rather than trusted from booking creation alone.
   const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+    ORDER BY Id
   `);
   // Real ledger settlement (Status='Paid') only happens via the automatic
   // full-booking sweep (autoApplyOnAccountIfFullyFunded in crmPayments.js) —
@@ -229,9 +231,12 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // full-booking auto-sweep to physically mark it Paid.
   if (!milestone1.recordset.length || (milestone1.recordset[0].Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
     const totalsRow = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT ISNULL(SUM(Amount), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+      SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
+        THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment
+      WHERE BookingId = @bid AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
     `);
-    const totalReceived = Number(totalsRow.recordset[0]?.TotalReceived) || 0;
+    const totalReceived = (Number(milestone1.recordset[0]?.AmountPaid) || 0)
+      + (Number(totalsRow.recordset[0]?.TotalReceived) || 0);
     const m1Due = Number(milestone1.recordset[0]?.AmountDue) || 0;
     if (m1Due > 0 && totalReceived < m1Due) {
       const shortfall = Math.round((m1Due - totalReceived) * 100) / 100;

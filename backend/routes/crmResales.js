@@ -384,7 +384,8 @@ router.get("/holdings", requirePageRight("crm-resales", "view"), async (req, res
                   WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = b.UnitId AND p.IsActive = 1) THEN N'Villa'
                   ELSE ISNULL(u.UnitKind, N'Unit') END AS Kind,
              (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
-               + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
+               + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
+                   THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId

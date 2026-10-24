@@ -211,13 +211,26 @@ const CrmPaymentMilestones: React.FC = () => {
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
-  // On Account Adjustment is a full-booking hold — it won't sweep any
-  // milestone until the on-account pool covers the booking's ENTIRE
-  // GrandTotal (matches applyOnAccountToMilestone in crmPayments.js).
-  const bookingGrandTotal = Number(booking?.GrandTotal ?? booking?.TotalValue ?? 0);
-  const bookingOnAccountReceived = Number(booking?.OnAccountTotalReceived || 0);
-  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
-  const fullPaymentShortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
+  // Funding counts already-settled milestone receipts plus remaining valid
+  // on-account balance, against the non-waived milestone total. This matches
+  // the backend gate and supports legacy direct receipts without double-counting
+  // deposits that have already been applied.
+  const bookingRequiredAmount = milestones.length > 0
+    ? Number(summary.totalDue || 0)
+    : Number(booking?.GrandTotal ?? booking?.TotalValue ?? 0);
+  const bookingFundsOnHand = Number(summary.totalPaid || 0) + Number(onAccountBalance || 0);
+  const notFullyPaid = bookingRequiredAmount > 0 && bookingFundsOnHand + 0.005 < bookingRequiredAmount;
+  const fullPaymentShortfall = Math.max(0, Math.round((bookingRequiredAmount - bookingFundsOnHand) * 100) / 100);
+  const nextOutstandingMilestone = [...milestones]
+    .sort((a: any, b: any) => Number(a.MilestoneNo) - Number(b.MilestoneNo))
+    .find((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived");
+  const nextMilestoneBalance = nextOutstandingMilestone
+    ? Math.max(0, Number(nextOutstandingMilestone.AmountDue) - Number(nextOutstandingMilestone.AmountPaid || 0))
+    : 0;
+  const canManuallyApplyOnAccount = !!(
+    !notFullyPaid && nextOutstandingMilestone && nextMilestoneBalance > 0 &&
+    nextOutstandingMilestone.DemandStatus !== CrmStatus.PENDING
+  );
 
   // Total pending finance approval across all milestones
   const totalPendingVerification = milestones.reduce(
@@ -236,12 +249,9 @@ const CrmPaymentMilestones: React.FC = () => {
   // the raw list when this booking's Project isn't known yet.
   const bankOptions = booking?.ProjectId != null ? projectBanks : companyBanks;
 
-  const milestone1 = milestones.find((m) => m.MilestoneNo === 1);
-  const needsResync = !!(
-    booking?.BookingAmount &&
-    milestone1 &&
-    Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1
-  );
+  const milestone1 = milestones.find((m) => m.MilestoneNo === 1 && !m.ParkingAllotmentId && !m.ExtraChargeId);
+  const needsResync = !!booking?.BookingAmount && (!milestone1
+    || Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1);
 
   // Live preview for the Record Payment dialog
   const editingMilestone = milestones.find((m) => m.Id === editingId) || null;
@@ -339,6 +349,9 @@ const CrmPaymentMilestones: React.FC = () => {
       }
       setEditingId(null);
       qc.invalidateQueries({ queryKey: ["crm-milestones", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-money-receipts", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", Number(selectedBookingId)] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-detail", Number(selectedBookingId)] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -365,6 +378,11 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleAddMilestone = async () => {
     if (!selectedBookingId || !addForm.MilestoneName.trim()) return;
+    const amountDue = Number(addForm.AmountDue);
+    if (!Number.isFinite(amountDue) || amountDue <= 0) {
+      toast.error("Enter an Amount Due greater than zero");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}`, {
@@ -373,7 +391,7 @@ const CrmPaymentMilestones: React.FC = () => {
         body: JSON.stringify({
           MilestoneName: addForm.MilestoneName,
           DueDate: addForm.DueDate || null,
-          AmountDue: addForm.AmountDue ? parseFloat(addForm.AmountDue) : 0,
+          AmountDue: amountDue,
           ResponsibleDepartment: addForm.ResponsibleDepartment || null,
           RequiredDocuments: addForm.RequiredDocuments || null,
         }),
@@ -413,6 +431,8 @@ const CrmPaymentMilestones: React.FC = () => {
       setOnAccountDialog(false);
       setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-money-receipts", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", Number(selectedBookingId)] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -497,14 +517,23 @@ const CrmPaymentMilestones: React.FC = () => {
         );
       } },
     { accessorKey: "AmountDue", header: "Amount Due", size: 130,
-      cell: (i) => (
-        <span className="font-semibold text-sm">
-          {fmt(i.row.original.AmountDue)}
-          {i.row.original.Percent != null && (
-            <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">({Number(i.row.original.Percent)}%)</span>
-          )}
-        </span>
-      ) },
+      cell: (i) => {
+        const m = i.row.original;
+        if (Number(m.AmountDue) === 0 && Number(m.AmountPaid || 0) === 0 && m.Status === CrmStatus.PAID) {
+          return <span className="text-xs font-medium text-muted-foreground">No amount due</span>;
+        }
+        return (
+          <span className="font-semibold text-sm">
+            {fmt(m.AmountDue)}
+            {m.Status === "Waived" && (
+            <span className="ml-1 text-[0.625rem] font-medium text-muted-foreground">(waived)</span>
+            )}
+            {m.Percent != null && (
+              <span className="ml-1 text-[0.625rem] font-normal text-muted-foreground">({Number(m.Percent)}%)</span>
+            )}
+          </span>
+        );
+      } },
     { accessorKey: "AmountPaid", header: "Amount Paid", size: 120,
       cell: (i) => {
         const m = i.row.original;
@@ -545,6 +574,9 @@ const CrmPaymentMilestones: React.FC = () => {
     { id: "status", header: "Status", size: 110, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
+        if (Number(m.AmountDue) === 0 && Number(m.AmountPaid || 0) === 0 && m.Status === CrmStatus.PAID) {
+          return <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit border-border text-muted-foreground">No amount due</span>;
+        }
         // The real ledger sweep only fires automatically once the whole
         // booking is funded, but the customer's money has genuinely arrived
         // the moment on-account covers this milestone — show ONE clear
@@ -553,7 +585,7 @@ const CrmPaymentMilestones: React.FC = () => {
         const virtuallyCovered = m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.VirtuallyCovered;
         if (virtuallyCovered) {
           return (
-            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit border-border text-blue-600 dark:text-blue-400" title="Money is on-account for this milestone; it will settle automatically once the full booking amount is received">
+            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit border-border text-blue-600 dark:text-blue-400" title="Money is available for this milestone; it settles automatically once all non-waived dues are funded">
               <Wallet size={12} />Paid (on-account)
             </span>
           );
@@ -613,20 +645,31 @@ const CrmPaymentMilestones: React.FC = () => {
             )}
             {rights.canEdit && m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
               <>
-                {onAccountBalance > 0 && (() => {
-                  const pmt = onAccountData?.payments?.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount || 0) > 0);
+                {onAccountBalance > 0 && m.Id === nextOutstandingMilestone?.Id && (() => {
+                  const pmt = onAccountData?.payments?.find((p: any) =>
+                    !["Bounced", "Held", "Void", "Cancelled", "Refunded"].includes(p.Status) &&
+                    Number(p.Amount) - Number(p.AppliedAmount || 0) > 0
+                  );
                   if (!pmt) return null;
                   if (notFullyPaid) {
                     return (
-                      <span title={`Auto-settles once fully funded — ₹${fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will trigger this automatically, no manual action needed`}
+                      <span title={`Auto-settles once all remaining dues are funded — ₹${fullPaymentShortfall.toLocaleString("en-IN")} more in valid payments is required`}
                         className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md font-medium cursor-not-allowed select-none whitespace-nowrap">
                         Auto
                       </span>
                     );
                   }
+                  if (nextOutstandingMilestone?.DemandStatus === CrmStatus.PENDING) {
+                    return (
+                      <span title="Raise the Demand before applying on-account funds to this milestone"
+                        className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md font-medium cursor-not-allowed select-none whitespace-nowrap">
+                        Raise Demand
+                      </span>
+                    );
+                  }
                   return (
                     <button onClick={() => openApplyDialog(pmt, m)}
-                      title="The full booking amount is on-account and this milestone should auto-settle shortly — use this only if it hasn't (e.g. a demand still needs to be raised first)"
+                      title="All remaining dues are funded; this milestone should auto-settle shortly. Use this only if the automatic adjustment did not run."
                       className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors font-medium whitespace-nowrap">
                       Apply
                     </button>
@@ -719,7 +762,9 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {needsResync && (
           <div className="rounded-lg border border-sky-300 bg-sky-50 text-sky-800 text-sm px-4 py-2.5 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-400">
-            Milestone 1's amount (₹{Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹{Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.
+            {!milestone1
+              ? "This booking has no core Booking Amount milestone. Click \"Resync Schedule\" to generate the schedule if no other milestone rows exist; existing non-core schedule rows will be protected for review."
+              : `Milestone 1's amount (₹${Number(milestone1.AmountDue).toLocaleString("en-IN")}) doesn't match this booking's actual booking amount (₹${Number(booking.BookingAmount).toLocaleString("en-IN")}) — click "Resync Schedule" to fix it and redistribute the remaining milestones.`}
           </div>
         )}
 
@@ -819,6 +864,12 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className="text-muted-foreground">Collected</span>
                           <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
                         </div>
+                        {summary.waivedCount > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-muted-foreground">Waived ({summary.waivedCount})</span>
+                            <span className="font-medium text-muted-foreground tabular-nums">{fmt(summary.waivedDue)}</span>
+                          </div>
+                        )}
                         {onAccountBalance > 0 && (
                           <div className="flex items-baseline justify-between">
                             <span className="text-blue-600 flex items-center gap-1"><Wallet size={11} /> Available On-Account (unapplied)</span>
@@ -959,28 +1010,39 @@ const CrmPaymentMilestones: React.FC = () => {
                         <Wallet size={12} className="text-blue-600 dark:text-blue-400" /> Held on-account — will auto-settle once fully funded
                       </span>
                       <span className="text-muted-foreground tabular-nums">
-                        {fmt(bookingOnAccountReceived)} of {fmt(bookingGrandTotal)} ({Math.round((bookingOnAccountReceived / bookingGrandTotal) * 100)}%)
+                        {fmt(bookingFundsOnHand)} of {fmt(bookingRequiredAmount)} ({Math.min(100, Math.round((bookingFundsOnHand / bookingRequiredAmount) * 100))}%)
                       </span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
+                      <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingFundsOnHand / bookingRequiredAmount) * 100)}%` }} />
                     </div>
                     <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
-                      No action needed — {fmt(fullPaymentShortfall)} more coming in on-account will automatically settle every eligible milestone, in order. Milestones already covered by money on hand show "Paid (on-account)" above.
+                      {fmt(fullPaymentShortfall)} more in valid payments is needed to fund the remaining dues. Milestones already covered by money on hand show "Paid (on-account)" above.
                     </div>
                   </div>
                 ) : (
                   <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-[0.6875rem] text-foreground flex items-center gap-1.5">
-                    <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" /> Full booking amount is on-account — every eligible milestone auto-settles automatically, in order.
+                    <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" /> Booking funding is complete — eligible milestones settle automatically, in order.
                   </div>
                 )}
                 <div className="space-y-1.5">
+                  {milestones.length > 0 && milestones.every((m: any) => m.Status === CrmStatus.PAID || m.Status === "Waived" || Number(m.AmountDue) <= Number(m.AmountPaid || 0)) && onAccountData.payments.some((p: any) => !["Bounced", "Held", "Void", "Cancelled", "Refunded"].includes(p.Status) && Number(p.Amount) > Number(p.AppliedAmount || 0)) && (
+                    <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                      No milestone balance is outstanding. Any remaining on-account funds stay unapplied on this booking until a balance is available.
+                    </div>
+                  )}
                   {onAccountData.payments.map((p: any) => {
-                    const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
-                    const canApply = remaining > 0 && p.Status !== "Applied" && !notFullyPaid;
+                    const isUnavailable = ["Bounced", "Held", "Void", "Cancelled", "Refunded"].includes(p.Status);
+                    const remaining = isUnavailable ? 0 : Number(p.Amount) - Number(p.AppliedAmount || 0);
+                    const hasOutstandingMilestone = milestones.some((m: any) =>
+                      m.Status !== CrmStatus.PAID && m.Status !== "Waived" && Number(m.AmountDue) > Number(m.AmountPaid || 0)
+                    );
+                    const canApply = remaining > 0 && p.Status !== "Applied" && !isUnavailable && canManuallyApplyOnAccount && hasOutstandingMilestone;
                     const isApplied = p.Status === "Applied";
                     const isPartial = p.Status === "PartiallyApplied";
-                    const borderAccent = isApplied
+                    const borderAccent = isUnavailable
+                      ? "border-l-red-400"
+                      : isApplied
                       ? "border-l-emerald-400"
                       : isPartial
                       ? "border-l-blue-400"
@@ -988,7 +1050,7 @@ const CrmPaymentMilestones: React.FC = () => {
                     return (
                       <div
                         key={p.Id}
-                        className={`flex items-center justify-between gap-3 rounded-lg border border-border border-l-4 ${borderAccent} px-3 py-2 ${isApplied ? "bg-muted/20 opacity-70" : "bg-background"}`}
+                        className={`flex items-center justify-between gap-3 rounded-lg border border-border border-l-4 ${borderAccent} px-3 py-2 ${isApplied || isUnavailable ? "bg-muted/20 opacity-70" : "bg-background"}`}
                       >
                         {/* Left: receipt info */}
                         <div className="min-w-0 flex-1">
@@ -998,7 +1060,9 @@ const CrmPaymentMilestones: React.FC = () => {
                             {p.PaymentMode && <span className="text-xs text-muted-foreground">· {p.PaymentMode}</span>}
                             {p.ReceivedDate && <span className="text-xs text-muted-foreground">· {fmtDate(p.ReceivedDate)}</span>}
                           </div>
-                          {remaining > 0 && remaining < Number(p.Amount) && (
+                          {isUnavailable ? (
+                            <div className="text-[0.6875rem] text-red-700 dark:text-red-400 font-medium mt-0.5">{p.Status} · not available to apply</div>
+                          ) : remaining > 0 && remaining < Number(p.Amount) && (
                             <div className="text-[0.6875rem] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
                               {fmt(remaining)} remaining
                             </div>
@@ -1009,11 +1073,13 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${
                             isApplied
                               ? "text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300"
+                              : isUnavailable
+                              ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-700 dark:text-red-300"
                               : isPartial
                               ? "text-blue-700 bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300"
                               : "text-sky-700 bg-sky-50 border-sky-200 dark:bg-sky-950/30 dark:border-sky-700 dark:text-sky-300"
                           }`}>
-                            {isApplied ? "✓ Applied" : isPartial ? "Partial" : "Unapplied"}
+                            {isUnavailable ? p.Status : isApplied ? "✓ Applied" : isPartial ? "Partial" : "Unapplied"}
                           </span>
                           {canApply && (
                             <button
@@ -1200,7 +1266,7 @@ const CrmPaymentMilestones: React.FC = () => {
                 </div>
                 <div>
                   <label className={LABEL}>Amount Due (₹)</label>
-                  <input type="number" value={addForm.AmountDue}
+                  <input type="number" min="0.01" step="0.01" value={addForm.AmountDue}
                     onChange={(e) => setAddForm((f) => ({ ...f, AmountDue: e.target.value }))}
                     className={`${FIELD} tabular-nums`} />
                 </div>
@@ -1325,10 +1391,15 @@ const CrmPaymentMilestones: React.FC = () => {
             </DialogHeader>
             {applyDialog && (() => {
               const remaining = Number(applyDialog.payment.Amount) - Number(applyDialog.payment.AppliedAmount || 0);
-              const unpaidMilestones = milestones.filter((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (Number(m.AmountDue) - Number(m.AmountPaid || 0)) > 0);
+              const unpaidMilestones = canManuallyApplyOnAccount && nextOutstandingMilestone ? [nextOutstandingMilestone] : [];
+              const hasAvailableMilestone = unpaidMilestones.length > 0;
+              const hasAnyOutstandingMilestone = milestones.some((m: any) =>
+                m.Status !== CrmStatus.PAID && m.Status !== "Waived" && Number(m.AmountDue) > Number(m.AmountPaid || 0)
+              );
               const chosenMilId = applyDialog.milestone?.Id ?? parseInt(applyMilestoneId);
               const chosenMil = applyDialog.milestone ?? milestones.find((m: any) => m.Id === chosenMilId);
               const milBalance = chosenMil ? Number(chosenMil.AmountDue) - Number(chosenMil.AmountPaid || 0) : 0;
+              const chosenTargetEligible = canManuallyApplyOnAccount && !!chosenMil && chosenMil.Id === nextOutstandingMilestone?.Id;
               return (
                 <div className="space-y-4">
                   <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1 text-sm">
@@ -1345,6 +1416,18 @@ const CrmPaymentMilestones: React.FC = () => {
                       <span className="font-semibold text-emerald-700">{fmt(remaining)}</span>
                     </div>
                   </div>
+
+                  {!chosenTargetEligible && !hasAvailableMilestone && (
+                    <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-900">
+                      {!hasAnyOutstandingMilestone
+                        ? `No outstanding milestones are available. ${fmt(remaining)} remains unapplied on-account.`
+                        : notFullyPaid
+                        ? `The booking's remaining dues are not fully funded yet. ${fmt(fullPaymentShortfall)} more in valid payments is required before funds can be applied.`
+                        : nextOutstandingMilestone?.DemandStatus === CrmStatus.PENDING
+                        ? `Raise the Demand for ${nextOutstandingMilestone?.MilestoneName} before applying funds. ${fmt(remaining)} remains on-account.`
+                        : `An earlier milestone must be settled first. ${fmt(remaining)} remains on-account.`}
+                    </div>
+                  )}
 
                   {applyDialog.milestone ? (
                     <div>
@@ -1386,7 +1469,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
                   <div>
                     <label className={LABEL}>Amount to apply</label>
-                    <input type="number" min="1" max={remaining}
+                    <input type="number" min="1" max={remaining} disabled={!chosenTargetEligible}
                       value={applyDialog.amount}
                       onChange={(e) => setApplyDialog((d) => d ? { ...d, amount: e.target.value } : d)}
                       className={`${FIELD} tabular-nums`} />
@@ -1401,7 +1484,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   <div className="flex justify-end gap-2 pt-1 border-t border-border">
                     <button onClick={() => setApplyDialog(null)}
                       className="h-9 px-4 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                    <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || (!applyDialog.milestone && !applyMilestoneId)}
+                    <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || !chosenTargetEligible}
                       className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">
                       {saving ? "Applying…" : `Apply ${applyDialog.amount ? fmt(parseFloat(applyDialog.amount)) : ""}`}
                     </button>

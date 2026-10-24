@@ -117,19 +117,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // Adjustment.
     const bookingRow = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT b.FinancingType,
-             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
-             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Id,
+             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Status,
+             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Id,
              CAST(CASE WHEN EXISTS (
                SELECT 1 FROM dbo.ReceivedPayment rp
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
-               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = 1 AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
                  AND rp.RPStatus = '${CrmStatus.PENDING}'
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval,
              CAST(CASE WHEN EXISTS (
                SELECT 1 FROM dbo.CrmOnAccountPayment oap
                JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = oap.SourceReceivedPaymentId
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
-               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = 1 AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
                  AND oap.Amount > oap.AppliedAmount
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment,
              -- The real ledger sweep (Status='Paid') only fires automatically
@@ -139,8 +139,10 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
              -- arrived for Milestone 1", which is true the moment on-account
              -- covers Milestone 1's own amount, so the shortfall shown is
              -- against that, not the whole booking.
-             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Due,
-             ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
+             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Due,
+             ISNULL((SELECT SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
+               THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END) FROM dbo.CrmOnAccountPayment
+               WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')), 0) AS OnAccountAvailable
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};

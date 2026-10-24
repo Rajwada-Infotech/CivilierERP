@@ -306,10 +306,11 @@ async function buildAgreementDetail(pool, agreementId) {
               cu.name AS CreatedByName
        FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
     pool.request().input("id", sql.Int, id).query(
-      `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
+      `SELECT ISNULL(SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
        FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
     pool.request().input("id", sql.Int, id).query(
-      `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
+      `SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+         THEN CASE WHEN Amount > ISNULL(AppliedAmount,0) THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END ELSE 0 END),0) AS AvailableBalance
        FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
     pool.request().input("id", sql.Int, id).query(
       `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt

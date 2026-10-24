@@ -9,6 +9,7 @@
 // CrmApplication/CrmBooking's real constraints (Unit Master mandatory,
 // milestones required, etc.).
 const { sql } = require("../db");
+const { CrmStatus } = require("../constants/crmStatuses");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
@@ -686,17 +687,13 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
       dueDate = runningDue;
     }
     const isFirst = m.no === 1;
-    // Nothing is due by default. Until a real Booking Amount is entered
-    // (bookingAmt > 0), every milestone — including #1 — is inserted at 0,
-    // not the plan's fixed percentage of TotalValue; staff would otherwise
-    // see a scary pre-filled "Due" figure the customer never agreed to.
-    // Once the Booking Amount is actually set (via the Payment tab's
-    // resync-schedule call), Milestone #1 takes that real amount and every
-    // other milestone gets redistributed across what's left, preserving the
-    // plan's relative weighting (recalculateRemainingMilestones falls back to
-    // the plan's own %s whenever a milestone's stored Percent is 0/unset).
-    const amt = bookingAmt > 0 ? (isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100) : 0;
-    const pct = bookingAmt > 0 ? (isFirst ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct) : 0;
+    // Milestone 1 is the plan's fixed Booking Amount. A zero Booking Amount
+    // means that step is already satisfied with no payment; later milestones
+    // still need real due amounts or the schedule would be all zero and block
+    // every subsequent payment forever.
+    const amt = isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100;
+    const pct = isFirst ? (totalValue > 0 ? Math.round((bookingAmt / totalValue) * 10000) / 100 : 0) : m.pct;
+    const zeroBookingStep = isFirst && bookingAmt === 0;
 
     const ins = await poolOrTx.request()
       .input("bid",  sql.Int,           bookingId)
@@ -708,15 +705,18 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
       .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
       .input("dept", sql.NVarChar(100), m.dept || null)
       .input("cb",   sql.Int,           actorUserId)
+      .input("status", sql.NVarChar(30), zeroBookingStep ? CrmStatus.PAID : CrmStatus.PENDING)
+      .input("demandStatus", sql.NVarChar(30), zeroBookingStep ? CrmStatus.PAID : CrmStatus.PENDING)
+      .input("paidDate", sql.Date, null)
       .query(`
-        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, DemandStatus, PaidDate, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, @status, @demandStatus, @paidDate, @cb, SYSDATETIME())
       `);
     if (isFirst) milestone1Id = ins.recordset[0].Id;
   }
 
-  if (bookingAmt > 0 && milestone1Id && milestones.length > 1) {
+  if (milestone1Id && milestones.length > 1) {
     await recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilestoneId: milestone1Id });
   }
 }
@@ -996,6 +996,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     }
     bookingAmount = Number(planRow.BookingAmount);
   }
+  if (!Number.isFinite(bookingAmount) || bookingAmount < 0) {
+    throw new CrmCreationError("Booking Amount must be a valid non-negative number");
+  }
+  if (bookingAmount > total) {
+    throw new CrmCreationError("Booking Amount cannot be more than the booking value");
+  }
 
   // getNextDocNumber uses its own internal sp_getapplock transaction and must
   // always run on pool (not on tx) — see crmPayments.js comment at line ~121.
@@ -1269,7 +1275,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
   if (!bookingAmount) return null;
   const m1 = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
   const firstMilestoneAmount = m1.recordset[0]?.AmountDue;
   if (firstMilestoneAmount == null) return null;
   if (Math.abs(Number(firstMilestoneAmount) - Number(bookingAmount)) < 1) return null;

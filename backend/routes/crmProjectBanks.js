@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -20,7 +21,7 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
       FROM dbo.CrmProjectBank pb
       JOIN dbo.enterprise proj ON proj.id = pb.ProjectId AND proj.business_type = 'P'
       JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = pb.BankLHeadId
-      WHERE pb.IsActive = 1
+      WHERE pb.IsActive = 1 ${projectPredicate(req.projectScope, "pb.ProjectId")}
       ORDER BY proj.name, ah.LHeadName
     `);
     res.json(result.recordset);
@@ -79,15 +80,8 @@ router.get("/for-project/:projectId", async (req, res) => {
     // this is a safe, broad match.
     const excludeCash = req.query.excludeCash === "1" || req.query.excludeCash === "true";
     const isCashHead = (name) => /^cash([\s-]?in[\s-]?hand)?/i.test(String(name || "").trim());
-    // Fetch ALL of this project's tag rows first (not filtered on the
-    // tagged bank's own LHeadStatus, and not on excludeCash either — see
-    // below). Whether we're in branch (1) or (2) above must be decided
-    // from "does this project have any tag row at all" — NOT "does this
-    // project have any tag row pointing to a currently-active, non-cash
-    // bank". Filtering that out before checking tag existence would mean
-    // a project tagged exclusively to Cash in Hand (or to a temporarily
-    // deactivated bank) silently fell through to branch (2) and leaked
-    // every untagged bank into a project meant to be exclusive.
+    // Restrict this lookup to projects the caller may access.
+    if (!assertProjectAllowed(req, res, projectId)) return;
     const rows = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus,
              ah.LBranchName AS BBranch, ah.LIFSCCode AS BIfscCode,
@@ -98,12 +92,13 @@ router.get("/for-project/:projectId", async (req, res) => {
       WHERE pb.ProjectId = @pid AND pb.IsActive = 1
       ORDER BY ah.LHeadName
     `);
+    const taggedBanks = rows.recordset
+      .filter((r) => !!r.BStatus && (!excludeCash || !isCashHead(r.BName)))
+      .map(({ BId, BName, BBranch, BIfscCode, BAccountLast4 }) => ({ BId, BName, BBranch, BIfscCode, BAccountLast4 }));
     if (rows.recordset.length) {
-      // Project has tag(s) -> stays in the exclusive branch even if every
-      // tagged bank happens to be currently inactive (or, with
-      // excludeCash, if the only tagged bank is Cash in Hand). An empty
-      // array here is the correct result, not a signal to fall through to
-      // the untagged pool below.
+      // Any active project tag keeps the selection exclusive. If its bank is
+      // inactive or excluded (for example cash), return no choices rather
+      // than leaking the shared company-bank pool into a tagged project.
       //
       // BUG FIX: LHeadStatus is a `bit` column — mssql deserializes it as a
       // JS boolean (true/false), not the number 1/0. The old `=== 1` strict
@@ -113,14 +108,10 @@ router.get("/for-project/:projectId", async (req, res) => {
       // to a project, its dropdown still shows nothing). Use a truthy check
       // instead so it works regardless of whether the driver hands back a
       // boolean or a 1/0.
-      return res.json(
-        rows.recordset
-          .filter((r) => !!r.BStatus && (!excludeCash || !isCashHead(r.BName)))
-          .map(({ BId, BName, BBranch, BIfscCode, BAccountLast4 }) => ({ BId, BName, BBranch, BIfscCode, BAccountLast4 })),
-      );
+      return res.json(taggedBanks);
     }
 
-    // No banks are tagged to this project — show ALL active company banks
+    // No active bank tags exist for this project: show all active company banks.
     const allBanks = await pool.request().query(`
       SELECT ah.LHeadId AS BId, ah.LHeadName AS BName,
              ah.LBranchName AS BBranch, ah.LIFSCCode AS BIfscCode,
@@ -148,7 +139,7 @@ router.get("/for-bank/:bankLHeadId", requirePageRight("crm-project-banks", "view
       SELECT pb.ProjectId, proj.name AS ProjectName
       FROM dbo.CrmProjectBank pb
       JOIN dbo.enterprise proj ON proj.id = pb.ProjectId AND proj.business_type = 'P'
-      WHERE pb.BankLHeadId = @bid AND pb.IsActive = 1
+      WHERE pb.BankLHeadId = @bid AND pb.IsActive = 1 ${projectPredicate(req.projectScope, "pb.ProjectId")}
       ORDER BY proj.name
     `);
     res.json(result.recordset);
@@ -192,6 +183,7 @@ router.post("/", requirePageRight("crm-project-banks", "create"), async (req, re
     const pool = getPool();
     const { ProjectId, BankLHeadId } = req.body;
     if (!ProjectId || !BankLHeadId) return res.status(400).json({ error: "ProjectId and BankLHeadId are required" });
+    if (!assertProjectAllowed(req, res, ProjectId)) return;
 
     const existing = await pool.request()
       .input("pid", sql.Int, parseInt(ProjectId))
@@ -222,6 +214,10 @@ router.delete("/:id", requirePageRight("crm-project-banks", "delete"), async (re
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const existing = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ProjectId FROM dbo.CrmProjectBank WHERE Id = @id");
+    if (!existing.recordset.length) return res.json({ success: true });
+    if (!assertProjectAllowed(req, res, existing.recordset[0].ProjectId)) return;
     await pool.request().input("id", sql.Int, id)
       .query("UPDATE dbo.CrmProjectBank SET IsActive = 0 WHERE Id = @id");
     res.json({ success: true });

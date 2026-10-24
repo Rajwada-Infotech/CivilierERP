@@ -35,7 +35,8 @@ async function movingBookings(db, bookingId) {
   return (await req.query(`
     SELECT b.Id, b.BookingNo, b.UnitId, b.UnitNo, b.ProjectId, b.CompanyId, b.TotalValue, b.Status, b.ApplicationId, a.CustomerId,
            (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
-             + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
+             + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
+               THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id IN (${inList}) AND ${LIVE}`)).recordset;
 }
@@ -164,7 +165,8 @@ async function endorseToBuyer(tx, resale, actorUserId) {
     SELECT b.Id, b.BookingNo, b.UnitId, b.UnitNo, b.ProjectId, b.CompanyId, b.ApplicationId, a.CustomerId,
            a.ProjectId AS AppProjectId, a.InterestedProject, a.InterestedUnit, a.PaymentPlanId,
            (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
-             + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
+             + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
+               THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
     FROM dbo.CrmBooking b WITH (UPDLOCK, HOLDLOCK) JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id IN (${bInList}) AND ${LIVE}`)).recordset;
   if (bookings.length !== ids.length) throw new ResaleError("A booking in this resale is no longer live — it can't be transferred", 409);
@@ -211,7 +213,8 @@ async function raiseBuyBackVoucher(tx, resale, { bankId, paymentMode = "", actor
   const bbInList = ids.length ? ids.map((_, i) => `@bbid${i}`).join(",") : "0";
   const bookings = (await bbReq.query(`
     SELECT b.Id, b.BookingNo, b.UnitNo, b.ProjectId, b.CompanyId, a.CustomerId,
-           (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Unapplied
+           (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
+             THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Unapplied
     FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
     WHERE b.Id IN (${bbInList}) AND ${LIVE}`)).recordset;
   if (!bookings.length || bookings.length !== ids.length) throw new ResaleError("A booking in this buy-back is no longer live", 409);
@@ -296,7 +299,8 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
     const cbInList = ids.length ? ids.map((_, i) => `@cbid${i}`).join(",") : "0";
     const paid = (await cbReq.query(`
       SELECT (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId IN (${cbInList}))
-           + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId IN (${cbInList})) AS Paid`)).recordset[0].Paid;
+           + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
+               THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId IN (${cbInList})) AS Paid`)).recordset[0].Paid;
     const { releaseBookingInventoryLines } = require("./crmWorkflowGuards");
     const { syncApplicationOnBookingTerminal } = require("./crmApplicationWorkflow");
     for (const id of ids) {

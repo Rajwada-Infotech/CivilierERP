@@ -479,7 +479,7 @@ router.get("/timeline", async (req, res) => {
       // already applied to the staff-side Dashboard/Customer 360.
       pool.request().input("bid", sql.Int, bk.Id).// only the part not yet applied to a milestone — applied money is already in
       // the milestones' AmountPaid, so the full Amount counted it twice
-      query("SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
+      query("SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
     ]);
 
     res.json({
