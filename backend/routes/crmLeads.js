@@ -12,12 +12,14 @@ const { requireAnyPageRight } = require("../middleware/requirePageRight");
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-// Also read by Customers' New Customer form, to offer only leads no active customer carries yet.
-router.get("/", requireAnyPageRight(["crm-leads", "crm-customers"], "view"), async (_req, res) => {
+// Also read by Customers' New Customer form (to offer only leads no active customer carries yet) and by Applications
+// (to carry the lead's source chain onto a new application).
+router.get("/", requireAnyPageRight(["crm-leads", "crm-customers", "crm-applications"], "view"), async (_req, res) => {
   try {
     const result = await getPool().request().query(`
       SELECT
         l.Id, l.LeadUid, l.CustomerName, l.Mobile, l.AltMobile, l.Email, l.DateGenerated, l.SourceType,
+        l.PlatformId, l.CampaignId, l.AdId, l.ChannelPartnerId,
         l.PropertyType, l.BhkPreference, l.PreferredLocation, l.BudgetMin, l.BudgetMax,
         sp.name AS SalespersonName,
         -- "Used" means an active customer carries the lead: the same rule Create Customer refuses on.
