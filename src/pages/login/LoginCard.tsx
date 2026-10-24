@@ -34,7 +34,7 @@ export function LoginCard(p: LoginCardProps) {
   }, [p.error, shake]);
 
   return (
-    <motion.div className="w-full max-w-[380px]" variants={cascade(0.25, 0.09)} initial="hidden" animate="show">
+    <motion.div className="relative z-[1] w-full max-w-[380px]" variants={cascade(0.25, 0.09)} initial="hidden" animate="show">
       <div className="p-6 sm:p-0">
         {/* Logo, name and greeting */}
         <motion.div className="text-center" variants={cascade(0, 0.08)}>
@@ -74,7 +74,6 @@ export function LoginCard(p: LoginCardProps) {
               type="email"
               autoComplete="username"
               required
-              autoFocus
               value={p.email}
               onChange={(e) => p.onEmail(e.target.value)}
               placeholder="name@company.com"

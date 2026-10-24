@@ -52,7 +52,15 @@ export const LOGIN_CSS = `
 /* The fields read as filled on the frosted card too */
 @media (max-width: 1023px) { .login-sheet .ls-field { background: rgba(242, 244, 243, 0.9); } }
 
-/* Filled field with its label inside */
+/* Decoration stays grey under the black-and-white theme like everything but the logo */
+[data-theme="bw"] .login-sheet .ls-bits { filter: grayscale(1); }
+
+/* Filled field with its label inside. Clicking into one gives it a little squish and makes its label hop. */
+@keyframes ls-squish { 0% { transform: scale(1); } 35% { transform: scale(1.025, 0.96); } 65% { transform: scale(0.99, 1.02); } 100% { transform: scale(1); } }
+@keyframes ls-hop { 0% { transform: translateY(0); } 40% { transform: translateY(-4px); } 70% { transform: translateY(1px); } 100% { transform: translateY(0); } }
+.login-sheet .ls-field:focus-within { animation: ls-squish .45s cubic-bezier(.3, 1.5, .5, 1); }
+.login-sheet .ls-field:focus-within > span { display: inline-block; animation: ls-hop .45s cubic-bezier(.3, 1.5, .5, 1); color: var(--brand); }
+@media (prefers-reduced-motion: reduce) { .login-sheet .ls-field:focus-within, .login-sheet .ls-field:focus-within > span { animation: none; } }
 .login-sheet .ls-field {
   position: relative; display: block; background: var(--field); border: 1px solid transparent; border-radius: 10px;
   padding: 9px 14px 8px; transition: border-color .15s, box-shadow .15s, background-color .15s;

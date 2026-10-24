@@ -8,6 +8,7 @@ import { useAppVersion } from "@/hooks/useAppVersion";
 import { LOGIN_CSS, type PublicStats } from "./login/config";
 import { LoginBackdrop, LoginPhoto } from "./login/LoginPhoto";
 import { LoginCard } from "./login/LoginCard";
+import { FloatingBits } from "./login/FloatingBits";
 import { WelcomeBack } from "./login/WelcomeBack";
 import { FLOW } from "./login/motion";
 
@@ -92,7 +93,7 @@ export default function Login() {
           <div className="hidden lg:block lg:order-2">
             <LoginPhoto stats={stats} />
           </div>
-          <div className="ls-form-side flex justify-center items-center">
+          <div className="ls-form-side relative overflow-hidden flex justify-center items-center">
             <LoginCard
               email={email}
               password={password}
@@ -111,6 +112,7 @@ export default function Login() {
               onSubmit={handleSubmit}
               onNavigate={(path) => navigate(path)}
             />
+            <FloatingBits />
           </div>
         </motion.div>
       </div>
