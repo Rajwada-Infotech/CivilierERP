@@ -51,22 +51,22 @@ export function CrmRowMenu({ items }: { items: RowMenuItem[] }) {
   return (
     <>
       <button ref={btnRef} type="button" onClick={toggle} aria-label="More actions" aria-haspopup="menu" aria-expanded={!!pos}
-        className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         <MoreHorizontal size={15} />
       </button>
       {pos && createPortal(
         <>
           <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); setPos(null); }} />
-          <div role="menu" style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
-            className="fixed z-[61] min-w-[200px] rounded-lg border border-border bg-card shadow-lg py-1">
+          <div role="menu" style={{ top: pos.top, bottom: pos.bottom, right: pos.right, border: "1px solid hsl(var(--foreground))" }}
+            className="fixed z-[61] min-w-[200px] bg-card py-1">
             {visible.map((it, i) => it.heading ? (
-              <div key={`h${i}`} className="px-3 pt-2 pb-1 text-[0.6875rem] font-medium text-muted-foreground border-t border-border mt-1">{it.heading}</div>
+              <div key={`h${i}`} className="px-3 pt-2 pb-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground border-t border-foreground/15 mt-1">{it.heading}</div>
             ) : (
               <button key={it.label} role="menuitem" type="button"
                 onClick={(e) => { e.stopPropagation(); setPos(null); it.onClick?.(); }}
                 className={cn(
-                  "w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted",
-                  it.danger ? "text-red-600" : "text-foreground",
+                  "w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-primary/10",
+                  it.danger ? "text-destructive" : "text-foreground",
                 )}>
                 {it.icon && <it.icon size={13} className="shrink-0" />}{it.label}
               </button>
@@ -102,7 +102,7 @@ interface CrmDataTableProps<T> {
   onSort?: (sortKey: string) => void;
   onRowClick?: (row: T) => void;
   activeKey?: string | number | null;
-  /** Tailwind border-l colour class for the status stripe, e.g. "border-l-green-500". */
+  /** Tailwind border-l colour class for the status stripe, e.g. "border-l-foreground". */
   rowAccent?: (row: T) => string | undefined;
   empty?: React.ReactNode;
   page: number;
@@ -122,11 +122,11 @@ export function CrmDataTable<T>({
 
   return (
     <div className="space-y-2">
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
         <div className={cn("overflow-x-auto transition-opacity", fetching && !showSkeleton && "opacity-60")}>
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-muted/40 border-b border-border">
+              <tr style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
                 {columns.map((col, i) => {
                   const active = !!sort && col.sortKey === sort.key;
                   const SortIcon = !active ? ArrowUpDown : sort!.dir === "asc" ? ArrowUp : ArrowDown;
@@ -134,7 +134,7 @@ export function CrmDataTable<T>({
                     <th key={col.key} scope="col"
                       aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}
                       className={cn(
-                        "px-3 py-2 text-xs font-medium text-muted-foreground whitespace-nowrap",
+                        "px-3 py-2.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground whitespace-nowrap",
                         ALIGN[col.align ?? "left"], col.className,
                         i === 0 && "border-l-[3px] border-l-transparent",
                       )}>
@@ -156,14 +156,14 @@ export function CrmDataTable<T>({
                   <tr key={r} className="border-b border-border/60 last:border-0">
                     {columns.map((col, i) => (
                       <td key={col.key} className={cn("px-3 py-3", col.className, i === 0 && "border-l-[3px] border-l-transparent")}>
-                        <div className="h-3 rounded bg-muted animate-pulse" style={{ width: `${55 + ((r + i) % 4) * 10}%` }} />
+                        <div className="h-3 bg-muted animate-pulse" style={{ width: `${55 + ((r + i) % 4) * 10}%` }} />
                       </td>
                     ))}
                   </tr>
                 ))
               ) : error ? (
-                <tr><td colSpan={columns.length} className="py-10 text-center text-sm text-red-600">
-                  Failed to load: {error}{" "}
+                <tr><td colSpan={columns.length} className="py-10 text-center text-sm text-destructive">
+                  {error}{" "}
                   {onRetry && <button onClick={onRetry} className="underline font-medium ml-1">Retry</button>}
                 </td></tr>
               ) : rows.length === 0 ? (
@@ -176,9 +176,9 @@ export function CrmDataTable<T>({
                     onKeyDown={clickable ? (e) => { if (e.key === "Enter" && e.target === e.currentTarget) onRowClick!(row); } : undefined}
                     tabIndex={clickable ? 0 : undefined}
                     className={cn(
-                      "border-b border-border/60 last:border-0 transition-colors",
-                      clickable && "cursor-pointer hover:bg-muted/40 focus:outline-none focus-visible:bg-muted/50",
-                      activeKey != null && activeKey === key && "bg-primary/5",
+                      "border-b border-foreground/10 last:border-0 transition-colors",
+                      clickable && "cursor-pointer hover:bg-primary/5 focus:outline-none focus-visible:bg-primary/10",
+                      activeKey != null && activeKey === key && "bg-primary/10",
                     )}>
                     {columns.map((col, i) => (
                       <td key={col.key}
