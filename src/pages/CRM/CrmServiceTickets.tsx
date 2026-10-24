@@ -120,7 +120,11 @@ const CrmServiceTickets: React.FC = () => {
     }
   };
 
+  const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
+
   const runAction = async (id: number, action: string, body?: object) => {
+    if (busyIds.has(id)) return;
+    setBusyIds((s) => new Set(s).add(id));
     try {
       const res = await fetchWithAuth(`${API}/${id}/${action}`, {
         method: "PUT",
@@ -133,6 +137,8 @@ const CrmServiceTickets: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
+    } finally {
+      setBusyIds((s) => { const next = new Set(s); next.delete(id); return next; });
     }
   };
 
@@ -256,7 +262,7 @@ const CrmServiceTickets: React.FC = () => {
             {/* Assigned: Start work + Reassign */}
             {t.Status === "Assigned" && (
               <>
-                <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
+                <button onClick={() => handleMarkInProgress(t.Id)} disabled={busyIds.has(t.Id)} className="text-xs text-primary hover:underline disabled:opacity-40">Start</button>
                 <SearchableNativeSelect
                   defaultValue=""
                   onChange={(e) => handleAssign(t.Id, e.target.value)}
@@ -288,12 +294,12 @@ const CrmServiceTickets: React.FC = () => {
             )}
             {/* Reopened: also allow restarting to InProgress */}
             {t.Status === "Reopened" && (
-              <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-purple-600 hover:underline">Start Work</button>
+              <button onClick={() => handleMarkInProgress(t.Id)} disabled={busyIds.has(t.Id)} className="text-xs text-purple-600 hover:underline disabled:opacity-40">Start Work</button>
             )}
             {/* Resolved: Close or Reopen */}
             {t.Status === CrmStatus.RESOLVED && (
               <>
-                <button onClick={() => handleClose(t.Id)} className="text-xs text-primary hover:underline">Close</button>
+                <button onClick={() => handleClose(t.Id)} disabled={busyIds.has(t.Id)} className="text-xs text-primary hover:underline disabled:opacity-40">Close</button>
                 <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
               </>
             )}

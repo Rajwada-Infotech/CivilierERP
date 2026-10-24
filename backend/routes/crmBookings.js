@@ -1644,7 +1644,6 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
             entityType: "Unit",
             entityId: booking.UnitId,
             applicationId: booking.ApplicationId,
-            holdDays: 3,
             reason: "Booking deleted by admin - application reverted to pre-booking hold",
             userId: actor,
           });

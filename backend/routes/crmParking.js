@@ -797,7 +797,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 
       const hold = await placeHoldIfNeeded(pool, {
         entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
-        holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
+        reason: "Application — parking slot selected", userId: actorId(req),
       });
 
       // placeHold's own INSERT is shared with Unit holds (no rate concept

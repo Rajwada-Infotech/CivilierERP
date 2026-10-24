@@ -95,9 +95,8 @@ const PortalOverview: React.FC = () => {
       <PageHeader eyebrow={`Application ${selectedApp?.ApplicationNo || ""}`} title={`Welcome back, ${(selectedApp?.ApplicantName || me.Name || "").split(" ")[0]}`}
         subtitle={`Here's where things stand on your home${timeline.booking?.ProjectName ? ` at ${timeline.booking.ProjectName}` : ""}.`} />
 
-      {/* Holds */}
+      {/* Holds — no expiry; confirming the booking is what ends the hold. */}
       {timeline.holds?.length > 0 && timeline.holds.map((h: any) => {
-        const daysLeft = Math.max(0, Math.ceil((new Date(h.HoldUntil).getTime() - Date.now()) / 86400000));
         const label = h.EntityType === "Unit" ? `Unit ${h.UnitName}` : `Parking Slot ${h.SlotNo}`;
         return (
           <Card key={h.Id} className="p-4 flex items-start gap-3" style={{ borderColor: "#E8C766" }}>
@@ -105,7 +104,7 @@ const PortalOverview: React.FC = () => {
             <div className="text-sm">
               <p className="font-semibold" style={{ color: "#8A6D14" }}>{label} is on hold for you</p>
               <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
-                Expires in {daysLeft} day{daysLeft === 1 ? "" : "s"} ({fmtDate(h.HoldUntil)}) — confirm your booking before it releases.
+                Confirm your booking to secure it.
               </p>
             </div>
           </Card>

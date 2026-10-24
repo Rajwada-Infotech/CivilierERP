@@ -3,13 +3,23 @@
  * shared by both crmBookings.js (Unit) and crmParking.js (Parking), so the
  * "on hold" rule is enforced identically everywhere instead of being
  * reimplemented per entity type.
+ *
+ * Holds never auto-expire (by design — see HOLD_UNTIL_SENTINEL below). A
+ * hold stays Active until staff releases it, the application it belongs to
+ * is rejected/cancelled (releaseAllHoldsForApplication), or it converts into
+ * a real booking/allotment (guardAndConvertHold).
  */
 const { sql } = require("../db");
 const { bumpCacheVersion } = require("../redis");
 const { getIo } = require("../socket");
 
 const ENTITY_TYPES = ["Unit", "Parking"];
-const MAX_HOLD_DAYS = 90;
+// HoldUntil/HoldDays are both NOT NULL columns (migration 173) from when
+// holds carried a staff-chosen day count. Every "is this still held" query
+// across the codebase reads `HoldUntil >= SYSDATETIME()`, so rather than a
+// schema change touching ~20 queries, a hold that should never expire is
+// simply given a HoldUntil far enough in the future that it never will.
+const HOLD_UNTIL_SENTINEL = "9999-12-31";
 
 // Live availability check — same table each entity type's own route already
 // queries, kept here so placeHold() can't put a hold on something already
@@ -34,14 +44,10 @@ async function findActiveHold(pool, entityType, entityId) {
   return r.recordset[0] || null;
 }
 
-async function placeHold(pool, { entityType, entityId, applicationId, holdDays, reason, userId, applicationProjectId }) {
+async function placeHold(pool, { entityType, entityId, applicationId, reason, userId, applicationProjectId }) {
   if (!ENTITY_TYPES.includes(entityType)) { const e = new Error("Invalid EntityType"); e.status = 400; throw e; }
   if (entityId == null) { const e = new Error("EntityId is required"); e.status = 400; throw e; }
   if (applicationId == null) { const e = new Error("ApplicationId is required"); e.status = 400; throw e; }
-  const days = parseInt(holdDays);
-  if (!Number.isFinite(days) || days < 1 || days > MAX_HOLD_DAYS) {
-    const e = new Error(`HoldDays must be between 1 and ${MAX_HOLD_DAYS}`); e.status = 400; throw e;
-  }
 
   const app = await pool.request().input("aid", sql.Int, applicationId)
     .query("SELECT Id, ApplicantName, ProjectId FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
@@ -99,32 +105,19 @@ async function placeHold(pool, { entityType, entityId, applicationId, holdDays, 
   // Without this try/catch, the loser gets a raw SQL constraint-violation
   // message surfaced as a generic 500 instead of the same clean 409 the
   // app-layer check already produces for the non-race case.
-  // Expire any stale holds that are past their HoldUntil time before inserting a new hold
-  await pool.request()
-    .input("entityType", sql.NVarChar(20), entityType)
-    .input("entityId", sql.Int, entityId)
-    .query(`
-      UPDATE dbo.CrmInventoryHold
-      SET Status = 'Expired', ExpiredAt = SYSDATETIME()
-      WHERE EntityType = @entityType
-        AND EntityId = @entityId
-        AND Status = 'Active'
-        AND HoldUntil < SYSDATETIME()
-    `);
-
   let result;
   try {
     result = await pool.request()
       .input("et", sql.NVarChar(20), entityType)
       .input("eid", sql.Int, entityId)
       .input("aid", sql.Int, applicationId)
-      .input("days", sql.Int, days)
+      .input("until", sql.DateTime2(3), HOLD_UNTIL_SENTINEL)
       .input("reason", sql.NVarChar(500), reason || null)
       .input("cb", sql.Int, userId)
       .query(`
         INSERT INTO dbo.CrmInventoryHold (EntityType, EntityId, ApplicationId, HoldDays, HoldUntil, Reason, Status, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id, INSERTED.HoldUntil
-        VALUES (@et, @eid, @aid, @days, DATEADD(DAY, @days, SYSDATETIME()), @reason, 'Active', @cb, SYSDATETIME())
+        VALUES (@et, @eid, @aid, 0, @until, @reason, 'Active', @cb, SYSDATETIME())
       `);
   } catch (insertErr) {
     // Re-throw unique-constraint violations as the same clean 409 the
@@ -200,7 +193,7 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
   const hold = await findActiveHold(pool, entityType, entityId);
   if (!hold) return;
   if (hold.ApplicationId !== applicationId) {
-    const e = new Error(`This ${entityType.toLowerCase()} is on hold for another applicant until ${new Date(hold.HoldUntil).toLocaleString("en-IN")}`);
+    const e = new Error(`This ${entityType.toLowerCase()} is on hold for another applicant`);
     e.status = 409;
     throw e;
   }
@@ -214,9 +207,9 @@ async function guardAndConvertHold(pool, entityType, entityId, applicationId) {
 
 // Releases every still-Active hold (Unit and/or Parking) tied to an
 // Application — called when the Application itself is rejected/cancelled/
-// expired, so a dead Application never keeps real inventory tied up until
-// the hourly SLA sweep eventually notices HoldUntil has passed. Booking
-// cancellation already has its own equivalent cascade
+// expired. Holds never auto-expire, so this (plus a manual release) is the
+// only way a dead Application's holds ever free the inventory back up.
+// Booking cancellation already has its own equivalent cascade
 // (crmCancellations.js) for the post-Booking stage; this covers the
 // pre-Booking stage, where the Application itself is the only thing that
 // was ever holding the entity.
@@ -236,6 +229,6 @@ async function releaseAllHoldsForApplication(pool, applicationId, userId) {
 }
 
 module.exports = {
-  ENTITY_TYPES, MAX_HOLD_DAYS, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold,
+  ENTITY_TYPES, findActiveHold, placeHold, placeHoldIfNeeded, releaseHold,
   guardAndConvertHold, releaseAllHoldsForApplication, assertEntityNotTaken,
 };

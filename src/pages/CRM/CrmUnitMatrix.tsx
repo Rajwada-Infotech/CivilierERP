@@ -128,15 +128,15 @@ async function fetchPlotMatrix(projectId: string, blockId: string): Promise<Matr
 
 const NONE = "__none__";
 
-// Available unit -> ask who it's being held for and for how long. Booking
-// itself still happens through the normal Application -> Booking flow; this
-// only reserves the unit against the matrix so no one else can book it
-// while the customer decides.
+// Available unit -> ask who it's being held for. Booking itself still
+// happens through the normal Application -> Booking flow; this only
+// reserves the unit against the matrix so no one else can book it while the
+// customer decides. The hold has no expiry — it stays until staff releases
+// it, the application is rejected/cancelled, or it converts into a booking.
 function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; projectId: string; onClose: () => void }) {
   const rights = usePageRights("crm-unit-matrix");
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
-  const [holdDays, setHoldDays] = useState("3");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -155,18 +155,16 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
 
   const handlePlace = async () => {
     if (!applicationId) { toast.error("Select a customer"); return; }
-    const days = parseInt(holdDays);
-    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(HOLDS_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ EntityType: "Unit", EntityId: unit.Id, ApplicationId: parseInt(applicationId), HoldDays: days, Reason: reason || null }),
+        body: JSON.stringify({ EntityType: "Unit", EntityId: unit.Id, ApplicationId: parseInt(applicationId), Reason: reason || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`Unit ${unit.UnitName} held for ${days} day(s)`);
+      toast.success(`Unit ${unit.UnitName} is on hold`);
       qc.invalidateQueries({ queryKey: ["unit-matrix"] });
       onClose();
     } catch (e: any) {
@@ -193,12 +191,6 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
             {apps.length === 0 && (
               <p className="text-[0.6875rem] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this unit can hold it.</p>
             )}
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Hold for how many days? *</label>
-            <input type="number" min={1} max={90} value={holdDays} onChange={(e) => setHoldDays(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <p className="text-[0.6875rem] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Reason (optional)</label>
@@ -235,10 +227,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [releasing, setReleasing] = useState(false);
-  const [extending, setExtending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [extendDays, setExtendDays] = useState("3");
-  const [showExtend, setShowExtend] = useState(false);
   const isHold = unit.Status === "OnHold";
   const hasUnpaidBooking = isHold && unit.BookingId != null;
 
@@ -256,27 +245,6 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
       toast.error(e.message);
     } finally {
       setReleasing(false);
-    }
-  };
-
-  const handleExtend = async () => {
-    const days = parseInt(extendDays);
-    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
-    setExtending(true);
-    try {
-      const res = await fetchWithAuth(`${HOLDS_API}/${unit.HoldId}/extend`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ AdditionalDays: days }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(`Hold extended by ${days} day(s)`);
-      invalidate();
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setExtending(false);
     }
   };
 
@@ -391,22 +359,6 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
           </div>
         )}
 
-        {showExtend && (
-          <div className="rounded-lg border border-border p-2.5 flex items-end gap-2">
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground block mb-1">Extend by (days)</label>
-              <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            {rights.canEdit && (
-              <button onClick={handleExtend} disabled={extending}
-                className="px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                {extending ? "Extending..." : "Confirm"}
-              </button>
-            )}
-          </div>
-        )}
-
         <div className="flex justify-end gap-2 pt-3 border-t border-border flex-wrap">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           {hasUnpaidBooking ? (
@@ -415,12 +367,6 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
                 <button onClick={handleCancelBooking} disabled={cancelling}
                   className="px-3 py-1.5 text-sm border border-rose-200 text-rose-600 rounded-lg font-medium hover:bg-rose-50 disabled:opacity-40">
                   {cancelling ? "Cancelling..." : "Cancel Booking"}
-                </button>
-              )}
-              {rights.canEdit && unit.HoldId != null && (
-                <button onClick={() => setShowExtend((s) => !s)}
-                  className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
-                  Extend Hold
                 </button>
               )}
               <button onClick={() => navigate(`/crm/bookings?applicationId=${unit.ApplicationId}`)}
@@ -463,7 +409,11 @@ export function UnitMatrixPage() {
     if (!sock) return;
     const handleMatrixUpdate = (payload: any) => {
       if (!payload?.projectId || payload.projectId === Number(projectId)) {
-        qc.invalidateQueries({ queryKey: ["unit-matrix", projectId] });
+        // Bare "unit-matrix" prefix also matches ["unit-matrix", "plots", ...]
+        // — a scoped ["unit-matrix", projectId] key does not, since "plots"
+        // sits where projectId would be, so plot tiles went stale on a live
+        // update while unit tiles refreshed.
+        qc.invalidateQueries({ queryKey: ["unit-matrix"] });
       }
     };
     sock.on("matrix:update", handleMatrixUpdate);

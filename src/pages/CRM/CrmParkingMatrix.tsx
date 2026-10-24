@@ -229,7 +229,6 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
   const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
-  const [holdDays, setHoldDays] = useState("3");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -244,18 +243,16 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
 
   const handlePlace = async () => {
     if (!applicationId) { toast.error("Select a customer"); return; }
-    const days = parseInt(holdDays);
-    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(HOLDS_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ EntityType: "Parking", EntityId: slot.Id, ApplicationId: parseInt(applicationId), HoldDays: days, Reason: reason || null }),
+        body: JSON.stringify({ EntityType: "Parking", EntityId: slot.Id, ApplicationId: parseInt(applicationId), Reason: reason || null }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(`Parking slot ${slot.SlotNo} held for ${days} day(s)`);
+      toast.success(`Parking slot ${slot.SlotNo} is on hold`);
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       onClose();
     } catch (e: any) {
@@ -284,12 +281,6 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
             )}
           </div>
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">Hold for how many days? *</label>
-            <input type="number" min={1} max={90} value={holdDays} onChange={(e) => setHoldDays(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <p className="text-[0.6875rem] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
-          </div>
-          <div>
             <label className="text-xs text-muted-foreground block mb-1">Reason (optional)</label>
             <textarea value={reason} onChange={(e) => setReason(e.target.value)}
               rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
@@ -314,19 +305,16 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
 // (sold independent of a unit booking, BookingId NULL) so the Booked path
 // only offers an "Open Booking" link when one actually exists. OnHold now
 // also covers "an Allotment exists but its own linked milestone isn't Paid
-// yet" — Extend Hold is offered there; releasing/cancelling an unpaid
-// allotment itself already has a proper flow on the booking's own Charges
-// dialog (crmParking.js applyReleaseParking, gated by the same legal-work/
-// amendment-queue rules as any other post-booking edit), so this dialog
-// doesn't shortcut around that — it links out instead.
+// yet"; releasing/cancelling an unpaid allotment itself already has a
+// proper flow on the booking's own Charges dialog (crmParking.js
+// applyReleaseParking, gated by the same legal-work/amendment-queue rules
+// as any other post-booking edit), so this dialog doesn't shortcut around
+// that — it links out instead.
 function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
   const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [releasing, setReleasing] = useState(false);
-  const [extending, setExtending] = useState(false);
-  const [extendDays, setExtendDays] = useState("3");
-  const [showExtend, setShowExtend] = useState(false);
   const isHold = slot.Status === "OnHold";
   const hasUnpaidAllotment = isHold && slot.AllotmentId != null;
 
@@ -347,26 +335,6 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
     }
   };
 
-  const handleExtend = async () => {
-    const days = parseInt(extendDays);
-    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
-    setExtending(true);
-    try {
-      const res = await fetchWithAuth(`${HOLDS_API}/${slot.HoldId}/extend`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ AdditionalDays: days }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(`Hold extended by ${days} day(s)`);
-      invalidate();
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setExtending(false);
-    }
-  };
 
   const appNo = (isHold && slot.HoldApplicationNo) || slot.ApplicationNo;
   const applicantName = (isHold && slot.HoldApplicantName) || slot.ApplicantName;
@@ -446,32 +414,10 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
           </div>
         )}
 
-        {showExtend && (
-          <div className="rounded-lg border border-border p-2.5 flex items-end gap-2">
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground block mb-1">Extend by (days)</label>
-              <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            {rights.canEdit && (
-              <button onClick={handleExtend} disabled={extending}
-                className="px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                {extending ? "Extending..." : "Confirm"}
-              </button>
-            )}
-          </div>
-        )}
-
         <div className="flex justify-end gap-2 pt-3 border-t border-border flex-wrap">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           {hasUnpaidAllotment ? (
             <>
-              {rights.canEdit && slot.HoldId != null && (
-                <button onClick={() => setShowExtend((s) => !s)}
-                  className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
-                  Extend Hold
-                </button>
-              )}
               <button onClick={() => navigate(slot.BookingId != null ? `/crm/bookings?applicationId=${slot.ApplicationId}` : `/crm/applications`)}
                 className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
                 {slot.BookingId != null ? "Open Booking" : "Open Application"}

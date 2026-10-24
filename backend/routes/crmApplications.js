@@ -578,7 +578,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     if (unitIsChanging && newUnitId !== null) {
       try {
         await placeHoldIfNeeded(pool, {
-          entityType: "Unit", entityId: newUnitId, applicationId: id, holdDays: 3,
+          entityType: "Unit", entityId: newUnitId, applicationId: id,
           reason: "Application unit changed — auto-hold", userId: actor,
           // Same effectiveProjectId pattern as the deposit-bank check below —
           // b.ProjectId is what's about to be saved by the UPDATE further
@@ -1068,7 +1068,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         const unitIds = await getApplicationUnitIds(pool, id, unitId);
         for (const selectedUnitId of unitIds) {
           await placeHoldIfNeeded(pool, {
-            entityType: "Unit", entityId: selectedUnitId, applicationId: id, holdDays: 3,
+            entityType: "Unit", entityId: selectedUnitId, applicationId: id,
             reason: "Application submitted — auto-hold", userId: actor,
           });
         }

@@ -120,6 +120,16 @@ export function CrmDataTable<T>({
   const showSkeleton = !!loading && rows.length === 0;
   const clickable = !!onRowClick;
 
+  // The row count can shrink for reasons other than a filter change (another
+  // user deletes the last row on this page, a live status update moves a row
+  // off the current tab) — without this, the page stays stuck past the real
+  // last page with nothing to show and only "Prev" to click back out.
+  useEffect(() => {
+    if (loading || total <= 0) return;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    if (page > lastPage) onPage(lastPage);
+  }, [loading, total, pageSize, page, onPage]);
+
   return (
     <div className="space-y-2">
       <div className="rounded-xl border border-border bg-card overflow-hidden">

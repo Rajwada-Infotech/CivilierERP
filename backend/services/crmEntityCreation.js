@@ -521,7 +521,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   if (preferredUnitId) {
     try {
       await placeHoldIfNeeded(pool, {
-        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId, holdDays: 3,
+        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId,
         reason: "Application created — auto-hold", userId: actorUserId,
       });
     } catch (holdErr) {
@@ -902,16 +902,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     if (why) throw new CrmCreationError(why);
   }
 
-  // A customer can't actually get their Booking approved/paid against an
-  // unapproved Application, so the real "confirm within N days" clock only
-  // makes sense starting now — a fresh 3 days from Booking creation, not
-  // whatever was left on the original pick-time hold (which may have
-  // already burned most of its window sitting in the admin approval
-  // queue). This Booking still isn't a confirmed sale (Status stays
-  // 'Pending' until Approved AND Milestone #1 is Paid — see
-  // unitMatrix.js/parkingMatrix.js's Status derivation), so the deadline
-  // below is what the Matrix keeps counting down against in the meantime.
-  const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  // No auto-expiry — a Booking stays "to be confirmed" (Pending, not yet
+  // Approved + Milestone #1 Paid) indefinitely until staff acts on it or
+  // cancels it. Every "is this unit/parking taken" query already treats a
+  // NULL ConfirmDeadline as not-yet-expired, so leaving it unset here is
+  // all that's needed — no sentinel required, unlike CrmInventoryHold's
+  // NOT NULL HoldUntil column.
+  const confirmDeadline = null;
   const application = appRow.recordset[0];
   const bookingBridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && application.BrokerId == null && application.ChannelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, application.ChannelPartnerId, actorUserId)
