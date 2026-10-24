@@ -1,4 +1,4 @@
-// Sign in. Parts under ./login: config (the look, public figures type) · LoginCard · LoginFigures · WelcomeBack
+// Sign in. Parts under ./login: config (the look, public figures type) · LoginCard · LoginPhoto · WelcomeBack
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { LOGIN_CSS, type PublicStats } from "./login/config";
-import { LoginFigures } from "./login/LoginFigures";
+import { LoginPhoto } from "./login/LoginPhoto";
 import { LoginCard } from "./login/LoginCard";
 import { WelcomeBack } from "./login/WelcomeBack";
 
@@ -73,16 +73,18 @@ export default function Login() {
 
       <AnimatePresence>{loginSuccess && <WelcomeBack name={loginName} />}</AnimatePresence>
 
-      {/* A soft light behind the card, nothing more */}
-      <div
-        className="absolute inset-0 z-0 pointer-events-none"
-        style={{ background: "radial-gradient(48% 42% at 50% 38%, rgba(30,138,74,0.07), transparent 70%), radial-gradient(40% 40% at 50% 100%, rgba(17,18,20,0.04), transparent 70%)" }}
-      />
-
-      {/* One centred column; the figures in a line along the foot. The column stays the last child: the black-and-white
-          theme keeps the logo in colour through it. */}
-      <div className="bw-login-lift relative z-10 min-h-screen flex flex-col">
-          <div className="flex-1 flex flex-col justify-center items-center px-4 py-10 gap-10">
+      {/* One white panel on the grey page: the form on the left, the photo on the right (hidden on a phone). The form
+          stays the last child in the markup (the photo moves right with order): the black-and-white theme keeps the
+          logo in colour through it. */}
+      <div className="min-h-screen flex items-stretch sm:items-center justify-center sm:p-5 lg:p-[min(2rem,3vh)]">
+        <div
+          className="bw-login-lift relative z-10 w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-6 sm:rounded-[28px] p-3 sm:p-4"
+          style={{ background: "var(--frame)", minHeight: "min(860px, calc(100vh - 6vh))", boxShadow: "0 1px 2px rgba(16,19,18,0.04), 0 24px 60px -24px rgba(16,19,18,0.18)" }}
+        >
+          <div className="hidden lg:block lg:order-2">
+            <LoginPhoto stats={stats} />
+          </div>
+          <div className="flex justify-center items-center px-2 sm:px-8" style={{ paddingBlock: "min(2.5rem, 3vh)" }}>
             <LoginCard
               email={email}
               password={password}
@@ -101,8 +103,8 @@ export default function Login() {
               onSubmit={handleSubmit}
               onNavigate={(path) => navigate(path)}
             />
-            <LoginFigures stats={stats} />
           </div>
+        </div>
       </div>
     </div>
   );

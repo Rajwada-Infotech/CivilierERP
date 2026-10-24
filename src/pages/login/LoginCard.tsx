@@ -1,9 +1,9 @@
-// The sign-in column: logo and name, the card with email and password, then the Android app and the supplier and
-// customer portals. The nesting (p-6 > text-center > logo first) is what the black-and-white theme's CSS hooks into
+// The sign-in side: logo and name, "Welcome back", email and password, then the supplier and customer portals and
+// the Android app. The nesting (p-6 > text-center > logo first) is what the black-and-white theme's CSS hooks into
 // to keep the logo in colour.
 import React, { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, ArrowRight, Building2, Eye, EyeOff, Smartphone, Truck } from "lucide-react";
+import { AlertCircle, Building2, Eye, EyeOff, Truck } from "lucide-react";
 
 export interface LoginCardProps {
   email: string;
@@ -22,117 +22,110 @@ export function LoginCard(p: LoginCardProps) {
   const [showPass, setShowPass] = useState(false);
 
   return (
-    <div className="w-full max-w-[400px]">
+    <div className="w-full max-w-[380px]">
       <div className="p-6 sm:p-0">
-        {/* Logo and name above the card */}
+        {/* Logo, name and greeting */}
         <div className="text-center ls-in">
-          <div className="flex flex-col items-center bw-color-keep">
-            <img src="/Civilier.png" alt="CivilierERP" width={56} height={56} className="rounded-full object-cover bw-color-keep" style={{ width: 56, height: 56, boxShadow: "0 0 0 1px var(--line), 0 6px 16px -6px rgba(17,18,20,0.18)" }} />
-            <h1 className="font-heading font-bold text-xl tracking-tight mt-4" style={{ color: "var(--ink)" }}>CivilierERP</h1>
+          <div className="flex items-center justify-center gap-2.5 bw-color-keep">
+            <img src="/Civilier.png" alt="CivilierERP" width={40} height={40} className="rounded-full object-cover bw-color-keep" style={{ width: 40, height: 40 }} />
+            <span className="font-heading font-semibold text-xl tracking-tight" style={{ color: "var(--brand)" }}>CivilierERP</span>
           </div>
-          <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>Manage smarter, build better.</p>
+          <h1 className="font-heading font-bold tracking-tight mt-[min(2rem,3.5vh)]" style={{ fontSize: "clamp(30px, 2.6vw, 38px)", lineHeight: 1.1, color: "var(--ink)" }}>Welcome back</h1>
+          <p className="text-sm mt-2" style={{ color: "var(--ink-2)" }}>Sign in to continue</p>
         </div>
 
-        {/* The card */}
-        <div className="ls-card mt-8 p-7 sm:p-8 ls-in" style={{ animationDelay: "60ms" }}>
-          <h2 className="font-heading font-semibold text-[22px] tracking-tight" style={{ color: "var(--ink)" }}>Sign in to continue</h2>
-          <p className="text-[13px] mt-1" style={{ color: "var(--muted)" }}>Secure access · Role-based permissions</p>
+        <form className="mt-[min(2rem,3.5vh)] space-y-3.5 ls-in" style={{ animationDelay: "60ms" }} onSubmit={p.onSubmit}>
+          <label className="ls-field" htmlFor="login-email">
+            <span>Email address</span>
+            <input
+              id="login-email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              required
+              autoFocus
+              value={p.email}
+              onChange={(e) => p.onEmail(e.target.value)}
+              placeholder="name@company.com"
+            />
+          </label>
 
-          <form className="mt-6 space-y-4" onSubmit={p.onSubmit}>
-            <div>
-              <label htmlFor="login-email" className="ls-label">Email address</label>
-              <input
-                id="login-email"
-                name="email"
-                type="email"
-                autoComplete="username"
-                required
-                autoFocus
-                value={p.email}
-                onChange={(e) => p.onEmail(e.target.value)}
-                placeholder="name@company.com"
-                className="ls-input"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="login-password" className="ls-label">Password</label>
-              <div className="relative">
-                <input
-                  id="login-password"
-                  name="password"
-                  type={showPass ? "text" : "password"}
-                  autoComplete="current-password"
-                  required
-                  value={p.password}
-                  onChange={(e) => p.onPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="ls-input"
-                  style={{ paddingRight: 46 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPass((s) => !s)}
-                  aria-label={showPass ? "Hide password" : "Show password"}
-                  aria-pressed={showPass}
-                  className="ls-eye absolute right-1 top-1 h-[38px] w-[38px] flex items-center justify-center rounded-lg"
-                >
-                  {showPass ? <EyeOff size={17} /> : <Eye size={17} />}
-                </button>
-              </div>
-            </div>
-
-            <AnimatePresence>
-              {p.error && (
-                <motion.div
-                  role="alert"
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.18 }}
-                  className="flex items-start gap-2 px-3 py-2.5 text-[13px] rounded-lg"
-                  style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c" }}
-                >
-                  <AlertCircle size={15} className="shrink-0 mt-0.5" />
-                  <span>{p.error}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <button type="submit" disabled={p.isLoading || p.loginSuccess} className="ls-btn !mt-6">
-              {p.isLoading ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Signing in…
-                </>
-              ) : (
-                <>
-                  Sign in <ArrowRight size={15} />
-                </>
-              )}
+          <label className="ls-field" htmlFor="login-password" style={{ paddingRight: 48 }}>
+            <span>Password</span>
+            <input
+              id="login-password"
+              name="password"
+              type={showPass ? "text" : "password"}
+              autoComplete="current-password"
+              required
+              value={p.password}
+              onChange={(e) => p.onPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPass((s) => !s)}
+              aria-label={showPass ? "Hide password" : "Show password"}
+              aria-pressed={showPass}
+              className="ls-eye absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 flex items-center justify-center rounded-lg"
+            >
+              {showPass ? <EyeOff size={18} /> : <Eye size={18} />}
             </button>
-          </form>
-        </div>
+          </label>
 
-        {/* Below the card: the app and the other portals, as quiet links */}
-        <div className="mt-6 flex flex-col items-center gap-3 text-[13px] ls-in" style={{ animationDelay: "120ms" }}>
-          <button type="button" onClick={() => p.onNavigate("/download-android-app")} className="ls-link inline-flex items-center gap-1.5">
-            <Smartphone size={14} /> Get the Android app
+          <AnimatePresence>
+            {p.error && (
+              <motion.div
+                role="alert"
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.18 }}
+                className="flex items-start gap-2 px-3 py-2.5 text-[13px] rounded-lg"
+                style={{ background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c" }}
+              >
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>{p.error}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <p className="text-xs pt-0.5" style={{ color: "var(--muted)" }}>Secure access · Role-based permissions</p>
+
+          <button type="submit" disabled={p.isLoading || p.loginSuccess} className="ls-btn">
+            {p.isLoading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Signing in…
+              </>
+            ) : (
+              "Sign in"
+            )}
           </button>
-          <div className="flex items-center gap-2" style={{ color: "var(--muted)" }}>
-            <span>Looking for a different portal?</span>
+        </form>
+
+        {/* The other portals */}
+        <div className="mt-[min(1.75rem,3vh)] ls-in" style={{ animationDelay: "120ms" }}>
+          <div className="flex items-center gap-3 text-xs" style={{ color: "var(--muted)" }}>
+            <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+            Or
+            <span className="h-px flex-1" style={{ background: "var(--line)" }} />
           </div>
-          <div className="flex items-center gap-5">
-            <button type="button" onClick={() => p.onNavigate("/supplier-login")} className="ls-link inline-flex items-center gap-1.5 font-medium" title="Vendor & order portal">
-              <Truck size={14} /> Supplier
+          <div className="mt-[min(1.25rem,2.2vh)] space-y-3">
+            <button type="button" onClick={() => p.onNavigate("/supplier-login")} className="ls-outline" title="Vendor & order portal">
+              <Truck size={17} style={{ color: "var(--brand)" }} /> Continue to the Supplier portal
             </button>
-            <span className="h-3 w-px" style={{ background: "var(--line-2)" }} />
-            <button type="button" onClick={() => p.onNavigate("/crm-client-portal/login")} className="ls-link inline-flex items-center gap-1.5 font-medium" title="Booking & owner portal">
-              <Building2 size={14} /> Customer
+            <button type="button" onClick={() => p.onNavigate("/crm-client-portal/login")} className="ls-outline" title="Booking & owner portal">
+              <Building2 size={17} style={{ color: "var(--brand)" }} /> Continue to the Customer portal
             </button>
           </div>
-          <span className="text-[11px] mt-1" style={{ color: "var(--muted)" }}>v{p.appVersion}</span>
         </div>
+
+        <p className="mt-[min(1.75rem,3vh)] text-center text-sm ls-in" style={{ color: "var(--ink-2)", animationDelay: "160ms" }}>
+          On your phone?{" "}
+          <button type="button" onClick={() => p.onNavigate("/download-android-app")} className="ls-link">Get the Android app</button>
+        </p>
+        <p className="mt-2 text-center text-[11px]" style={{ color: "var(--muted)" }}>v{p.appVersion}</p>
       </div>
     </div>
   );
