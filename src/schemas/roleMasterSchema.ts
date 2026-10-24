@@ -6,3 +6,5 @@ export const roleMasterSchema = z.object({
 });
 
 export type RoleMasterForm = z.infer<typeof roleMasterSchema>;
+/** What the form holds before validation fills in the defaults (react-hook-form's input type). */
+export type RoleMasterFormInput = z.input<typeof roleMasterSchema>;

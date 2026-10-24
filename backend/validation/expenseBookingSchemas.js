@@ -208,9 +208,7 @@ const emiPaySchema = z.object({
 
 // PUT /:id/emi-toggle
 const emiToggleSchema = z.object({
-  enabled: z.coerce.boolean({
-    errorMap: () => ({ message: "enabled must be a boolean" }),
-  }),
+  enabled: z.coerce.boolean({ error: "enabled must be a boolean" }),
   deleteUnpaid: z.coerce.boolean().default(true),
 });
 
