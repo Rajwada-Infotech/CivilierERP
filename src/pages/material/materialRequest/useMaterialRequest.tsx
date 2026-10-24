@@ -644,7 +644,8 @@ export function useMaterialRequest() {
       // (DataTable.tsx), so a taller cell just grows the row — it doesn't
       // break the layout.
       size: 260,
-      meta: { className: "hidden lg:table-cell" },
+      // Items and Status show from tablet width (with Doc No and the actions they fit 768px); the rest from 1024px.
+      meta: { className: "hidden md:table-cell" },
       cell: ({ row }) => (
         <span className="flex flex-wrap items-baseline gap-x-1 text-sm py-1">
           <span className="font-heading font-semibold tabular-nums shrink-0">{row.original.ItemCount || 0}</span>
@@ -689,7 +690,7 @@ export function useMaterialRequest() {
       accessorKey: "Status",
       header: "Status",
       size: 180,
-      meta: { className: "hidden lg:table-cell" },
+      meta: { className: "hidden md:table-cell" },
       cell: ({ row }) => {
         const pending = pendingSummaryByMRId.get(row.original.MRId);
         return (
