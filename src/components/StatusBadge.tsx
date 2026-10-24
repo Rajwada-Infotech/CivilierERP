@@ -197,6 +197,137 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
   },
+
+  // ── CRM domain statuses (shared across every CRM page — see CrmStatus in
+  // src/constants/crmStatuses.ts) — added so every CRM page can render the
+  // same status word in the same color instead of each page's own
+  // independently-invented status-color map. Colors follow the same
+  // semantic convention already set above: emerald = done/good, amber =
+  // waiting on someone, red = rejected/blocked/dead, blue = informational/
+  // in-flight, slate = inactive/draft, orange = partial.
+  Executed: {
+    label: "Executed",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Registered: {
+    label: "Registered",
+    icon: PackageCheck,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  PendingCustomerReview: {
+    label: "Awaiting Customer",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  FinancePending: {
+    label: "Finance Pending",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Paid: {
+    label: "Paid",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  "Partially Paid": {
+    label: "Partially Paid",
+    icon: PackageSearch,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  Voided: {
+    label: "Voided",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Refunded: {
+    label: "Refunded",
+    icon: PackageCheck,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  Demanded: {
+    label: "Demanded",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  "Clawback Required": {
+    label: "Clawback Required",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  Open: {
+    label: "Open",
+    icon: Clock,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  InProgress: {
+    label: "In Progress",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Resolved: {
+    label: "Resolved",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Expired: {
+    label: "Expired",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Transferred: {
+    label: "Transferred",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  // Sale Deed / Transfer Deed legal sub-stages — distinct words from the
+  // generic Pending/Approved pair above so a deed's own multi-step status
+  // (not just a simple approval) still gets one consistent color.
+  UnderReview: {
+    label: "Under Review",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  LegalApproved: {
+    label: "Legal Approved",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  WithParties: {
+    label: "With Parties",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  PartiesApproved: {
+    label: "Parties Approved",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  DateApproved: {
+    label: "Date Approved",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
 };
 
 // Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
