@@ -601,6 +601,11 @@ router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req,
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+    const pool = getPool();
+    const bk = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (!bk.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
+    const activeErr = await requireActiveBooking(pool, bk.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     const result = await approvalTransition("crm-brokerage", id, CrmStatus.PENDING, userEmail, req.user?.role);
     res.json({ success: true, status: result.newStatus });
   } catch (e) {
@@ -623,11 +628,19 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
     // created locked, so this branch only ever fires for UnlockGate='Agreement'.
     const pool = getPool();
     const locked = await pool.request().input("id", sql.Int, id)
-      .query("SELECT IsLocked, UnlockGate FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+      .query("SELECT IsLocked, UnlockGate, BookingId FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (!locked.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
     if (locked.recordset[0]?.IsLocked) {
       const msg = "This tranche unlocks once the Agreement is Executed";
       return res.status(400).json({ error: msg });
     }
+    // requireActiveBooking is only checked at tranche creation (POST /) —
+    // nothing re-checks it on submit/approve/reject, so a tranche created
+    // while the booking was still live stays Pending/actionable even after
+    // the booking is later cancelled. Approving it would post a real GL
+    // accrual and a Finance payout voucher for a dead booking's commission.
+    const activeErr = await requireActiveBooking(pool, locked.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     const result = await approvalTransition("crm-brokerage", id, CrmStatus.APPROVED, userEmail, req.user?.role, null, req.user?.userId ?? null);
     // approvalTransition() manages its own internal transaction and commits
@@ -678,6 +691,10 @@ router.put("/:id/retry-finance-handoff", requirePageRight("crm-brokerage", "edit
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    const bk = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmBrokerageMaster WHERE Id = @id");
+    if (!bk.recordset.length) return res.status(404).json({ error: "Brokerage record not found" });
+    const activeErr = await requireActiveBooking(pool, bk.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
     const financePayment = await createFinancePaymentForBrokerage(pool, id, req);
     await Promise.all([bumpCacheVersion("crm-brokerage"), bumpCacheVersion("new-payment")]);
     res.json({ success: true, financePayment });
