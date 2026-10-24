@@ -1377,7 +1377,24 @@ async function resolveOcCcGate(pool, bookingId, certType = null) {
   return { received: true, source: row.Source, receivedDate: row.ReceivedDate, certType: null, certRow: null };
 }
 
+// A locked Welcome Call checklist asserts specific facts were verified with
+// the customer — including, via its conditional items, that parking/extra
+// charges/co-applicant details are confirmed. Mutating any of those after
+// the checklist is Submitted/locked would leave it silently claiming
+// "verified" for a fact nobody re-checked. Shared by crmCoApplicant.js,
+// crmParking.js, and crmExtraCharges.js so every module with a dedicated
+// checklist item gets the same re-validation, not just the first one fixed.
+async function assertWelcomeChecklistUnlocked(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT IsLocked FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
+  if (r.recordset[0]?.IsLocked) {
+    return "The welcome call verification checklist for this booking is already submitted and locked. Reopen it on the Welcome Calls page before making this change.";
+  }
+  return null;
+}
+
 module.exports = { requireNotMidApproval, releaseBookingInventoryLines,
+  assertWelcomeChecklistUnlocked,
   resolveNocType,
   resolveOcCcGate,
   validateAgreementPreparationPrerequisites,

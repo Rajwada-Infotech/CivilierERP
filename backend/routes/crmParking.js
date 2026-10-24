@@ -15,7 +15,7 @@ const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../serv
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
@@ -148,6 +148,8 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   if (activeErr) throw parkingError(activeErr);
   const midApprovalAdd = await requireNotMidApproval(pool, bookingId);
   if (midApprovalAdd) throw parkingError(midApprovalAdd);
+  const checklistLockAdd = await assertWelcomeChecklistUnlocked(pool, bookingId);
+  if (checklistLockAdd) throw parkingError(checklistLockAdd);
   if (await isSaleDeedRegistered(pool, bookingId)) {
     throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
   }
@@ -287,6 +289,8 @@ async function applyEditParking(pool, id, b) {
     if (activeErr) throw parkingError(activeErr);
     const midApprovalEdit = await requireNotMidApproval(pool, BookingId);
     if (midApprovalEdit) throw parkingError(midApprovalEdit);
+    const checklistLockEdit = await assertWelcomeChecklistUnlocked(pool, BookingId);
+    if (checklistLockEdit) throw parkingError(checklistLockEdit);
     if (await isSaleDeedRegistered(pool, BookingId)) {
       throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
     }
@@ -391,6 +395,8 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null, 
   if (activeErr) throw parkingError(activeErr);
   const midApprovalRelease = await requireNotMidApproval(pool, BookingId);
   if (midApprovalRelease) throw parkingError(midApprovalRelease);
+  const checklistLockRelease = await assertWelcomeChecklistUnlocked(pool, BookingId);
+  if (checklistLockRelease) throw parkingError(checklistLockRelease);
   if (await isSaleDeedRegistered(pool, BookingId)) {
     throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
   }

@@ -9,7 +9,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { isLegalWorkStarted, requireApprovedBooking } = require("../services/crmWorkflowGuards");
+const { isLegalWorkStarted, requireApprovedBooking, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 
 router.use(authMiddleware);
@@ -74,15 +74,6 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
 // checked. Block the edit here instead, same as the checklist's own
 // assertUnlocked gate — staff reopen the checklist first, which is an
 // explicit, logged action, rather than this silently going stale.
-async function assertWelcomeChecklistUnlocked(pool, bookingId) {
-  const r = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT IsLocked FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
-  if (r.recordset[0]?.IsLocked) {
-    return "The welcome call verification checklist for this booking is already submitted and locked. Reopen it on the Welcome Calls page before adding or removing a co-applicant.";
-  }
-  return null;
-}
-
 // The actual insert, shared by the direct (pre-legal-work) path below and
 // the amendment-approval replay path in crmBookingAmendments.js — never
 // duplicated logic between the two.
