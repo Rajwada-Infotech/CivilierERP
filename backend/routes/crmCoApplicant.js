@@ -87,6 +87,12 @@ async function assertWelcomeChecklistUnlocked(pool, bookingId) {
 // the amendment-approval replay path in crmBookingAmendments.js — never
 // duplicated logic between the two.
 async function applyAddCoApplicant(pool, bookingId, b, actorUserId) {
+  if (bookingId) {
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+    if (lockErr) throw Object.assign(new Error(lockErr), { status: 400 });
+  }
   // Same person never twice; the main applicant is never also a co-applicant.
   const pickedCustomerId = await resolveCoApplicantCustomer(pool, { bookingId }, b);
   const result = await pool.request()
@@ -151,6 +157,12 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
 // Shared with the amendment-approval replay path — see applyAddCoApplicant.
 async function applyEditCoApplicant(pool, id, b, actorUserId) {
   const where = (await pool.request().input("id", sql.Int, id).query("SELECT ApplicationId, BookingId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0] || {};
+  if (where.BookingId) {
+    const activeErr = await requireApprovedBooking(pool, where.BookingId);
+    if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, where.BookingId);
+    if (lockErr) throw Object.assign(new Error(lockErr), { status: 400 });
+  }
   const pickedCustomerId = await resolveCoApplicantCustomer(pool, { applicationId: where.ApplicationId, bookingId: where.BookingId, exceptId: id }, b);
   await pool.request().input("id", sql.Int, id).input("c", sql.Int, pickedCustomerId)
     .query("IF COL_LENGTH('dbo.CrmCoApplicant', 'CustomerId') IS NOT NULL EXEC sp_executesql N'UPDATE dbo.CrmCoApplicant SET CustomerId = @c WHERE Id = @id', N'@c INT, @id INT', @c = @c, @id = @id");
@@ -241,6 +253,14 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
 
 // Shared with the amendment-approval replay path — see applyAddCoApplicant.
 async function applyRemoveCoApplicant(pool, id) {
+  const row = (await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id")).recordset[0];
+  const bookingId = row?.BookingId;
+  if (bookingId) {
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) throw Object.assign(new Error(activeErr), { status: 400 });
+    const lockErr = await assertWelcomeChecklistUnlocked(pool, bookingId);
+    if (lockErr) throw Object.assign(new Error(lockErr), { status: 400 });
+  }
   await pool.request().input("id", sql.Int, id)
     .query("UPDATE dbo.CrmCoApplicant SET IsActive = 0 WHERE Id = @id");
   return { success: true };

@@ -146,6 +146,11 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
 
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) throw parkingError(activeErr);
+  const midApprovalAdd = await requireNotMidApproval(pool, bookingId);
+  if (midApprovalAdd) throw parkingError(midApprovalAdd);
+  if (await isSaleDeedRegistered(pool, bookingId)) {
+    throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+  }
 
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
@@ -280,6 +285,11 @@ async function applyEditParking(pool, id, b) {
   if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw parkingError(activeErr);
+    const midApprovalEdit = await requireNotMidApproval(pool, BookingId);
+    if (midApprovalEdit) throw parkingError(midApprovalEdit);
+    if (await isSaleDeedRegistered(pool, BookingId)) {
+      throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+    }
   }
 
   const milestone = BookingId != null
@@ -379,6 +389,11 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null, 
 
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw parkingError(activeErr);
+  const midApprovalRelease = await requireNotMidApproval(pool, BookingId);
+  if (midApprovalRelease) throw parkingError(midApprovalRelease);
+  if (await isSaleDeedRegistered(pool, BookingId)) {
+    throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+  }
 
   // Legacy shape: a dedicated milestone still exists for this sale — keep
   // using its own Status, same as before. New-shape sales (no linked
