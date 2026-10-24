@@ -503,6 +503,8 @@ const CrmAfsQueryPayment: React.FC<{
     if (detail) setStep(detail.Status === CrmStatus.PENDING ? 1 : 2);
     setPendingInfoFiles([]);
     setProofFile(null);
+    setConfirmAmount("");
+    setConfirmRemarks("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.Id]);
 
