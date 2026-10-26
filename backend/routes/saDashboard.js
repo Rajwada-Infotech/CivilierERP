@@ -147,6 +147,7 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
 
     const salesPayload = {
       totalLeads: total,
+      statusCounts: statusMap,
       pendingLeads: statusMap["New"] || 0,
       assignedLeads: statusMap["Assigned"] || 0,
       contactedLeads: statusMap["Contacted"] || 0,

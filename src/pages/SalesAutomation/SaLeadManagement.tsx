@@ -25,6 +25,7 @@ import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
 const API = "/api/sa/leads";
@@ -112,7 +113,7 @@ const fields: FieldDef[] = [
   { name: "CapturedAt", label: "Captured At", type: "date" },
   { name: "AssignedTeamLeadId", label: "Assigned Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
   { name: "AssignedSalespersonId", label: "Assigned Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
-  { name: "Status", label: "Lead Status", type: "select", options: ["New","Assigned","Contacted","FollowUp","VisitScheduled","Visited","Booking","Lost"], defaultValue: "New" },
+  { name: "Status", label: "Lead Status", type: "select", options: LEAD_STATUS_KEYS, defaultValue: "New" },
   { name: "Classification", label: "Classification", type: "select", options: ["Hot","Warm","Cold","NotInterested","CallBackLater"] },
   { name: "BudgetMin", label: "Budget Min", type: "number" },
   { name: "BudgetMax", label: "Budget Max", type: "number" },
