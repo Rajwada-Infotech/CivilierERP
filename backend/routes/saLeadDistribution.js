@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { distributableStatus } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -82,6 +83,7 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
     await tx.begin();
     try {
       const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
+      let distributed = 0, skipped = 0;
       for (const asgn of assignments) {
         const { userId, leadIdList } = asgn;
         for (const lid of leadIdList) {
@@ -95,8 +97,13 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
           // (history + assignment) when it's already assigned to this exact
           // target at this level.
           const cur = await tx.request().input("lid", sql.Int, lid)
-            .query(`SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid`);
-          if (!cur.recordset.length || cur.recordset[0].assignedTo === userId) continue;
+            .input("st", sql.NVarChar(30), distributableStatus(level))
+            .query(`SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid AND IsActive = 1 AND Status = @st`);
+          // Not found also means the lead has moved past this level since the
+          // page loaded — skip it rather than reset it to Assigned.
+          if (!cur.recordset.length) { skipped++; continue; }
+          if (cur.recordset[0].assignedTo === userId) continue;
+          distributed++;
 
           await tx.request()
             .input("lid", sql.Int, lid)
@@ -118,7 +125,7 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
         }
       }
       await tx.commit();
-      res.json({ success: true, distributed: leadIds.length });
+      res.json({ success: true, distributed, skipped });
     } catch (e) {
       await tx.rollback();
       throw e;

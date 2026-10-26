@@ -2,6 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { distributableStatus } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -200,9 +201,8 @@ router.post("/run-now/:level", requirePageRight("sa-lead-distribution", "create"
       await tx.begin();
       try {
         const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
-        const statusCheck = level === 1 ? "AND Status = 'New'" : "AND Status = 'Assigned'";
-        const cur = await tx.request().input("lid", sql.Int, lead.Id).query(
-          `SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid AND IsActive = 1 ${statusCheck}`,
+        const cur = await tx.request().input("lid", sql.Int, lead.Id).input("st", sql.NVarChar(30), distributableStatus(level)).query(
+          `SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid AND IsActive = 1 AND Status = @st`,
         );
         if (!cur.recordset.length || cur.recordset[0].assignedTo != null) {
           await tx.commit();

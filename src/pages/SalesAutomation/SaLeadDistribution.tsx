@@ -127,8 +127,10 @@ const SaLeadDistribution: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ leadIds: selectedLeads, assignments: assignmentList, method, level }),
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Distribution failed");
-      toast.success(`${selectedLeads.length} leads distributed!`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Distribution failed");
+      toast.success(`${data.distributed ?? selectedLeads.length} leads distributed!`);
+      if (data.skipped) toast.warning(`${data.skipped} lead${data.skipped === 1 ? " had" : "s had"} already moved on and ${data.skipped === 1 ? "was" : "were"} skipped`);
       setSelectedLeads([]);
       setAssignments({});
       setPercentages({});

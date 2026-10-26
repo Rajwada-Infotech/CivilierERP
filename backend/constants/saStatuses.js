@@ -37,4 +37,10 @@ const QUALIFIED_FOR_CONVERSION = ["Visited", "Booking"];
 const statusesThatCanMoveTo = (to) =>
   Object.keys(STATUS_TRANSITIONS).filter((from) => from !== to && STATUS_TRANSITIONS[from].includes(to));
 
-module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };
+// The only status a lead may have to be distributed at a level: level 1
+// (to a team lead) takes New leads, level 2 (to a salesperson) takes
+// Assigned ones. Shared by manual and auto distribution so neither can
+// pull a lead that has moved on back to Assigned.
+const distributableStatus = (level) => (level === 1 ? "New" : "Assigned");
+
+module.exports = { distributableStatus, STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };
