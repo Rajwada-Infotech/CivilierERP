@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Wrench,
   BarChart3,
+  CalendarClock,
   ChevronRight,
 } from "lucide-react-native";
 import { colors } from "@/theme/colors";
@@ -40,6 +41,7 @@ const ENTRIES: Entry[] = [
   { route: "AssetTransfer", label: "User-Wise Asset Transfer", desc: "Custody moves between users", icon: ArrowLeftRight, pageKey: "asset-transfer" },
   { route: "QualityCheck", label: "Owner & Quality Checking", desc: "Condition checks & follow-ups", icon: ShieldCheck, pageKey: "fixed-asset-quality-check" },
   { route: "Maintenance", label: "FA Maintenance & Repair", desc: "Repair vouchers & spend", icon: Wrench, pageKey: "fixed-asset-maintenance" },
+  { route: "DepreciationRun", label: "Depreciation Run", desc: "Post a month — or a custom month range — for a project", icon: CalendarClock, pageKey: "fixed-asset-depreciation-generate" },
   { route: "Reports", label: "Reports", desc: "Depreciation, owner, maintenance & transfer — FA Item Code wise", icon: BarChart3, pageKey: "fixed-asset-record" },
 ];
 
