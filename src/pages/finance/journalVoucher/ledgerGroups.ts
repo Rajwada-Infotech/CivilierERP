@@ -46,10 +46,12 @@ export interface LedgerGroup {
 export function filterLedgerOptions(options: JournalVoucherLedgerOption[], query: string) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return options;
-  return options.filter((o) => {
-    const hay = `${o.label} ${o.code ?? ""} ${o.accountNoLast4 ?? ""} ${ledgerGroupLabel(o.group)}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
+  const hit = (hay: string) => words.every((w) => hay.includes(w));
+  // The head's own name / code first: matching the group name too ("General …") pulled in every head of that
+  // group and buried the one actually named so. The group only counts when no head's own name matches.
+  const byName = options.filter((o) => hit(`${o.label} ${o.code ?? ""} ${o.accountNoLast4 ?? ""}`.toLowerCase()));
+  if (byName.length) return byName;
+  return options.filter((o) => hit(`${o.label} ${o.code ?? ""} ${o.accountNoLast4 ?? ""} ${ledgerGroupLabel(o.group)}`.toLowerCase()));
 }
 
 /** Groups in the fixed display order (empty groups dropped), names A→Z within each. */

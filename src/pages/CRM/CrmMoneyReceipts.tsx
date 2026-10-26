@@ -448,9 +448,11 @@ const CrmMoneyReceipts: React.FC = () => {
                         <td className={`${td} text-xs`}>{g.projectName || "—"} <span className="text-muted-foreground">· {g.unitNo}</span></td>
                         <td className={td}>
                           {/* The latest receipt; the rest open with the row. */}
-                          <div className="font-heading text-xs tabular-nums">{g.receipts[0].ReceiptNo}</div>
-                          <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">
-                            {fmtDate(g.receipts[0].ReceivedDate)}{g.receipts.length > 1 ? ` · +${g.receipts.length - 1} more` : ""}
+                          <div className="flex flex-col gap-1">
+                            <span className="font-heading text-xs tabular-nums">{g.receipts[0].ReceiptNo}</span>
+                            <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
+                              {fmtDate(g.receipts[0].ReceivedDate)}{g.receipts.length > 1 ? ` · +${g.receipts.length - 1} more` : ""}
+                            </span>
                           </div>
                         </td>
                         <td className={`${td} text-right font-heading font-semibold tabular-nums`}>{fmt(g.totalAmount)}</td>
