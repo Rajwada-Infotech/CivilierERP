@@ -467,6 +467,160 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
   },
+
+  // ── Closing the remaining gaps the CRM/SA UI/UX audits found unmigrated
+  // (money-collection milestone status, refund/credit-note pipelines, loan
+  // lifecycle, document/checklist verification, handover snag states).
+  Overdue: {
+    label: "Overdue",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  Waived: {
+    label: "Waived",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Bounced: {
+    label: "Bounced",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  FinanceApproved: {
+    label: "Finance Approved",
+    icon: PackageCheck,
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
+  },
+  TimeBarred: {
+    label: "Time-Barred",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Applied: {
+    label: "Applied",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  PartiallyApplied: {
+    label: "Partially Applied",
+    icon: PackageSearch,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  Unapplied: {
+    label: "Unapplied",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  NotApplied: {
+    label: "Not Applied",
+    icon: FileEdit,
+    classes:
+      "bg-slate-500/10 text-slate-400 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Sanctioned: {
+    label: "Sanctioned",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Disbursed: {
+    label: "Disbursed",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  QueryRaised: {
+    label: "Query Raised",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Requested: {
+    label: "Requested",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  Uploaded: {
+    label: "Uploaded",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  Verified: {
+    label: "Verified",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Checked: {
+    label: "Checked",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  NeedsRecheck: {
+    label: "Needs Recheck",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Review: {
+    label: "Under Review",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Deleted: {
+    label: "Deleted",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Ready: {
+    label: "Ready",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Disputed: {
+    label: "Disputed",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  Reopened: {
+    label: "Reopened",
+    icon: PackageSearch,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  SnagInspection: {
+    label: "Snag Inspection",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  SnagPending: {
+    label: "Snag Pending",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Drafted: {
+    label: "Drafted",
+    icon: FileEdit,
+    classes:
+      "bg-slate-500/10 text-slate-400 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
 };
 
 // Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
