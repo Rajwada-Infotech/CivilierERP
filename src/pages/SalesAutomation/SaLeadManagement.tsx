@@ -17,13 +17,15 @@ const fetchUnitOptions = () => {
     .catch(() => ({ kinds: [], layouts: [] }));
   return unitOptionsPromise;
 };
-import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter } from "lucide-react";
+import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
+import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
 const API = "/api/sa/leads";
 
@@ -178,6 +180,9 @@ const SaLeadManagement: React.FC = () => {
   const queryClient = useQueryClient();
   const [handoffLoading, setHandoffLoading] = useState<string | null>(null);
   const [auditLeadId, setAuditLeadId] = useState<string | null>(null);
+  // Lets staff log a call/WhatsApp/etc straight from a row instead of
+  // leaving this page for Lead Activities or Follow-Ups just to do that.
+  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string } | null>(null);
   // Was a standalone "Tracking" tab with its own two hand-rolled tables —
   // same information, now a one-click filter on the grid itself instead of
   // a separate tab/page round-trip.
@@ -506,9 +511,20 @@ const SaLeadManagement: React.FC = () => {
                 <Clock size={13} />
               </button>
             );
+            const interactionBtn = (
+              <button
+                type="button"
+                onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid) })}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                title="Log a call/WhatsApp/etc against this lead"
+              >
+                <MessageSquarePlus size={13} />
+              </button>
+            );
             if (hasBooking) {
               return (
                 <>
+                  {interactionBtn}
                   {auditBtn}
                   <span className="px-2 py-1 text-[0.625rem] font-medium rounded-full bg-emerald-500/10 text-emerald-600">
                     Booked
@@ -518,6 +534,7 @@ const SaLeadManagement: React.FC = () => {
             }
             return (
               <>
+                {interactionBtn}
                 {auditBtn}
                 {!isConverted && !hasFollowup && (
                   <button
@@ -628,6 +645,18 @@ const SaLeadManagement: React.FC = () => {
         )}
       </CrmSideDrawer>
 
+      {/* Log interaction — same shared form/history Lead Activities and
+          Follow-Ups use (see useLeadActivities.ts), reachable in one click
+          from the row it's about instead of leaving this page. */}
+      <CrmSideDrawer
+        open={!!interactionLead}
+        onClose={() => setInteractionLead(null)}
+        title="Log Interaction"
+        subtitle={interactionLead?.uid}
+      >
+        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} />}
+      </CrmSideDrawer>
+
       {/* Transfer Leads Dialog */}
       <Dialog open={transferOpen} onOpenChange={(o) => { if (!o) { setTransferOpen(false); setTransferSelectedIds(new Set()); setTransferToTLId(""); setTransferNotes(""); } }}>
         <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
@@ -730,6 +759,36 @@ const SaLeadManagement: React.FC = () => {
         </DialogContent>
       </Dialog>
     </SalesAutoShell>
+  );
+};
+
+// Small history + form combo for the "Log Interaction" drawer above — not
+// hoisted into useLeadActivities.ts/LeadInteractionForm.tsx since this is
+// the only call site; if a second one shows up, promote it there instead
+// of copying this.
+const LeadInteractionPanelContent: React.FC<{ leadId: number }> = ({ leadId }) => {
+  const { data: history = [] } = useLeadActivityHistory(leadId);
+  return (
+    <div className="space-y-4">
+      <LeadInteractionForm leadId={leadId} variant="compact" />
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="px-3 py-2 bg-muted/30 border-b border-border">
+          <h3 className="text-xs font-semibold text-foreground">History ({history.length})</h3>
+        </div>
+        {history.length === 0 ? (
+          <div className="p-4 text-center text-muted-foreground text-xs">No activity logged yet</div>
+        ) : (history as any[]).map((h) => (
+          <div key={h.Id} className="px-3 py-2.5 border-b border-border last:border-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">{h.ActivityType}</span>
+              <span className="text-xs text-muted-foreground">{h.CreatedAt ? new Date(h.CreatedAt).toLocaleString() : "—"}</span>
+            </div>
+            {h.Summary && <p className="text-xs text-muted-foreground mt-1">{h.Summary}</p>}
+            {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {String(h.NextFollowupDate).slice(0, 10)}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 
