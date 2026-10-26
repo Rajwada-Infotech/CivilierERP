@@ -25,6 +25,7 @@
  * Idempotent: converting an already-Converted lead is a no-op.
  */
 const { sql } = require("../db");
+const { QUALIFIED_FOR_CONVERSION } = require("../constants/saStatuses");
 
 async function convertLead(pool, leadId, userId) {
   const leadResult = await pool.request()
@@ -41,6 +42,16 @@ async function convertLead(pool, leadId, userId) {
   }
   if (lead.Status === "Converted") {
     return { alreadyConverted: true };
+  }
+  // Every other status change is forced through STATUS_TRANSITIONS' forward
+  // progression - this was the one bypass of it, letting a brand-new lead
+  // (never contacted, never visited) convert straight to a CRM Application.
+  // Require the same qualification bar a human would expect before handing
+  // a lead to CRM.
+  if (!QUALIFIED_FOR_CONVERSION.includes(lead.Status)) {
+    const e = new Error(`This lead hasn't reached Visited yet (currently ${lead.Status}) — it can't be converted to CRM until a site visit is completed.`);
+    e.status = 409;
+    throw e;
   }
   if (lead.CrmApplicationId) {
     // Shouldn't be reachable under the current flow (CrmApplicationId is

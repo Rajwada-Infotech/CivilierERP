@@ -233,17 +233,10 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
   }
 });
 
-// Allowed forward transitions per status
-const STATUS_TRANSITIONS = {
-  New: ["New", "Assigned", "Contacted", "Lost"],
-  Assigned: ["Assigned", "Contacted", "Lost"],
-  Contacted: ["Contacted", "FollowUp", "VisitScheduled", "Lost"],
-  FollowUp: ["FollowUp", "VisitScheduled", "Lost"],
-  VisitScheduled: ["VisitScheduled", "Visited", "Lost"],
-  Visited: ["Visited", "FollowUp", "Booking", "Lost"],
-  Booking: ["Booking"],
-  Lost: ["Lost"],
-};
+// Allowed forward transitions per status — shared with saHandoff.js via
+// constants/saStatuses.js (kept there, not here, to avoid a circular
+// require: this file requires saHandoff.js below).
+const { STATUS_TRANSITIONS } = require("../constants/saStatuses");
 
 // PUT /:id — update lead (with audit trail + notifications)
 router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
