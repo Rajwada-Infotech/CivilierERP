@@ -1,4 +1,5 @@
 import React from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -101,6 +102,9 @@ const SaCampaignMaster: React.FC = () => {
   usePageRights("sa-campaigns");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
+  // Pre-filter when arriving from Social Media Master's "N campaigns" link.
+  const [searchParams] = useSearchParams();
+  const platformFilter = searchParams.get("platformId");
 
   const { data: campaigns, isLoading, error } = useQuery({
     queryKey: ["sa-campaigns"],
@@ -108,7 +112,7 @@ const SaCampaignMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const mappedData: RecordWithId[] = React.useMemo(() => {
+  const allMappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(campaigns)) return [];
     return campaigns.map((item) => ({
       _id: String(item.Id),
@@ -132,6 +136,11 @@ const SaCampaignMaster: React.FC = () => {
       activeDays: item.ActiveDays ?? "",
     }));
   }, [campaigns]);
+
+  const mappedData = React.useMemo(
+    () => platformFilter ? allMappedData.filter((c) => c.platformId === platformFilter) : allMappedData,
+    [allMappedData, platformFilter],
+  );
 
   const toPayload = (r: Record<string, any>) => ({
     CampaignCode: r.campaignCode?.trim() || null,
@@ -177,13 +186,25 @@ const SaCampaignMaster: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load campaigns.</div>;
 
   return (
-    <SalesAutoShell title="Campaign Master" subtitle="Manage marketing campaigns across all social media platforms">
+    <SalesAutoShell title="Campaign Master" subtitle={platformFilter ? `Showing campaigns for the selected platform — ${mappedData[0]?.platformName || ""}` : "Manage marketing campaigns across all social media platforms"}>
       <Breadcrumbs items={["Sales Automation", "Campaign Master"]} />
       <div className="space-y-8">
+        {platformFilter && (
+          <Link to="/sales-automation/campaigns" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+            ← Clear platform filter, show all campaigns
+          </Link>
+        )}
         <MasterPage
           title="Campaign"
           fields={fields}
           columns={columns}
+          columnRenderers={{
+            totalAds: (value, row) => (
+              <Link to={`/sales-automation/ads?campaignId=${row._id}`} className="text-primary hover:underline">
+                {String(value)} ad{value === 1 ? "" : "s"} →
+              </Link>
+            ),
+          }}
           canCreate={canDoAction("sa-campaigns", "create")}
           canEdit={canDoAction("sa-campaigns", "edit")}
           canDelete={canDoAction("sa-campaigns", "delete")}

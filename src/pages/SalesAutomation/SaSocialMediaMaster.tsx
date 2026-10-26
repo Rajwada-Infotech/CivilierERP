@@ -14,6 +14,7 @@ import {
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { PlugZap } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const API = "/api/sa/social-media";
 
@@ -195,6 +196,17 @@ const SaSocialMediaMaster: React.FC = () => {
           canDelete={canDoAction("sa-social-media", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          columnRenderers={{
+            // Platform -> Campaign -> Ad is a real hierarchy that was never
+            // discoverable in the UI — these counts now link straight into
+            // the filtered next level instead of requiring a user to
+            // already know the relationship exists.
+            campaignCount: (value, row) => (
+              <Link to={`/sales-automation/campaigns?platformId=${row._id}`} className="text-primary hover:underline">
+                {String(value)} campaign{value === 1 ? "" : "s"} →
+              </Link>
+            ),
+          }}
           rowActions={(row) => (
             <button
               type="button"

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -235,6 +236,9 @@ const SaAdMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"list" | "performance">("list");
   const [creativesFor, setCreativesFor] = useState<{ id: string; name: string } | null>(null);
+  // Pre-filter when arriving from Campaign Master's "N ads" link.
+  const [searchParams] = useSearchParams();
+  const campaignFilter = searchParams.get("campaignId");
 
   const { data: ads, isLoading, error } = useQuery({
     queryKey: ["sa-ads"],
@@ -242,7 +246,7 @@ const SaAdMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const mappedData: RecordWithId[] = React.useMemo(() => {
+  const allMappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(ads)) return [];
     return ads.map((item) => ({
       _id: String(item.Id),
@@ -295,6 +299,11 @@ const SaAdMaster: React.FC = () => {
       isActive: Boolean(item.IsActive),
     }));
   }, [ads]);
+
+  const mappedData = React.useMemo(
+    () => campaignFilter ? allMappedData.filter((a) => a.campaignId === campaignFilter) : allMappedData,
+    [allMappedData, campaignFilter],
+  );
 
   const toPayload = (r: Record<string, any>) => ({
     CampaignId: r.campaignId ? parseInt(r.campaignId) : null,
@@ -394,9 +403,14 @@ const SaAdMaster: React.FC = () => {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
-    <SalesAutoShell title="Ad Master" subtitle="Manage advertisements running under each campaign">
+    <SalesAutoShell title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : "Manage advertisements running under each campaign"}>
       <Breadcrumbs items={["Sales Automation", "Ad Master"]} />
       <div className="space-y-6">
+        {campaignFilter && (
+          <Link to="/sales-automation/ads" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+            ← Clear campaign filter, show all ads
+          </Link>
+        )}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
             {([
