@@ -433,6 +433,7 @@ const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialM
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
 const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
 const SaLeadManagement = lazy(() => import("./pages/SalesAutomation/SaLeadManagement"));
+const SaLeadPipeline = lazy(() => import("./pages/SalesAutomation/SaLeadPipeline"));
 const SaChannelPartners = lazy(() => import("./pages/SalesAutomation/SaChannelPartners"));
 const SaLeadActivities = lazy(() => import("./pages/SalesAutomation/SaLeadActivities"));
 const SaFollowups = lazy(() => import("./pages/SalesAutomation/SaFollowups"));
@@ -2577,6 +2578,7 @@ function AppRoutes() {
       <Route path="/sales-automation/campaigns" element={<ProtectedRoute pageKey="sa-campaigns"><SaCampaignMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/ads" element={<ProtectedRoute pageKey="sa-ads"><SaAdMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/leads" element={<ProtectedRoute pageKey="sa-leads"><SaLeadManagement /></ProtectedRoute>} />
+      <Route path="/sales-automation/pipeline" element={<ProtectedRoute pageKey="sa-leads"><SaLeadPipeline /></ProtectedRoute>} />
       <Route path="/sales-automation/channel-partners" element={<ProtectedRoute pageKey="sa-channel-partners"><SaChannelPartners /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-activities" element={<ProtectedRoute pageKey="sa-lead-activities"><SaLeadActivities /></ProtectedRoute>} />
       <Route path="/sales-automation/followups" element={<ProtectedRoute pageKey="sa-followups"><SaFollowups /></ProtectedRoute>} />

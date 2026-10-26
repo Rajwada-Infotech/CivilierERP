@@ -29,6 +29,7 @@ export const salesAutomationNavItems: NavItem[] = [
     icon: Profile2User,
     children: [
       { label: "All Leads",    path: "/sales-automation/leads",          pageKey: "sa-leads"              },
+      { label: "Pipeline",     path: "/sales-automation/pipeline",       pageKey: "sa-leads"              },
       { label: "Inquiry",      path: "/sales-automation/inquiry",        pageKey: "sa-inquiry"            },
       { label: "Follow-Up",    path: "/sales-automation/followups",      pageKey: "sa-followups"          },
       { label: "Site Visits",  path: "/sales-automation/site-visits",    pageKey: "sa-site-visits"        },
