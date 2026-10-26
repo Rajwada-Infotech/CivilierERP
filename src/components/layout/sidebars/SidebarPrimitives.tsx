@@ -406,8 +406,11 @@ export const SidebarNav = ({
             collapsed={collapsed}
             accentColor={accentColor}
             isActive={
-              item.path === "/"
-                ? location.pathname === "/"
+              // A dashboard often sits at the module root (/finance,
+              // /sales-automation), so every page in the module starts with
+              // its path — it's only active on that exact path.
+              item.path === "/" || item.isDashboard
+                ? location.pathname === item.path
                 : location.pathname === item.path ||
                   location.pathname.startsWith((item.path || "") + "/")
             }
