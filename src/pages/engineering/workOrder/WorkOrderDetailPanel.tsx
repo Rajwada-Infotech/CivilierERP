@@ -562,7 +562,12 @@ export const WorkOrderDetailPanel: React.FC<{
                 (s, a) => s + (a.MaterialAmount || 0),
                 0,
               );
-              const groupTotal = groupLabour + groupMats;
+              // With tax: each activity's HSN / SAC GST on its labour + materials, as in the edit screen and the grand total.
+              const groupGst = acts.reduce(
+                (s, a) => s + ((a.LabourAmount || 0) + (a.MaterialAmount || 0)) * (Number(a.HsnGstRate) || 0) / 100,
+                0,
+              );
+              const groupTotal = groupLabour + groupMats + groupGst;
               const isExpanded = expandedGroups[groupIdx] !== false;
 
               return (
