@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Megaphone, Inbox, GitBranch, PhoneCall, Repeat, CalendarCheck, MapPin, Award, XCircle, IndianRupee, ChevronRight } from "lucide-react";
+import { Megaphone, Inbox, GitBranch, PhoneCall, Repeat, CalendarCheck, MapPin, Award, XCircle, IndianRupee, ChevronRight, Handshake } from "lucide-react";
 import { ACCENT } from "@/components/sa/SalesAutoShell";
 import { LEAD_STAGES, type LeadStage } from "@/components/sa/leadStages";
 
@@ -11,7 +11,7 @@ import { LEAD_STAGES, type LeadStage } from "@/components/sa/leadStages";
 
 const STAGE_ICONS: Record<string, React.ElementType> = {
   New: Inbox, Assigned: GitBranch, Contacted: PhoneCall, FollowUp: Repeat,
-  VisitScheduled: CalendarCheck, Visited: MapPin, Booking: Award, Lost: XCircle,
+  VisitScheduled: CalendarCheck, Visited: MapPin, Converted: Handshake, Booking: Award, Lost: XCircle,
 };
 
 const SOURCE = { key: "source", label: "Campaigns", hint: "Platforms → campaigns → ads", path: "/sales-automation/social-media", hex: "#8b5cf6" };

@@ -13,6 +13,7 @@ const STATUS_TRANSITIONS = {
   FollowUp: ["FollowUp", "VisitScheduled", "Lost"],
   VisitScheduled: ["VisitScheduled", "Visited", "Lost"],
   Visited: ["Visited", "FollowUp", "Booking", "Lost"],
+  Converted: ["Converted"],
   Booking: ["Booking"],
   Lost: ["Lost"],
 };
@@ -21,6 +22,10 @@ const STATUS_TRANSITIONS = {
 // the booking (crmApplications.js) — it must be SA's own value, not CRM's
 // 'Booked', or the lead falls out of every SA view and transition rule.
 const SA_LEAD_BOOKED = "Booking";
+
+// In the CRM Leads pool (CrmLeads.tsx lists ?status=Converted). Set by
+// convertLead, and again when a lead's CRM booking is cancelled or deleted.
+const SA_LEAD_CONVERTED = "Converted";
 
 // The statuses a lead must have reached before it's qualified enough for
 // SA -> CRM handoff (used by saHandoff.js's convertLead).
@@ -32,4 +37,4 @@ const QUALIFIED_FOR_CONVERSION = ["Visited", "Booking"];
 const statusesThatCanMoveTo = (to) =>
   Object.keys(STATUS_TRANSITIONS).filter((from) => from !== to && STATUS_TRANSITIONS[from].includes(to));
 
-module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, statusesThatCanMoveTo };
+module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };

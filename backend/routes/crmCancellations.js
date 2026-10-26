@@ -1,6 +1,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
+const { returnLeadToPool } = require("../services/saHandoff");
 const router = express.Router();
 const { reversePostingBySource } = require("../services/generalLedger");
 // Project access: a cancellation belongs to its booking's project.
@@ -668,6 +669,9 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       // Release the unit / plot lines in the same transaction as the header —
       // otherwise the inventory can never be sold again.
       await releaseBookingInventoryLines(tx, bookingId);
+
+      // The buyer stays a lead: back into the CRM Leads pool, unlinked.
+      await returnLeadToPool(tx, bookingId);
 
       // The Application was force-advanced to 'Approved' the instant this
       // Booking was created and nothing has touched it since — without this,

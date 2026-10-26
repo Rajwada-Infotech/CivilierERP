@@ -1,5 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
+const { returnLeadToPool } = require("../services/saHandoff");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
@@ -1625,11 +1626,11 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       UPDATE dbo.CrmCoApplicant SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmExtraCharge SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
       UPDATE dbo.CrmCommunicationLog SET BookingId = NULL WHERE BookingId = @bid AND ApplicationId = @aid;
-      UPDATE dbo.SaLead SET CrmBookingId = NULL WHERE CrmBookingId = @bid;
       UPDATE dbo.ReceivedPayment SET CrmBookingId = NULL, CrmMilestoneId = NULL
       WHERE (CrmBookingId = @bid OR CrmMilestoneId IN (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
         AND ISNULL(RPStatus, '') = 'Rejected';
     `);
+    await returnLeadToPool(tx, id);
     // The deleted booking keeps its own history: payment schedule, welcome
     // call, attachments and amendment requests stay on the (inactive) booking
     // — CRM records are never hard-deleted. Every screen reads live bookings
