@@ -6,7 +6,6 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
-const { promoteLeadToFollowup } = require("../services/saHandoff");
 const { statusesThatCanMoveTo } = require("../constants/saStatuses");
 
 // Move a lead to `to` only if STATUS_TRANSITIONS allows it from its current
@@ -104,7 +103,7 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
   }
 });
 
-// PUT /:id — update a site visit; auto-promote to followup when Completed
+// PUT /:id — update a site visit; moves the lead to Visited when Completed
 router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -115,7 +114,7 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
     // GET / scopes by applyLeadScope so a sales_person/team_lead only ever
     // sees their own leads' visits — PUT/DELETE never checked that, letting
     // anyone with the edit/delete page right mark or remove another
-    // salesperson's visit (including triggering the Completed auto-promote
+    // salesperson's visit (including triggering the Completed lead move
     // below) by id alone.
     const scopeReq = pool.request();
     const scope = applyLeadScope(scopeReq, req, "l");
@@ -149,16 +148,7 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
 
     if (b.Status === "Completed" && prev && prev.Status !== "Completed") {
       // Forward only: a Booking or Lost lead is left as it is.
-      const moved = await advanceLead(pool, prev.LeadId, "Visited");
-      if (moved) {
-        // Auto-promote to follow-up module
-        try {
-          await promoteLeadToFollowup(pool, prev.LeadId, actorId(req));
-        } catch (handoffErr) {
-          // Log but don't fail the request — visit update succeeded
-          console.warn("[sa-site-visits] followup promotion failed:", handoffErr.message);
-        }
-      }
+      await advanceLead(pool, prev.LeadId, "Visited");
     }
 
     res.json({ success: true });
