@@ -65,6 +65,11 @@ export function printList({ title, subtitle, columns, rows, numeric = [] }: Prin
   <footer><span>CivilierERP</span><span>${escapeHtml(title)}</span></footer>
 </body></html>`;
 
+  openPrintWindow(html);
+}
+
+/** Opens a complete HTML document in its own window and prints it (also used by single-record prints). */
+export function openPrintWindow(html: string) {
   const blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
   const win = window.open(blobUrl, "_blank", "width=1100,height=760");
   if (!win) {
