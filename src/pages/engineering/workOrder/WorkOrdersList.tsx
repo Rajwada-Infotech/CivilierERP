@@ -1,6 +1,6 @@
 // The work order register.
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { ChevronRight, Building2, User, Layers, AlertCircle, Eye, Search, RefreshCw, ChevronLeft, List, ClipboardList, TrendingUp, Boxes, BadgeCheck, Clock, Printer } from "lucide-react";
+import { ChevronRight, Building2, User, Layers, AlertCircle, Eye, Search, RefreshCw, ChevronLeft, List, ClipboardList, TrendingUp, Boxes, BadgeCheck, Clock } from "lucide-react";
 import { getWorkOrders } from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -8,7 +8,6 @@ import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-import { printList } from "@/lib/printList";
 import { fetchAllPages } from "@/lib/fetchAllPages";
 import { usePageRights } from "@/hooks/usePageRights";
 import { WorkOrderListItem, fmt, ensureArray, getStatusConfig } from "./config";
@@ -83,17 +82,6 @@ export const WorkOrdersList: React.FC<{
   const fetchAllWorkOrders = () =>
     fetchAllPages<Record<string, unknown>>((p, limit) => getWorkOrders({ page: p, limit, search: debouncedSearch, status: statusFilter }));
   const filterNote = [statusFilter !== "all" ? `Status: ${statusFilter}` : "", debouncedSearch ? `Search: ${debouncedSearch}` : ""].filter(Boolean).join(" · ");
-  const [printing, setPrinting] = useState(false);
-  const handlePrintList = async () => {
-    setPrinting(true);
-    try {
-      printList({ title: "Work Orders", subtitle: filterNote || undefined, columns: EXPORT_COLUMNS, rows: await fetchAllWorkOrders(), numeric: ["Activities", "Total Amount"] });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load the work orders to print.");
-    } finally {
-      setPrinting(false);
-    }
-  };
   const filteredPages = Math.ceil(filteredTotal / LIMIT);
 
   // One request for every visible row's approval trail instead of one per
@@ -170,17 +158,6 @@ export const WorkOrdersList: React.FC<{
           subtitle={filterNote || undefined}
           disabled={loading || filteredTotal === 0 || !rights.canExport}
         />
-        {rights.canPrint && (
-          <button
-            onClick={handlePrintList}
-            disabled={loading || printing || filteredTotal === 0}
-            className="flex items-center gap-1.5 px-3 py-2 border border-foreground/30 text-sm text-muted-foreground hover:bg-primary/5 transition-colors disabled:opacity-40"
-            title="Print the list"
-          >
-            <Printer size={13} />
-            <span className="hidden sm:inline">{printing ? "Preparing…" : "Print"}</span>
-          </button>
-        )}
       </div>
 
       {/* Error */}
