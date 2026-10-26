@@ -17,8 +17,13 @@ const STATUS_TRANSITIONS = {
   Lost: ["Lost"],
 };
 
+// The terminal "won" status. CRM writes this onto the SaLead when it creates
+// the booking (crmApplications.js) — it must be SA's own value, not CRM's
+// 'Booked', or the lead falls out of every SA view and transition rule.
+const SA_LEAD_BOOKED = "Booking";
+
 // The statuses a lead must have reached before it's qualified enough for
 // SA -> CRM handoff (used by saHandoff.js's convertLead).
 const QUALIFIED_FOR_CONVERSION = ["Visited", "Booking"];
 
-module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION };
+module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED };

@@ -1,6 +1,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
+const { SA_LEAD_BOOKED } = require("../constants/saStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on applications outside their projects.
 const { projectParamGuard, projectPredicate, assertProjectAllowed } = require("../services/projectScope");
@@ -1101,7 +1102,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           booking = { id: created.id, BookingNo: created.BookingNo };
           // Sync SA Lead to Booked now that a Booking exists
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
-            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
+            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${SA_LEAD_BOOKED}', UpdatedAt = SYSDATETIME()
                     WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
             UPDATE dbo.CrmBookingDocument
@@ -1176,7 +1177,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     // place a Booking gets created from, just moved here.
     await pool.request().input("bid", sql.Int, created.id).input("id", sql.Int, id)
       .query(`
-        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
+        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${SA_LEAD_BOOKED}', UpdatedAt = SYSDATETIME()
         WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
       `);
     await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
