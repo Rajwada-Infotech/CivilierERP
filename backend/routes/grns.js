@@ -2,7 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -1395,6 +1395,7 @@ router.put(
   async (req, res) => {
     let wasApproved = false;
     let wasRejected = false;
+    let wasPending = false;
     let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
@@ -1402,7 +1403,8 @@ router.put(
         req,
         "grn-master",
       );
-      await guardEdit("goods-receipt", req.params.id, { allowPostApproval });
+      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+      await guardEditAnyStage("goods-receipt", req.params.id, { allowPostApproval });
 
       // Chain guard: an Expense Booking already raised against this GRN
       // (directly, or as one of a multi-GRN combined invoice) must be
@@ -1417,6 +1419,7 @@ router.put(
 
       wasApproved = currentStatus === "Approved";
       wasRejected = currentStatus === "Rejected";
+      wasPending = currentStatus === "Pending";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
       }
@@ -1446,7 +1449,8 @@ router.put(
     // Status='Pending', and to the invoice picker, which only offers
     // Status='Approved' GRNs). Mirrors journalVoucher.js's wasApproved
     // handling.
-    const effectiveStatus = wasApproved ? "Pending" : status || "Draft";
+    // The form always sends "Draft", so a Pending GRN is held at Pending too.
+    const effectiveStatus = wasApproved || wasPending ? "Pending" : status || "Draft";
 
     // Reject future dates
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -1600,6 +1604,16 @@ router.put(
           });
         } catch (logErr) {
           console.error("Amendment log error (grn):", logErr.message);
+        }
+      }
+
+      // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+      // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+      if (wasPending) {
+        try {
+          await restartApprovalCycle("goods-receipt", grnId, req.user?.email, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+        } catch (cycleErr) {
+          console.error("[grns] could not restart approval cycle after pending edit:", cycleErr.message);
         }
       }
 

@@ -1,14 +1,18 @@
-// Sign in. Parts under ./login: config (the sheet look, public figures type) · LoginHero · LoginCard · WelcomeBack · CivilScene
+// Sign in. Parts under ./login: config (the look, public figures type) · LoginCard · SiteDrawing · SitePlan · FloatingBits ·
+// WelcomeBack
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { LOGIN_CSS, type PublicStats } from "./login/config";
-import { LoginHero } from "./login/LoginHero";
+import { SiteBackdrop, SiteDrawing } from "./login/SiteDrawing";
 import { LoginCard } from "./login/LoginCard";
+import { FloatingBits } from "./login/FloatingBits";
+import { SitePlan } from "./login/SitePlan";
 import { WelcomeBack } from "./login/WelcomeBack";
+import { FLOW } from "./login/motion";
 
 export default function Login() {
   const { appVersion } = useAppVersion();
@@ -65,29 +69,35 @@ export default function Login() {
   };
 
   return (
+    // reducedMotion="user": everything here holds still for anyone whose system asks for less motion.
+    <MotionConfig reducedMotion="user">
     <div
       className="login-page login-sheet min-h-screen w-full overflow-x-hidden overflow-y-auto relative"
-      style={{ background: "var(--ground)" }}
+      style={{ background: "var(--page)" }}
     >
       <style>{LOGIN_CSS}</style>
 
-      {/* The drawing grid, and a still wash of violet in the top corner */}
-      <div
-        className="absolute inset-0 z-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            "radial-gradient(60% 50% at 0% 0%, rgba(124,58,237,0.22), transparent 70%), linear-gradient(rgba(167,139,250,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(167,139,250,0.07) 1px, transparent 1px)",
-          backgroundSize: "auto, 28px 28px, 28px 28px",
-        }}
-      />
-
       <AnimatePresence>{loginSuccess && <WelcomeBack name={loginName} />}</AnimatePresence>
 
-      {/* The whole screen: headline and figures on the left, the sign-in panel on the right */}
-      <div className="bw-login-lift relative z-10 grid grid-cols-1 lg:grid-cols-[1fr_minmax(420px,34%)] min-h-screen">
-          <LoginHero stats={stats} />
+      {/* Phone and tablet: the blueprint fills the screen behind the form. */}
+      <SiteBackdrop />
 
-          <div className="flex justify-center items-center px-5 py-10 sm:px-10 lg:border-l" style={{ borderColor: "var(--rule)", background: "rgba(20,16,42,0.78)" }}>
+      {/* Wide screens: one drafting-film panel on the grey page, the form on the left and the blueprint on the right.
+          Narrower, the panel goes clear and the form sits in a frosted card over the blueprint. The form stays the last
+          child in the markup (the drawing moves right with order): the black-and-white theme keeps the logo in colour
+          through it. */}
+      <div className="min-h-screen flex items-center justify-center p-4 sm:p-5 lg:p-[min(2rem,3vh)]">
+        <motion.div
+          initial={{ opacity: 0, y: 40, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={FLOW}
+          className="ls-panel bw-login-lift relative z-10 w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-6 lg:rounded-[24px] lg:p-4"
+        >
+          <div className="hidden lg:block lg:order-2">
+            <SiteDrawing stats={stats} />
+          </div>
+          <div className="ls-form-side relative overflow-hidden flex justify-center items-center">
+            <SitePlan />
             <LoginCard
               email={email}
               password={password}
@@ -106,8 +116,11 @@ export default function Login() {
               onSubmit={handleSubmit}
               onNavigate={(path) => navigate(path)}
             />
+            <FloatingBits />
           </div>
+        </motion.div>
       </div>
     </div>
+    </MotionConfig>
   );
 }

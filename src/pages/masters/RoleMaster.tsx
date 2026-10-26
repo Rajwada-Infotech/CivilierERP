@@ -30,6 +30,7 @@ import {
 import {
   roleMasterSchema,
   type RoleMasterForm,
+  type RoleMasterFormInput,
 } from "@/schemas/roleMasterSchema";
 import { BodyPortal } from "@/components/ui/body-portal";
 
@@ -206,7 +207,7 @@ const RoleMaster: React.FC = () => {
     trigger,
     clearErrors,
     formState: { errors },
-  } = useForm<RoleMasterForm>({
+  } = useForm<RoleMasterFormInput, unknown, RoleMasterForm>({
     resolver: zodResolver(roleMasterSchema),
     defaultValues: EMPTY,
   });

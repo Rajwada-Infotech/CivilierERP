@@ -321,7 +321,7 @@ export interface ReportedAssignment {
   attemptNo: number;
   reworkFromAssignmentId: number | null;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -696,8 +696,16 @@ export interface QcHistoryEntry {
 // Quality Check now inspects COMPLETED activities (work dragged to 100%),
 // not IN_PROGRESS ones — an activity only reaches QC once it's actually
 // done, not while it's still being worked on.
-export const getCompletedAssignments = async (): Promise<ReportedAssignment[]> => {
-  const res = await fetchWithAuth(`${BASE}?status=COMPLETED`);
+/** How many rows one Quality Check request brings back; the page says so when a project or search would show more. */
+export const QC_QUEUE_LIMIT = 500;
+
+/** Quality Check's queue: Completed work that hasn't passed QC yet, narrowed on the server by project and search
+ *  (it used to fetch every Completed activity, capped at the route's default of 2000, and filter here). */
+export const getQcQueue = async (params: { projectId?: number; search?: string }): Promise<ReportedAssignment[]> => {
+  const q = new URLSearchParams({ status: "COMPLETED", qcPending: "1", limit: String(QC_QUEUE_LIMIT) });
+  if (params.projectId) q.set("projectId", String(params.projectId));
+  if (params.search) q.set("search", params.search);
+  const res = await fetchWithAuth(`${BASE}?${q}`);
   return handleResponse<ReportedAssignment[]>(res);
 };
 
@@ -789,7 +797,7 @@ export interface AssignmentAttempt {
   endDate: string | null;
   reworkFromAssignmentId: number | null;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   createdAt: string;
   updatedAt: string | null;
   engineerNames: string | null;
@@ -819,7 +827,7 @@ export interface AmendmentRecord {
   attemptNo: number;
   status: AssignmentStatus;
   reworkReason: string | null;
-  reworkSource: "QC" | "APPROVAL" | null;
+  reworkSource: "QC" | "APPROVAL" | "RESTORE" | null;
   startDate: string | null;
   endDate: string | null;
   updatedAt: string;
@@ -853,9 +861,9 @@ export const getAmendments = async (): Promise<AmendmentRecord[]> => {
 // Bringing a Cancelled activity back — super_admin only (enforced
 // server-side by role, not a page right), and only after reviewing the
 // activity's full detail in ActivityDetailModal, where this is called
-// from. Restores to APPROVED if it genuinely was before being cancelled,
-// otherwise IN_PROGRESS regardless of exactly where it was — see the
-// backend route's own comment.
+// from. Restores to APPROVED if it genuinely was before being cancelled;
+// otherwise it starts over as a fresh attempt at ALLOCATED (PENDING if no
+// engineer is on it) with Work Done at 0 — see the backend route's own comment.
 export const restoreCancelledActivity = async (
   rungId: number,
 ): Promise<{ success: boolean; status: AssignmentStatus }> => {

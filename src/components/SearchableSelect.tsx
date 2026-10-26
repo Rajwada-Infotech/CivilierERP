@@ -16,6 +16,8 @@ interface Props {
   searchPlaceholder?: string;
   disabled?: boolean;
   className?: string;
+  /** Drawn square in ink, for drawing-sheet pages (a dialog renders outside the page, so it can't be detected). */
+  sheet?: boolean;
 }
 
 const GAP = 6;
@@ -51,6 +53,7 @@ export function SearchableSelect({
   searchPlaceholder = "Search…",
   disabled,
   className = "",
+  sheet = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -171,9 +174,9 @@ export function SearchableSelect({
           zIndex: 9999,
           ...(openUp ? { bottom: bounds.height - relTop + GAP } : { top: relBottom + GAP }),
         }}
-        className="rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden"
+        className={sheet ? "border border-foreground bg-popover text-popover-foreground shadow-xl overflow-hidden" : "rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden"}
       >
-        <div className="p-1.5 border-b border-border">
+        <div className={sheet ? "p-1.5 border-b border-foreground/30" : "p-1.5 border-b border-border"}>
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -182,7 +185,7 @@ export function SearchableSelect({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder={searchPlaceholder}
-              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className={sheet ? "w-full pl-7 pr-2 py-1.5 border border-foreground/40 focus:border-foreground bg-card text-sm outline-none" : "w-full pl-7 pr-2 py-1.5 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"}
             />
           </div>
         </div>
@@ -198,12 +201,12 @@ export function SearchableSelect({
                 disabled={o.disabled}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(o)}
-                className={`w-full flex items-center gap-2 text-left px-2.5 py-1.5 rounded-md text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`w-full flex items-center gap-2 text-left px-2.5 py-1.5 ${sheet ? "" : "rounded-md"} text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   i === active ? "ss-opt-active text-foreground" : "text-foreground"
                 } ${o.value === value ? "font-medium" : ""}`}
               >
                 <span className="flex-1 truncate">{o.label}</span>
-                {o.value === value && <Check size={13} className="mod-text shrink-0" />}
+                {o.value === value && <Check size={13} className={sheet ? "shrink-0" : "mod-text shrink-0"} />}
               </button>
             ))
           )}
@@ -220,7 +223,9 @@ export function SearchableSelect({
         type="button"
         disabled={disabled}
         onClick={() => (open ? close() : setOpen(true))}
-        className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-background text-sm text-left focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 ${className}`}
+        className={`w-full flex items-center justify-between gap-2 text-sm text-left disabled:opacity-50 ${sheet
+          ? "h-9 px-2.5 border border-foreground/40 hover:border-foreground focus:border-foreground bg-card outline-none"
+          : "px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"} ${className}`}
       >
         <span className={`truncate ${selected ? "text-foreground" : "text-muted-foreground"}`}>
           {selected ? selected.label : placeholder}

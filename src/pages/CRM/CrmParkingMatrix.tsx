@@ -1,34 +1,25 @@
-import { CrmStatus } from "@/constants/crmStatuses";
-import { useEffect, useMemo, useState } from "react";
-import { getSocket } from '@/lib/socket';
+// CRM Parking Matrix: every parking slot of a project by block and type, with who holds or has bought it. A free slot
+// can be sold on its own (no unit booking needed) or held for a customer; a held or sold one opens to show the record.
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Car, Clock, User, FileText, IndianRupee, CalendarClock, CheckCircle2 } from "lucide-react";
-
+import { Car } from "lucide-react";
+import { getSocket } from "@/lib/socket";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { translateError } from "@/lib/translateError";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CrmShell } from "@/components/crm/CrmShell";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import {
+  ExtendRow, Facts, Field, HOLDS_API, INP, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
+  customerOptions, fetchOptions, fmtMoney, holdCall, holdLeft, useMatrixCustomers, type Option, type TileStatus,
+} from "./matrix/shared";
 
 const API = "/api/parking-matrix";
 const RATE_API = "/api/parking-master/rate";
-const APP_API = "/api/crm/applications";
-const HOLDS_API = "/api/crm/holds";
-
-interface Option {
-  Id: number;
-  Name: string;
-}
 
 interface MatrixSlot {
   Id: number;
@@ -36,7 +27,7 @@ interface MatrixSlot {
   ParkingType: string;
   BlockId: number | null;
   BlockName: string | null;
-  Status: "Available" | "Booked" | "OnHold" | "Blocked";
+  Status: TileStatus;
   AllotmentId: number | null;
   BookingId: number | null;
   BookingNo: string | null;
@@ -60,87 +51,23 @@ interface MatrixSlot {
   HoldAssignedToEmail: string | null;
 }
 
-const STATUS_STYLE: Record<string, string> = {
-  Available: "bg-emerald-500/15 text-emerald-600 border border-emerald-400/30",
-  Booked: "bg-rose-500/15 text-rose-600 border border-rose-400/30",
-  OnHold: "bg-amber-500/15 text-amber-600 border border-amber-400/30",
-  Blocked: "bg-muted text-muted-foreground border border-border",
-};
-const PAYMENT_STATUS_STYLE: Record<string, string> = {
-  Paid: "text-emerald-600 bg-emerald-50 border-emerald-200",
-  Pending: "text-amber-600 bg-amber-50 border-amber-200",
-};
-const fmtMoney = (n: number | null | undefined) => n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
-
-async function fetchOptions<T>(url: string): Promise<T[]> {
-  const res = await fetchWithAuth(url);
-  if (!res.ok) return [];
-  return res.json().catch(() => []);
-}
-
 async function fetchMatrix(projectId: string, blockId: string): Promise<MatrixSlot[]> {
   const params = new URLSearchParams({ projectId });
   if (blockId) params.set("blockId", blockId);
-  const res = await fetchWithAuth(`${API}?${params}`);
-  if (!res.ok) throw new Error("Failed to load parking matrix");
-  return res.json();
+  return fetchOptions<MatrixSlot>(`${API}?${params}`);
 }
 
-const NONE = "__none__";
-
-// Available slot -> choose whether to sell it now or just hold it for a
-// customer who's still deciding.
-function ActionChoiceDialog({
-  slot, onClose, onSell, onHold,
-}: { slot: MatrixSlot; onClose: () => void; onSell: () => void; onHold: () => void }) {
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-sm">
-        <DialogHeader><DialogTitle className="font-heading">Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-1 gap-2 pt-1">
-          <button onClick={onSell} className="px-4 py-2.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg text-left">
-            Sell Now
-            <span className="block text-[0.6875rem] font-normal opacity-80">Allot this slot to a customer immediately</span>
-          </button>
-          <button onClick={onHold} className="px-4 py-2.5 text-sm border border-border rounded-lg font-medium hover:bg-muted text-left">
-            Place On Hold
-            <span className="block text-[0.6875rem] font-normal text-muted-foreground">Reserve for N days while the customer decides</span>
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Buying a parking slot never requires a unit booking — this dialog only
-// asks who it's for (any Application) and how many. If that same customer
-// also has a unit booking, staff can instead allot parking from the
-// booking's own Charges dialog so it rides the booking's payment schedule;
-// this path always creates a standalone, independently-paid sale.
-function BookParkingDialog({
-  slot, projectId, onClose,
-}: { slot: MatrixSlot; projectId: string; onClose: () => void }) {
-  const rights = usePageRights("crm-parking-matrix");
+// Sell a slot on its own: who it's for (any live customer of the project, booked or not) and how many. A customer
+// with a unit booking can instead get parking from the booking's Charges, so it rides the booking's schedule; this
+// path is always a standalone, separately paid sale.
+function SellDialog({ slot, projectId, onClose }: { slot: MatrixSlot; projectId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
-
-  const { data: allApps = [] } = useQuery({
-    queryKey: ["crm-applications-for-parking"],
-    queryFn: () => fetchOptions<any>(APP_API),
-  });
-  // Scoped to this slot's own Project — the backend now rejects a
-  // cross-project sale outright (see crmParking.js POST /standalone), but
-  // showing every Application system-wide here made that mismatch trivial
-  // to create by accident in the first place.
-  const apps = useMemo(
-    () => (allApps as any[]).filter((a: any) => String(a.ProjectId) === projectId),
-    [allApps, projectId]
-  );
-
-  const { data: rate } = useQuery({
+  const { data: customers = [], isLoading } = useMatrixCustomers(projectId);
+  const { data: rate, isLoading: loadingRate } = useQuery({
     queryKey: ["parking-rate", projectId, slot.BlockId, slot.ParkingType],
     queryFn: async () => {
       const params = new URLSearchParams({ projectId, parkingType: slot.ParkingType });
@@ -150,29 +77,23 @@ function BookParkingDialog({
     },
   });
 
-  const handleBook = async () => {
-    if (!applicationId) { toast.error("Select a customer"); return; }
-    if (!rate?.Id) { toast.error(`No active parking rate configured for ${slot.ParkingType} in this project/block`); return; }
+  const sell = async () => {
+    if (!applicationId) return void toast.error("Select a customer.");
+    if (!rate?.Id) return void toast.error(`No ${slot.ParkingType} parking rate is set for this project or block.`);
     setSaving(true);
     try {
       const res = await fetchWithAuth("/api/crm/parking/standalone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ApplicationId: parseInt(applicationId),
-          ParkingMasterId: rate.Id,
-          ParkingSlotId: slot.Id,
-          Quantity: parseInt(quantity) || 1,
-          Notes: notes || null,
-        }),
+        body: JSON.stringify({ ApplicationId: parseInt(applicationId, 10), ParkingMasterId: rate.Id, ParkingSlotId: slot.Id, Quantity: parseInt(quantity, 10) || 1, Notes: notes || null }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Parking slot ${slot.SlotNo} sold — ₹${data.TotalAmount.toLocaleString("en-IN")}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not sell the slot.");
+      toast.success(`Slot ${slot.SlotNo} sold for ${fmtMoney(data.TotalAmount)}`);
       qc.invalidateQueries({ queryKey: ["parking-matrix"] });
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(translateError(e.message));
     } finally {
       setSaving(false);
     }
@@ -180,320 +101,110 @@ function BookParkingDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-md">
-        <DialogHeader><DialogTitle className="font-heading">Book Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="font-medium">{slot.ParkingType}</span></div>
-            <div className="flex justify-between mt-1"><span className="text-muted-foreground">Rate</span>
-              <span className="font-medium">{rate ? `₹${Number(rate.Charge).toLocaleString("en-IN")} + ${rate.GstRate}% GST` : "No rate configured"}</span>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Customer (Application) *</label>
-            <SearchableNativeSelect value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Select customer</option>
-              {apps.map((a: any) => (
-                <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
-              ))}
-            </SearchableNativeSelect>
-            <p className="text-[0.6875rem] text-muted-foreground mt-1">This customer does not need an existing unit booking — parking can be sold on its own. Only Applications for this same Project are shown.</p>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Quantity</label>
-            <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+      <DialogContent className="max-w-md p-5 gap-4 rounded-none" style={{ border: RULE }}>
+        <DialogHeader>
+          <DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em]">Sell slot {slot.SlotNo}</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-px" style={{ background: "hsl(var(--foreground) / 0.15)", border: RULE_SOFT }}>
+          <div className="bg-card px-3 py-2"><p className={LBL}>Type</p><p className="text-sm font-medium mt-0.5">{slot.ParkingType}</p></div>
+          <div className="bg-card px-3 py-2"><p className={LBL}>Rate</p>
+            <p className={`text-sm font-medium mt-0.5 tabular-nums ${!loadingRate && !rate ? "text-destructive" : ""}`}>{loadingRate ? "…" : rate ? `${fmtMoney(rate.Charge)} + ${rate.GstRate}% GST` : "No rate set"}</p>
           </div>
         </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          {rights.canCreate && (
-            <button onClick={handleBook} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Booking..." : "Book Slot"}
-            </button>
-          )}
+        <Field label="Customer *" hint="Any live customer of this project, with or without a unit booking.">
+          <SearchableSelect value={applicationId} onChange={setApplicationId} placeholder={isLoading ? "Loading customers…" : customers.length ? "Select customer" : "No live customer in this project"}
+            searchPlaceholder="Search name, mobile or application…" options={customerOptions(customers)} />
+        </Field>
+        <Field label="Quantity"><input type="number" min={1} value={quantity} onChange={(e) => setQuantity(e.target.value)} className={INP} /></Field>
+        <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={`${INP} h-auto py-2 resize-none`} /></Field>
+        <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+          <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+          <button onClick={sell} disabled={saving || !rate} className={`${KEY_INK} h-9 px-4`}>{saving ? "Selling…" : "Sell slot"}</button>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; projectId: string; onClose: () => void }) {
-  const rights = usePageRights("crm-parking-matrix");
-  const qc = useQueryClient();
-  const [applicationId, setApplicationId] = useState("");
-  const [holdDays, setHoldDays] = useState("3");
-  const [reason, setReason] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const { data: allApps = [] } = useQuery({
-    queryKey: ["crm-applications-for-parking"],
-    queryFn: () => fetchOptions<any>(APP_API),
-  });
-  const apps = useMemo(
-    () => (allApps as any[]).filter((a: any) => String(a.ProjectId) === projectId),
-    [allApps, projectId]
-  );
-
-  const handlePlace = async () => {
-    if (!applicationId) { toast.error("Select a customer"); return; }
-    const days = parseInt(holdDays);
-    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(HOLDS_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ EntityType: "Parking", EntityId: slot.Id, ApplicationId: parseInt(applicationId), HoldDays: days, Reason: reason || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Parking slot ${slot.SlotNo} held for ${days} day(s)`);
-      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-md">
-        <DialogHeader><DialogTitle className="font-heading">Hold Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Customer (Application) *</label>
-            <SearchableNativeSelect value={applicationId} onChange={(e) => setApplicationId(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-              <option value="">Select customer</option>
-              {apps.map((a: any) => (
-                <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
-              ))}
-            </SearchableNativeSelect>
-            {apps.length === 0 && (
-              <p className="text-[0.6875rem] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this slot can hold it.</p>
-            )}
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Hold for how many days? *</label>
-            <input type="number" min={1} max={90} value={holdDays} onChange={(e) => setHoldDays(e.target.value)}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <p className="text-[0.6875rem] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Reason (optional)</label>
-            <textarea value={reason} onChange={(e) => setReason(e.target.value)}
-              rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          {rights.canCreate && (
-            <button onClick={handlePlace} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Placing..." : "Place Hold"}
-            </button>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Shared detail dialog for tapping any non-Available tile — mirrors
-// CrmUnitMatrix.tsx's TileInfoDialog. Parking allotments can be standalone
-// (sold independent of a unit booking, BookingId NULL) so the Booked path
-// only offers an "Open Booking" link when one actually exists. OnHold now
-// also covers "an Allotment exists but its own linked milestone isn't Paid
-// yet" — Extend Hold is offered there; releasing/cancelling an unpaid
-// allotment itself already has a proper flow on the booking's own Charges
-// dialog (crmParking.js applyReleaseParking, gated by the same legal-work/
-// amendment-queue rules as any other post-booking edit), so this dialog
-// doesn't shortcut around that — it links out instead.
+// A held or sold slot, opened. A sale can be standalone (no booking). "Held" also covers a sale whose own charge isn't
+// paid yet: Extend is offered there, while releasing the sale itself belongs to the booking's Charges (it follows the
+// same legal-work and amendment rules as any other post-booking change), so this links out.
 function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
   const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [releasing, setReleasing] = useState(false);
-  const [extending, setExtending] = useState(false);
-  const [extendDays, setExtendDays] = useState("3");
+  const [busy, setBusy] = useState(false);
   const [showExtend, setShowExtend] = useState(false);
   const isHold = slot.Status === "OnHold";
   const hasUnpaidAllotment = isHold && slot.AllotmentId != null;
+  const refresh = () => qc.invalidateQueries({ queryKey: ["parking-matrix"] });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["parking-matrix"] });
-
-  const handleRelease = async () => {
-    setReleasing(true);
+  const release = async () => {
+    setBusy(true);
     try {
-      const res = await fetchWithAuth(`${HOLDS_API}/${slot.HoldId}/release`, { method: "PUT" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(`Hold released — slot ${slot.SlotNo} is Available again`);
-      invalidate();
+      await holdCall(`${HOLDS_API}/${slot.HoldId}/release`, "PUT");
+      toast.success(`Hold released; slot ${slot.SlotNo} is free again`);
+      refresh();
       onClose();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setReleasing(false);
-    }
+    } catch (e: any) { toast.error(translateError(e.message)); } finally { setBusy(false); }
   };
 
-  const handleExtend = async () => {
-    const days = parseInt(extendDays);
-    if (!Number.isFinite(days) || days < 1) { toast.error("Enter a valid number of days"); return; }
-    setExtending(true);
-    try {
-      const res = await fetchWithAuth(`${HOLDS_API}/${slot.HoldId}/extend`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ AdditionalDays: days }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(`Hold extended by ${days} day(s)`);
-      invalidate();
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setExtending(false);
-    }
-  };
-
-  const appNo = (isHold && slot.HoldApplicationNo) || slot.ApplicationNo;
-  const applicantName = (isHold && slot.HoldApplicantName) || slot.ApplicantName;
-  const mobile = (isHold && slot.HoldMobile) || slot.Mobile;
-  const assignedName = (isHold && slot.HoldAssignedToName) || slot.AssignedToName;
-  const assignedEmail = (isHold && slot.HoldAssignedToEmail) || slot.AssignedToEmail;
+  const pick = <T,>(hold: T, own: T) => (isHold && hold) || own;
+  const left = isHold ? holdLeft(slot.HoldUntil) : null;
+  const state = isHold ? (hasUnpaidAllotment ? "Sold, payment pending" : "On hold") : "Sold";
+  // The booking's own card when there is one; a standalone sale has only its application.
+  const openRecord = () => navigate(slot.BookingId != null ? `/crm/bookings?view=${slot.BookingId}` : `/crm/applications?id=${slot.ApplicationId}`);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-lg">
+      <DialogContent className="max-w-lg p-5 gap-4 rounded-none" style={{ border: RULE }}>
         <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <Car size={18} className="text-primary" />
-            Slot {slot.SlotNo}
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${STATUS_STYLE[isHold ? "OnHold" : "Booked"]}`}>
-              {isHold ? (hasUnpaidAllotment ? "Booked — Payment Pending" : "On Hold") : "Booked"}
+          <DialogTitle className="min-w-0">
+            <span className={`block ${LBL}`}>Parking slot</span>
+            <span className="font-heading text-lg font-bold flex flex-wrap items-center gap-2">
+              <Car size={16} /> <span className="tabular-nums">{slot.SlotNo}</span>
+              <SheetMark text={state} tone={isHold ? "waiting" : "done"} />
             </span>
+            <span className="block text-xs text-muted-foreground font-normal mt-0.5">{[slot.ParkingType, slot.BlockName, slot.Quantity ? `Qty ${slot.Quantity}` : null].filter(Boolean).join(" · ")}</span>
           </DialogTitle>
         </DialogHeader>
 
-        {(slot.BlockName || slot.ParkingType) && (
-          <p className="text-xs text-muted-foreground -mt-2">{slot.ParkingType}{slot.BlockName ? ` · ${slot.BlockName}` : ""}{slot.Quantity ? ` · Qty ${slot.Quantity}` : ""}</p>
+        <Facts title="Customer" rows={[
+          ["Application", pick(slot.HoldApplicationNo, slot.ApplicationNo)],
+          ["Applicant", pick(slot.HoldApplicantName, slot.ApplicantName)],
+          ["Mobile", pick(slot.HoldMobile, slot.Mobile)],
+          ["Salesperson", <>{pick(slot.HoldAssignedToName, slot.AssignedToName) || "—"}{pick(slot.HoldAssignedToEmail, slot.AssignedToEmail) && <span className="block text-[0.6875rem] text-muted-foreground">{pick(slot.HoldAssignedToEmail, slot.AssignedToEmail)}</span>}</>],
+        ]} />
+
+        {slot.AllotmentId != null && (
+          <Facts title="Sale" rows={[
+            ["Booking", slot.BookingNo || "Standalone parking sale"],
+            ["Payment", slot.AllotmentPaymentStatus ? <SheetMark text={slot.AllotmentPaymentStatus} tone={slot.AllotmentPaymentStatus === "Paid" ? "done" : "waiting"} /> : "—"],
+            ["Sold on", slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"],
+            ["Charge", fmtMoney(slot.TotalAmount)],
+          ]} />
         )}
 
-        <div className="rounded-xl border border-border p-4 space-y-2">
-          <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Application & Customer</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-            <div><span className="text-muted-foreground block">Application No</span><span className="font-semibold text-sm">{appNo || "—"}</span></div>
-            <div><span className="text-muted-foreground block">Applicant</span><span className="font-semibold text-sm">{applicantName || "—"}</span></div>
-            <div><span className="text-muted-foreground block">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
-            <div>
-              <span className="text-muted-foreground flex items-center gap-1"><User size={11} /> Salesperson</span>
-              <span className="font-medium">{assignedName || "—"}</span>
-              {assignedEmail && <span className="block text-[0.6875rem] text-muted-foreground">{assignedEmail}</span>}
-            </div>
-          </div>
-        </div>
-
-        {isHold ? (
-          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-sky-800">
-              <Clock size={14} /> Hold Status
-            </h3>
-            {hasUnpaidAllotment && (
-              <div className="text-xs pt-1 border-t border-current/10">
-                <span className="text-muted-foreground block">Booking</span>
-                <span className="font-semibold">{slot.BookingNo || "Standalone parking sale"}</span>
-              </div>
-            )}
-            {hasUnpaidAllotment && (
-              <p className="text-[0.6875rem] text-sky-700 bg-sky-100/60 border border-sky-200 rounded px-2 py-1.5 flex items-center gap-1.5">
-                <CheckCircle2 size={12} className="shrink-0" /> Parking charge not yet paid — this tile flips to Booked automatically once it's received.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-600" /> Sale</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <div><span className="text-muted-foreground block">Booking</span><span className="font-semibold text-sm">{slot.BookingNo || "Standalone parking sale"}</span></div>
-              <div>
-                <span className="text-muted-foreground block">Payment Status</span>
-                <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${PAYMENT_STATUS_STYLE[slot.AllotmentPaymentStatus || ""] || ""}`}>
-                  {slot.AllotmentPaymentStatus || "—"}
-                </span>
-              </div>
-              <div className="flex items-center gap-1"><CalendarClock size={11} className="text-muted-foreground" /><span className="text-muted-foreground">Sold on</span></div>
-              <div className="font-medium">{slot.AllotmentDate ? String(slot.AllotmentDate).slice(0, 10) : "—"}</div>
-            </div>
-          </div>
+        {isHold && (
+          <p className="text-xs px-3 py-2" style={{ border: RULE_SOFT }}>
+            {hasUnpaidAllotment ? "The parking charge isn't paid yet; the tile turns Sold once it is." : "Held for the customer while they decide."}
+            {left && <span className="font-semibold"> Hold: {left}.</span>}
+          </p>
         )}
 
-        {slot.TotalAmount != null && (
-          <div className="rounded-xl border border-border p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Charge</h3>
-            <div className="text-sm font-bold">{fmtMoney(slot.TotalAmount)}</div>
-          </div>
-        )}
+        {showExtend && slot.HoldId != null && <ExtendRow holdId={slot.HoldId} onDone={() => { refresh(); onClose(); }} />}
 
-        {showExtend && (
-          <div className="rounded-lg border border-border p-2.5 flex items-end gap-2">
-            <div className="flex-1">
-              <label className="text-xs text-muted-foreground block mb-1">Extend by (days)</label>
-              <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            {rights.canEdit && (
-              <button onClick={handleExtend} disabled={extending}
-                className="px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                {extending ? "Extending..." : "Confirm"}
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-3 border-t border-border flex-wrap">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-          {hasUnpaidAllotment ? (
-            <>
-              {rights.canEdit && slot.HoldId != null && (
-                <button onClick={() => setShowExtend((s) => !s)}
-                  className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
-                  Extend Hold
-                </button>
-              )}
-              <button onClick={() => navigate(slot.BookingId != null ? `/crm/bookings?applicationId=${slot.ApplicationId}` : `/crm/applications`)}
-                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
-                {slot.BookingId != null ? "Open Booking" : "Open Application"}
-              </button>
-            </>
-          ) : isHold ? (
-            rights.canEdit && (
-              <button onClick={handleRelease} disabled={releasing}
-                className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
-                {releasing ? "Releasing..." : "Release Hold"}
-              </button>
+        <div className="flex flex-wrap justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
+          <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Close</button>
+          {isHold && rights.canEdit && slot.HoldId != null && hasUnpaidAllotment && (
+            <button onClick={() => setShowExtend((s) => !s)} className={`${KEY_LINE} h-9 px-3`}>Extend hold</button>
+          )}
+          {isHold && !hasUnpaidAllotment ? (
+            rights.canEdit && slot.HoldId != null && (
+              <button onClick={release} disabled={busy} className={`${KEY_RED} h-9 px-4`}>{busy ? "Releasing…" : "Release hold"}</button>
             )
-          ) : slot.BookingId != null ? (
-            <button onClick={() => navigate(`/crm/bookings?applicationId=${slot.ApplicationId}`)}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
-              Open Booking
-            </button>
           ) : (
-            <button onClick={() => navigate(`/crm/applications`)}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
-              Open Application
-            </button>
+            <button onClick={openRecord} className={`${KEY_INK} h-9 px-4`}>{slot.BookingId != null ? "Open booking" : "Open application"}</button>
           )}
         </div>
       </DialogContent>
@@ -503,7 +214,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 
 export function ParkingMatrixPage() {
   const navigate = useNavigate();
-  usePageRights("crm-parking-matrix");
+  const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState("");
   const [blockId, setBlockId] = useState("");
@@ -512,182 +223,172 @@ export function ParkingMatrixPage() {
   const [holdSlot, setHoldSlot] = useState<MatrixSlot | null>(null);
   const [infoSlot, setInfoSlot] = useState<MatrixSlot | null>(null);
 
-  // Forces a re-render every minute so hold countdown badges (and any open
-  // TileInfoDialog) tick down live instead of only updating on refetch.
+  // Live updates: any sale, hold or release on this project refreshes the matrix (whatever block is in view).
   useEffect(() => {
     const sock = getSocket();
     if (!sock) return;
-    const handleMatrixUpdate = (payload: any) => {
-      if (!payload?.projectId || payload.projectId === Number(projectId)) {
-        qc.invalidateQueries({ queryKey: ["parking-matrix", projectId] });
-      }
+    const onUpdate = (payload: any) => {
+      if (!payload?.projectId || payload.projectId === Number(projectId)) qc.invalidateQueries({ queryKey: ["parking-matrix"] });
     };
-    sock.on("matrix:update", handleMatrixUpdate);
-    return () => {
-      sock.off("matrix:update", handleMatrixUpdate);
-    };
+    sock.on("matrix:update", onUpdate);
+    return () => { sock.off("matrix:update", onUpdate); };
   }, [projectId, qc]);
-
+  // Re-render every minute so the hold countdowns tick.
   const [, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 60000);
-    return () => clearInterval(t);
-  }, []);
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 60_000); return () => clearInterval(t); }, []);
 
-  const { data: projects = [] } = useQuery({
-    queryKey: ["parking-matrix-projects"],
-    queryFn: () => fetchOptions<Option>(`${API}/projects`),
-  });
-
+  const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["parking-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
+  useEffect(() => { if (!projectId && projects.length === 1) setProjectId(String(projects[0].Id)); }, [projects, projectId]);
   const { data: blocks = [] } = useQuery({
     queryKey: ["parking-matrix-blocks", projectId],
     queryFn: () => fetchOptions<Option>(`${API}/blocks?projectId=${projectId}`),
     enabled: !!projectId,
   });
-
-  const { data: slots = [], isLoading } = useQuery({
+  const { data: slots = [], isLoading, isError, error } = useQuery({
     queryKey: ["parking-matrix", projectId, blockId],
     queryFn: () => fetchMatrix(projectId, blockId),
     enabled: !!projectId,
   });
 
-  const stats = useMemo(() => {
-    const total = slots.length;
-    const available = slots.filter((s) => s.Status === "Available").length;
-    const onHold = slots.filter((s) => s.Status === "OnHold").length;
-    const booked = slots.filter((s) => s.Status === CrmStatus.BOOKED).length;
-    const blocked = slots.filter((s) => s.Status === "Blocked").length;
-    return { total, available, onHold, booked, blocked };
+  // By block, then by parking type (it was one flat grid of every slot).
+  const grouped = useMemo(() => {
+    const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    const byBlock = new Map<string, Map<string, MatrixSlot[]>>();
+    for (const s of slots) {
+      const bk = s.BlockName || "No block";
+      const tk = s.ParkingType || "Parking";
+      if (!byBlock.has(bk)) byBlock.set(bk, new Map());
+      const m = byBlock.get(bk)!;
+      if (!m.has(tk)) m.set(tk, []);
+      m.get(tk)!.push(s);
+    }
+    return Array.from(byBlock.entries()).sort(([a], [b]) => cmp(a, b)).map(([blockName, typeMap]) => ({
+      blockName,
+      count: Array.from(typeMap.values()).reduce((n, l) => n + l.length, 0),
+      free: Array.from(typeMap.values()).reduce((n, l) => n + l.filter((s) => s.Status === "Available").length, 0),
+      types: Array.from(typeMap.entries()).sort(([a], [b]) => cmp(a, b)).map(([t, list]) => [t, [...list].sort((x, y) => cmp(x.SlotNo, y.SlotNo))] as const),
+    }));
   }, [slots]);
+
+  const counts = useMemo(() => {
+    const c: Record<TileStatus, number> = { Available: 0, OnHold: 0, Booked: 0, Blocked: 0 };
+    slots.forEach((s) => { c[s.Status] = (c[s.Status] || 0) + 1; });
+    return c;
+  }, [slots]);
+  const forSale = slots.length - counts.Blocked;
+  const unpaid = slots.filter((s) => s.Status === "OnHold" && s.AllotmentId != null).length;
+  const canSell = rights.canEdit;
+  const canHold = rights.canCreate;
+
+  const onTile = (s: MatrixSlot) => {
+    if (s.Status === "OnHold" || s.Status === "Booked") return setInfoSlot(s);
+    if (s.Status !== "Available") return;
+    if (canSell && canHold) setChoiceSlot(s);
+    else if (canSell) setSellSlot(s);
+    else if (canHold) setHoldSlot(s);
+  };
 
   return (
     <>
-      <Breadcrumbs
-        items={[
-          { label: "CRM", path: "/crm/dashboard" },
-          { label: "Parking Matrix", path: "/crm/parking-matrix" },
-        ]}
-      />
-      <CrmShell
+      <Breadcrumbs items={[{ label: "CRM", path: "/crm/dashboard" }, { label: "Parking Matrix", path: "/crm/parking-matrix" }]} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
         title="Parking Matrix"
-        icon={Car}
+        subtitle="Every parking slot of a project, by block and type. Sell a free slot on its own or hold it for a customer; open a held or sold one to see who."
         action={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate("/crm/setup/parking-master")}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors"
-            >
-              <Car size={14} /> Parking Rate Master
-            </button>
-            <button
-              onClick={() => navigate("/crm/setup/parking-slot-master")}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm font-medium rounded-lg hover:bg-muted transition-colors"
-            >
-              <Car size={14} /> Parking Slot Master
-            </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => navigate("/crm/setup/parking-master")} className={`${KEY_LINE} h-9 px-3`}><Car size={13} /> Parking rates</button>
+            <button onClick={() => navigate("/crm/setup/parking-slot-master")} className={`${KEY_LINE} h-9 px-3`}><Car size={13} /> Parking slots</button>
           </div>
         }
       >
-        <div className="flex gap-3 flex-wrap items-end">
-          <div className="min-w-56 space-y-1.5">
-            <label className="text-xs text-muted-foreground">Project</label>
-            <Select
-              value={projectId || NONE}
-              onValueChange={(v) => {
-                setProjectId(v === NONE ? "" : v);
-                setBlockId("");
-              }}
-            >
-              <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
-              <SelectContent>
-                {projects.map((p) => <SelectItem key={p.Id} value={String(p.Id)}>{p.Name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+        <div className="space-y-5">
+          <div className="bg-card px-5 py-4 flex flex-wrap items-end gap-3" style={{ border: RULE }}>
+            <label className="block space-y-1 w-full sm:w-72">
+              <span className={`block ${LBL}`}>Project</span>
+              <SearchableSelect value={projectId} onChange={(v) => { setProjectId(v); setBlockId(""); }}
+                placeholder={loadingProjects ? "Loading…" : projects.length ? "Select project" : "No project you can see"}
+                searchPlaceholder="Search projects…" options={projects.map((p) => ({ value: String(p.Id), label: p.Name }))} />
+            </label>
+            <label className="block space-y-1 w-full sm:w-56">
+              <span className={`block ${LBL}`}>Block</span>
+              <SearchableSelect value={blockId} onChange={setBlockId} disabled={!projectId} placeholder="All blocks"
+                searchPlaceholder="Search blocks…" options={[{ value: "", label: "All blocks" }, ...blocks.map((b) => ({ value: String(b.Id), label: b.Name }))]} />
+            </label>
+            {projectId && slots.length > 0 && <div className="sm:ml-auto"><Legend counts={counts} bookedLabel="Sold" /></div>}
           </div>
-          <div className="min-w-48 space-y-1.5">
-            <label className="text-xs text-muted-foreground">Block</label>
-            <Select value={blockId || NONE} onValueChange={(v) => setBlockId(v === NONE ? "" : v)} disabled={!projectId}>
-              <SelectTrigger><SelectValue placeholder="All blocks" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>All blocks</SelectItem>
-                {blocks.map((b) => <SelectItem key={b.Id} value={String(b.Id)}>{b.Name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
 
-        {!projectId ? (
-          <div className="py-20 text-center text-muted-foreground text-sm">Select a project to view its parking matrix</div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              {[
-                { label: "Total Slots", value: stats.total, dot: "bg-blue-400" },
-                { label: "Available", value: stats.available, dot: "bg-emerald-500" },
-                { label: "On Hold", value: stats.onHold, dot: "bg-amber-500" },
-                { label: "Booked", value: stats.booked, dot: "bg-rose-500" },
-                { label: "Blocked", value: stats.blocked, dot: "bg-muted-foreground" },
-              ].map(({ label, value, dot }) => (
-                <div key={label} className="rounded-xl border border-border bg-card p-4">
-                  <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
-                  <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
-                  <p className="text-[0.6875rem] text-muted-foreground mt-1">{label}</p>
+          {!projectId ? (
+            <p className="py-16 text-center text-sm text-muted-foreground">Select a project to see its parking.</p>
+          ) : isError ? (
+            <p className="py-16 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+          ) : (
+            <>
+              <div className="bg-card" style={{ border: RULE }}>
+                <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                  {[
+                    { label: "Free", value: counts.Available, note: `of ${slots.length} slots in this view` },
+                    { label: "On hold", value: counts.OnHold, note: unpaid ? `${unpaid} sold, charge not paid yet` : "Held for customers" },
+                    { label: "Sold", value: counts.Booked, note: `${forSale ? Math.round((counts.Booked / forSale) * 100) : 0}% of what is for sale` },
+                    { label: "Blocked", value: counts.Blocked, note: "Not for sale" },
+                  ].map((x) => (
+                    <div key={x.label}>
+                      <p className="label">{x.label}</p>
+                      <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                      <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-
-            {isLoading ? (
-              <div className="py-20 text-center text-muted-foreground text-sm">Loading matrix...</div>
-            ) : slots.length === 0 ? (
-              <div className="py-20 text-center text-muted-foreground text-sm">No parking slots found for this selection</div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                {slots.map((s) => (
-                  <button
-                    key={s.Id}
-                    onClick={() => {
-                      if (s.Status === "Available") setChoiceSlot(s);
-                      else if (s.Status === "OnHold" || s.Status === CrmStatus.BOOKED) setInfoSlot(s);
-                    }}
-                    disabled={s.Status === "Blocked"}
-                    className={`text-left bg-card border border-border rounded-xl p-3.5 transition-colors ${
-                      s.Status !== "Blocked" ? "hover:border-primary/50 hover:shadow-sm cursor-pointer" : "cursor-default opacity-90"
-                    }`}
-                    title={s.BlockName ? `${s.BlockName} — ${s.SlotNo}` : s.SlotNo}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                      <span className="font-bold text-sm text-foreground truncate">#{s.SlotNo}</span>
-                      <span className={`shrink-0 text-[0.625rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[s.Status]}`}>
-                        {s.Status === "OnHold" ? "Hold" : s.Status}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate flex items-center gap-1">
-                      {s.Status === CrmStatus.BOOKED ? (s.ApplicantName || s.BookingNo || "—")
-                        : s.Status === "OnHold" ? (
-                          <>
-                            <Clock size={11} className="shrink-0" />
-                            {s.HoldApplicantName || s.ApplicantName || "—"}
-                          </>
-                        ) : "—"}
-                    </div>
-                  </button>
-                ))}
               </div>
-            )}
-          </>
-        )}
-      </CrmShell>
+
+              {isLoading ? (
+                <p className="py-16 text-center text-sm text-muted-foreground">Loading the matrix…</p>
+              ) : slots.length === 0 ? (
+                <p className="py-16 text-center text-sm text-muted-foreground">No parking slots in this selection. Add them in Parking slots.</p>
+              ) : (
+                grouped.map(({ blockName, count, free, types }) => (
+                  <Section key={blockName} title={blockName} note={`${count} · ${free} free`}>
+                    {types.map(([type, list]) => (
+                      <div key={type}>
+                        <p className={`mb-2 ${LBL}`}>{type}</p>
+                        <div className={TILE_GRID}>
+                          {list.map((s) => (
+                            <Tile key={s.Id} name={s.SlotNo} status={s.Status}
+                              line={s.Status === "Booked" ? (s.ApplicantName || s.BookingNo || "—") : s.Status === "OnHold" ? (s.HoldApplicantName || s.ApplicantName || "—") : s.Status === "Blocked" ? "Not for sale" : "Free"}
+                              holdUntil={s.HoldUntil}
+                              title={s.Status === "Available" && !canSell && !canHold ? "You don't have the right to sell or hold slots." : undefined}
+                              disabled={s.Status === "Blocked" || (s.Status === "Available" && !canSell && !canHold)}
+                              onClick={() => onTile(s)} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </Section>
+                ))
+              )}
+            </>
+          )}
+        </div>
+      </SheetShell>
 
       {choiceSlot && (
-        <ActionChoiceDialog
-          slot={choiceSlot}
-          onClose={() => setChoiceSlot(null)}
-          onSell={() => { setSellSlot(choiceSlot); setChoiceSlot(null); }}
-          onHold={() => { setHoldSlot(choiceSlot); setChoiceSlot(null); }}
-        />
+        <Dialog open onOpenChange={(o) => !o && setChoiceSlot(null)}>
+          <DialogContent className="max-w-sm p-5 gap-3 rounded-none" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em]">Slot {choiceSlot.SlotNo}</DialogTitle></DialogHeader>
+            <button onClick={() => { setSellSlot(choiceSlot); setChoiceSlot(null); }} className={`${KEY_INK} h-auto py-3 px-4 !justify-start text-left flex-col !items-start`}>
+              Sell now <span className="normal-case tracking-normal font-normal text-[0.6875rem] opacity-80">Sell it to a customer straight away</span>
+            </button>
+            <button onClick={() => { setHoldSlot(choiceSlot); setChoiceSlot(null); }} className={`${KEY_LINE} h-auto py-3 px-4 !justify-start text-left flex-col !items-start`}>
+              Hold <span className="normal-case tracking-normal font-normal text-[0.6875rem] text-muted-foreground">Keep it for a customer for a few days</span>
+            </button>
+          </DialogContent>
+        </Dialog>
       )}
-      {sellSlot && <BookParkingDialog slot={sellSlot} projectId={projectId} onClose={() => setSellSlot(null)} />}
-      {holdSlot && <PlaceHoldDialog slot={holdSlot} projectId={projectId} onClose={() => setHoldSlot(null)} />}
+      {sellSlot && <SellDialog slot={sellSlot} projectId={projectId} onClose={() => setSellSlot(null)} />}
+      {holdSlot && (
+        <PlaceHoldDialog entityType="Parking" entityId={holdSlot.Id} label={`slot ${holdSlot.SlotNo}`} projectId={projectId}
+          canPlace={canHold} onDone={() => qc.invalidateQueries({ queryKey: ["parking-matrix"] })} onClose={() => setHoldSlot(null)} />
+      )}
       {infoSlot && <TileInfoDialog slot={infoSlot} onClose={() => setInfoSlot(null)} />}
     </>
   );

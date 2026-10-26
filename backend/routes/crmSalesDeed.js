@@ -4,7 +4,7 @@ const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: a sale deed belongs to its booking's project.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, assertBookingAllowed } = require("../services/projectScope");
 // :id is a different record on the query-payment and registry routes, so each
 // is traced to its booking through its own table.
 const guardDeed = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId WHERE d.Id = @id");
@@ -15,10 +15,16 @@ router.param("id", (req, res, next, value) => {
   if (req.path.startsWith("/registry/")) return guardRegistry(req, res, next, value);
   return guardDeed(req, res, next, value);
 });
+// A document or attachment id in the path (the file downloads take nothing else) is traced the same way.
+const guardDeedDoc = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmSalesDeedDocument x JOIN dbo.CrmSalesDeed d ON d.Id = x.SalesDeedId JOIN dbo.CrmBooking b ON b.Id = d.BookingId WHERE x.Id = @id");
+const guardRegistryDoc = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmRegistryDocument x JOIN dbo.CrmRegistry r ON r.Id = x.RegistryId JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE x.Id = @id");
+router.param("docId", (req, res, next, value) =>
+  (req.path.startsWith("/registry/") ? guardRegistryDoc : guardDeedDoc)(req, res, next, value));
+router.param("attachId", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmQueryPaymentAttachments x JOIN dbo.CrmQueryPayment qp ON qp.Id = x.QueryPaymentId JOIN dbo.CrmBooking b ON b.Id = qp.BookingId WHERE x.AttachmentId = @id"));
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { crmSalesDeedCreateSchema } = require("../validation/crmSalesDeedSchemas");
 const { crmRegistryCreateSchema } = require("../validation/crmRegistrySchemas");
@@ -215,7 +221,7 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
       WHERE b.IsActive = 1
         AND b.Status NOT IN ${DEAD_BOOKING_SQL}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id AND ISNULL(Status, '') <> 'Cancelled')
-        AND ag.Status = 'Registered'
+        AND ag.Status = 'Registered'${projectPredicate(req.projectScope, "b.ProjectId")}
         AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
              OR proj.entity_type <> 'UnderConstruction'
              OR proj.status = 'Completed'
@@ -262,6 +268,8 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
         registrationDeadline: r.RegistrationDeadline,
       }),
     }));
+    const statusCounts = {};
+    for (const r of rows) statusCounts[r.Status] = (statusCounts[r.Status] || 0) + 1;
     if (status) rows = rows.filter((r) => r.Status === status);
 
     if (!req.query.page) return res.json(rows);
@@ -274,9 +282,25 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
     const { page, pageSize } = applyPagination(req);
     const total = rows.length;
     const start = (page - 1) * pageSize;
-    res.json({ rows: rows.slice(start, start + pageSize), total, page, pageSize });
+    res.json({ rows: rows.slice(start, start + pageSize), total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-sales-deed] GET error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /booking/:bookingId/deed — the booking's current deed (a live one before a cancelled one), or null.
+router.get("/booking/:bookingId/deed", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    const r = await getPool().request().input("bid", sql.Int, bookingId).query(`
+      SELECT TOP 1 Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid
+      ORDER BY CASE WHEN ISNULL(Status, '') = 'Cancelled' THEN 1 ELSE 0 END, CreatedAt DESC
+    `);
+    res.json(r.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-sales-deed] GET /booking/:id/deed error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
@@ -390,7 +414,7 @@ async function logRegistryHistory(registryId, action, remarks, actorIdVal, actor
             VALUES (@rid, @act, @rem, @atype, @aid, SYSDATETIME())`);
 }
 
-router.get("/registry", requirePageRight("crm-registry", "view"), async (req, res) => {
+router.get("/registry", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { status, search } = req.query;
@@ -399,6 +423,7 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("r.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
@@ -436,7 +461,7 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
             AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))${projectPredicate(req.projectScope, "b.ProjectId")}
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
@@ -446,7 +471,7 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
   }
 });
 
-router.get("/registry/booking/:bookingId", requirePageRight("crm-registry", "view"), async (req, res) => {
+router.get("/registry/booking/:bookingId", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
@@ -463,7 +488,7 @@ router.get("/registry/booking/:bookingId", requirePageRight("crm-registry", "vie
 
 // GET /registry/eligible-bookings — bookings whose Query Payment is Confirmed
 // and don't have a Registry tracker yet.
-router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view"), async (req, res) => {
+router.get("/registry/eligible-bookings", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -475,7 +500,7 @@ router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view
       JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')${projectPredicate(req.projectScope, "b.ProjectId")}
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -486,7 +511,7 @@ router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view
 });
 
 // GET /registry/:id — full detail: the tracker row, its documents and its history.
-router.get("/registry/:id", requirePageRight("crm-registry", "view"), async (req, res) => {
+router.get("/registry/:id", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -517,12 +542,13 @@ router.get("/registry/:id", requirePageRight("crm-registry", "view"), async (req
 // POST /registry — start Registry tracking for a booking. Gated on Query
 // Payment being Confirmed — the customer must have actually paid the
 // government before the deed can go to the Sub-Registrar Office.
-router.post("/registry", requirePageRight("crm-registry", "create"), validateBody(crmRegistryCreateSchema), async (req, res) => {
+router.post("/registry", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "create"), validateBody(crmRegistryCreateSchema), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -618,7 +644,7 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
 
 // PUT /registry/:id/schedule — record (or set for the first time) the
 // appointment date at the Sub-Registrar Office.
-router.put("/registry/:id/schedule", requirePageRight("crm-registry", "edit"), async (req, res) => {
+router.put("/registry/:id/schedule", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -656,7 +682,7 @@ router.put("/registry/:id/schedule", requirePageRight("crm-registry", "edit"), a
 });
 
 // PUT /registry/:id/reschedule
-router.put("/registry/:id/reschedule", requirePageRight("crm-registry", "edit"), async (req, res) => {
+router.put("/registry/:id/reschedule", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -696,7 +722,7 @@ router.put("/registry/:id/reschedule", requirePageRight("crm-registry", "edit"),
 // office. Captures the real registration particulars here and mirrors
 // RegistrationNo/BookNo/PartNo/SubRegistrarOffice/RegistrationDate onto
 // CrmSalesDeed, which is what unlocks the Sale Deed's own "Registered" step.
-router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), async (req, res) => {
+router.put("/registry/:id/complete", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -820,7 +846,7 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
 });
 
 // PUT /registry/:id/cancel
-router.put("/registry/:id/cancel", requirePageRight("crm-registry", "edit"), async (req, res) => {
+router.put("/registry/:id/cancel", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -862,7 +888,7 @@ router.put("/registry/:id/cancel", requirePageRight("crm-registry", "edit"), asy
 });
 
 // POST /registry/:id/documents/upload
-router.post("/registry/:id/documents/upload", requirePageRight("crm-registry", "edit"), upload.array('files'), async (req, res) => {
+router.post("/registry/:id/documents/upload", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), upload.array('files'), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -932,7 +958,7 @@ router.post("/registry/:id/documents/upload", requirePageRight("crm-registry", "
 });
 
 // POST /registry/:id/documents/request
-router.post("/registry/:id/documents/request", requirePageRight("crm-registry", "edit"), async (req, res) => {
+router.post("/registry/:id/documents/request", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -968,7 +994,7 @@ router.post("/registry/:id/documents/request", requirePageRight("crm-registry", 
 });
 
 // PUT /registry/:id/documents/:docId — review a document (Verify/Reject).
-router.put("/registry/:id/documents/:docId", requirePageRight("crm-registry", "edit"), async (req, res) => {
+router.put("/registry/:id/documents/:docId", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const docId = parseId(req.params.docId);
@@ -1004,7 +1030,7 @@ router.put("/registry/:id/documents/:docId", requirePageRight("crm-registry", "e
 });
 
 // GET /registry/documents/file/:docId
-router.get("/registry/documents/file/:docId", requirePageRight("crm-registry", "view"), async (req, res) => {
+router.get("/registry/documents/file/:docId", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const doc = await pool.request().input("docid", sql.Int, parseInt(req.params.docId, 10)).query(`
@@ -1062,7 +1088,7 @@ const QP_SELECT = `
   LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
 `;
 
-router.get("/query-payment", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+router.get("/query-payment", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { status } = req.query;
@@ -1071,6 +1097,7 @@ router.get("/query-payment", requirePageRight("crm-query-payment", "view"), asyn
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("qp.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
@@ -1083,7 +1110,7 @@ router.get("/query-payment", requirePageRight("crm-query-payment", "view"), asyn
   }
 });
 
-router.get("/query-payment/booking/:bookingId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+router.get("/query-payment/booking/:bookingId", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
@@ -1099,7 +1126,7 @@ router.get("/query-payment/booking/:bookingId", requirePageRight("crm-query-paym
 
 // GET /query-payment/eligible-bookings — MUST be registered before
 // GET /query-payment/:id (Express matches in registration order).
-router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+router.get("/query-payment/eligible-bookings", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -1110,7 +1137,7 @@ router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payme
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND sd.DirectorApprovalStatus = 'Approved'
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)${projectPredicate(req.projectScope, "b.ProjectId")}
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -1120,7 +1147,7 @@ router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payme
   }
 });
 
-router.get("/query-payment/:id", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+router.get("/query-payment/:id", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1141,12 +1168,13 @@ router.get("/query-payment/:id", requirePageRight("crm-query-payment", "view"), 
 
 // POST /query-payment — start tracking. Gated on a Sales Deed existing and
 // Director Approved (that's where the finalised amount comes from).
-router.post("/query-payment", requirePageRight("crm-query-payment", "create"), async (req, res) => {
+router.post("/query-payment", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "create"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1186,7 +1214,7 @@ router.post("/query-payment", requirePageRight("crm-query-payment", "create"), a
 });
 
 // PUT /query-payment/:id — update Remarks while Status is still Pending.
-router.put("/query-payment/:id", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+router.put("/query-payment/:id", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1221,7 +1249,7 @@ router.put("/query-payment/:id", requirePageRight("crm-query-payment", "edit"), 
 
 // POST /query-payment/:id/info — upload paperwork for the customer, flip
 // Status -> InfoSent.
-router.post("/query-payment/:id/info", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+router.post("/query-payment/:id/info", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1289,7 +1317,7 @@ router.post("/query-payment/:id/info", requirePageRight("crm-query-payment", "ed
 });
 
 // POST /query-payment/:id/confirm — staff confirms the customer has paid.
-router.post("/query-payment/:id/confirm", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+router.post("/query-payment/:id/confirm", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1377,7 +1405,7 @@ router.post("/query-payment/:id/confirm", requirePageRight("crm-query-payment", 
 const PROXY_METHODS_QP = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
 
 router.post("/query-payment/:id/proxy-proof",
-  requirePageRight("crm-query-payment", "edit"),
+  requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "edit"),
   uploadQP.single("file"),
   async (req, res) => {
     try {
@@ -1439,7 +1467,7 @@ router.post("/query-payment/:id/proxy-proof",
   }
 );
 
-router.get("/query-payment/attachment/:attachId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+router.get("/query-payment/attachment/:attachId", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const attachId = parseId(req.params.attachId);
@@ -2381,6 +2409,7 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), validateBody(crmS
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

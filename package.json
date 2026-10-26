@@ -19,7 +19,7 @@
     "dev:all": "concurrently \"vite\" \"npm --prefix backend run dev\""
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.10.0",
+    "@hookform/resolvers": "^5.9.2",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-checkbox": "^1.3.2",
@@ -36,6 +36,7 @@
     "@tabler/icons-react": "^3.49.0",
     "@tanstack/react-query": "^5.83.0",
     "@tanstack/react-table": "^8.21.0",
+    "@tanstack/react-virtual": "3.14.13",
     "@types/react-webcam": "^3.0.0",
     "@vitejs/plugin-react": "^6.0.2",
     "axios": "^1.20.0",
@@ -67,7 +68,7 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
@@ -89,7 +90,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^8.3.5",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "overrides": {
     "postcss-selector-parser": ">=6.1.3",

@@ -7,6 +7,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { runDepreciationForPeriod, previewDepreciationForPeriod, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
@@ -74,6 +75,10 @@ async function generateAssetCode(pool, category) {
 }
 
 // ── GET / — list ──────────────────────────────────────────────────────────────
+// Depreciation posted against each asset (reversed entries left out); book value is cost less this.
+const POSTED_DEPRECIATION_JOIN = `LEFT JOIN (SELECT e.AssetId, SUM(e.DepreciationAmount) AS Depreciated FROM dbo.FixedAssetDepreciationEntry e
+                 WHERE ISNULL(e.Status, '') <> 'Reversed' GROUP BY e.AssetId) dep ON dep.AssetId = fa.AssetId`;
+
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -93,6 +98,8 @@ router.get("/", async (req, res) => {
     if (req.query.finYear)    { request.input("FinYear",    sql.NVarChar(20),  String(req.query.finYear));         where.push("fa.FinYear = COALESCE((SELECT FName FROM dbo.FinYear WHERE FId = TRY_CONVERT(int, @FinYear)), @FinYear)"); }
     if (req.query.fromDate)   { request.input("FromDate",   sql.Date,          req.query.fromDate);                where.push("fa.PurchaseDate >= @FromDate"); }
     if (req.query.toDate)     { request.input("ToDate",     sql.Date,          req.query.toDate);                  where.push("fa.PurchaseDate <= @ToDate"); }
+    // Only the user's projects, as the dashboard counts them.
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "fa.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -110,12 +117,14 @@ router.get("/", async (req, res) => {
         fa.CompanyId, co.name AS CompanyName,
         fa.ProjectId, pr.name AS ProjectName,
         fa.SupplierId, sup.LHeadName AS SupplierName,
-        fa.GodownID, gd.GodownName, fa.SourceTagId, fa.FAItemCode
+        fa.GodownID, gd.GodownName, fa.SourceTagId, fa.FAItemCode,
+        ISNULL(dep.Depreciated, 0) AS Depreciated
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.enterprise co  ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr  ON pr.id = fa.ProjectId
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = fa.SupplierId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
+      ${POSTED_DEPRECIATION_JOIN}
       ${whereClause}
       ORDER BY fa.CreatedAt DESC
     `);
@@ -270,6 +279,17 @@ router.post("/depreciation/run", requirePageRight("fixed-asset-record", "edit"),
 });
 
 // ── GET /:id — single ─────────────────────────────────────────────────────────
+// ── GET /dashboard — the Fixed Asset dashboard: figures from every page of the module, kept to the user's projects ─
+router.get("/dashboard", async (req, res) => {
+  try {
+    const { buildFixedAssetDashboard } = require("../services/fixedAssetDashboard");
+    res.json(await buildFixedAssetDashboard(getPool(), req.projectScope ?? null));
+  } catch (err) {
+    console.error("[fixedAssets] GET /dashboard:", err.message);
+    res.status(500).json({ error: "Could not load the fixed asset figures." });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
@@ -282,12 +302,14 @@ router.get("/:id", async (req, res) => {
         pr.name AS ProjectName,
         sup.LHeadName AS SupplierName,
         sup.LHeadCode AS SupplierCode,
-        gd.GodownName
+        gd.GodownName,
+        ISNULL(dep.Depreciated, 0) AS Depreciated
       FROM dbo.FixedAssetRecord fa
       LEFT JOIN dbo.enterprise co  ON co.id = fa.CompanyId
       LEFT JOIN dbo.enterprise pr  ON pr.id = fa.ProjectId
       LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = fa.SupplierId
       LEFT JOIN dbo.Godowns gd ON gd.GodownID = fa.GodownID
+      ${POSTED_DEPRECIATION_JOIN}
       WHERE fa.AssetId = @AssetId
     `);
     const row = result.recordset[0];

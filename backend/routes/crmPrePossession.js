@@ -146,6 +146,8 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
       "b.IsActive = 1",
       "b.Status NOT IN ('" + cancelled + "', '" + rejected + "', 'Expired')",
       "NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
+      // A user limited to some projects sees only their bookings (this list and its counts used to show every project's).
+      ...(req.projectScope ? [require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()] : []),
       ...bindListFilters(request, req.query),
     ];
     const buildSelect = (conds) => [
@@ -252,6 +254,8 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "WHERE b.IsActive = 1",
       "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "', 'Expired', 'Transferred')",
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
+      // Only the user's own projects can start a check (every project's bookings used to be offered).
+      require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId"),
       // Agreement for Sale, registered at the Sub-Registrar, is mandatory
       // for every booking regardless of project type — no exception.
       "  AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered')",
@@ -281,6 +285,8 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking comes in the body, which the path guards don't see.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

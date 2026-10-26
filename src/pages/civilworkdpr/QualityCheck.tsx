@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Search, Camera, Loader2, CheckCircle2, RotateCcw } from "lucide-react";
@@ -8,7 +8,9 @@ import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  getCompletedAssignments,
+  getQcQueue,
+  getScopeProjects,
+  QC_QUEUE_LIMIT,
   getRungAssignment,
   getQcHistory,
   getActivityPhotos,
@@ -293,29 +295,36 @@ function InspectDialog({
 export default function QualityCheck() {
   const rights = usePageRights("civilworkdpr-quality-check");
   const [search, setSearch] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [inspecting, setInspecting] = useState<ReportedAssignment | null>(null);
 
-  const { data: allRows = [], isLoading } = useQuery({
-    queryKey: ["qc-queue"],
-    queryFn: getCompletedAssignments,
+  // The search goes to the server, so it waits for a pause in typing and for at least 2 letters.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const q = search.trim();
+      setDebouncedSearch(q.length >= 2 ? q : "");
+    }, 350);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ["civilworkdpr-scope-projects"],
+    queryFn: getScopeProjects,
     enabled: rights.canView,
+    staleTime: 10 * 60 * 1000,
   });
 
-  // A Completed activity that already has a passing QC decision has moved
-  // on to the approval step — it's not this queue's job any more, even
-  // though its own Status is still literally Completed until that
-  // approval lands (a super_admin approves directly when no approval
-  // levels are configured, otherwise the named approval chain does). See
-  // getCompletedAssignments' own comment.
-  const rows = useMemo(() => allRows.filter((r) => r.qcStatus !== "APPROVED"), [allRows]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.activityName, r.alias, r.scopePath, r.projectName, r.engineerNames].some((v) => (v || "").toLowerCase().includes(q)),
-    );
-  }, [rows, search]);
+  // Completed work that hasn't passed QC yet (a passed one has moved on to approval), narrowed by project and
+  // search on the server. The previous list stays on screen while the next one loads.
+  const { data: rows = [], isLoading, isFetching } = useQuery({
+    queryKey: ["qc-queue", projectId, debouncedSearch],
+    queryFn: () => getQcQueue({ projectId: projectId ? Number(projectId) : undefined, search: debouncedSearch || undefined }),
+    enabled: rights.canView,
+    placeholderData: (prev) => prev,
+  });
+  const filtered = rows;
+  const capped = rows.length >= QC_QUEUE_LIMIT;
 
   return (
     <>
@@ -329,9 +338,26 @@ export default function QualityCheck() {
           <div className="px-4 py-3 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
             <p className="flex items-baseline gap-2.5">
               <span className={HEAD}>Waiting for inspection</span>
-              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{rows.length}</span>
+              <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">
+                {rows.length}
+                {capped ? "+" : ""}
+              </span>
+              {isFetching && !isLoading && <Loader2 size={12} className="animate-spin text-muted-foreground self-center" />}
             </p>
-            <div className="relative ml-auto w-full sm:w-72">
+            {projects.length > 0 && (
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                aria-label="Project"
+                className="sm:ml-auto h-9 px-2.5 w-full sm:w-52 text-xs border border-foreground/40 focus:border-foreground bg-card text-foreground outline-none"
+              >
+                <option value="">All projects</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name || `Project ${p.id}`}</option>
+                ))}
+              </select>
+            )}
+            <div className={`relative w-full sm:w-72 ${projects.length > 0 ? "" : "ml-auto"}`}>
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 value={search}
@@ -342,6 +368,11 @@ export default function QualityCheck() {
             </div>
           </div>
 
+          {capped && (
+            <p className="px-4 py-2 text-xs text-muted-foreground" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
+              Showing the first {QC_QUEUE_LIMIT}. Pick a project or search to see the rest.
+            </p>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -360,7 +391,7 @@ export default function QualityCheck() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                      {rows.length === 0 ? "Nothing is waiting for inspection right now." : "No activities match your search."}
+                      {projectId || debouncedSearch ? "Nothing waiting for inspection matches these filters." : "Nothing is waiting for inspection right now."}
                     </td>
                   </tr>
                 ) : (

@@ -7,7 +7,7 @@ router.param("id", require("../services/projectScope").crmCustomerGuard);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
@@ -82,7 +82,8 @@ async function assertUniqueCustomerEmail(pool, email, excludeId = null) {
 }
 
 // GET / — all customers
-router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
+// Resale and Ownership Changes pick the new buyer from this list, so their rights read it too.
+router.get("/", requireAnyPageRight(["crm-customers", "crm-resales", "crm-ownership-changes"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { search } = req.query;
@@ -90,11 +91,14 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
+    const countReq = pool.request();
+    const bind = (name, type, value) => { req0.input(name, type, value); countReq.input(name, type, value); };
     const conds = ["c.IsActive = 1"];
-    // A restricted user sees customers with an application in their projects.
-    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")})`);
+    // A restricted user sees customers with an application in their projects, and those with none yet (a new customer
+    // belongs to no project until its first application; crmCustomerGuard lets them open one by id too).
+    if (req.projectScope) conds.push(`(EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")}) OR NOT EXISTS (SELECT 1 FROM dbo.CrmApplication sa2 WHERE sa2.CustomerId = c.Id))`);
     if (search) {
-      req0.input("srch", sql.NVarChar(200), `%${search}%`);
+      bind("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch OR c.PanNo LIKE @srch)");
     }
     // A customer isn't itself scoped to one Company/Project/Block — it can
@@ -102,9 +106,9 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     // at least one application matching this scope", via EXISTS against
     // CrmApplication (which always carries CompanyId/ProjectId; BlockId only
     // resolves once a unit is picked, via UnitMaster).
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
     const where = `WHERE ${conds.join(" AND ")}`;
 
     if (!req.query.page) {
@@ -117,20 +121,9 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmCustomer c
-          WHERE c.IsActive = 1
-            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2 OR c.PanNo LIKE @srch2))
-            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
-            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
-            AND (@blockId2 IS NULL OR (EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId2)))
-        `),
+      // The same WHERE as the rows (it used to repeat the filters without the project scope, so a restricted
+      // user's total counted customers they can't see).
+      countReq.query(`SELECT COUNT(*) AS total FROM dbo.CrmCustomer c ${where}`),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
@@ -161,8 +154,8 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
     // endpoint threw a SQL syntax error on every single call, regardless of
     // excludeId, and had apparently never actually been exercised live.
     const conds = ["c.IsActive = 1"];
-    // A restricted user sees customers with an application in their projects.
-    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")})`);
+    // Same scope as the list above.
+    if (req.projectScope) conds.push(`(EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")}) OR NOT EXISTS (SELECT 1 FROM dbo.CrmApplication sa2 WHERE sa2.CustomerId = c.Id))`);
     if (excludeId) conds.push("c.Id <> @excl");
     const orClauses = [];
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { DependencyMasterListRow, LadderActivity } from "@/api/dependencyMasterApi";
 import { dependencyAutoName, matchesAutoNameSearch } from "@/lib/dependencyAutoName";
@@ -8,6 +8,13 @@ const MAX_RESULTS = 25;
 interface Props {
   chains: DependencyMasterListRow[];
   onPick: (rung: LadderActivity, chain: DependencyMasterListRow) => void;
+}
+
+interface FinderProps extends Props {
+  /** Called once someone starts typing, so a page can load the chains (with every activity) only then. */
+  onActive?: () => void;
+  /** Those chains are still loading. */
+  loading?: boolean;
 }
 
 /**
@@ -71,8 +78,12 @@ export function AutoNameResults({ chains, query, onPick }: Props & { query: stri
   );
 }
 
-export function AutoNameFinder({ chains, onPick }: Props) {
+export function AutoNameFinder({ chains, onPick, onActive, loading }: FinderProps) {
   const [query, setQuery] = useState("");
+  const active = query.trim().length >= 2;
+  useEffect(() => {
+    if (active) onActive?.();
+  }, [active, onActive]);
   return (
     <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
@@ -94,7 +105,11 @@ export function AutoNameFinder({ chains, onPick }: Props) {
             </button>
           )}
         </div>
-        <AutoNameResults chains={chains} query={query} onPick={onPick} />
+        {active && loading && chains.length === 0 ? (
+          <p className="mt-3 text-xs text-muted-foreground">Loading activities…</p>
+        ) : (
+          <AutoNameResults chains={chains} query={query} onPick={onPick} />
+        )}
       </div>
     </div>
   );

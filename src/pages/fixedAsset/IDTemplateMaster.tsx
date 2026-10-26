@@ -1,267 +1,164 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+// ID Template Master: the project alias that starts every FA Item Code of a project. Parts under
+// ./idTemplate: TemplatePanel (new / edit at the side, delete, sample codes). Sheet styles from ./record/config.
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Edit2, Trash2, RotateCcw, AlertTriangle, Hash } from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { GlassShell } from "@/components/dashboard/GlassShell";
+import { PenSquare, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
-import {
-  getIDTemplates, createIDTemplate, updateIDTemplate, deleteIDTemplate,
-  type IDTemplate,
-} from "@/api/idTemplateMasterApi";
+import { getIDTemplates, updateIDTemplate, type IDTemplate } from "@/api/idTemplateMasterApi";
+import { KEY_INK, KEY_LINE, Mark, RULE, ensureArray, fmt } from "./record/config";
+import { DeleteTemplateDialog, SampleCodes, TemplatePanel } from "./idTemplate/TemplatePanel";
 
-function ensureArray<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
-
-const EMPTY = { projectId: "", projectAlias: "", isActive: true };
+type Show = "all" | "active" | "inactive";
 
 export default function IDTemplateMaster() {
   const rights = usePageRights("id-template-master");
   const qc = useQueryClient();
-
-  const { data: templates = [], isLoading } = useQuery({
-    queryKey: ["id-templates"],
-    queryFn: getIDTemplates,
-  });
-  const { data: projects = [] } = useQuery({
-    queryKey: ["enterprise-options-P"],
-    queryFn: () => getEnterpriseOptions(undefined, "P"),
-  });
-
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<IDTemplate | null>(null);
-  const [form, setForm] = useState(EMPTY);
-  const [saving, setSaving] = useState(false);
+  // undefined = closed, null = new, a template = editing it
+  const [editing, setEditing] = useState<IDTemplate | null | undefined>(undefined);
   const [deleting, setDeleting] = useState<IDTemplate | null>(null);
+  const [show, setShow] = useState<Show>("all");
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setOpen(true); };
-  const openEdit = (r: IDTemplate) => {
-    setEditing(r);
-    setForm({ projectId: String(r.projectId), projectAlias: r.projectAlias, isActive: r.isActive });
-    setOpen(true);
-  };
+  const { data: templates = [], isLoading, isFetching, refetch } = useQuery({ queryKey: ["id-templates"], queryFn: getIDTemplates });
+  const { data: projectOpts = [] } = useQuery({ queryKey: ["enterprise-options-P"], queryFn: () => getEnterpriseOptions(undefined, "P") });
+  const all = ensureArray<IDTemplate>(templates);
+  const projects = ensureArray<{ id: number; label: string }>(projectOpts);
+  const rows = useMemo(() => (show === "all" ? all : all.filter((t) => t.isActive === (show === "active"))), [all, show]);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["id-templates"] });
-
-  const handleSave = async () => {
-    if (!form.projectId) { toast.error("Project is required"); return; }
-    if (!form.projectAlias.trim()) { toast.error("Project Alias is required"); return; }
-    setSaving(true);
-    try {
-      const payload = {
-        projectId: Number(form.projectId),
-        projectAlias: form.projectAlias.trim(),
-        isActive: form.isActive,
-      };
-      if (editing) {
-        await updateIDTemplate(editing.id, payload);
-        toast.success("ID template updated");
-      } else {
-        await createIDTemplate(payload);
-        toast.success("ID template created");
-      }
-      await invalidate();
-      setOpen(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (r: IDTemplate) => {
-    try {
-      await deleteIDTemplate(r.id);
-      toast.success("ID template deleted");
-      await invalidate();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  const reactivate = async (r: IDTemplate) => {
-    try {
-      await updateIDTemplate(r.id, { projectId: r.projectId, projectAlias: r.projectAlias, isActive: true });
-      toast.success("ID template reactivated");
-      await invalidate();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed");
-    }
-  };
-
-  const columns: ColumnDef<IDTemplate, unknown>[] = [
+  const taken = useMemo(() => new Set(all.map((t) => t.projectId)), [all]);
+  const without = projects.filter((p) => !taken.has(p.id));
+  const activeCount = all.filter((t) => t.isActive).length;
+  const stats = [
+    { label: "Templates", value: fmt(all.length), note: "one per project" },
+    { label: "Active", value: fmt(activeCount), note: "projects that can generate codes" },
+    { label: "Inactive", value: fmt(all.length - activeCount), note: "new codes are blocked" },
     {
-      id: "projectName",
-      header: "Project",
-      cell: ({ row }) => <span className="font-medium">{row.original.projectName || "—"}</span>,
-    },
-    {
-      id: "projectAlias",
-      header: "Project Alias",
-      cell: ({ row }) => <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400">{row.original.projectAlias}</span>,
-    },
-    {
-      id: "sample",
-      header: "Sample FA Item Code",
-      cell: ({ row }) => (
-        <div className="font-mono text-xs text-muted-foreground space-y-0.5">
-          <div><span className="font-sans text-[0.625rem] uppercase tracking-wide opacity-70">Inventory </span>{row.original.projectAlias}/ItemName/0001/26-27</div>
-          <div><span className="font-sans text-[0.625rem] uppercase tracking-wide opacity-70">Assigned </span>{row.original.projectAlias}/<span className="text-amber-600 dark:text-amber-400">Department</span>/ItemName/0001/26-27</div>
-        </div>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      cell: ({ row }) =>
-        row.original.isActive ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
-          </span>
-        ),
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const r = row.original;
-        return (
-          <div className="flex items-center gap-1">
-            {rights.canEdit && (
-              <button onClick={() => openEdit(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Edit">
-                <Edit2 size={13} />
-              </button>
-            )}
-            {rights.canDelete && r.isActive && (
-              <button onClick={() => setDeleting(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Delete">
-                <Trash2 size={13} />
-              </button>
-            )}
-            {rights.canEdit && !r.isActive && (
-              <button onClick={() => reactivate(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 transition-colors" title="Reactivate">
-                <RotateCcw size={13} />
-              </button>
-            )}
-          </div>
-        );
-      },
+      label: "Projects without one",
+      value: fmt(without.length),
+      note: without.length ? `${without.slice(0, 2).map((p) => p.label).join(", ")}${without.length > 2 ? ` +${without.length - 2}` : ""}` : "every project is set up",
     },
   ];
 
-  const inputCls = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500/30 placeholder:text-muted-foreground";
+  const reactivate = useMutation({
+    mutationFn: (t: IDTemplate) => updateIDTemplate(t.id, { projectId: t.projectId, projectAlias: t.projectAlias, isActive: true }),
+    onSuccess: (r) => {
+      const tagged = r?.autoTagged ?? 0;
+      toast.success(`ID template reactivated${tagged ? ` — ${tagged} waiting asset${tagged === 1 ? "" : "s"} tagged with it` : ""}`);
+      ["id-templates", "fixed-asset-taggings", "fixed-asset-pending-batches", "fixed-assets", "fixed-asset-dashboard"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const COLUMNS: ColumnDef<IDTemplate>[] = [
+    {
+      id: "projectName",
+      accessorFn: (t) => t.projectName ?? "",
+      size: 240,
+      header: "Project",
+      cell: ({ row: { original: t } }) => <p className="text-sm font-medium text-foreground truncate max-w-[260px]">{t.projectName || "—"}</p>,
+    },
+    {
+      id: "projectAlias",
+      accessorKey: "projectAlias",
+      size: 120,
+      header: "Alias",
+      cell: ({ row: { original: t } }) => <span className="font-heading font-bold tabular-nums border border-foreground px-2 py-0.5 text-xs">{t.projectAlias}</span>,
+    },
+    { id: "sample", size: 320, header: "FA Item Codes it makes", enableSorting: false, cell: ({ row: { original: t } }) => <SampleCodes alias={t.projectAlias} compact /> },
+    {
+      id: "status",
+      accessorFn: (t) => (t.isActive ? "Active" : "Inactive"),
+      size: 110,
+      header: "Status",
+      cell: ({ row: { original: t } }) => <Mark text={t.isActive ? "Active" : "Inactive"} tone={t.isActive ? "done" : "none"} />,
+    },
+    {
+      id: "actions",
+      size: 100,
+      header: "",
+      enableSorting: false,
+      cell: ({ row: { original: t } }) => (
+        <div className="flex items-center gap-1 justify-end" onClick={(e) => e.stopPropagation()}>
+          {rights.canEdit && !t.isActive && (
+            <button onClick={() => reactivate.mutate(t)} disabled={reactivate.isPending} title="Reactivate" className="p-1.5 text-muted-foreground hover:text-foreground"><RotateCcw size={13} /></button>
+          )}
+          {rights.canEdit && <button onClick={() => setEditing(t)} title="Edit" className="p-1.5 text-muted-foreground hover:text-foreground"><PenSquare size={13} /></button>}
+          {rights.canDelete && <button onClick={() => setDeleting(t)} title="Delete" className="p-1.5 text-muted-foreground hover:text-destructive"><Trash2 size={13} /></button>}
+        </div>
+      ),
+    },
+  ];
+
+  const SHOW: { k: Show; label: string }[] = [
+    { k: "all", label: "All" },
+    { k: "active", label: "Active" },
+    { k: "inactive", label: "Inactive" },
+  ];
 
   return (
     <>
-    <Breadcrumbs items={["Dashboard", "Fixed Asset", "ID Template Master"]} />
-    <GlassShell
-      title="ID Template Master"
-      subtitle="Configure the Project Alias used to build FA Item Codes"
-      icon={Hash}
-      accentColor="#eab308"
-      action={
-        rights.canCreate ? (
-          <button onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity">
-            <Plus size={14} /> New Template
-          </button>
-        ) : undefined
-      }
-    >
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <DataTable columns={columns} data={templates} loading={isLoading} emptyMessage="No ID templates configured yet. Add one per project to enable FA Inventory code generation." />
-      </div>
+      <Breadcrumbs items={["Dashboard", "Fixed Asset", "ID Template Master"]} />
+      <SheetShell
+        eyebrow="CivilierERP · Fixed Asset"
+        title="ID templates"
+        subtitle="The alias each project's FA Item Codes start with. A project needs an active template before its assets can be given codes."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh">
+              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+            </button>
+            {rights.canCreate && <button onClick={() => setEditing(null)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New template</button>}
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {stats.map((x) => (
+                <div key={x.label}>
+                  <p className="label">{x.label}</p>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Edit ID Template" : "New ID Template"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-1">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Project <span className="text-red-500">*</span>
-              </label>
-              <select className={inputCls} value={form.projectId}
-                onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
-                <option value="">Select project…</option>
-                {ensureArray<{ id: number; label: string }>(projects).map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <span className="inline-flex h-9 border border-foreground overflow-x-auto max-w-full" role="group" aria-label="Show">
+                {SHOW.map((s) => (
+                  <button key={s.k} onClick={() => setShow(s.k)} aria-pressed={show === s.k}
+                    className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] px-3 shrink-0 transition-colors ${show === s.k ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}>
+                    {s.label}
+                  </button>
                 ))}
-              </select>
+              </span>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Project Alias <span className="text-red-500">*</span>
-              </label>
-              <input className={`${inputCls} font-mono`} placeholder="e.g. RG"
-                value={form.projectAlias}
-                onChange={(e) => setForm((p) => ({ ...p, projectAlias: e.target.value }))} />
-              <p className="text-[0.6875rem] text-muted-foreground">
-                Used as the first segment of every generated FA Item Code for this project, e.g. <span className="font-mono">RG/Laptop/0001/26-27</span>. Once an asset is assigned, its holder's department is shown after the alias (<span className="font-mono">RG/Legal/Laptop/0001/26-27</span>) and follows the asset when it is transferred.
-              </p>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-              <div>
-                <p className="text-sm font-medium">Active</p>
-                <p className="text-xs text-muted-foreground">Inactive templates block new code generation for this project</p>
-              </div>
-              <button type="button" onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-emerald-500" : "bg-muted"}`}>
-                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${form.isActive ? "translate-x-6" : "translate-x-1"}`} />
-              </button>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setOpen(false)}
-                className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
-                Cancel
-              </button>
-              <button onClick={handleSave} disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
-                {saving ? "Saving…" : editing ? "Update" : "Create"}
-              </button>
-            </div>
+            <DataTable
+              data={rows}
+              columns={COLUMNS}
+              loading={isLoading}
+              searchable
+              searchPlaceholder="Search project or alias…"
+              paginated
+              onRowClick={rights.canEdit ? (row) => setEditing(row.original) : undefined}
+              getRowId={(t) => String(t.id)}
+              rowClassName={(row) => (row.original.isActive ? "" : "opacity-60")}
+              emptyMessage={show !== "all" ? "No templates match this filter." : "No ID templates yet. Add one per project so its assets can be given FA Item Codes."}
+            />
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </SheetShell>
 
-      <Dialog open={!!deleting} onOpenChange={() => setDeleting(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle size={16} /> Delete Template
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground pt-1">
-            Delete the alias <strong>{deleting?.projectAlias}</strong> for <strong>{deleting?.projectName}</strong>? This permanently removes it and cannot be undone. Codes already generated stay exactly as they are — this only blocks new tagging for this project.
-          </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
-              Cancel
-            </button>
-            <button onClick={() => deleting && handleDelete(deleting)}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity">
-              Delete
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </GlassShell>
+      {editing !== undefined && (
+        <TemplatePanel key={editing?.id ?? "new"} editing={editing} projects={projects} takenProjectIds={taken} onClose={() => setEditing(undefined)} />
+      )}
+      {deleting && <DeleteTemplateDialog template={deleting} onClose={() => setDeleting(null)} />}
     </>
   );
 }

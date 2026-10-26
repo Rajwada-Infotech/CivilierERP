@@ -67,6 +67,8 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
     const pool = getPool();
     const b = req.body;
     if (!b.ProjectId)  return res.status(400).json({ error: "ProjectId is required" });
+    // A user limited to some projects can record certificates for those only (any project id used to be accepted).
+    if (!require("../services/projectScope").assertProjectAllowed(req, res, parseInt(b.ProjectId, 10))) return;
     if (!b.CertType)   return res.status(400).json({ error: "CertType is required (OC / CC / OC+CC)" });
     if (!["OC", "CC", "OC+CC"].includes(b.CertType)) return res.status(400).json({ error: "CertType must be OC, CC, or OC+CC" });
 

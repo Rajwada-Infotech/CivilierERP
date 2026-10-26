@@ -4,19 +4,19 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, FileText, Upload, FileImage, FileSpreadsheet, File as FileIcon, Eye, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, Download, CheckCircle2, AlertCircle, Info, CalendarDays, BarChart3 } from "lucide-react";
+import { Plus, Search, Upload, Send, Clock, UserCircle2, Pencil, Lock, Check, ArrowRight, ShieldAlert, Building2, ScrollText, X, FolderClock, CheckCircle2, AlertCircle, Info, CalendarDays, BarChart3, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
-import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
-import { ProxyActionDialog, PROXY_METHODS, type ProxyMethod, PROXY_METHOD_LABELS } from "@/components/crm/ProxyActionDialog";
+import { FinancialStatusBar, fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import CrmAfsQueryPayment from "@/pages/CRM/CrmAfsQueryPayment";
@@ -24,597 +24,14 @@ import CrmAfsRegistry from "@/pages/CRM/CrmAfsRegistry";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { API, DOC_TYPES, agrStatusColor, isBookingCancelled, unverifiedMandatoryDocs, followupProgress, AGR_TABS, AgrTab, TAB_SLUGS, SLUG_FOR_TAB, agreementStepStates } from "./agreement/config";
+import { AgreementStepper, docStatusColor, AgreementTimeline } from "./agreement/Timeline";
+import { EMPTY_AGR_FORM, fetchUsers, EMPTY_DOC_FORM, EMPTY_DOC_REQUEST_FORM, mimeIcon, fmtBytes } from "./agreement/forms";
+import { DocumentReviewDialog } from "./agreement/DocumentReviewDialog";
+import { PAGE_SIZE, AgreementListFilters, fetchAgreementsList, fetchAgreementDetail, fetchAgreementIdByBooking, fetchDateHistory, fetchRevisions, fetchBookings, fetchWelcomeCallsForBooking } from "./agreement/api";
 
-const API = "/api/crm/agreements";
-const USERS_API = "/api/users";
-
-const DOC_TYPES = ["SaleAgreement", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
-
-const agrStatusColor: Record<string, string> = {
-  Draft:      "text-muted-foreground bg-muted/50 border-border",
-  Executed:   "text-blue-600 bg-blue-50 border-blue-200",
-  Registered: "text-green-600 bg-green-50 border-green-200",
-  Cancelled:  "text-red-600 bg-red-50 border-red-200",
-};
-
-function isBookingCancelled(a: { BookingStatus?: string | null; BookingIsActive?: boolean | null }): boolean {
-  return a.BookingIsActive === false || ["Cancelled", "Rejected"].includes(a.BookingStatus || "");
-}
-
-const DATE_BADGE_COLORS: Record<string, string> = {
-  purple: "text-purple-600 bg-purple-50 border-purple-200",
-  blue:   "text-blue-600 bg-blue-50 border-blue-200",
-  green:  "text-green-600 bg-green-50 border-green-200",
-};
-function DateStatusBadge({ label, date, color, active }: { label: string; date?: string | null; color: "purple" | "blue" | "green"; active: boolean }) {
-  if (!active) return null;
-  return (
-    <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium ${DATE_BADGE_COLORS[color]}`}>
-      {label}{date ? `: ${String(date).slice(0, 10)}` : ""}
-    </span>
-  );
-}
-
-function unverifiedMandatoryDocs(documents: any[] | undefined): any[] {
-  return (documents || []).filter((d) => d.IsMandatory && d.Status !== "Verified");
-}
-
-function followupProgress(documents: any[] | undefined): { required: number; uploaded: number; percent: number } {
-  const mandatory = (documents || []).filter((d) => d.IsMandatory);
-  const required = mandatory.length;
-  const uploaded = mandatory.filter((d) => d.FilePath).length;
-  const percent = required > 0 ? Math.round((uploaded / required) * 100) : 0;
-  return { required, uploaded, percent };
-}
-
-const AGR_TABS = ["Timeline", "Overview", "Legal & Approval", "Documents", "AFS Payment", "AFS Registry"] as const;
-type AgrTab = typeof AGR_TABS[number];
-
-const TAB_SLUGS: Record<string, AgrTab> = {
-  timeline: "Timeline", overview: "Overview", legal: "Legal & Approval",
-  "legal-approval": "Legal & Approval", documents: "Documents", papers: "Documents",
-  "afs-payment": "AFS Payment", "afs-query-payment": "AFS Payment",
-  "afs-registry": "AFS Registry",
-};
-const SLUG_FOR_TAB: Record<AgrTab, string> = {
-  Timeline: "timeline", Overview: "overview", "Legal & Approval": "legal",
-  Documents: "documents", "AFS Payment": "afs-payment", "AFS Registry": "afs-registry",
-};
-
-type StepState = "done" | "current" | "upcoming";
-function agreementStepStates(a: any, documents: any[] | undefined): { label: string; state: StepState; tab: AgrTab }[] {
-  const legalAssigned = a?.LegalExecutiveId != null;
-  const followup = followupProgress(documents);
-  const followupDone = followup.required > 0 && followup.percent === 100;
-  const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
-  const sent = !!a?.SentToCustomerAt;
-  const custApproved = a?.CustomerApprovalStatus === CrmStatus.APPROVED;
-  const dated = !!a?.AgreementDate;
-  const executed = a?.Status === CrmStatus.EXECUTED || a?.Status === CrmStatus.REGISTERED;
-  const registered = a?.Status === CrmStatus.REGISTERED;
-  return [
-    { label: "Initialisation",       state: "done" as StepState,                                                    tab: "Overview" as AgrTab },
-    { label: "Legal Exec. Assigned", state: (legalAssigned ? "done" : "current") as StepState,                      tab: "Legal & Approval" as AgrTab },
-    { label: `Agreement Followup${followup.required > 0 ? ` (${followup.percent}%)` : ""}`,
-      state: (followupDone ? "done" : legalAssigned ? "current" : "upcoming") as StepState,                         tab: "Documents" as AgrTab },
-    { label: "Senior Approval",      state: (senior ? "done" : followupDone ? "current" : "upcoming") as StepState,       tab: "Legal & Approval" as AgrTab },
-    { label: "Sent to Customer",     state: (sent ? "done" : senior ? "current" : "upcoming") as StepState,               tab: "Legal & Approval" as AgrTab },
-    { label: "Customer Approval",    state: (custApproved ? "done" : sent ? "current" : "upcoming") as StepState,         tab: "Legal & Approval" as AgrTab },
-    { label: "Date Agreed",          state: (dated ? "done" : custApproved ? "current" : "upcoming") as StepState,        tab: "Legal & Approval" as AgrTab },
-    { label: "Execution Follow-ups", state: (executed ? "done" : dated ? "current" : "upcoming") as StepState,            tab: "Documents" as AgrTab },
-    { label: "Registered",           state: (registered ? "done" : executed ? "current" : "upcoming") as StepState,       tab: "Overview" as AgrTab },
-  ];
-}
-function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: AgrTab }[]; activeTab: AgrTab; onStepClick: (t: AgrTab) => void }) {
-  return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={`flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors group ${activeTab === s.tab ? "bg-muted/50" : ""}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2 ${
-              s.state === "done"
-                ? "bg-green-500 text-white ring-green-200 dark:ring-green-900"
-                : s.state === "current"
-                ? "bg-primary text-primary-foreground ring-primary/25"
-                : "bg-muted text-muted-foreground ring-transparent"}`}>
-              {s.state === "done" ? <Check size={11} /> : i + 1}
-            </span>
-            <span className={`text-[0.6875rem] font-semibold whitespace-nowrap leading-tight ${
-              s.state === "done" ? "text-green-600 dark:text-green-400"
-              : s.state === "current" ? "text-foreground"
-              : "text-muted-foreground/60"}`}>
-              {s.label}
-            </span>
-          </button>
-          {i < steps.length - 1 && (
-            <div className={`w-4 h-px mx-0.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-green-400" : "bg-border"}`} />
-          )}
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
-const docStatusColor: Record<string, string> = {
-  Pending:   "text-orange-600 bg-orange-50 border-orange-200",
-  Requested: "text-sky-600 bg-sky-50 border-sky-200",
-  Uploaded:  "text-blue-600 bg-blue-50 border-blue-200",
-  Submitted: "text-blue-600 bg-blue-50 border-blue-200",
-  Verified:  "text-green-600 bg-green-50 border-green-200",
-  Rejected:  "text-red-600 bg-red-50 border-red-200",
-};
-
-type TlState = "done" | "current" | "upcoming" | "blocked";
-function TlRow({ n, title, detailText, state, badge, onJump, last }: {
-  n: number; title: string; detailText?: string; state: TlState; badge?: string;
-  onJump: () => void; last?: boolean;
-}) {
-  const ring =
-    state === "done" ? "bg-green-500 text-white" :
-    state === "current" ? "bg-primary text-primary-foreground" :
-    state === "blocked" ? "bg-muted text-muted-foreground" :
-    "bg-muted text-muted-foreground";
-  return (
-    <button onClick={onJump} className="w-full text-left flex gap-3 group">
-      <div className="flex flex-col items-center">
-        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 ${ring}`}>
-          {state === "done" ? <Check size={13} /> : n}
-        </span>
-        {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-green-400" : "bg-border"}`} />}
-      </div>
-      <div className={`flex-1 min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-sm font-semibold ${
-            state === "done" ? "text-green-700 dark:text-green-400"
-            : state === "current" ? "text-foreground"
-            : "text-muted-foreground"}`}>{title}</span>
-          {badge && (
-            <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border border-border bg-muted/50 text-muted-foreground">{badge}</span>
-          )}
-          <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-        {detailText && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detailText}</p>}
-      </div>
-    </button>
-  );
-}
-function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay = true, canViewAfsReg = true }: { agreement: any; bookingId: number; onJump: (t: AgrTab) => void; canViewAfsPay?: boolean; canViewAfsReg?: boolean }) {
-  const { data: afsQp } = useQuery({
-    queryKey: ["crm-afs-query-payment-booking", bookingId],
-    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-query-payment/booking/${bookingId}`); return r.ok ? r.json() : null; },
-    staleTime: 15_000,
-    enabled: canViewAfsPay && bookingId != null,
-  });
-  const { data: afsReg } = useQuery({
-    queryKey: ["crm-afs-registry-booking", bookingId],
-    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-registry/booking/${bookingId}`); return r.ok ? r.json() : null; },
-    staleTime: 15_000,
-    enabled: canViewAfsReg && bookingId != null,
-  });
-
-  const executed = agreement?.Status === CrmStatus.EXECUTED || agreement?.Status === CrmStatus.REGISTERED;
-  const registered = agreement?.Status === CrmStatus.REGISTERED;
-  const qpConfirmed = afsQp?.Status === "Confirmed";
-  const regDone = afsReg?.Status === "Completed";
-
-  const agrStageText = registered ? "Registered at Sub-Registrar"
-    : executed ? "Executed — awaiting AFS registration"
-    : agreement?.SentToCustomerAt ? "Sent to customer for approval"
-    : agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "Senior-approved — ready to send"
-    : agreement?.LegalExecutiveId != null ? "Drafting / legal review"
-    : "Not started — assign a Legal Executive";
-
-  const allRows: { n: number; title: string; detailText: string; state: TlState; badge?: string; tab: AgrTab }[] = [
-    {
-      n: 1, title: "Agreement for Sale",
-      detailText: agrStageText, state: registered ? "done" : executed ? "done" : "current",
-      badge: agreement?.Status, tab: "Overview",
-    },
-    {
-      n: 2, title: "Agreement Papers",
-      detailText: "Supporting documents — request, upload and verify",
-      state: executed ? "done" : agreement?.LegalExecutiveId != null ? "current" : "upcoming",
-      tab: "Documents",
-    },
-    {
-      n: 3, title: "AFS Query Payment",
-      detailText: !executed ? "Unlocks once the Agreement is Executed"
-        : qpConfirmed ? "Government fees confirmed paid"
-        : afsQp ? `In progress — ${afsQp.Status === "InfoSent" ? "info sent, awaiting payment" : "started"}`
-        : "Not started",
-      state: !executed ? "blocked" : qpConfirmed ? "done" : afsQp ? "current" : "current",
-      badge: afsQp?.Status, tab: "AFS Payment",
-    },
-    {
-      n: 4, title: "AFS Registry (Sub-Registrar Visit 1)",
-      detailText: !qpConfirmed ? "Unlocks once AFS Query Payment is Confirmed"
-        : regDone ? (afsReg?.AfsRegistrationNo ? "Completed & registration no. recorded" : "Visit complete — record the AFS Reg No on the Agreement tab")
-        : afsReg ? `In progress — ${afsReg.Status}`
-        : "Not started",
-      state: !qpConfirmed ? "blocked" : regDone ? "done" : afsReg ? "current" : "current",
-      badge: afsReg?.Status, tab: "AFS Registry",
-    },
-  ];
-  const rows = allRows
-    .filter((r) =>
-      r.tab === "AFS Payment" ? canViewAfsPay :
-      r.tab === "AFS Registry" ? canViewAfsReg : true,
-    )
-    .map((r, i) => ({ ...r, n: i + 1 }));
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
-        <BarChart3 size={15} className="text-primary" /> Workflow Timeline
-      </h3>
-      <div>
-        {rows.map((r, i) => (
-          <TlRow key={r.n} n={r.n} title={r.title} detailText={r.detailText}
-            state={r.state} badge={r.badge} onJump={() => onJump(r.tab)} last={i === rows.length - 1} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const EMPTY_AGR_FORM = {
-  BookingId: "", LegalName: "", LegalAddress: "",
-  PanNo: "", AadhaarNo: "", Notes: "", LegalExecutiveId: "",
-};
-
-async function fetchUsers(): Promise<{ value: string; label: string }[]> {
-  try {
-    const r = await fetchWithAuth(`${USERS_API}/legal-executives`);
-    if (!r.ok) return [];
-    const d: any[] = await r.json();
-    return d.map((u) => ({ value: String(u.id), label: u.name }));
-  } catch { return []; }
-}
-
-const EMPTY_DOC_FORM = {
-  DocumentType: "SaleAgreement", DocumentUrl: "", IssuedBy: "", Remarks: "",
-};
-const EMPTY_DOC_REQUEST_FORM = {
-  DocumentType: "IdentityProof", Label: "", IsMandatory: true,
-};
-
-function mimeIcon(mime: string | null | undefined) {
-  if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
-  if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
-  if (mime === "application/pdf") return <FileText size={16} className="text-red-500 shrink-0" />;
-  if (mime.includes("sheet") || mime.includes("excel")) return <FileSpreadsheet size={16} className="text-emerald-500 shrink-0" />;
-  return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
-}
-function fmtBytes(n: number | null | undefined) {
-  if (!n) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-async function fetchDocAudit(docId: number): Promise<any[]> {
-  try {
-    const r = await fetchWithAuth(`${API}/documents/${docId}/audit`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
-}
-
-const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
-  ({ agreementId, doc, onClose, onReviewed }) => {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [tab, setTab] = useState<"preview" | "history">("preview");
-  const [audit, setAudit] = useState<any[] | null>(null);
-  const [remarks, setRemarks] = useState(doc.Remarks || "");
-  const [saving, setSaving] = useState(false);
-  const [attaching, setAttaching] = useState(false);
-  const attachInputRef = useRef<HTMLInputElement>(null);
-  const proxyAttachRef = useRef<HTMLInputElement>(null);
-  const [proxyUploadOpen, setProxyUploadOpen] = useState(false);
-  const [proxyUploadMethod, setProxyUploadMethod] = useState<ProxyMethod>("Phone");
-  const [proxyUploadRemarks, setProxyUploadRemarks] = useState("");
-  const [proxyUploadFile, setProxyUploadFile] = useState<File | null>(null);
-  const [proxyUploading, setProxyUploading] = useState(false);
-
-  const attachFile = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    setAttaching(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}/attach`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      toast.success("File uploaded");
-      onReviewed();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setAttaching(false);
-    }
-  };
-
-  const handleProxyAttach = async () => {
-    if (!proxyUploadFile || !proxyUploadRemarks.trim()) return;
-    setProxyUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", proxyUploadFile);
-      formData.append("ProxyMethod", proxyUploadMethod);
-      formData.append("ProxyRemarks", proxyUploadRemarks.trim());
-      const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}/proxy-attach`, { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Upload failed");
-      toast.success("Document submitted on customer's behalf");
-      onReviewed();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setProxyUploading(false);
-    }
-  };
-
-  useEffect(() => {
-    toast.dismiss();
-  }, []);
-
-  useEffect(() => {
-    if (!doc.FilePath) return;
-    let objectUrl: string | null = null;
-    fetchWithAuth(`${API}/documents/file/${doc.Id}`)
-      .then((r) => r.blob())
-      .then((blob) => { objectUrl = URL.createObjectURL(blob); setBlobUrl(objectUrl); })
-      .catch(() => setBlobUrl(null));
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [doc.Id, doc.FilePath]);
-
-  useEffect(() => {
-    if (tab === "history" && audit === null) fetchDocAudit(doc.Id).then(setAudit);
-  }, [tab, audit, doc.Id]);
-
-  const setStatus = async (status: string) => {
-    if (status === CrmStatus.REJECTED && !remarks.trim()) { toast.error("Remarks are required to reject"); return; }
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${agreementId}/documents/${doc.Id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Status: status, Remarks: remarks || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to update");
-      toast.success(`Marked ${status}`);
-      onReviewed();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent accent="crm" className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
-            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="flex items-center gap-1 border-b border-border -mt-1">
-          <button onClick={() => setTab("preview")}
-            className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px ${tab === "preview" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            Preview
-          </button>
-          <button onClick={() => setTab("history")}
-            className={`text-xs font-medium px-3 py-1.5 border-b-2 -mb-px flex items-center gap-1 ${tab === "history" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <Clock size={12} /> History
-          </button>
-        </div>
-
-        {tab === "preview" ? (
-          <>
-            <div className="flex items-center justify-center min-h-[240px] bg-muted/30 rounded-lg overflow-hidden">
-              {!doc.FilePath && !doc.DocumentUrl ? (
-                <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">
-                  <Clock size={22} />
-                  {doc.UploadedByType === "Customer" ? (
-                    <p className="text-sm text-muted-foreground px-4 text-center">Awaiting upload from customer — nothing to preview yet.</p>
-                  ) : (
-                    <>
-                      Not yet uploaded — Legal Executive to attach.
-                      <input type="file" ref={attachInputRef} className="hidden"
-                        onChange={(e) => attachFile(e.target.files)} />
-                      <button type="button" onClick={() => attachInputRef.current?.click()} disabled={attaching}
-                        className="mt-1 flex items-center gap-1.5 px-3 py-1.5 text-xs btn-module text-white rounded-lg font-medium disabled:opacity-40">
-                        <Upload size={12} /> {attaching ? "Uploading..." : "Upload File"}
-                      </button>
-                    </>
-                  )}
-                </div>
-              ) : doc.DocumentUrl && !doc.FilePath ? (
-                <a href={doc.DocumentUrl} target="_blank" rel="noreferrer" className="flex flex-col items-center gap-2 py-8 text-primary text-sm hover:underline">
-                  <FileIcon size={22} /> Open external document link
-                </a>
-              ) : !blobUrl ? (
-                <span className="text-sm text-muted-foreground">Loading preview…</span>
-              ) : doc.MimeType?.startsWith("image/") ? (
-                <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[50vh] object-contain" />
-              ) : doc.MimeType === "application/pdf" ? (
-                <iframe src={blobUrl} title={doc.FileName} className="w-full h-[50vh] border-0" />
-              ) : (
-                <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">{mimeIcon(doc.MimeType)} Preview not available.</div>
-              )}
-            </div>
-
-            {doc.UploadedByType === "Customer" && !doc.FilePath && !doc.DocumentUrl && (
-              <div className="rounded-lg border border-border overflow-hidden">
-                {!proxyUploadOpen ? (
-                  <button type="button" onClick={() => setProxyUploadOpen(true)}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors text-left">
-                    <UserCircle2 size={13} className="shrink-0" />
-                    Customer provided this document off-portal? Submit on their behalf
-                  </button>
-                ) : (
-                  <div className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                        <UserCircle2 size={13} /> Submit on Customer's Behalf
-                      </div>
-                      <button type="button" onClick={() => setProxyUploadOpen(false)}
-                        className="text-muted-foreground hover:text-foreground p-0.5 rounded">
-                        <X size={14} />
-                      </button>
-                    </div>
-                    <div>
-                      <p className="text-[0.6875rem] text-muted-foreground mb-1.5">How did the customer provide this document?</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-                        {PROXY_METHODS.map((m) => (
-                          <button type="button" key={m} onClick={() => setProxyUploadMethod(m)}
-                            className={`text-[0.6875rem] px-2 py-1.5 rounded-md border font-medium transition-colors ${
-                              proxyUploadMethod === m
-                                ? "btn-module text-white border-primary"
-                                : "border-border text-muted-foreground hover:bg-muted"
-                            }`}>
-                            {PROXY_METHOD_LABELS[m]}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <textarea
-                      value={proxyUploadRemarks} onChange={(e) => setProxyUploadRemarks(e.target.value)}
-                      placeholder="Brief note on how/when the document was received…"
-                      rows={2}
-                      className="w-full text-xs border border-border rounded-md px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <div className="flex items-center gap-2">
-                      <input type="file" ref={proxyAttachRef} className="hidden"
-                        onChange={(e) => setProxyUploadFile(e.target.files?.[0] || null)} />
-                      <button type="button" onClick={() => proxyAttachRef.current?.click()}
-                        className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-dashed border-border rounded-md font-medium hover:bg-muted flex items-center gap-1.5 text-muted-foreground transition-colors">
-                        <Upload size={11} className="shrink-0" />
-                        <span className="truncate">{proxyUploadFile ? proxyUploadFile.name : "Choose File…"}</span>
-                      </button>
-                      <button type="button" onClick={handleProxyAttach}
-                        disabled={proxyUploading || !proxyUploadFile || !proxyUploadRemarks.trim()}
-                        className="shrink-0 text-xs px-3 py-1.5 btn-module text-white rounded-md font-semibold hover:shadow-lg disabled:opacity-40 transition-colors">
-                        {proxyUploading ? "Uploading…" : "Submit"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {!!doc.FilePath && (
-              <div className="flex justify-between items-center text-xs text-muted-foreground">
-                <span>{doc.FileName} {doc.FileSize ? `· ${fmtBytes(doc.FileSize)}` : ""}{doc.IssuedBy ? ` · by ${doc.IssuedBy}` : ""}</span>
-                {blobUrl && <a href={blobUrl} download={doc.FileName} className="text-primary hover:underline flex items-center gap-1"><Download size={12} /> Download</a>}
-              </div>
-            )}
-            {!!doc.FilePath && (
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Remarks {doc.Status !== "Verified" ? "(required to reject)" : ""}</label>
-                <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2}
-                  placeholder="Reason for rejection, or any note for the record..."
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="min-h-[240px] max-h-[50vh] overflow-y-auto">
-            {audit === null ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">Loading history…</div>
-            ) : audit.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
-                <FolderClock size={20} /> No review history yet for this document.
-              </div>
-            ) : (
-              <ul className="space-y-2">
-                {audit.map((h: any) => (
-                  <li key={h.Id} className="text-xs border border-border rounded-lg px-3 py-2 flex items-start justify-between gap-3">
-                    <div>
-                      <span className="font-medium">{h.Field}</span>{": "}
-                      <span className="text-muted-foreground">{h.OldValue || "—"}</span>{" → "}
-                      <span className="font-medium">{h.NewValue || "—"}</span>
-                    </div>
-                    <div className="text-right text-muted-foreground shrink-0">
-                      <div>{h.ChangedByName || "System"}</div>
-                      <div>{fmtIstIso(h.ChangedAt)}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-2 border-t border-border">
-          {!!doc.FilePath && doc.Status !== "Verified" && (
-            <button onClick={() => setStatus("Verified")} disabled={saving}
-              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">Verify</button>
-          )}
-          {!!doc.FilePath && doc.Status !== CrmStatus.REJECTED && (
-            <button onClick={() => setStatus("Rejected")} disabled={saving}
-              className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">Reject</button>
-          )}
-          <button onClick={onClose} className="px-3 py-1.5 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-async function fetchAgreements(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
-}
-
-const PAGE_SIZE = 20;
-interface AgreementListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchAgreementsList(filters: AgreementListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
-}
-async function fetchAgreementDetail(id: number): Promise<any> {
-  const r = await fetchWithAuth(`${API}/${id}`);
-  if (!r.ok) throw new Error("Failed to load agreement");
-  return r.json();
-}
-async function fetchAgreementIdByBooking(bookingId: string): Promise<number | null> {
-  try {
-    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
-    if (!r.ok) return null;
-    const data = await r.json();
-    return data?.agreement?.Id ?? null;
-  } catch { return null; }
-}
-async function fetchDateHistory(id: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/${id}/date-history`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchRevisions(id: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/${id}/revisions`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchBookings(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchWelcomeCallsForBooking(bookingId: number): Promise<any[]> {
-  try { const r = await fetchWithAuth(`/api/crm/welcome-calls?bookingId=${bookingId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
+// Registered is done; Executed is settled for now; Cancelled has stopped; Draft is in hand.
+const agrTone = (s: string): "done" | "waiting" | "stopped" => (s === "Registered" || s === "Executed" ? "done" : statusTone(s));
 
 const CrmAgreement: React.FC = () => {
   const qc = useQueryClient();
@@ -678,7 +95,7 @@ const CrmAgreement: React.FC = () => {
     () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
     [search, cpb]
   );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["crm-agreements", listFilters, page],
     queryFn: () => fetchAgreementsList(listFilters, page),
     staleTime: 30_000,
@@ -692,8 +109,10 @@ const CrmAgreement: React.FC = () => {
     enabled: selectedId != null,
     staleTime: 30_000,
   });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
+  // Own keys: this list (eligible bookings) and the legal executives used to share "crm-bookings" and "sa-users" with
+  // Bookings' and Welcome Calls' lists, so a visit there could fill the legal-executive pick with salespeople.
+  const { data: bookings = [] } = useQuery({ queryKey: ["crm-agreement-eligible-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  const { data: users = [] } = useQuery({ queryKey: ["crm-legal-executives"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
   const { data: dateHistory = [] } = useQuery({
     queryKey: ["crm-agreement-date-history", selectedId],
     queryFn: () => fetchDateHistory(selectedId!),
@@ -774,8 +193,9 @@ const CrmAgreement: React.FC = () => {
       if (!res.ok) throw new Error(data.error || "Failed to create agreement");
       toast.success(`Agreement ${data.AgreementNo} created`);
       setAgrDialog(false);
+      if (data.id != null) selectAgreement(data.id);
       setAgrForm({ ...EMPTY_AGR_FORM, BookingId: bkgFilter });
-      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+      ["crm-agreements", "crm-agreement-eligible-bookings"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -1170,71 +590,58 @@ const CrmAgreement: React.FC = () => {
     t === "AFS Payment" ? afsPayRights.canView :
     t === "AFS Registry" ? afsRegRights.canView : true;
 
+  const canWork = rights.canEdit;
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Agreements"]} />
-      <CrmShell
-        title="CRM — Agreements"
-      subtitle="Sale agreements and legal documents"
-      action={
-          <div className="flex items-center gap-3">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          <button onClick={() => setAgrDialog(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
-          <Plus size={14} /> New Agreement
-        </button>
-        </div>
-      }
-    >
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Pre-sale"
+        title="Agreements"
+        subtitle="The agreement for sale: legal paperwork, senior and customer approval, the signing date, execution, then AFS payment and registry."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {/* The server creates under the create right; the button was offered to everyone. */}
+            {rights.canCreate && <button onClick={() => setAgrDialog(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New agreement</button>}
+          </div>
+        }
+      >
       <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-220px)]">
         {/* List */}
-        <div className="w-full md:w-80 shrink-0 flex flex-col gap-2">
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <div className="w-full md:w-80 shrink-0 flex flex-col bg-card min-h-0" style={{ border: RULE }}>
+          <div className="p-3 space-y-2" style={{ borderBottom: RULE }}>
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search agreements..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+              placeholder="Search customer, agreement or booking…"
+              className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+            <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
           </div>
-          <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
-          <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5 max-h-[45vh] md:max-h-none">
-            {isLoading ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
+          <div className="flex-1 overflow-y-auto thin-scroll max-h-[45vh] md:max-h-none">
+            {isError ? (
+              <p className="p-4 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : isLoading ? (
+              <p className="p-4 text-center text-muted-foreground text-sm">Loading…</p>
             ) : filtered.length === 0 ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">No agreements found</div>
-            ) : (filtered as any[]).map((a: any) => {
-              const railColor = a.Status === "Registered" ? "#22c55e" : a.Status === "Executed" ? "#3b82f6" : a.Status === "Cancelled" ? "#ef4444" : "var(--border)";
-              return (
+              <p className="p-4 text-center text-muted-foreground text-sm">{search || cpb.projectId ? "No agreement matches." : "No agreements yet."}</p>
+            ) : (filtered as any[]).map((a: any) => (
               <button key={a.Id} onClick={() => selectAgreement(a.Id)}
-                className={`w-full text-left rounded-lg border overflow-hidden transition-colors ${selectedId === a.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
-                <div className="flex">
-                  <div className="w-[3px] shrink-0 self-stretch" style={{ background: railColor }} />
-                  <div className="flex-1 min-w-0 p-3 space-y-1.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} /></span>
-                      <span className={`shrink-0 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${agrStatusColor[a.Status] || ""}`}>{a.Status}</span>
-                    </div>
-                    {isBookingCancelled(a) && (
-                      <div className="text-[0.625rem] font-semibold text-red-600">⚠ Booking {a.BookingStatus || "inactive"} — locked</div>
-                    )}
-                    <div className="text-[0.6875rem] font-mono text-muted-foreground">{a.AgreementNo}</div>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-[0.6875rem] text-muted-foreground truncate">{a.BookingNo} · {a.UnitNo}</div>
-                      <div className="shrink-0 text-[0.625rem] text-muted-foreground">{a.DocumentCount || 0} doc{a.DocumentCount !== 1 ? "s" : ""}</div>
-                    </div>
-                    <div className="text-[0.6875rem] flex items-center gap-1">
-                      <UserCircle2 size={10} className="text-muted-foreground shrink-0" />
-                      {a.LegalExecutiveName
-                        ? <span className="text-foreground font-medium truncate">{a.LegalExecutiveName}</span>
-                        : <span className="text-sky-600 font-medium">Unassigned</span>}
-                    </div>
-                  </div>
+                className={`w-full text-left px-3 py-2.5 transition-colors ${selectedId === a.Id ? "bg-foreground text-card" : "hover:bg-primary/5"}`}
+                style={{ borderBottom: RULE_SOFT }}>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={a.ApplicantName} bookingId={a.BookingId} applicationId={a.ApplicationId} /></span>
+                  <span className={selectedId === a.Id ? "[&_*]:!text-card" : ""}><SheetMark text={a.Status} tone={agrTone(a.Status)} /></span>
+                </div>
+                <div className={`mt-1 text-[0.6875rem] tabular-nums truncate ${selectedId === a.Id ? "opacity-80" : "text-muted-foreground"}`}>
+                  {[a.AgreementNo, a.BookingNo, a.UnitNo].filter(Boolean).join(" · ")} · {a.DocumentCount || 0} doc{a.DocumentCount !== 1 ? "s" : ""}
+                </div>
+                <div className={`mt-0.5 text-[0.6875rem] truncate ${selectedId === a.Id ? "opacity-80" : ""}`}>
+                  {isBookingCancelled(a) ? <span className="text-destructive font-semibold">Booking {a.BookingStatus || "inactive"}: locked</span>
+                    : a.LegalExecutiveName ? <span>{a.LegalExecutiveName}</span> : <span className="font-semibold">No legal executive</span>}
                 </div>
               </button>
-              );
-            })}
+            ))}
           </div>
-          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
         </div>
 
         {/* Detail */}
@@ -1248,7 +655,7 @@ const CrmAgreement: React.FC = () => {
           ) : (
             <>
               {detail.agreement?.Status !== CrmStatus.CANCELLED && (
-                <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+                <div className="bg-card p-4 space-y-3" style={{ border: RULE }}>
                   <AgreementStepper steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
                   {(() => {
                     const a = detail.agreement;
@@ -1316,90 +723,64 @@ const CrmAgreement: React.FC = () => {
                       text = "All checks passed — ready to mark this agreement executed.";
                       cta = { label: "Mark Executed", onClick: () => handleAgreementAction("mark-executed") };
                     }
-                    type VariantDef = { card: string; text: string; sub: string; icon: React.ReactNode };
-                    const variantDef: Record<BannerVariant, VariantDef> = {
-                      error:   { card: "border-red-300 bg-red-500/10 dark:border-red-800 dark:bg-red-950/50",     text: "text-red-700 dark:text-red-300",   sub: "text-red-600/80 dark:text-red-400/80",   icon: <AlertCircle size={16} className="text-red-500 shrink-0 mt-0.5" /> },
-                      warning: { card: "border-amber-300 bg-[#ffe2021a] dark:border-amber-800 dark:bg-amber-950/50", text: "text-amber-800 dark:text-amber-200", sub: "text-amber-700/80 dark:text-amber-400/80", icon: <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" /> },
-                      info:    { card: "border-blue-300 bg-blue-500/10 dark:border-blue-800 dark:bg-blue-950/50",   text: "text-blue-800 dark:text-blue-200",   sub: "text-blue-700/80 dark:text-blue-400/80",   icon: <Info size={16} className="text-blue-500 shrink-0 mt-0.5" /> },
-                      success: { card: "border-green-300 bg-green-500/10 dark:border-green-800 dark:bg-green-950/50", text: "text-green-800 dark:text-green-200", sub: "text-green-700/80 dark:text-green-400/80", icon: <CheckCircle2 size={16} className="text-green-500 shrink-0 mt-0.5" /> },
-                      action:  { card: "border-primary/40 bg-primary/10",                                            text: "text-foreground",                   sub: "text-muted-foreground",                   icon: <ArrowRight size={16} className="text-primary shrink-0 mt-0.5" /> },
-                    };
-                    const vd = variantDef[variant];
+                    // One ruled note; red edge for trouble, ink edge for "your move". The action is offered only with the
+                    // edit right (the server refuses otherwise; it used to be offered to anyone).
+                    const edge = variant === "error" ? "hsl(var(--destructive))" : variant === "action" ? "hsl(var(--foreground))" : "hsl(var(--foreground) / 0.3)";
+                    const icon = variant === "error" || variant === "warning" ? <AlertCircle size={15} className={`shrink-0 mt-0.5 ${variant === "error" ? "text-destructive" : ""}`} />
+                      : variant === "success" ? <CheckCircle2 size={15} className="shrink-0 mt-0.5" /> : variant === "action" ? <ArrowRight size={15} className="shrink-0 mt-0.5" /> : <Info size={15} className="shrink-0 mt-0.5" />;
                     return (
-                      <div className={`flex items-start justify-between gap-3 flex-wrap rounded-xl border px-4 py-3 ${vd.card}`}>
+                      <div className="flex items-start justify-between gap-3 flex-wrap px-4 py-3 bg-card" style={{ border: RULE_SOFT, borderLeft: `3px solid ${edge}` }}>
                         <div className="flex items-start gap-2.5">
-                          {vd.icon}
+                          {icon}
                           <div>
-                            <p className={`text-sm font-semibold leading-snug ${vd.text}`}>{text}</p>
-                            {subtext && <p className={`text-xs mt-0.5 ${vd.sub}`}>{subtext}</p>}
+                            <p className={`text-sm font-semibold leading-snug ${variant === "error" ? "text-destructive" : "text-foreground"}`}>{text}</p>
+                            {subtext && <p className="text-xs mt-0.5 text-muted-foreground">{subtext}</p>}
                           </div>
                         </div>
-                        {cta && (
-                          <button onClick={cta.onClick}
-                            className="shrink-0 px-3.5 py-1.5 text-xs btn-module text-white rounded-lg font-semibold hover:shadow-lg whitespace-nowrap">
-                            {cta.label}
-                          </button>
-                        )}
+                        {cta && canWork && <button onClick={cta.onClick} className={`${KEY_INK} h-9 px-4 shrink-0`}>{cta.label}</button>}
                       </div>
                     );
                   })()}
                 </div>
               )}
 
-              <div className="rounded-xl border border-border overflow-hidden">
-                <div className={`px-4 py-3 flex items-center justify-between gap-3 flex-wrap ${
-                  detail.agreement?.Status === "Registered" ? "bg-gradient-to-r from-green-500/10 to-green-500/5 border-b border-green-200/60 dark:border-green-900/40"
-                  : detail.agreement?.Status === "Executed" ? "bg-gradient-to-r from-blue-500/10 to-blue-500/5 border-b border-blue-200/60 dark:border-blue-900/40"
-                  : detail.agreement?.Status === "Cancelled" ? "bg-gradient-to-r from-red-500/10 to-red-500/5 border-b border-red-200/60 dark:border-red-900/40"
-                  : "bg-muted/20 border-b border-border"
-                }`}>
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`p-2 rounded-xl shrink-0 ${
-                      detail.agreement?.Status === "Registered" ? "bg-green-100 dark:bg-green-900/40"
-                      : detail.agreement?.Status === "Executed" ? "bg-blue-100 dark:bg-blue-900/40"
-                      : detail.agreement?.Status === "Cancelled" ? "bg-red-100 dark:bg-red-900/40"
-                      : "bg-primary/10"}`}>
-                      <Building2 size={16} className={
-                        detail.agreement?.Status === "Registered" ? "text-green-600"
-                        : detail.agreement?.Status === "Executed" ? "text-blue-600"
-                        : detail.agreement?.Status === "Cancelled" ? "text-red-600"
-                        : "text-primary"} />
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="font-bold text-[0.9375rem] text-foreground leading-tight truncate"><ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} /></h2>
-                      <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">
-                        {detail.agreement?.AgreementNo}
-                        {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{detail.agreement.VersionNo}</span>}
-                      </p>
-                    </div>
+              <div className="bg-card" style={{ border: RULE }}>
+                <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <span className={`block ${LBL}`}>Agreement</span>
+                    <h2 className="font-heading font-bold text-lg text-foreground leading-tight truncate flex items-center gap-2">
+                      <Building2 size={16} /> <ApplicantNames name={detail.agreement?.ApplicantName} bookingId={detail.agreement?.BookingId} applicationId={detail.agreement?.ApplicationId} />
+                    </h2>
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">
+                      {detail.agreement?.AgreementNo}
+                      {detail.agreement?.VersionNo > 1 && <span className="ml-1.5 font-semibold text-foreground">· version {detail.agreement.VersionNo}</span>}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-xs px-2.5 py-1 rounded-lg border font-semibold ${agrStatusColor[detail.agreement?.Status] || ""}`}>
-                      {detail.agreement?.Status}
-                    </span>
+                    <SheetMark text={detail.agreement?.Status || "—"} tone={agrTone(detail.agreement?.Status || "")} />
                     {detail.agreement && isBookingCancelled(detail.agreement) && (
                       <span title={`Booking ${detail.agreement.BookingStatus || "inactive"} — Edit/Send/Mark actions are locked. Cancel the agreement instead.`}
-                        className="text-xs px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-600 font-medium cursor-help">
+                        className="text-xs font-semibold text-destructive cursor-help">
                         ⚠ Booking {detail.agreement.BookingStatus || "Inactive"}
                       </span>
                     )}
                     {rights.canEdit && detail.agreement?.Status === CrmStatus.DRAFT && (
                       isBookingCancelled(detail.agreement) ? (
-                        <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                        <span title="Booking is cancelled — cannot edit" className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-40 cursor-not-allowed`}>
                           Edit Details
                         </span>
                       ) : (
                         <button onClick={openEdit}
-                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          className={`${KEY_LINE} h-8 px-2.5`}>
                           Edit Details
                         </button>
                       )
                     )}
-                    {detail.agreement?.Status === CrmStatus.DRAFT && (() => {
+                    {canWork && detail.agreement?.Status === CrmStatus.DRAFT && (() => {
                       const pendingDocs = unverifiedMandatoryDocs(detail.documents);
                       if (isBookingCancelled(detail.agreement)) {
                         return (
-                          <span title="Booking is cancelled — cannot mark executed" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                          <span title="Booking is cancelled — cannot mark executed" className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-40 cursor-not-allowed`}>
                             Mark Executed
                           </span>
                         );
@@ -1410,7 +791,7 @@ const CrmAgreement: React.FC = () => {
                       if (!approvalsReady) {
                         return (
                           <span title="Requires senior approval, customer approval, and a mutually agreed date"
-                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                            className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-60 cursor-help`}>
                             Mark Executed (not ready)
                           </span>
                         );
@@ -1418,7 +799,7 @@ const CrmAgreement: React.FC = () => {
                       if (detail.agreement?.LegalExecutiveId == null) {
                         return (
                           <span title="A Legal Executive must be assigned first — pick one from the Legal Executive field above"
-                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                            className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-60 cursor-help`}>
                             Mark Executed (legal exec. unassigned)
                           </span>
                         );
@@ -1426,25 +807,25 @@ const CrmAgreement: React.FC = () => {
                       if (pendingDocs.length) {
                         return (
                           <span title={`Mandatory document(s) not yet verified: ${pendingDocs.map((d) => d.Label || d.DocumentType).join(", ")}`}
-                            className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/60 cursor-help">
+                            className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-60 cursor-help`}>
                             Mark Executed (docs pending)
                           </span>
                         );
                       }
                       return (
                         <button onClick={() => handleAgreementAction("mark-executed")}
-                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          className={`${KEY_LINE} h-8 px-2.5`}>
                           Mark Executed
                         </button>
                       );
                     })()}
-                    {detail.agreement?.Status === CrmStatus.EXECUTED && (
+                    {canWork && detail.agreement?.Status === CrmStatus.EXECUTED && (
                       isBookingCancelled(detail.agreement) ? (
-                        <span title="Booking is cancelled — cannot mark registered" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                        <span title="Booking is cancelled — cannot mark registered" className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-40 cursor-not-allowed`}>
                           Mark Registered
                         </span>
                       ) : detail.agreement?.AfsRegistryStatus !== "Completed" ? (
-                        <span title="AFS Registry (the Sub-Registrar Visit 1 tracker) must be marked Completed first" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
+                        <span title="AFS Registry (the Sub-Registrar Visit 1 tracker) must be marked Completed first" className={`${KEY_LINE} h-8 px-2.5 !border-dashed opacity-40 cursor-not-allowed`}>
                           Mark Registered
                         </span>
                       ) : (
@@ -1471,36 +852,34 @@ const CrmAgreement: React.FC = () => {
                             setRegFeesLocked(prefillStamp !== "" || prefillFee !== "");
                             setRegDialog(true);
                           }}
-                          className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
+                          className={`${KEY_LINE} h-8 px-2.5`}>
                           Mark Registered
                         </button>
                       )
                     )}
-                    {(detail.agreement?.Status === CrmStatus.DRAFT || detail.agreement?.Status === CrmStatus.EXECUTED) && (
-                      <button onClick={() => { if (window.confirm("Cancel this agreement?")) handleAgreementAction("cancel"); }}
-                        className="text-xs px-2.5 py-1 border border-red-200 rounded-lg text-red-600 bg-red-50/50 hover:bg-red-100 font-medium">
-                        Cancel
+                    {canWork && (detail.agreement?.Status === CrmStatus.DRAFT || detail.agreement?.Status === CrmStatus.EXECUTED) && (
+                      <button onClick={() => { if (window.confirm(`Cancel agreement ${detail.agreement?.AgreementNo}?`)) handleAgreementAction("cancel"); }}
+                        className={`${KEY_LINE} h-8 px-2.5 !text-destructive !border-destructive`}>
+                        Cancel agreement
                       </button>
                     )}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1 overflow-x-auto thin-scroll">
-                {AGR_TABS.filter(tabAllowed).map((t, i) => (
+              <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+                {AGR_TABS.filter(tabAllowed).map((t) => (
                   <button key={t} onClick={() => setAgrTab(t)}
-                    className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                      agrTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                    }`}>
-                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${
-                      agrTab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{i + 1}</span>
+                    className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${
+                      agrTab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"
+                    }`} style={{ borderRight: RULE_SOFT }}>
                     {t}
                   </button>
                 ))}
               </div>
 
               {agrTab === "Overview" && (
-              <div className="rounded-xl border border-border overflow-hidden space-y-0">
+              <div className="border border-border overflow-hidden space-y-0">
                 <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
                   <div className="px-4 py-3">
                     <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Booking</p>
@@ -1511,10 +890,10 @@ const CrmAgreement: React.FC = () => {
                     <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Project</p>
                     <p className="text-sm font-semibold truncate">{detail.agreement?.ProjectName || "—"}</p>
                   </div>
-                  <div className={`px-4 py-3 ${detail.agreement?.AgreementDate ? "bg-green-500/[0.04]" : ""}`}>
+                  <div className={`px-4 py-3 ${detail.agreement?.AgreementDate ? "bg-foreground/5" : ""}`}>
                     <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Agreement Date</p>
                     {detail.agreement?.AgreementDate ? (
-                      <p className="text-sm font-bold text-green-700 dark:text-green-400">{String(detail.agreement.AgreementDate).slice(0, 10)}</p>
+                      <p className="text-sm font-bold text-foreground">{String(detail.agreement.AgreementDate).slice(0, 10)}</p>
                     ) : (
                       <p className="text-sm text-muted-foreground/60 italic">Not set</p>
                     )}
@@ -1530,27 +909,27 @@ const CrmAgreement: React.FC = () => {
                     ["Aadhaar",          detail.agreement?.AadhaarNo || detail.agreement?.CustomerAadhaarNo || "—"],
                   ].map(([k, v]) => (
                     <div key={k}>
-                      <span className="text-[0.6875rem] text-muted-foreground block">{k}</span>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">{k}</span>
                       <span className="font-medium text-sm">{v}</span>
                     </div>
                   ))}
                   {detail.agreement?.LegalAddress && (
                     <div className="col-span-2">
-                      <span className="text-[0.6875rem] text-muted-foreground block">Legal Address</span>
+                      <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Legal Address</span>
                       <span className="text-sm text-muted-foreground">{detail.agreement.LegalAddress}</span>
                     </div>
                   )}
                   <div className="col-span-2 pt-1 border-t border-border/60">
-                    <span className="text-[0.6875rem] text-muted-foreground block">{detail.agreement?.IsPlotSale ? "Total Value (land — no GST)" : "Total Value (incl. GST)"}</span>
-                    <span className="text-sm font-bold font-mono">
-                      {detail.agreement?.GrandTotal ? `₹${Number(detail.agreement.GrandTotal).toLocaleString("en-IN")}` : "—"}
+                    <span className={`block ${LBL}`}>{detail.agreement?.IsPlotSale ? "Total value (land, no GST)" : "Total value (incl. GST)"}</span>
+                    <span className="block font-heading text-xl font-bold tabular-nums text-foreground mt-1">
+                      {detail.agreement?.GrandTotal ? fmtRupees(detail.agreement.GrandTotal) : "—"}
                     </span>
                     {detail.agreement?.GrandTotal > 0 && (
-                      <span className="text-[0.6875rem] text-muted-foreground block mt-0.5">
-                        {detail.agreement?.IsPlotSale ? "Land" : "Unit"} ₹{Number(detail.agreement.TotalValue).toLocaleString("en-IN")}
-                        {detail.agreement?.UnitGstAmount > 0 && ` + GST ₹${Number(detail.agreement.UnitGstAmount).toLocaleString("en-IN")}`}
-                        {detail.agreement?.ParkingTotal > 0 && ` + Parking ₹${Number(detail.agreement.ParkingTotal).toLocaleString("en-IN")}`}
-                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra ₹${Number(detail.agreement.ExtraChargesTotal).toLocaleString("en-IN")}`}
+                      <span className="text-[0.6875rem] text-muted-foreground block mt-0.5 tabular-nums">
+                        {detail.agreement?.IsPlotSale ? "Land" : "Unit"} {fmtRupees(detail.agreement.TotalValue)}
+                        {detail.agreement?.UnitGstAmount > 0 && ` + GST ${fmtRupees(detail.agreement.UnitGstAmount)}`}
+                        {detail.agreement?.ParkingTotal > 0 && ` + Parking ${fmtRupees(detail.agreement.ParkingTotal)}`}
+                        {detail.agreement?.ExtraChargesTotal > 0 && ` + Extra ${fmtRupees(detail.agreement.ExtraChargesTotal)}`}
                       </span>
                     )}
                   </div>
@@ -1575,29 +954,29 @@ const CrmAgreement: React.FC = () => {
                 })()}
 
                 {detail.agreement?.Status === CrmStatus.REGISTERED && (
-                  <div className="px-4 py-3 bg-green-500/[0.04] border-b border-green-200/60 dark:border-green-900/40 space-y-2">
-                    <p className="text-[0.6875rem] font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <div className="px-4 py-3 bg-foreground/5 border-b border-foreground/30 space-y-2">
+                    <p className="text-[0.6875rem] font-semibold text-foreground uppercase tracking-wide flex items-center gap-1.5">
                       <CheckCircle2 size={12} /> AFS Registration (Sub-Registrar)
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                       <div>
-                        <span className="text-[0.6875rem] text-muted-foreground block">Doc No.</span>
-                        <span className="font-semibold font-mono">{detail.agreement.AfsRegistrationNo || "—"}</span>
+                        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Doc No.</span>
+                        <span className="font-semibold font-heading tabular-nums">{detail.agreement.AfsRegistrationNo || "—"}</span>
                       </div>
                       <div>
-                        <span className="text-[0.6875rem] text-muted-foreground block">Registration Date</span>
+                        <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Registration Date</span>
                         <span className="font-semibold">{detail.agreement.AfsRegistrationDate ? String(detail.agreement.AfsRegistrationDate).slice(0, 10) : "—"}</span>
                       </div>
                       {detail.agreement.AfsStampDuty != null && (
                         <div>
-                          <span className="text-[0.6875rem] text-muted-foreground block">Stamp Duty Paid</span>
-                          <span className="font-semibold font-mono">{Number(detail.agreement.AfsStampDuty).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
+                          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Stamp Duty Paid</span>
+                          <span className="font-semibold font-heading tabular-nums">{Number(detail.agreement.AfsStampDuty).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
                         </div>
                       )}
                       {detail.agreement.AfsRegistrationFee != null && (
                         <div>
-                          <span className="text-[0.6875rem] text-muted-foreground block">Registration Fee</span>
-                          <span className="font-semibold font-mono">{Number(detail.agreement.AfsRegistrationFee).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
+                          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Registration Fee</span>
+                          <span className="font-semibold font-heading tabular-nums">{Number(detail.agreement.AfsRegistrationFee).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 })}</span>
                         </div>
                       )}
                     </div>
@@ -1609,9 +988,9 @@ const CrmAgreement: React.FC = () => {
                     <p className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide font-medium mb-2">Version History (prior to v{detail.agreement?.VersionNo})</p>
                     <div className="space-y-1.5 text-xs">
                       {(revisions as any[]).map((r) => (
-                        <div key={r.Id} className="rounded-lg border border-border p-2.5 bg-muted/20">
+                        <div key={r.Id} className="border border-border p-2.5 bg-muted/20">
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <span className="px-1.5 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-violet-600 text-[0.625rem] font-medium">v{r.VersionNo}</span>
+                            <span className="px-1.5 py-0.5 border border-foreground/30 bg-card text-foreground text-[0.625rem] font-medium">v{r.VersionNo}</span>
                             <span>{r.Reason}</span>
                             <span className="text-[0.625rem]">({fmtIstIso(r.CreatedAt)}{r.CreatedByName ? ` · ${r.CreatedByName}` : ""})</span>
                           </div>
@@ -1646,107 +1025,107 @@ const CrmAgreement: React.FC = () => {
                 const stepsComplete = [seniorApproved, sent, custApproved, dated, executed].filter(Boolean).length;
 
                 const circleCls = (s: "done"|"active"|"warn"|"upcoming") =>
-                  s === "done"     ? "bg-green-500 text-white ring-2 ring-green-200 dark:ring-green-900" :
+                  s === "done"     ? "bg-foreground text-card ring-2" :
                   s === "active"   ? "bg-primary text-primary-foreground ring-2 ring-primary/30" :
-                  s === "warn"     ? "bg-red-500 text-white ring-2 ring-red-200 dark:ring-red-900" :
+                  s === "warn"     ? "bg-destructive text-white ring-2 ring-red-200 dark:ring-red-900" :
                   "bg-muted text-muted-foreground";
 
                 return (
                   <div className="space-y-4">
-                    <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <UserCircle2 size={15} className="text-primary" /> Legal Executive
+                        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                          <UserCircle2 size={15} className="text-foreground" /> Legal Executive
                         </h3>
                         {legalAssigned
-                          ? <span className="text-[0.6875rem] text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full font-semibold">Assigned</span>
-                          : <span className="text-[0.6875rem] text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full font-semibold">Unassigned</span>
+                          ? <span className="text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-2 py-0.5 font-semibold">Assigned</span>
+                          : <span className="text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-2 py-0.5 font-semibold">Unassigned</span>
                         }
                       </div>
                       <div className="px-4 py-3 space-y-2">
                         <p className="text-xs text-muted-foreground">The person responsible for preparing this agreement's paperwork. Required before execution (server-enforced).</p>
                         {a?.LegalExecutiveId != null && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
                           <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border rounded-lg px-3 py-1.5">
-                              <UserCircle2 size={14} className="text-primary shrink-0" />
+                            <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border px-3 py-1.5">
+                              <UserCircle2 size={14} className="text-foreground shrink-0" />
                               <span className="text-sm font-medium">{a.LegalExecutiveName}</span>
                               <Lock size={11} className="text-muted-foreground ml-auto shrink-0" />
                             </div>
                             <button
                               onClick={() => setEditingLegalExec(true)}
-                              className="text-xs px-2.5 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted shrink-0">
+                              className="text-xs px-2.5 py-1.5 border border-border text-muted-foreground hover:bg-muted shrink-0">
                               Change
                             </button>
                           </div>
                         ) : ["Registered", "Cancelled"].includes(a?.Status) || cancelled ? (
-                          <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-sky-600">Unassigned</span>}</div>
+                          <div className="font-medium text-sm">{a?.LegalExecutiveName || <span className="text-foreground">Unassigned</span>}</div>
                         ) : (
                           <div className="flex items-center gap-2">
                             <SearchableNativeSelect
                               value={a?.LegalExecutiveId != null ? String(a.LegalExecutiveId) : ""}
                               disabled={assigningLegal}
                               onChange={(e) => handleAssignLegal(e.target.value)}
-                              className={`flex-1 text-sm border rounded-lg px-2 py-1.5 bg-background disabled:opacity-40 ${
-                                a?.LegalExecutiveId != null ? "border-border" : "border-sky-300 text-sky-600"}`}>
+                              className={`flex-1 text-sm border px-2 py-1.5 bg-background disabled:opacity-40 ${
+                                a?.LegalExecutiveId != null ? "border-border" : "border-foreground/30 text-foreground"}`}>
                               <option value="">— Unassigned —</option>
                               {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
                             </SearchableNativeSelect>
                             {editingLegalExec && (
                               <button
                                 onClick={() => setEditingLegalExec(false)}
-                                className="text-xs px-2.5 py-1.5 border border-border rounded-lg text-muted-foreground hover:bg-muted shrink-0">
+                                className="text-xs px-2.5 py-1.5 border border-border text-muted-foreground hover:bg-muted shrink-0">
                                 Cancel
                               </button>
                             )}
                           </div>
                         )}
                         {a?.LegalExecutiveId == null && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
-                          <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1.5">
+                          <p className="text-xs text-foreground bg-card border border-foreground/30 px-2 py-1.5">
                             Assign someone now so they receive an immediate notification and can start preparing the paperwork.
                           </p>
                         )}
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="border border-border overflow-hidden">
                       <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
-                        <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                          <ShieldAlert size={15} className="text-primary" /> Approval Timeline
+                        <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5">
+                          <ShieldAlert size={15} className="text-foreground" /> Approval Timeline
                         </h3>
                         <div className="flex items-center gap-2">
                           <div className="flex gap-1">
                             {[0,1,2,3,4].map((i) => (
-                              <div key={i} className={`w-2 h-2 rounded-full ${i < stepsComplete ? "bg-green-500" : "bg-muted"}`} />
+                              <div key={i} className={`w-2 h-2 ${i < stepsComplete ? "bg-foreground" : "bg-muted"}`} />
                             ))}
                           </div>
                           <span className="text-xs text-muted-foreground">{stepsComplete}/5</span>
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-green-500/[0.04]" : seniorRejected ? "bg-red-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${seniorApproved ? "bg-foreground/5" : seniorRejected ? "bg-destructive/5" : ""}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(seniorApproved ? "done" : seniorRejected ? "warn" : seniorPending ? "active" : "upcoming")}`}>
                           {seniorApproved ? <Check size={14} /> : seniorRejected ? <AlertCircle size={13} /> : 1}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Senior Review</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
-                              seniorApproved ? "text-green-600 bg-green-50 border-green-200"
-                              : seniorRejected ? "text-red-600 bg-red-50 border-red-200"
-                              : "text-sky-600 bg-sky-50 border-sky-200"
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
+                              seniorApproved ? "text-foreground bg-card border-foreground/30"
+                              : seniorRejected ? "text-destructive bg-destructive/5 border-destructive/40"
+                              : "text-foreground bg-card border-foreground/30"
                             }`}>{seniorStatus || "Pending"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             An admin or super-admin approves this agreement before it's shared with the customer. Once submitted, review happens from the <strong>Admin Approval Inbox</strong>.
                           </p>
                           {seniorApproved && a?.SeniorApprovedAt && (
-                            <p className="text-xs text-green-700 flex items-center gap-1">
+                            <p className="text-xs text-foreground flex items-center gap-1">
                               <CheckCircle2 size={11} /> Approved {String(a.SeniorApprovedAt).slice(0,10)}
                               {a?.SeniorApprovalRemarks && <span className="text-muted-foreground ml-1">· {a.SeniorApprovalRemarks}</span>}
                             </p>
                           )}
                           {seniorRejected && a?.SeniorApprovalRemarks && (
-                            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                            <div className="text-xs text-destructive bg-destructive/5 border border-destructive/40 px-2 py-1.5">
                               <strong>Rejection reason:</strong> {a.SeniorApprovalRemarks}
                             </div>
                           )}
@@ -1768,38 +1147,38 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "bg-blue-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${sent ? "bg-foreground/5" : ""}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(sent ? "done" : seniorApproved ? "active" : "upcoming")}`}>
                           {sent ? <Check size={14} /> : 2}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Shared with Customer</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
-                              sent ? "text-blue-600 bg-blue-50 border-blue-200" : "text-muted-foreground bg-muted/30 border-border"
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
+                              sent ? "text-foreground bg-card border-foreground/30" : "text-muted-foreground bg-muted/30 border-border"
                             }`}>{sent ? "Sent" : "Not sent"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             The customer can view this agreement in their portal and approve it or request a recheck.
                           </p>
                           {sent && a?.SentToCustomerAt && (
-                            <p className="text-xs text-blue-600 flex items-center gap-1">
+                            <p className="text-xs text-foreground flex items-center gap-1">
                               <Send size={11} /> Sent {fmtIstIso(a.SentToCustomerAt)}
                             </p>
                           )}
                           {seniorApproved && !sent && !cancelled && (
                             <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setSendDialog(true); }}
-                              className="mt-0.5 text-xs px-3 py-1.5 btn-module text-white rounded-lg font-semibold ">
+                              className={`${KEY_INK} h-8 px-3`}>
                               Send to Customer Portal
                             </button>
                           )}
                           {custRecheck && seniorApproved && !cancelled && (
                             <div className="space-y-1.5 pt-0.5">
-                              <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                              <div className="text-xs text-destructive bg-destructive/5 border border-destructive/40 px-2 py-1.5">
                                 <strong>Recheck requested ({a.RecheckCount}x):</strong> {a.LastRecheckRemarks || "No remark provided"}
                               </div>
                               <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setSendDialog(true); }}
-                                className="text-xs px-3 py-1.5 btn-module text-white rounded-lg font-semibold ">
+                                className={`${KEY_INK} h-8 px-3`}>
                                 Resend After Recheck
                               </button>
                             </div>
@@ -1807,29 +1186,29 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "bg-green-500/[0.04]" : custRecheck ? "bg-red-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${custApproved ? "bg-foreground/5" : custRecheck ? "bg-destructive/5" : ""}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(custApproved ? "done" : custRecheck ? "warn" : sent ? "active" : "upcoming")}`}>
                           {custApproved ? <Check size={14} /> : custRecheck ? <AlertCircle size={13} /> : 3}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Customer Approval</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
-                              custApproved ? "text-green-600 bg-green-50 border-green-200"
-                              : custRecheck ? "text-red-600 bg-red-50 border-red-200"
-                              : "text-sky-600 bg-sky-50 border-sky-200"
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
+                              custApproved ? "text-foreground bg-card border-foreground/30"
+                              : custRecheck ? "text-destructive bg-destructive/5 border-destructive/40"
+                              : "text-foreground bg-card border-foreground/30"
                             }`}>{custStatus || "Pending"}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             Customer reviews the agreement from their portal and approves it or flags issues.
                           </p>
                           {custApproved && a?.CustomerApprovedAt && (
-                            <p className="text-xs text-green-700 flex items-center gap-1">
+                            <p className="text-xs text-foreground flex items-center gap-1">
                               <CheckCircle2 size={11} /> Approved by customer {String(a.CustomerApprovedAt).slice(0,10)}
                             </p>
                           )}
                           {a?.RecheckCount > 0 && !custApproved && (
-                            <p className="text-xs text-red-600">Recheck count: {a.RecheckCount} · Last remark: {a.LastRecheckRemarks || "—"}</p>
+                            <p className="text-xs text-destructive">Recheck count: {a.RecheckCount} · Last remark: {a.LastRecheckRemarks || "—"}</p>
                           )}
                           {sent && !custApproved && !custRecheck && !cancelled && (
                             <div className="pt-1 border-t border-border/60 mt-1">
@@ -1839,13 +1218,13 @@ const CrmAgreement: React.FC = () => {
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   onClick={() => setProxyApproveDialog(true)}
-                                  className="text-xs px-3 py-1.5 bg-sky-50 border border-sky-300 text-sky-800 rounded-lg font-semibold hover:bg-sky-100 flex items-center gap-1.5"
+                                  className="text-xs px-3 py-1.5 bg-card border border-foreground/30 text-foreground font-semibold hover:bg-primary/10 flex items-center gap-1.5"
                                 >
                                   <UserCircle2 size={12} /> Record Approval on Their Behalf
                                 </button>
                                 <button
                                   onClick={() => setProxyRecheckDialog(true)}
-                                  className="text-xs px-3 py-1.5 bg-red-50 border border-red-200 text-red-800 rounded-lg font-semibold hover:bg-red-100 flex items-center gap-1.5"
+                                  className="text-xs px-3 py-1.5 bg-destructive/5 border border-destructive/40 text-destructive font-semibold hover:bg-destructive/10 flex items-center gap-1.5"
                                 >
                                   <UserCircle2 size={12} /> Record Recheck Request on Their Behalf
                                 </button>
@@ -1855,23 +1234,23 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "bg-green-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
+                      <div className={`px-4 py-4 border-b border-border flex items-start gap-3 ${dated ? "bg-foreground/5" : ""}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(dated ? "done" : a?.DateApprovalStatus === CrmStatus.PENDING ? "warn" : custApproved ? "active" : "upcoming")}`}>
                           {dated ? <Check size={14} /> : <CalendarDays size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Agreement Date</span>
                             {dated ? (
-                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-green-600 bg-green-50 border-green-200">
+                              <span className="text-[0.6875rem] px-2 py-0.5 border font-semibold text-foreground bg-card border-foreground/30">
                                 Confirmed: {String(a.AgreementDate).slice(0,10)}
                               </span>
                             ) : a?.ProposedDate ? (
-                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-purple-600 bg-purple-50 border-purple-200">
+                              <span className="text-[0.6875rem] px-2 py-0.5 border font-semibold text-foreground bg-card border-foreground/30">
                                 Proposed: {String(a.ProposedDate).slice(0,10)}
                               </span>
                             ) : (
-                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
+                              <span className="text-[0.6875rem] px-2 py-0.5 border font-semibold text-muted-foreground bg-muted/30 border-border">Not set</span>
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground">
@@ -1879,7 +1258,7 @@ const CrmAgreement: React.FC = () => {
                           </p>
                           {!dated && custApproved && !cancelled && (() => {
                             if (a?.DateApprovalStatus === CrmStatus.PENDING) return (
-                              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-2 py-1.5 flex items-center gap-1.5">
+                              <p className="text-xs text-foreground bg-card border border-foreground/30 px-2 py-1.5 flex items-center gap-1.5">
                                 <Clock size={11} /> Date matched — awaiting super admin sign-off
                               </p>
                             );
@@ -1890,7 +1269,7 @@ const CrmAgreement: React.FC = () => {
                                   <p className="text-[0.6875rem] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer not on portal?</p>
                                   <button
                                     onClick={() => setProxyDateDialog(true)}
-                                    className="text-xs px-3 py-1.5 bg-sky-50 border border-sky-300 text-sky-800 rounded-lg font-semibold hover:bg-sky-100 flex items-center gap-1.5"
+                                    className="text-xs px-3 py-1.5 bg-card border border-foreground/30 text-foreground font-semibold hover:bg-primary/10 flex items-center gap-1.5"
                                   >
                                     <UserCircle2 size={12} /> Accept Date on Their Behalf
                                   </button>
@@ -1900,11 +1279,11 @@ const CrmAgreement: React.FC = () => {
                             if (a?.ProposedDateStatus === "PendingCompanyReview") return (
                               <div className="flex items-center gap-2 flex-wrap pt-0.5">
                                 <button onClick={handleAcceptDate} disabled={saving}
-                                  className="text-xs px-3 py-1.5 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-40">
+                                  className="text-xs px-3 py-1.5 bg-foreground text-card font-semibold hover:bg-foreground/80 disabled:opacity-40">
                                   Accept {String(a.ProposedDate).slice(0,10)}
                                 </button>
                                 <button onClick={() => { setSendDate(a?.ProposedDate ? String(a.ProposedDate).slice(0,10) : ""); setProposeDateDialog(true); }}
-                                  className="text-xs px-3 py-1.5 border border-border rounded-lg font-medium hover:bg-muted">
+                                  className="text-xs px-3 py-1.5 border border-border font-medium hover:bg-muted">
                                   Propose Different Date
                                 </button>
                               </div>
@@ -1912,17 +1291,17 @@ const CrmAgreement: React.FC = () => {
                             return (
                               <div className="space-y-2">
                                 <button onClick={() => { setSendDate(preferredAgrDate); setProposeDateDialog(true); }}
-                                  className="text-xs px-3 py-1.5 btn-module text-white rounded-lg font-semibold ">
+                                  className={`${KEY_INK} h-8 px-3`}>
                                   Propose Agreement Date
                                 </button>
                                 <div className="border-t border-border/60 pt-1.5">
                                   <p className="text-[0.6875rem] text-muted-foreground mb-1.5 flex items-center gap-1"><UserCircle2 size={11} /> Customer communicated a date off-portal?</p>
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <DateInput value={proxyProposedDate} onChange={(e) => setProxyProposedDate(e.target.value)}
-                                      className="text-xs border border-border rounded-md px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                                      className="text-xs border border-border px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
                                     <button onClick={() => proxyProposedDate && setProxyProposeDateDialog(true)}
                                       disabled={!proxyProposedDate}
-                                      className="text-xs px-3 py-1.5 bg-sky-50 border border-sky-300 text-sky-800 rounded-lg font-semibold hover:bg-sky-100 disabled:opacity-40 flex items-center gap-1.5">
+                                      className="text-xs px-3 py-1.5 bg-card border border-foreground/30 text-foreground font-semibold hover:bg-primary/10 disabled:opacity-40 flex items-center gap-1.5">
                                       <UserCircle2 size={12} /> Record Customer's Proposed Date
                                     </button>
                                   </div>
@@ -1935,7 +1314,7 @@ const CrmAgreement: React.FC = () => {
                               <p className="text-[0.6875rem] text-muted-foreground font-medium flex items-center gap-1"><FolderClock size={11} /> Negotiation history</p>
                               {(dateHistory as any[]).map((h) => (
                                 <div key={h.Id} className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
-                                  <span className={`px-1.5 py-0.5 rounded-full border font-medium ${h.ProposedBy === "Company" ? "text-purple-600 bg-purple-50 border-purple-200" : "text-blue-600 bg-blue-50 border-blue-200"}`}>
+                                  <span className={`px-1.5 py-0.5 border font-medium ${h.ProposedBy === "Company" ? "text-foreground bg-card border-foreground/30" : "text-foreground bg-card border-foreground/30"}`}>
                                     {h.ProposedBy}
                                   </span>
                                   proposed {String(h.ProposedDate).slice(0,10)}
@@ -1947,16 +1326,16 @@ const CrmAgreement: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "bg-green-500/[0.04]" : ""}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
+                      <div className={`px-4 py-4 flex items-start gap-3 ${executed ? "bg-foreground/5" : ""}`}>
+                        <div className={`w-8 h-8 flex items-center justify-center text-[0.6875rem] font-bold shrink-0 mt-0.5 ${circleCls(a?.Status === CrmStatus.REGISTERED ? "done" : a?.Status === CrmStatus.EXECUTED ? "active" : dated ? "active" : "upcoming")}`}>
                           {a?.Status === CrmStatus.REGISTERED ? <Check size={14} /> : <BarChart3 size={13} />}
                         </div>
                         <div className="flex-1 min-w-0 space-y-1.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-sm font-semibold">Execution &amp; Registration</span>
-                            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-semibold ${
-                              a?.Status === CrmStatus.REGISTERED ? "text-green-600 bg-green-50 border-green-200"
-                              : a?.Status === CrmStatus.EXECUTED ? "text-blue-600 bg-blue-50 border-blue-200"
+                            <span className={`text-[0.6875rem] px-2 py-0.5 border font-semibold ${
+                              a?.Status === CrmStatus.REGISTERED ? "text-foreground bg-card border-foreground/30"
+                              : a?.Status === CrmStatus.EXECUTED ? "text-foreground bg-card border-foreground/30"
                               : "text-muted-foreground bg-muted/30 border-border"
                             }`}>
                               {a?.Status === CrmStatus.REGISTERED ? "Registered" : a?.Status === CrmStatus.EXECUTED ? "Executed" : "Pending"}
@@ -1966,10 +1345,10 @@ const CrmAgreement: React.FC = () => {
                             All mandatory documents verified → signed &amp; executed → registered at the Sub-Registrar's office with a Doc No.
                           </p>
                           {a?.Status === CrmStatus.EXECUTED && (
-                            <p className="text-xs text-blue-600">Agreement executed. Record the Sub-Registrar Doc No. to mark it Registered.</p>
+                            <p className="text-xs text-foreground">Agreement executed. Record the Sub-Registrar Doc No. to mark it Registered.</p>
                           )}
                           {a?.Status === CrmStatus.REGISTERED && a?.AfsRegistrationNo && (
-                            <p className="text-xs text-green-700 flex items-center gap-1">
+                            <p className="text-xs text-foreground flex items-center gap-1">
                               <CheckCircle2 size={11} /> Reg. No. {a.AfsRegistrationNo} · {a?.AfsRegistrationDate ? String(a.AfsRegistrationDate).slice(0,10) : ""}
                             </p>
                           )}
@@ -1984,10 +1363,10 @@ const CrmAgreement: React.FC = () => {
                 const fp = followupProgress(detail.documents);
                 const allVerified = (detail.documents || []).filter((d: any) => d.IsMandatory).every((d: any) => d.Status === "Verified");
                 return (
-              <div className="rounded-xl border border-border overflow-hidden">
+              <div className="border border-border overflow-hidden">
                 <div className="px-4 py-3 bg-muted/30 border-b border-border space-y-2">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><ScrollText size={15} className="text-primary" /> Agreement Documents ({detail.documents?.length || 0})</h3>
+                    <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><ScrollText size={15} className="text-foreground" /> Agreement Documents ({detail.documents?.length || 0})</h3>
                     <div className="flex items-center gap-3">
                       <button onClick={() => setDocRequestDialog(true)}
                         className="flex items-center gap-1 text-xs text-primary hover:underline">
@@ -2003,12 +1382,12 @@ const CrmAgreement: React.FC = () => {
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-[0.6875rem]">
                         <span className="text-muted-foreground">Mandatory docs: {fp.uploaded}/{fp.required} uploaded{allVerified ? "" : ` · ${(detail.documents || []).filter((d: any) => d.IsMandatory && d.Status === "Verified").length} verified`}</span>
-                        <span className={`font-semibold ${fp.percent === 100 && allVerified ? "text-green-600" : fp.percent === 100 ? "text-sky-600" : "text-muted-foreground"}`}>{fp.percent}%</span>
+                        <span className={`font-semibold ${fp.percent === 100 && allVerified ? "text-foreground" : fp.percent === 100 ? "text-foreground" : "text-muted-foreground"}`}>{fp.percent}%</span>
                       </div>
-                      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-muted overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${
-                            allVerified ? "bg-green-500" : fp.percent === 100 ? "bg-sky-500" : "bg-primary"
+                          className={`h-full transition-all ${
+                            allVerified ? "bg-foreground" : fp.percent === 100 ? "bg-foreground/60" : "bg-foreground/40"
                           }`}
                           style={{ width: `${fp.percent}%` }}
                         />
@@ -2022,21 +1401,21 @@ const CrmAgreement: React.FC = () => {
                   const awaitingUpload = d.Status === "Requested" && !d.FilePath && !d.DocumentUrl;
                   const awaitingCustomer = awaitingUpload && d.UploadedByType === "Customer";
                   const awaitingStaff = awaitingUpload && d.UploadedByType !== "Customer";
-                  const statusBg = d.Status === "Verified" ? "bg-green-500/[0.06] dark:bg-green-900/20" : d.Status === "Rejected" ? "bg-red-500/[0.06] dark:bg-red-900/20" : "";
-                  const docRail = d.Status === "Verified" ? "#22c55e" : d.Status === "Rejected" ? "#ef4444" : d.Status === "Uploaded" || d.Status === "Submitted" ? "#3b82f6" : awaitingUpload ? "#f59e0b" : "var(--border)";
+                  const statusBg = d.Status === "Verified" ? "bg-foreground/5" : d.Status === "Rejected" ? "bg-destructive/5" : "";
+                  const docRail = d.Status === "Verified" ? "hsl(var(--foreground))" : d.Status === "Rejected" ? "hsl(var(--destructive))" : d.Status === "Uploaded" || d.Status === "Submitted" ? "hsl(var(--foreground) / 0.5)" : awaitingUpload ? "hsl(var(--foreground) / 0.35)" : "var(--border)";
                   return (
                     <div key={d.Id} className={`border-b border-border last:border-0 flex ${statusBg}`}>
                       <div className="w-[3px] shrink-0 self-stretch" style={{ background: docRail }} />
                       <div className="flex-1 min-w-0 px-4 py-3.5 flex items-center gap-4">
 
-                        <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center border ${
-                          d.Status === "Verified" ? "bg-green-100 border-green-200 dark:bg-green-900/40 dark:border-green-800" :
-                          d.Status === "Rejected" ? "bg-red-100 border-red-200 dark:bg-red-900/40 dark:border-red-800" :
-                          awaitingUpload ? "bg-amber-100 border-amber-200 dark:bg-amber-900/40 dark:border-amber-800" :
+                        <div className={`w-9 h-9 shrink-0 flex items-center justify-center border ${
+                          d.Status === "Verified" ? "bg-card border-foreground/30" :
+                          d.Status === "Rejected" ? "bg-destructive/5 border-destructive/40" :
+                          awaitingUpload ? "bg-card border-foreground/30" :
                           "bg-muted/60 border-border"
                         }`}>
                           {awaitingUpload
-                            ? <Clock size={15} className="text-sky-500" />
+                            ? <Clock size={15} className="text-foreground" />
                             : React.cloneElement(mimeIcon(d.MimeType) as React.ReactElement, { size: 15 })}
                         </div>
 
@@ -2045,19 +1424,19 @@ const CrmAgreement: React.FC = () => {
                             <span className="text-sm font-semibold leading-tight">
                               {d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim()}
                             </span>
-                            {d.IsMandatory && <span className="text-[0.625rem] text-red-500 font-bold">REQUIRED</span>}
-                            {d.VersionNo > 1 && <span className="text-[0.625rem] text-violet-600 border border-violet-200 bg-violet-50 rounded px-1 font-medium">v{d.VersionNo}</span>}
+                            {d.IsMandatory && <span className="text-[0.625rem] text-destructive font-bold">REQUIRED</span>}
+                            {d.VersionNo > 1 && <span className="text-[0.625rem] text-foreground border border-foreground/30 bg-card px-1 font-medium">v{d.VersionNo}</span>}
                             {d.UploadedByType === "Customer" && (
-                              <span className="flex items-center gap-0.5 text-[0.625rem] text-violet-600 border border-violet-200 bg-violet-50 rounded px-1.5 py-0.5 font-medium">
+                              <span className="flex items-center gap-0.5 text-[0.625rem] text-foreground border border-foreground/30 bg-card px-1.5 py-0.5 font-medium">
                                 <UserCircle2 size={9} /> Customer
                               </span>
                             )}
                           </div>
                           <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                             {awaitingCustomer ? (
-                              <span className="text-[0.6875rem] text-amber-600">Awaiting customer upload{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
+                              <span className="text-[0.6875rem] text-foreground">Awaiting customer upload{d.RequestedAt ? ` · requested ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
                             ) : awaitingStaff ? (
-                              <span className="text-[0.6875rem] text-amber-600">Pending — Legal Executive to attach{d.RequestedAt ? ` · ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
+                              <span className="text-[0.6875rem] text-foreground">Pending — Legal Executive to attach{d.RequestedAt ? ` · ${String(d.RequestedAt).slice(0, 10)}` : ""}</span>
                             ) : (
                               <>
                                 {d.FileName && <span className="text-[0.6875rem] text-muted-foreground truncate max-w-[200px]">{d.FileName}</span>}
@@ -2070,18 +1449,18 @@ const CrmAgreement: React.FC = () => {
                         </button>
 
                         <div className="shrink-0 flex items-center gap-2">
-                          <span className={`text-[0.6875rem] px-2.5 py-1 rounded-lg border font-semibold ${docStatusColor[d.Status] || "text-muted-foreground border-border"}`}>
+                          <span className={`text-[0.6875rem] px-2.5 py-1 border font-semibold ${docStatusColor[d.Status] || "text-muted-foreground border-border"}`}>
                             {d.Status}
                           </span>
                           {!!d.FilePath && d.Status !== "Verified" && (
                             <button title="Quick verify" onClick={() => handleDocStatusChange(d.Id, "Verified")}
-                              className="flex items-center gap-1 text-[0.6875rem] px-2.5 py-1 rounded-lg border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 font-semibold dark:bg-green-900/30 dark:border-green-800 dark:text-green-400">
+                              className="flex items-center gap-1 text-[0.6875rem] px-2.5 py-1 border border-foreground/30 bg-card text-foreground hover:bg-primary/10 font-semibold">
                               <Check size={11} /> Verify
                             </button>
                           )}
                           {!!d.FilePath && d.Status !== CrmStatus.REJECTED && (
                             <button title="Reject (opens review — a reason is required)" onClick={() => setPreviewDoc(d)}
-                              className="flex items-center gap-1 text-[0.6875rem] px-2.5 py-1 rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 font-semibold dark:bg-red-900/30 dark:border-red-800">
+                              className="flex items-center gap-1 text-[0.6875rem] px-2.5 py-1 border border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive/10 font-semibold">
                               <X size={11} /> Reject
                             </button>
                           )}
@@ -2117,7 +1496,7 @@ const CrmAgreement: React.FC = () => {
                     }}
                   />
                 ) : (
-                  <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  <div className="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
                     You don't have access to the AFS Query Payment stage.
                   </div>
                 )
@@ -2134,7 +1513,7 @@ const CrmAgreement: React.FC = () => {
                     }}
                   />
                 ) : (
-                  <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  <div className="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
                     You don't have access to the AFS Registry stage.
                   </div>
                 )
@@ -2146,17 +1525,17 @@ const CrmAgreement: React.FC = () => {
 
       {/* New Agreement Dialog */}
       <Dialog open={agrDialog} onOpenChange={(o) => { if (!o) setAgrDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto rounded-none" style={{ border: RULE }}>
           <DialogHeader><DialogTitle className="font-heading">New Agreement</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Booking *</label>
               <SearchableNativeSelect value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({
                   ...f,
                   BookingId: e.target.value,
                   LegalName: "", PanNo: "", AadhaarNo: "", LegalAddress: "",
                 }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
@@ -2169,16 +1548,16 @@ const CrmAgreement: React.FC = () => {
                 </p>
               )}
               {bkgFilter && !(bookings as any[]).some((b) => String(b.Id) === String(bkgFilter)) && (
-                <p className="text-xs text-sky-600 mt-1">
+                <p className="text-xs text-foreground mt-1">
                   This dialog was opened for a specific booking, but that booking isn't eligible for an agreement yet
                   — pick from the list above, or complete its remaining prerequisites first.
                 </p>
               )}
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
               <SearchableNativeSelect value={agrForm.LegalExecutiveId} onChange={(e) => setAgrForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 <option value="">— Unassigned —</option>
                 {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
               </SearchableNativeSelect>
@@ -2190,29 +1569,29 @@ const CrmAgreement: React.FC = () => {
                 { key: "AadhaarNo",    label: "Aadhaar No",      type: "text" },
               ].map(({ key, label, type }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+                  <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">{label}</label>
                   <AutoInput type={type} value={agrForm[key as keyof typeof agrForm]}
                     onChange={(e) => setAgrForm((f) => ({ ...f, [key]: key === "PanNo" ? e.target.value.toUpperCase() : e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
                 </div>
               ))}
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Address</label>
               <textarea value={agrForm.LegalAddress} onChange={(e) => setAgrForm((f) => ({ ...f, LegalAddress: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                rows={2} className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Notes</label>
               <textarea value={agrForm.Notes} onChange={(e) => setAgrForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                rows={2} className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setAgrDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSaveAgreement} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+              className={`${KEY_INK} h-8 px-3`}>
               {saving ? "Creating..." : "Create Agreement"}
             </button>
           </div>
@@ -2221,24 +1600,24 @@ const CrmAgreement: React.FC = () => {
 
       {/* Send to Customer Portal Dialog */}
       <Dialog open={sendDialog} onOpenChange={(o) => { if (!o) { setSendDialog(false); setSendDate(""); } }}>
-        <DialogContent accent="crm" className="max-w-sm">
+        <DialogContent className="max-w-sm rounded-none" style={{ border: RULE }}>
           <DialogHeader><DialogTitle className="font-heading">Send to Customer Portal</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
               The customer will be able to review this agreement and its documents from their portal, and either approve it or request a recheck.
             </p>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date (optional)</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Proposed Agreement Date (optional)</label>
               <DateInput value={sendDate} onChange={(e) => setSendDate(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
               <p className="text-[0.6875rem] text-muted-foreground mt-1">If the customer proposes the same date, it's confirmed automatically as the Agreement Date.</p>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setSendDialog(false); setSendDate(""); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={() => handleSendToCustomer(sendDate)} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">
+              className={`${KEY_INK} h-8 px-3`}>
               {saving ? "Sending..." : "Send"}
             </button>
           </div>
@@ -2290,18 +1669,18 @@ const CrmAgreement: React.FC = () => {
       )}
 
       <Dialog open={proposeDateDialog} onOpenChange={(o) => { if (!o) { setProposeDateDialog(false); setSendDate(""); } }}>
-        <DialogContent accent="crm" className="max-w-sm">
+        <DialogContent className="max-w-sm rounded-none" style={{ border: RULE }}>
           <DialogHeader><DialogTitle className="font-heading">Propose Agreement Date</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
               This date goes to the customer for their review. They can accept it as-is, or propose a different one back to you.
             </p>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Proposed Agreement Date</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Proposed Agreement Date</label>
               <DateInput value={sendDate} onChange={(e) => setSendDate(e.target.value)}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
               {preferredAgrDate && sendDate === preferredAgrDate && (
-                <p className="text-[0.6875rem] text-blue-600 mt-1 flex items-center gap-1">
+                <p className="text-[0.6875rem] text-foreground mt-1 flex items-center gap-1">
                   <span>ⓘ</span> Pre-filled from welcome call discussion
                 </p>
               )}
@@ -2309,9 +1688,9 @@ const CrmAgreement: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setProposeDateDialog(false); setSendDate(""); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={() => handleProposeDate(sendDate)} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">
+              className={`${KEY_INK} h-8 px-3`}>
               {saving ? "Saving..." : "Propose Date"}
             </button>
           </div>
@@ -2319,7 +1698,7 @@ const CrmAgreement: React.FC = () => {
       </Dialog>
 
       <Dialog open={regDialog} onOpenChange={(o) => { if (!o) { setRegDialog(false); setRegFeesLocked(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); } }}>
-        <DialogContent accent="crm" className="max-w-sm">
+        <DialogContent className="max-w-sm rounded-none" style={{ border: RULE }}>
           <DialogHeader>
             <DialogTitle className="font-heading">Mark Agreement Registered</DialogTitle>
           </DialogHeader>
@@ -2330,40 +1709,40 @@ const CrmAgreement: React.FC = () => {
           </div>
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-foreground block mb-1">AFS Registration No. <span className="text-red-500">*</span></label>
+              <label className="text-xs font-medium text-foreground block mb-1">AFS Registration No. <span className="text-destructive">*</span></label>
               <input
                 type="text"
                 placeholder="e.g. SRO/MH/2024/001234"
                 value={regForm.AfsRegistrationNo}
                 onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationNo: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background"
               />
               <p className="text-[0.6875rem] text-muted-foreground mt-1">Doc No. issued by Sub-Registrar at the time of AFS registration.</p>
             </div>
             <div>
-              <label className="text-xs font-medium text-foreground block mb-1">AFS Registration Date <span className="text-red-500">*</span></label>
+              <label className="text-xs font-medium text-foreground block mb-1">AFS Registration Date <span className="text-destructive">*</span></label>
               <DateInput
                 value={regForm.AfsRegistrationDate}
                 onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationDate: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background"
               />
             </div>
-            <div className={`rounded-lg border ${regFeesLocked ? "border-green-200 bg-green-500/[0.04] dark:border-green-900/50" : "border-border"} p-3 space-y-2`}>
+            <div className={`border ${regFeesLocked ? "border-foreground/30 bg-foreground/5" : "border-border"} p-3 space-y-2`}>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold text-foreground">Government Fees</p>
                   {regFeesLocked && (
-                    <p className="text-[0.6875rem] text-green-700 dark:text-green-400 mt-0.5">Pre-filled from confirmed AFS Query Payment — verify against Sub-Registrar receipt</p>
+                    <p className="text-[0.6875rem] text-foreground mt-0.5">Pre-filled from confirmed AFS Query Payment — verify against Sub-Registrar receipt</p>
                   )}
                 </div>
                 {regFeesLocked ? (
                   <button type="button" onClick={() => setRegFeesLocked(false)}
-                    className="shrink-0 text-[0.6875rem] px-2 py-1 rounded-lg border border-border text-muted-foreground hover:bg-muted font-medium">
+                    className="shrink-0 text-[0.6875rem] px-2 py-1 border border-border text-muted-foreground hover:bg-muted font-medium">
                     Edit amounts
                   </button>
                 ) : (regForm.AfsStampDuty !== "" || regForm.AfsRegistrationFee !== "") ? (
                   <button type="button" onClick={() => setRegFeesLocked(true)}
-                    className="shrink-0 text-[0.6875rem] px-2 py-1 rounded-lg border border-green-300 text-green-700 hover:bg-green-50 font-medium dark:border-green-700 dark:text-green-400">
+                    className="shrink-0 text-[0.6875rem] px-2 py-1 border border-foreground/30 text-foreground hover:bg-primary/10 font-medium">
                     Lock amounts
                   </button>
                 ) : null}
@@ -2376,7 +1755,7 @@ const CrmAgreement: React.FC = () => {
                     value={regForm.AfsStampDuty}
                     readOnly={regFeesLocked}
                     onChange={(e) => setRegForm((f) => ({ ...f, AfsStampDuty: e.target.value }))}
-                    className={`w-full text-sm border rounded px-2 py-1.5 font-mono ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
+                    className={`w-full text-sm border px-2 py-1.5 font-heading tabular-nums ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
                   />
                 </div>
                 <div>
@@ -2386,7 +1765,7 @@ const CrmAgreement: React.FC = () => {
                     value={regForm.AfsRegistrationFee}
                     readOnly={regFeesLocked}
                     onChange={(e) => setRegForm((f) => ({ ...f, AfsRegistrationFee: e.target.value }))}
-                    className={`w-full text-sm border rounded px-2 py-1.5 font-mono ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
+                    className={`w-full text-sm border px-2 py-1.5 font-heading tabular-nums ${regFeesLocked ? "bg-muted/30 border-border text-foreground cursor-default select-none" : "bg-background border-border"}`}
                   />
                 </div>
               </div>
@@ -2395,9 +1774,9 @@ const CrmAgreement: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setRegDialog(false); setRegFeesLocked(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleMarkRegistered} disabled={regSaving || !regForm.AfsRegistrationNo.trim() || !regForm.AfsRegistrationDate}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+              className={`${KEY_INK} h-8 px-3`}>
               {regSaving ? "Saving..." : "Confirm Registration"}
             </button>
           </div>
@@ -2405,33 +1784,33 @@ const CrmAgreement: React.FC = () => {
       </Dialog>
 
       <Dialog open={docDialog} onOpenChange={(o) => { if (!o) { setDocDialog(false); setShowUrlField(false); } }}>
-        <DialogContent accent="crm" className="max-w-md">
+        <DialogContent className="max-w-md rounded-none" style={{ border: RULE }}>
           <DialogHeader><DialogTitle className="font-heading">Add Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Document Type *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Document Type *</label>
               <select value={docForm.DocumentType} onChange={(e) => setDocForm((f) => ({ ...f, DocumentType: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Issued By</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Issued By</label>
               <input type="text" value={docForm.IssuedBy} onChange={(e) => setDocForm((f) => ({ ...f, IssuedBy: e.target.value }))}
                 placeholder="e.g. Legal team, Bank, Registrar office"
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Remarks (optional)</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Remarks (optional)</label>
               <textarea value={docForm.Remarks} onChange={(e) => setDocForm((f) => ({ ...f, Remarks: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                rows={2} className="w-full text-sm border border-border px-2 py-1.5 bg-background resize-none" />
             </div>
 
             <input type="file" multiple ref={docFileInputRef}
               onChange={(e) => handleUploadDocFiles(e.target.files)}
               className="hidden" />
             <button onClick={() => docFileInputRef.current?.click()} disabled={uploadingDocs}
-              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 border-2 border-dashed border-border rounded-lg text-sm font-medium text-muted-foreground hover:border-primary/50 hover:text-primary disabled:opacity-40">
+              className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 border-2 border-dashed border-border text-sm font-medium text-muted-foreground hover:border-primary/50 hover:text-primary disabled:opacity-40">
               <Upload size={14} /> {uploadingDocs ? "Uploading..." : "Upload File(s)"}
             </button>
             <p className="text-[0.6875rem] text-muted-foreground text-center">PDF, images, Word, Excel · up to 10 files, 25 MB each</p>
@@ -2439,9 +1818,9 @@ const CrmAgreement: React.FC = () => {
             {showUrlField ? (
               <div className="flex items-center gap-2 pt-1">
                 <input placeholder="https://..." value={docForm.DocumentUrl} onChange={(e) => setDocForm((f) => ({ ...f, DocumentUrl: e.target.value }))}
-                  className="flex-1 text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  className="flex-1 text-sm border border-border px-2 py-1.5 bg-background" />
                 <button onClick={handleAddDocument} disabled={saving}
-                  className="text-xs px-3 py-1.5 border border-border rounded-lg hover:bg-muted shrink-0 disabled:opacity-40">
+                  className="text-xs px-3 py-1.5 border border-border hover:bg-muted shrink-0 disabled:opacity-40">
                   {saving ? "Adding..." : "Add Link"}
                 </button>
               </div>
@@ -2453,27 +1832,27 @@ const CrmAgreement: React.FC = () => {
           </div>
           <div className="flex justify-end pt-3 border-t border-border">
             <button onClick={() => { setDocDialog(false); setShowUrlField(false); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+              className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Close</button>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={docRequestDialog} onOpenChange={(o) => { if (!o) setDocRequestDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-sm">
+        <DialogContent className="max-w-sm rounded-none" style={{ border: RULE }}>
           <DialogHeader><DialogTitle className="font-heading">Request Document from Customer</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Document Type *</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Document Type *</label>
               <select value={docRequestForm.DocumentType} onChange={(e) => setDocRequestForm((f) => ({ ...f, DocumentType: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background">
                 {DOC_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Label shown to customer (optional)</label>
+              <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Label shown to customer (optional)</label>
               <input type="text" value={docRequestForm.Label} onChange={(e) => setDocRequestForm((f) => ({ ...f, Label: e.target.value }))}
                 placeholder="e.g. Latest bank statement"
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
             </div>
             <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
               <input type="checkbox" checked={docRequestForm.IsMandatory}
@@ -2483,9 +1862,9 @@ const CrmAgreement: React.FC = () => {
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => setDocRequestDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleRequestDocument} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
+              className={`${KEY_INK} h-8 px-3`}>
               {saving ? "Requesting..." : "Request"}
             </button>
           </div>
@@ -2502,7 +1881,7 @@ const CrmAgreement: React.FC = () => {
       )}
 
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
-        <DialogContent accent="crm" className="max-w-lg">
+        <DialogContent className="max-w-lg rounded-none" style={{ border: RULE }}>
           {(() => {
             const alIssued = false;
             const alIssuedOn = null;
@@ -2511,13 +1890,13 @@ const CrmAgreement: React.FC = () => {
                 <DialogHeader>
                   <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
                     <span className="flex items-center gap-1.5">
-                      {alIssued && <Lock size={14} className="text-sky-600 shrink-0" />}
+                      {alIssued && <Lock size={14} className="text-foreground shrink-0" />}
                       {alIssued ? "Amend Agreement Details" : "Edit Agreement Details"}
                     </span>
                     {editLocked && (
                       <button onClick={() => setEditLocked(false)}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded-lg hover:bg-muted transition-colors shrink-0 ${
-                          alIssued ? "border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100" : "border-border"
+                        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border hover:bg-muted transition-colors shrink-0 ${
+                          alIssued ? "border-foreground/30 text-foreground bg-card hover:bg-primary/10" : "border-border"
                         }`}>
                         <Pencil size={12} /> {alIssued ? "Unlock for Amendment" : "Edit"}
                       </button>
@@ -2526,7 +1905,7 @@ const CrmAgreement: React.FC = () => {
                 </DialogHeader>
                 {editLocked ? (
                   alIssued ? (
-                    <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 -mt-1">
+                    <div className="flex items-start gap-2 text-xs text-foreground bg-card border border-foreground/30 px-3 py-2 -mt-1">
                       <Lock size={12} className="shrink-0 mt-0.5" />
                       <span>
                         Allotment Letter issued{alIssuedOn ? ` on ${String(alIssuedOn).slice(0, 10)}` : ""} — legal details are formally committed.
@@ -2534,12 +1913,12 @@ const CrmAgreement: React.FC = () => {
                       </span>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border px-3 py-1.5 -mt-1">
                       <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
                     </div>
                   )
                 ) : alIssued ? (
-                  <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 -mt-1">
+                  <div className="flex items-start gap-2 text-xs text-foreground bg-card border border-foreground/30 px-3 py-2 -mt-1">
                     <ShieldAlert size={12} className="shrink-0 mt-0.5" />
                     <span>
                       <strong>Amendment mode</strong> — the Allotment Letter has been issued. Any changes to legal details
@@ -2550,7 +1929,7 @@ const CrmAgreement: React.FC = () => {
                 ) : null}
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
                     <SearchableNativeSelect value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
                       className={editInputCls}>
                       <option value="">— Unassigned —</option>
@@ -2559,47 +1938,47 @@ const CrmAgreement: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Name</label>
                       <input type="text" value={editForm.LegalName} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
                         className={editInputCls} />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">PAN (Permanent Account Number)</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">PAN (Permanent Account Number)</label>
                       <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
                         className={editInputCls} />
                     </div>
                     <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Aadhaar No.</label>
+                      <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Aadhaar No.</label>
                       <input type="text" value={editForm.AadhaarNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
                         className={editInputCls} />
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
+                    <label className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1">Legal Address</label>
                     <textarea value={editForm.LegalAddress} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
                       rows={2} className={`${editInputCls} resize-none`} />
                   </div>
                   {!editLocked && (
                     <div>
-                      <label className={`text-xs block mb-1 ${alIssued ? "text-sky-700 font-medium" : "text-muted-foreground"}`}>
-                        {alIssued ? <>Amendment Reason <span className="text-red-500">*</span></> : "Reason for this revision"}
+                      <label className={`text-xs block mb-1 ${alIssued ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                        {alIssued ? <>Amendment Reason <span className="text-destructive">*</span></> : "Reason for this revision"}
                       </label>
                       <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
                         placeholder={alIssued ? "Required — e.g. Customer requested name correction (affidavit attached)" : "e.g. Customer requested recheck — corrected spelling"}
-                        className={`w-full text-sm border rounded px-2 py-1.5 bg-background ${alIssued ? "border-sky-300 focus:border-sky-500" : "border-border"}`} />
-                      {alIssued && <p className="text-[0.6875rem] text-sky-600 mt-1">Required when legal details change after Allotment Letter is issued. Saved permanently in version history.</p>}
+                        className={`w-full text-sm border px-2 py-1.5 bg-background ${alIssued ? "border-foreground/40 focus:border-foreground" : "border-border"}`} />
+                      {alIssued && <p className="text-[0.6875rem] text-foreground mt-1">Required when legal details change after Allotment Letter is issued. Saved permanently in version history.</p>}
                     </div>
                   )}
                 </div>
                 <div className="flex justify-end gap-2 pt-3 border-t border-border">
                   {editLocked ? (
-                    <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+                    <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Close</button>
                   ) : (
                     <>
-                      <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                      <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted">Cancel</button>
                       <button onClick={handleSaveEdit} disabled={saving}
-                        className={`px-4 py-1.5 text-sm rounded-lg font-medium disabled:opacity-40 ${
-                          alIssued ? "bg-sky-600 text-white hover:bg-sky-700" : "btn-module text-white "
+                        className={`px-4 py-1.5 text-sm font-medium disabled:opacity-40 ${
+                          alIssued ? "bg-foreground text-card" : "bg-foreground text-card"
                         }`}>
                         {saving ? "Saving..." : alIssued ? "Save Amendment" : "Save"}
                       </button>
@@ -2611,7 +1990,7 @@ const CrmAgreement: React.FC = () => {
           })()}
         </DialogContent>
       </Dialog>
-    </CrmShell>
+    </SheetShell>
     </>
   );
 };

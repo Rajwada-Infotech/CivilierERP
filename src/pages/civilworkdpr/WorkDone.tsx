@@ -9,7 +9,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomsForUnit } from "@/api/roomMasterApi";
 import { floorLabel, floorDisplay, roomDisplay, VILLA_FLOOR } from "@/lib/floorLabel";
-import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
+import { getDependencyMasters, getDependencyMaster, listDependencyMasters, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { AutoNameFinder } from "@/components/civilworkdpr/AutoNameFinder";
@@ -138,6 +138,15 @@ function DependencyChainCards({
   onAssign: (rung: LadderActivity, chain: DependencyMasterListRow) => void;
 }) {
   const roomId = chains[0]?.roomId ?? null;
+  // The tree is drawn from the chain list without activities; this room's chains, with their activities, are
+  // fetched when the room is opened (and, with Expand all, only once it scrolls into view).
+  const { data: roomChains } = useQuery({
+    queryKey: ["civilworkdpr-work-done-room-chains", roomId],
+    queryFn: () => listDependencyMasters({ roomId: roomId as number }),
+    enabled: roomId != null,
+    staleTime: 60 * 1000,
+  });
+  const fullById = useMemo(() => new Map((roomChains ?? []).map((c) => [c.id, c])), [roomChains]);
   const { data: assignments = [] } = useQuery({
     queryKey: ["civilworkdpr-work-done-saved-flow", "room", roomId],
     queryFn: () => getReportedAssignments({ roomId }),
@@ -151,7 +160,8 @@ function DependencyChainCards({
 
   return (
     <div className="space-y-2.5">
-      {chains.map((chain) => {
+      {chains.map((light) => {
+        const chain = fullById.get(light.id) ?? light;
         const rungs = chain.activities ?? [];
         return (
           <div key={chain.id} className="px-3.5 py-3 space-y-2.5" style={{ border: "1px solid hsl(var(--border))" }}>
@@ -229,34 +239,57 @@ export default function WorkDone() {
   // GET /:id per chain via useQueries, which at production scale (1000+
   // chains) blew through the route's rate limit and left this page unable
   // to load at all.
-  const { data: allChains = [], isSuccess: chainsLoaded } = useQuery({
-    queryKey: ["civilworkdpr-work-done-all-chains"],
-    queryFn: getDependencyMasters,
+  // Just the chains (where each one is), not their activities: enough to draw the tree, count and bulk assign.
+  // A room's activities load when it is opened (DependencyChainCards); the Auto Name finder, which searches every
+  // activity, loads the full list only once someone types in it.
+  const { data: allChains = [] } = useQuery({
+    queryKey: ["civilworkdpr-work-done-all-chains", "light"],
+    queryFn: () => listDependencyMasters({ withActivities: false }),
     enabled: rights.canView,
+  });
+  const [finderActive, setFinderActive] = useState(false);
+  const { data: finderChains = [], isFetching: loadingFinderChains } = useQuery({
+    queryKey: ["civilworkdpr-work-done-all-chains", "full"],
+    queryFn: getDependencyMasters,
+    enabled: rights.canView && finderActive,
+    staleTime: 5 * 60 * 1000,
   });
 
   // Opened from a report row (?rung=&chain=): go straight to that activity's allocation form, once.
   const [searchParams, setSearchParams] = useSearchParams();
   const { rungId: linkedRung, chainId: linkedChain } = readChainLink(searchParams);
   useEffect(() => {
-    if ((!linkedRung && !linkedChain) || !chainsLoaded) return;
-    const chain = (allChains as DependencyMasterListRow[]).find((c) =>
-      linkedChain ? c.id === linkedChain : c.activities?.some((a) => a.rungId === linkedRung),
-    );
-    const rung = chain?.activities?.find((a) => a.rungId === linkedRung);
-    if (chain && rung) setActiveAssignment({ rung, chain });
-    else toast.error("That activity is not in Work Allocation (its chain may have been retired, or is outside your projects).");
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("rung");
-        next.delete("chain");
-        return next;
-      },
-      { replace: true },
-    );
+    if ((!linkedRung && !linkedChain) || !rights.canView) return;
+    let cancelled = false;
+    // Only the chain that activity belongs to is fetched, not every chain in the system.
+    (linkedRung ? listDependencyMasters({ rungId: linkedRung }) : Promise.resolve([] as DependencyMasterListRow[]))
+      .then((found) => {
+        if (cancelled) return;
+        const chain = found.find((c) => (linkedChain ? c.id === linkedChain : true));
+        const rung = chain?.activities?.find((a) => a.rungId === linkedRung);
+        if (chain && rung) setActiveAssignment({ rung, chain });
+        else toast.error("That activity is not in Work Allocation (its chain may have been retired, or is outside your projects).");
+      })
+      .catch((e) => {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not open that activity.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("rung");
+            next.delete("chain");
+            return next;
+          },
+          { replace: true },
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkedRung, linkedChain, chainsLoaded]);
+  }, [linkedRung, linkedChain, rights.canView]);
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
     queryFn: fetchProjects,
@@ -310,9 +343,10 @@ export default function WorkDone() {
   // real dbo.RoomMaster rows (Flat Master), so matching narrows all the way
   // down to the exact Room, not just Project/Tower/Floor/Unit.
   const [linkedDependencyId, setLinkedDependencyId] = useState<string>("");
+  // The picked room's chains only: the server narrows it, instead of every chain being downloaded and filtered here.
   const { data: allDependencies = [], isLoading: loadingDependencies } = useQuery({
-    queryKey: ["civilworkdpr-work-done-dependencies"],
-    queryFn: getDependencyMasters,
+    queryKey: ["civilworkdpr-work-done-room-chains", Number(form.RoomId)],
+    queryFn: () => listDependencyMasters({ roomId: Number(form.RoomId) }),
     staleTime: 60 * 1000,
     enabled: !!form.RoomId,
   });
@@ -435,7 +469,9 @@ export default function WorkDone() {
         ) : (
           <>
           <AutoNameFinder
-            chains={allChains as DependencyMasterListRow[]}
+            chains={finderChains as DependencyMasterListRow[]}
+            loading={loadingFinderChains}
+            onActive={() => setFinderActive(true)}
             onPick={(rung, chain) => setActiveAssignment({ rung, chain })}
           />
           <div className="bg-card" style={{ border: RULE }}>

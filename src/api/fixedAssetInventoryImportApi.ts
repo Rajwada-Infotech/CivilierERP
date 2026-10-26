@@ -1,4 +1,5 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import type { ReversalPlan } from "@/api/fixedAssetApi";
 
 const BASE = "/api/fixed-asset-inventory-import";
 
@@ -73,4 +74,11 @@ export const createInventoryImport = async (
 export const deleteInventoryImport = async (id: number): Promise<void> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) await handleError(res, "Failed to reverse this import");
+};
+
+/** What reversing an import would remove, or why it can't be reversed (same plan as the asset register's Delete & Reverse). */
+export const getInventoryImportReversalPlan = async (id: number): Promise<ReversalPlan> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/can-reverse`);
+  if (!res.ok) await handleError(res, "Could not check whether this import can be reversed");
+  return res.json();
 };

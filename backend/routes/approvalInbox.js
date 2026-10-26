@@ -1464,7 +1464,10 @@ function buildInboxQueries(module, projectScope = null) {
             WHERE dae.AssignmentId = daa.Id
           )                                               AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                    AS Amount,
-          ${NULL_EXTRA_CIVILWORKDPR_APPROVAL}
+          ${withProjectName(NULL_EXTRA_CIVILWORKDPR_APPROVAL, "ep.name")}
+          -- Shown in the row where other modules show an amount: an activity
+          -- has no amount, its name is what tells rows apart.
+          am.activity_name                               AS ActivityName,
           CAST(daa.CreatedBy AS NVARCHAR(255))           AS CreatedBy,
           ''                                              AS ApprovedBy,
           ''                                              AS ApprovedAt,
@@ -1475,6 +1478,7 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
         JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
         JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
         WHERE daa.IsCurrent = 1${projectPredicate(projectScope, "dm.ProjectId")}
           AND daa.Status = 'COMPLETED'
           -- No longer requires ApprovalLevelsJson to be configured — a

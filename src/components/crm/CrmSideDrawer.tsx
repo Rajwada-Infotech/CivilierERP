@@ -52,7 +52,8 @@ export function CrmSideDrawer({ open, onClose, title, subtitle, badge, children,
   if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-40">
+    // Above the top bar (z-50), at the dialogs' level: at z-40 the bar covered the panel's header.
+    <div className="fixed inset-0 z-[60]">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/30 transition-opacity duration-200"
@@ -62,24 +63,24 @@ export function CrmSideDrawer({ open, onClose, title, subtitle, badge, children,
       {/* Panel — slides in from right, slides out to right */}
       <div
         ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true"
-        className="absolute right-0 top-0 h-full w-full sm:w-[440px] bg-background border-l border-border shadow-xl flex flex-col outline-none transition-transform duration-200 ease-in-out"
-        style={{ transform: visible ? "translateX(0)" : "translateX(100%)" }}
+        className="absolute right-0 top-0 h-full w-full sm:w-[440px] bg-card flex flex-col outline-none transition-transform duration-200 ease-in-out"
+        style={{ transform: visible ? "translateX(0)" : "translateX(100%)", borderLeft: "1px solid hsl(var(--foreground))" }}
       >
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border">
+        <div className="flex items-start justify-between gap-3 px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="font-heading font-semibold truncate">{title}</h2>
+              <h2 className="font-heading text-lg font-bold truncate">{title}</h2>
               {badge}
             </div>
-            {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+            {subtitle && <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">{subtitle}</p>}
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
-            className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground shrink-0">
+            className="h-8 w-8 inline-flex items-center justify-center text-muted-foreground hover:bg-primary/10 hover:text-foreground shrink-0">
             <X size={16} />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="px-5 py-3 border-t border-border">{footer}</div>}
+        {footer && <div className="px-5 py-3" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>{footer}</div>}
       </div>
     </div>,
     document.body,

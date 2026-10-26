@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -1129,9 +1129,11 @@ router.put(
 
       const currentStatus = await getRecordStatus("purchase-orders", id);
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
-      await guardEdit("purchase-orders", id, { allowPostApproval });
+      // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+      await guardEditAnyStage("purchase-orders", id, { allowPostApproval });
       const wasApproved = currentStatus === "Approved";
       const wasRejected = currentStatus === "Rejected";
+      const wasPending = currentStatus === "Pending";
 
       const pool = getPool();
 
@@ -1150,7 +1152,7 @@ router.put(
       // ignore whatever status the client sent. Mirrors journalVoucher.js's
       // wasApproved handling and grns.js's identical fix (PO itself doesn't
       // post to GL directly, so no reversal needed here — only GRN does).
-      const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
+      const effectiveStatus = wasApproved || wasPending ? "Pending" : Status || "Draft";
       const uomMap = await buildUomMap(pool);
       const fyId = await resolveFyId(pool, finYear);
       const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
@@ -1262,6 +1264,16 @@ router.put(
           });
         } catch (logErr) {
           console.error("Amendment log error (purchase-order):", logErr.message);
+        }
+      }
+
+      // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+      // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+      if (wasPending) {
+        try {
+          await restartApprovalCycle("purchase-orders", id, userEmail, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+        } catch (cycleErr) {
+          console.error("[purchase-orders] could not restart approval cycle after pending edit:", cycleErr.message);
         }
       }
 

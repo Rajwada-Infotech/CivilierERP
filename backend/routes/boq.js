@@ -11,7 +11,7 @@ router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.BOQ WHERE BoqID 
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
-const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
+const { transition, guardEditAnyStage, restartApprovalCycle, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -518,8 +518,10 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 
     const currentStatus = await getRecordStatus("boq", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "boq");
-    await guardEdit("boq", id, { allowPostApproval });
+    // Pending is editable and stays Pending; Approved (with the post-approval right) goes back for approval.
+    await guardEditAnyStage("boq", id, { allowPostApproval });
     const wasApproved = currentStatus === "Approved";
+    const wasPending = currentStatus === "Pending";
 
     const pool = getPool();
     const beforeSnapshot = wasApproved
@@ -532,7 +534,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     // only fires for Draft/Rejected). Mirrors journalVoucher.js's
     // wasApproved handling. BOQ doesn't post to GL directly, so no
     // reversal needed.
-    const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
+    const effectiveStatus = wasApproved || wasPending ? "Pending" : Status || "Draft";
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -573,6 +575,16 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 
     await transaction.commit();
     await bumpCacheVersion("boq");
+
+    // Edited while Pending: it stays Pending, but earlier sign-offs were given to the old figures, so the
+    // approval starts again from level 1 (same as Journal Voucher and Fund Transfer).
+    if (wasPending) {
+      try {
+        await restartApprovalCycle("boq", id, userEmail, req.user?.role, null, null, req.user?.userId ?? req.user?.id ?? null);
+      } catch (cycleErr) {
+        console.error("[boq] could not restart approval cycle after pending edit:", cycleErr.message);
+      }
+    }
 
     // Re-submit to Pending if record was reverted to Draft (e.g. after edit).
     // For a genuinely Rejected record, transition()'s Pending branch writes a

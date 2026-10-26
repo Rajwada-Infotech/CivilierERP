@@ -191,6 +191,26 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
     `);
   }
 
+  // Restored after a cancel: the work is the same allocation, started over — same checklist with
+  // nothing ticked, the planned dates kept, and back at Allocated (Pending if nobody is on it) with
+  // the bar at 0, so it is reported up to Completed again and then goes through QC / Approval afresh.
+  if (source === "RESTORE") {
+    await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+      INSERT INTO dbo.DependencyActivityCheckpoint
+        (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked)
+      SELECT @new, c.CheckpointId, c.FieldName, c.SortOrder, c.MinWaitDays, c.IsDaily, 0
+      FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @old;
+
+      UPDATE n SET
+        StartDate = o.StartDate, EndDate = o.EndDate, Days = o.Days,
+        Status = CASE WHEN EXISTS (SELECT 1 FROM dbo.DependencyActivityEngineer e WHERE e.AssignmentId = @new)
+                      THEN 'ALLOCATED' ELSE 'PENDING' END
+      FROM dbo.DependencyActivityAssignment n
+      JOIN dbo.DependencyActivityAssignment o ON o.Id = @old
+      WHERE n.Id = @new;
+    `);
+  }
+
   return newAssignmentId;
 }
 
@@ -548,10 +568,10 @@ router.get(
 
 // GET /amendments — Civil Work DPR's Amendment page: every superseded
 // assignment attempt (IsCurrent = 0) across every chain, newest first.
-// Every such row exists ONLY because it was reworked (see migration 488's
-// fork-on-rework design — the only way IsCurrent ever becomes 0), so this
-// is already exactly "every reworked activity", no extra status filter
-// needed. currentStatus/currentAttemptNo describe whatever attempt
+// Such a row exists because it was reworked (see migration 488's
+// fork-on-rework design) or because a Cancelled activity was restored and
+// started over (ReworkSource = 'RESTORE', migration 577) — those aren't
+// rework, so they're left out and this is exactly "every reworked activity". currentStatus/currentAttemptNo describe whatever attempt
 // eventually replaced it, so this reads as a log ("attempt 2 was sent
 // back for rework by QC on this date; attempt 3 is now In Progress"), not
 // just a pile of orphaned rows.
@@ -604,7 +624,7 @@ router.get(
         LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
         LEFT JOIN dbo.DependencyActivityAssignment cur
           ON cur.DependencyMasterActivityId = daa.DependencyMasterActivityId AND cur.IsCurrent = 1
-        WHERE daa.IsCurrent = 0${projectPredicate(req.projectScope, "dm.ProjectId")}
+        WHERE daa.IsCurrent = 0 AND ISNULL(daa.ReworkSource, '') <> 'RESTORE'${projectPredicate(req.projectScope, "dm.ProjectId")}
         ORDER BY daa.UpdatedAt DESC
       `);
       res.json(r.recordset);
@@ -1875,10 +1895,11 @@ router.delete(
 // this is meant to be a rare, deliberate override, not something granted
 // out via Menu Rights. Restores to APPROVED if that's genuinely what it
 // was before being cancelled (PreCancelStatus, captured by the status
-// PATCH above); anything else — it was never actually approved — comes
-// back at IN_PROGRESS regardless of exactly where it was, so it has to go
-// through Reporting/QC/Approval again rather than silently resuming
-// wherever it happened to be.
+// PATCH above). Anything else — it was never actually approved — starts
+// over: the cancelled attempt is kept as history and a fresh one is forked
+// (forkAssignmentForRework, source RESTORE) at Allocated with the bar at 0,
+// so it is reported again from zero and goes through QC/Approval afresh,
+// rather than resuming with the old Work Done (and any old QC pass) still on it.
 router.post("/:rungId/restore", authMiddleware, async (req, res) => {
   if (req.user?.role !== "super_admin") {
     return res.status(403).json({ error: "Only a super admin can restore a Cancelled activity." });
@@ -1895,19 +1916,32 @@ router.post("/:rungId/restore", authMiddleware, async (req, res) => {
     if (cur.recordset[0].Status !== "CANCELLED") {
       return res.status(400).json({ error: "Only a Cancelled activity can be restored." });
     }
-    const restoredStatus = cur.recordset[0].PreCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
     const actor = req.user?.email || req.user?.name || "system";
 
-    await pool.request()
-      .input("id", sql.Int, cur.recordset[0].Id)
-      .input("status", sql.NVarChar(20), restoredStatus)
-      .input("by", sql.NVarChar(200), actor)
-      .query(`
-        UPDATE dbo.DependencyActivityAssignment
-        SET Status = @status, PreCancelStatus = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    res.json({ success: true, status: restoredStatus });
+    if (cur.recordset[0].PreCancelStatus === "APPROVED") {
+      await pool.request()
+        .input("id", sql.Int, cur.recordset[0].Id)
+        .input("by", sql.NVarChar(200), actor)
+        .query(`
+          UPDATE dbo.DependencyActivityAssignment
+          SET Status = 'APPROVED', PreCancelStatus = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      return res.json({ success: true, status: "APPROVED" });
+    }
+
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const newId = await forkAssignmentForRework(tx, cur.recordset[0].Id, rungId, "Cancelled, then restored — started over", "RESTORE", actor);
+      const st = (await new sql.Request(tx).input("id", sql.Int, newId)
+        .query("SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id")).recordset[0].Status;
+      await tx.commit();
+      res.json({ success: true, status: st, assignmentId: newId });
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
   } catch (err) {
     console.error("[dependency-activity-assignment] POST /:rungId/restore error:", err.message);
     res.status(500).json({ error: err.message });

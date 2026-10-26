@@ -1189,6 +1189,23 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
+
+    // Chain guard: a Purchase Order already raised against this MR must be
+    // deleted first — editing quantities/items here after a PO exists would
+    // silently drift the MR out of sync with what the PO already locked in.
+    // Checked before the status guard: ordering moves the MR on to Partially
+    // Fulfilled / Completed, and the status message ("only Draft, Pending,
+    // Approved or Rejected can be edited") never said the PO was the reason.
+    const blockingPO = await poExistsForMR(pool, id);
+    if (blockingPO)
+      return res.status(409).json({
+        error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
+      });
+    if (["Partially Fulfilled", "Completed"].includes(currentMRStatus))
+      return res.status(409).json({
+        error: `Cannot edit: this Material Request is ${currentMRStatus.toLowerCase()} — it has already been ordered on a Purchase Order. Delete that Purchase Order first, then edit the request.`,
+      });
+
     if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
         error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
@@ -1209,15 +1226,6 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
-
-    // Chain guard: a Purchase Order already raised against this MR must be
-    // deleted first — editing quantities/items here after a PO exists would
-    // silently drift the MR out of sync with what the PO already locked in.
-    const blockingPO = await poExistsForMR(pool, id);
-    if (blockingPO)
-      return res.status(409).json({
-        error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
-      });
 
     if (RequiredByDate) {
       const minDate = await computeMinRequiredByDate(

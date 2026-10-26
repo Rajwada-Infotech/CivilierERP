@@ -121,6 +121,20 @@ function projectParamGuard(sqlText) {
   };
 }
 
+// A CRM booking named in a request body (a create): the param guards only see ids in the path. Sends 403 and returns
+// false when the booking's project is outside the user's scope; unknown ids pass to the route's own check.
+async function assertBookingAllowed(req, res, bookingId) {
+  if (!req.projectScope) return true;
+  const id = parseInt(bookingId, 10);
+  if (!Number.isFinite(id)) return true;
+  const r = await getPool().request().input("id", sql.Int, id).query(CRM_BOOKING_PROJECT_SQL);
+  if (r.recordset.length && !projectAllowed(req.projectScope, r.recordset[0].ProjectId)) {
+    res.status(403).json({ error: "You don't have access to this project." });
+    return false;
+  }
+  return true;
+}
+
 // Civil Work DPR labour / progress / attendance rows hang off a
 // ContractorAllocation, which carries the project.
 async function assertAllocationAllowed(req, res, allocationId) {
@@ -322,6 +336,7 @@ async function crmCustomerGuard(req, res, next, value) {
 }
 
 module.exports = {
+  assertBookingAllowed,
   setupScopeGuard,
   crmProjectGuards,
   crmViaBookingSql,

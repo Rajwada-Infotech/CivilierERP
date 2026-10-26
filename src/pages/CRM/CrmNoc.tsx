@@ -1,84 +1,41 @@
+// CRM NOC: one No Objection Certificate per booking, once the Agreement for Sale is registered: from the bank when the
+// booking is loan-financed (the lender releases its charge), from the developer otherwise (no dues outstanding).
+// Requested, approved, then issued; Handover waits for it.
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
-import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { cn } from "@/lib/utils";
-import { formatINR } from "@/utils/formatCurrency";
-import {
-  Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock,
-  ShieldCheck, Building2, ArrowRight, Search,
-} from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
-} from "@/components/ui/dialog";
-import { ApprovalActions } from "@/components/ApprovalActions";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { promptNextStep } from "@/lib/workflowNav";
+import { AlertTriangle, Building2, CheckSquare, Landmark, Lock, PenSquare, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SearchableSelect } from "@/components/SearchableSelect";
+import { ApprovalActions } from "@/components/ApprovalActions";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { promptNextStep } from "@/lib/workflowNav";
+import { translateError } from "@/lib/translateError";
+import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/noc";
+const STATUSES = ["Pending", "Approved", "Issued", "Rejected"] as const;
+const TYPES = ["Organisation", "Bank"] as const;
+const INP = "w-full h-9 border border-foreground/40 focus:border-foreground bg-card px-2.5 text-sm text-foreground outline-none read-only:bg-muted/30 read-only:border-foreground/20";
 
-// ─── Status badge ──────────────────────────────────────────────────────────
-
-const STATUS_CFG: Record<string, { text: string; bar: string }> = {
-  Pending:  { text: "text-amber-700",   bar: "bg-amber-500" },
-  Approved: { text: "text-blue-700",    bar: "bg-blue-500" },
-  Issued:   { text: "text-emerald-700", bar: "bg-emerald-500" },
-  Rejected: { text: "text-rose-700",    bar: "bg-rose-500" },
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
-  return (
-    <span className={cn(
-      "inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[0.625rem] font-semibold uppercase tracking-wider",
-      c.text,
-    )}>
-      <span className={cn("w-[3px] h-3 rounded-[1px]", c.bar)} />
-      {status}
-    </span>
-  );
-}
-
-// ─── Detail row ────────────────────────────────────────────────────────────
-
-function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
-      <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
-      <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
-    </div>
-  );
-}
-
-function fmtDate(d?: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-// ─── Fetchers ──────────────────────────────────────────────────────────────
-
+// Issued is settled; approved and pending are in hand; rejected has stopped.
+const nocTone = (s: string): "done" | "waiting" | "stopped" => (s === "Issued" ? "done" : statusTone(s === "Approved" ? "Pending" : s));
+const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 
 const PAGE_SIZE = 20;
-interface NocListFilters {
-  type: string;
-  status: string;
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchNocList(filters: NocListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+interface NocListFilters { type: string; status: string; search: string; companyId: string; projectId: string; blockId: string }
+// Throws, so a failed load shows as one instead of an empty list.
+async function fetchNocList(filters: NocListFilters, page: number, pageSize: number) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.type !== "All") params.set("type", filters.type);
   if (filters.status !== "All") params.set("status", filters.status);
@@ -86,38 +43,25 @@ async function fetchNocList(filters: NocListFilters, page: number, pageSize: num
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+  const r = await fetchWithAuth(`${API}?${params}`);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Could not load the NOCs (${r.status}).`);
+  return {
+    rows: (data.rows || []) as any[], total: Number(data.total || 0),
+    statusCounts: (data.statusCounts || {}) as Record<string, number>, typeCounts: (data.typeCounts || {}) as Record<string, number>,
+  };
 }
-
-// No type param here — NOC type is resolved per booking (see NocType on
-// each returned row), never chosen up front. Filtering this list by a
-// pre-selected type before the user has even picked a booking would hide
-// genuinely eligible bookings of the other type.
+// The NOC type is resolved per booking from how it is financed, never chosen.
 async function fetchEligibleBookings(): Promise<any[]> {
-  try {
-    const r = await fetchWithAuth(`${API}/eligible-bookings`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
+  try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
-
 async function fetchBookingContext(bookingId: string): Promise<any> {
   if (!bookingId) return null;
-  try {
-    const r = await fetchWithAuth(`${API}/booking/${bookingId}/context`);
-    return r.ok ? r.json() : null;
-  } catch { return null; }
+  try { const r = await fetchWithAuth(`${API}/booking/${bookingId}/context`); return r.ok ? r.json() : null; } catch { return null; }
 }
-
-// Deep-link lookup — fetches the NOC row for a specific booking directly from
-// the server so the deep-link works even when the NOC is on page 2+ of the
-// paginated list. Mirrors the same pattern used in CrmLegalMilestones and
-// CrmHandover to fix the same class of pagination/deep-link bug.
-async function fetchNocByBooking(bookingId: string, nocType?: string): Promise<any | null> {
+// The NOC of one booking, straight from the server (the list is paged). No type unless the link names one: it used to
+// assume Organisation, so a Bank NOC was not found and the Request dialog opened for a booking that had one.
+async function fetchNocByBooking(bookingId: string, nocType?: string | null): Promise<any | null> {
   try {
     const params = new URLSearchParams({ bookingId });
     if (nocType) params.set("nocType", nocType);
@@ -126,71 +70,47 @@ async function fetchNocByBooking(bookingId: string, nocType?: string): Promise<a
   } catch { return null; }
 }
 
-// ─── Edit dialog for loan tracking / notes ─────────────────────────────────
+const EMPTY_FORM = { BookingId: "", NocType: "Organisation" as string, NocDate: "", Reason: "", BankName: "", LoanAccountNo: "", LoanAmount: "" };
 
-// Loan Sanction/Disbursement Status+Date used to be editable here too, but
-// they were a second, disconnected copy of what the Loan Tracking page
-// (CrmLoanDetail) already tracks — nothing in the workflow (resolveNocType,
-// checkLoanProcessingCleared, the lifecycle bar, the Sales Deed page) ever
-// read this copy, so a staff member filling it in here was writing to a
-// field the system quietly ignored while trusting the wrong number if it
-// ever drifted from the real one. Removed; see the Loan Tracking page for
-// actual loan status. Only Notes is editable here now.
+const Title: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <DialogHeader><DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">{children}</DialogTitle></DialogHeader>
+);
+const Foot: React.FC<{ children: React.ReactNode }> = ({ children }) => <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>{children}</div>;
+const TypeMark: React.FC<{ type: string }> = ({ type }) => (
+  <span className="inline-flex items-center gap-1.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]">
+    {type === "Bank" ? <Landmark size={11} /> : <Building2 size={11} />} {type === "Bank" ? "Bank" : "Developer"}
+  </span>
+);
+
+// Only the notes are kept here: loan sanction and disbursement live on Loan Tracking (the real record).
 function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => void; onSaved: () => void }) {
   const [notes, setNotes] = useState(noc.Notes || "");
   const [saving, setSaving] = useState(false);
-
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetchWithAuth(`${API}/${noc.Id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Notes: notes || null }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("NOC details updated");
+      const res = await fetchWithAuth(`${API}/${noc.Id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Notes: notes || null }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Could not save the notes.");
+      toast.success("Notes saved");
       onSaved();
       onClose();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
   };
-
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent accent="crm" className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="font-heading">Edit NOC Details</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
-              className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-3 border-t border-border">
-          <button onClick={onClose}
-            className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button onClick={save} disabled={saving}
-            className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
+      <DialogContent className="max-w-sm p-5 gap-4 rounded-none" style={{ border: RULE }}>
+        <Title><PenSquare size={14} /> Notes · {noc.NocNo}</Title>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={`${INP} h-auto py-2 resize-none`} />
+        <Foot>
+          <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+          <button onClick={save} disabled={saving} className={`${KEY_INK} h-9 px-4`}>{saving ? "Saving…" : "Save"}</button>
+        </Foot>
       </DialogContent>
     </Dialog>
   );
 }
-
-// ─── Main page ─────────────────────────────────────────────────────────────
-
-const EMPTY_FORM = {
-  BookingId: "", NocType: "Organisation" as string, NocDate: "",
-  Reason: "", BankName: "", LoanAccountNo: "", LoanAmount: "",
-};
 
 const CrmNoc: React.FC = () => {
   const rights = usePageRights("crm-noc");
@@ -198,14 +118,11 @@ const CrmNoc: React.FC = () => {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
-  const deepLinkNocType   = sp.get("nocType"); // "Bank" | "Organisation"
+  const deepLinkNocType = sp.get("nocType");
 
-  // Filter tabs
-  const [typeFilter, setTypeFilter]     = useState("All");
+  const [typeFilter, setTypeFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -213,484 +130,336 @@ const CrmNoc: React.FC = () => {
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
   }
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
 
-  // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm]   = useState({ ...EMPTY_FORM });
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [bankFieldsLocked, setBankFieldsLocked] = useState(true);
-
-  // Detail / edit dialogs
-  const [detailId, setDetailId] = useState<number | null>(null);
+  // The open NOC is kept as a record, not looked up on the page in view: one on another page, or filtered out, opened
+  // an empty dialog.
+  const [openNoc, setOpenNoc] = useState<any | null>(null);
   const [markingIssued, setMarkingIssued] = useState(false);
   const [editNoc, setEditNoc] = useState<any>(null);
 
-  // Data
   const listFilters: NocListFilters = useMemo(
     () => ({ type: typeFilter, status: statusFilter, search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [typeFilter, statusFilter, search, cpb]
+    [typeFilter, statusFilter, search, cpb],
   );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["crm-noc", listFilters, page, pageSize],
     queryFn: () => fetchNocList(listFilters, page, pageSize),
+    placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
   const nocs = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
+  const sCounts = listResult?.statusCounts ?? {};
+  const tCounts = listResult?.typeCounts ?? {};
+  const all = Object.values(sCounts).reduce((a, b) => a + b, 0);
 
-  const { data: eligibleBookings = [], isFetching: bkgFetching } = useQuery({
-    queryKey: ["crm-noc-eligible"],
-    queryFn: fetchEligibleBookings,
-    enabled: dialogOpen,
-    staleTime: 0,
-  });
+  // A fresher copy from the list replaces the open one.
+  const detail = openNoc ? (nocs.find((n: any) => n.Id === openNoc.Id) ?? openNoc) : null;
 
+  const { data: eligibleBookings = [], isFetching: bkgFetching } = useQuery({ queryKey: ["crm-noc-eligible"], queryFn: fetchEligibleBookings, enabled: dialogOpen, staleTime: 0 });
   const { data: context, isFetching: contextLoading } = useQuery({
-    queryKey: ["crm-noc-context", form.BookingId],
-    queryFn: () => fetchBookingContext(form.BookingId),
-    enabled: !!form.BookingId,
+    queryKey: ["crm-noc-context", form.BookingId], queryFn: () => fetchBookingContext(form.BookingId), enabled: !!form.BookingId,
   });
 
-  const detail = detailId != null ? (nocs as any[]).find((n: any) => n.Id === detailId) : null;
-
-  // Gate: AFS must be Registered — mandatory for every booking, no
-  // project-type exception (eligible-bookings already enforces this; this
-  // guards deep-link cases where context is fetched separately — must
-  // mirror the backend gate in crmNoc.js POST / exactly).
+  // The server's gate: the Agreement for Sale must be registered.
   const agreementRegistered = context?.agreement?.Status === CrmStatus.REGISTERED;
   const canRequest = !!form.BookingId && agreementRegistered && !contextLoading && !saving;
 
-  // Deep-link: ?bookingId=X&nocType=Bank|Organisation
-  // BUG FIX: the old implementation scanned `nocs` (the paginated first page)
-  // which meant a NOC on page 2+ was never found — the code then fell through
-  // to opening the Create dialog, making it look like the NOC didn't exist.
-  // Fix: resolve via a dedicated server lookup (same fix already applied in
-  // CrmLegalMilestones and CrmHandover for the same class of bug).
+  // ?bookingId=X[&nocType=…] opens that booking's NOC, or the Request dialog for it.
   const [deepLinkResolved, setDeepLinkResolved] = useState(false);
   useEffect(() => {
     if (!deepLinkBookingId || deepLinkResolved) return;
     setDeepLinkResolved(true);
-    setSp({}, { replace: true }); // clear params so this only fires once
-    const type = deepLinkNocType || "Organisation";
-    fetchNocByBooking(deepLinkBookingId, type).then((existing) => {
-      if (existing) {
-        setDetailId(existing.Id);
-      } else if (rights.canCreate) {
-        setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: type }));
-        setDialogOpen(true);
-      }
+    setSp({}, { replace: true });
+    fetchNocByBooking(deepLinkBookingId, deepLinkNocType).then((existing) => {
+      if (existing) setOpenNoc(existing);
+      else if (rights.canCreate) { setForm({ ...EMPTY_FORM, BookingId: deepLinkBookingId }); setDialogOpen(true); }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId]);
 
-  // Auto-fill Bank NOC from loan tracking record
+  // The type follows the booking's financing (resolved by the server on the eligible list). A deep-linked booking gets
+  // it once that list is in.
+  useEffect(() => {
+    if (!form.BookingId) return;
+    const bk = (eligibleBookings as any[]).find((b: any) => String(b.Id) === form.BookingId);
+    if (!bk) return;
+    const resolved = bk.NocType || (bk.HasLoan ? "Bank" : "Organisation");
+    setForm((f) => (f.NocType === resolved ? f : { ...f, NocType: resolved }));
+  }, [form.BookingId, eligibleBookings]);
+
+  // Bank NOC fills its lender details from Loan Tracking.
   useEffect(() => {
     if (form.NocType !== "Bank" || !context) return;
     setForm((f) => ({
       ...f,
-      BankName:      f.BankName      || context.loanDetail?.BankName      || "",
+      BankName: f.BankName || context.loanDetail?.BankName || "",
       LoanAccountNo: f.LoanAccountNo || context.loanDetail?.LoanAccountNo || "",
-      LoanAmount:    f.LoanAmount    || (context.loanDetail?.LoanAmount != null ? String(context.loanDetail.LoanAmount) : ""),
+      LoanAmount: f.LoanAmount || (context.loanDetail?.LoanAmount != null ? String(context.loanDetail.LoanAmount) : ""),
     }));
     setBankFieldsLocked(true);
   }, [form.NocType, context]);
 
-  // When booking changes, resolve NOC type from the booking's financing —
-  // never a manual choice, since a booking only ever has one NOC type.
-  const handleBookingChange = (bookingId: string) => {
-    setForm((f) => {
-      const bk = (eligibleBookings as any[]).find((b: any) => String(b.Id) === bookingId);
-      const resolvedType = bk?.NocType || (bk?.HasLoan ? "Bank" : "Organisation");
-      return { ...f, BookingId: bookingId, NocType: resolvedType };
-    });
-    setBankFieldsLocked(true);
-  };
-
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["crm-noc"] });
-    qc.invalidateQueries({ queryKey: ["crm-noc-eligible"] });
-    qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
-    qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
-    qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
-  };
+  const invalidate = () => ["crm-noc", "crm-noc-eligible", "crm-legal-milestones", "crm-booking-lifecycle", "crm-dashboard", "crm-handover-eligible"]
+    .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const closeRequest = () => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); };
 
   const handleCreate = async () => {
-    if (!form.BookingId) { toast.error("Select a booking"); return; }
-    if (!agreementRegistered) { toast.error("Agreement for Sale must be Registered before a NOC can be requested"); return; }
+    if (!form.BookingId) return void toast.error("Select a booking.");
+    if (!agreementRegistered) return void toast.error("The Agreement for Sale must be registered before a NOC can be requested.");
     setSaving(true);
     try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, BookingId: parseInt(form.BookingId), LoanAmount: form.LoanAmount || null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const res = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, BookingId: parseInt(form.BookingId), LoanAmount: form.LoanAmount || null }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not request the NOC.");
       toast.success(`NOC ${data.NocNo} requested`);
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
+      const bookingId = form.BookingId;
+      closeRequest();
       invalidate();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
+      // Open what was just requested.
+      fetchNocByBooking(bookingId).then((n) => n && setOpenNoc(n));
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
   };
 
   const handleMarkIssued = async () => {
-    if (detailId == null) return;
+    if (!detail) return;
     setMarkingIssued(true);
     try {
-      const res = await fetchWithAuth(`${API}/${detailId}/mark-issued`, { method: "PUT" });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success("NOC marked as Issued");
-
-      const current = (nocs as any[]).find((n) => n.Id === detailId);
-      if (current) {
-        // Check if both Bank + Org NOCs for this booking are now Issued
-        const bookingNocs = (nocs as any[]).filter((n) => n.BookingId === current.BookingId);
-        const allIssued = bookingNocs.length > 0 && bookingNocs.every(
-          (n) => n.Id === detailId ? true : n.Status === "Issued",
-        );
-        if (allIssued) {
-          promptNextStep(
-            navigate,
-            "All NOCs for this booking are issued — the pre-possession check can now proceed.",
-            "/crm/pre-possession",
-            "Go to Pre-Possession Check",
-          );
-        }
-      }
-      setDetailId(null);
+      const res = await fetchWithAuth(`${API}/${detail.Id}/mark-issued`, { method: "PUT" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Could not mark it issued.");
+      toast.success("NOC issued");
+      setOpenNoc(null);
       invalidate();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setMarkingIssued(false);
-    }
+      // The issued NOC is what Handover waits for (it pointed at Pre-Possession, which doesn't need it).
+      promptNextStep(navigate, "NOC issued: the handover can be scheduled once the possession notice is acknowledged.", "/crm/handover", "Go to Handover");
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setMarkingIssued(false); }
   };
 
-  // Table columns
-  const nocColumns: ColumnDef<any, unknown>[] = [
-    {
-      accessorKey: "NocNo", header: "NOC No", size: 120,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span>,
-    },
-    {
-      accessorKey: "ApplicantName", header: "Customer", size: 200,
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "NocNo", header: "NOC", size: 120, cell: (i) => <span className="font-heading text-xs font-semibold tabular-nums">{i.getValue() as string}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 220,
       cell: (i) => (
-        <div>
-          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
+        <div className="min-w-0">
+          <div className="font-medium truncate"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="text-xs text-muted-foreground tabular-nums truncate">{[i.row.original.BookingNo, i.row.original.UnitNo].filter(Boolean).join(" · ")}</div>
         </div>
-      ),
-    },
-    {
-      accessorKey: "NocType", header: "Type", size: 120,
-      cell: (i) => {
-        const t = i.getValue() as string;
-        return (
-          <span className={cn(
-            "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border font-medium",
-            t === "Bank" ? "text-blue-700 bg-blue-50 border-blue-200" : "text-purple-700 bg-purple-50 border-purple-200",
-          )}>
-            {t === "Bank" ? <Landmark size={10} /> : <Building2 size={10} />} {t}
-          </span>
-        );
-      },
-    },
-    {
-      id: "bankLoan", header: "Bank / Loan", size: 160, enableSorting: false,
+      ) },
+    { accessorKey: "NocType", header: "From", size: 120, cell: (i) => <TypeMark type={i.getValue() as string} /> },
+    { id: "bankLoan", header: "Lender / loan", size: 190, enableSorting: false,
       cell: (i) => {
         const n = i.row.original;
-        return <span className="text-xs">{n.NocType === "Bank" ? `${n.BankName || "—"} · ${n.LoanAmount ? formatINR(n.LoanAmount) : "—"}` : "—"}</span>;
-      },
-    },
-    {
-      accessorKey: "Status", header: "Status", size: 110,
-      cell: (i) => <StatusBadge status={i.row.original.Status} />,
-    },
-    {
-      accessorKey: "IssuedDate", header: "Issued", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground">{fmtDate(i.row.original.IssuedDate)}</span>,
-    },
+        return n.NocType === "Bank"
+          ? <span className="text-xs tabular-nums">{n.BankName || "—"}{n.LoanAmount ? ` · ${fmtRupees(n.LoanAmount)}` : ""}</span>
+          : <span className="text-xs text-muted-foreground">—</span>;
+      } },
+    { accessorKey: "Status", header: "Status", size: 110, cell: (i) => <SheetMark text={i.row.original.Status} tone={nocTone(i.row.original.Status)} /> },
+    { accessorKey: "IssuedDate", header: "Issued", size: 110, cell: (i) => <span className="text-xs text-muted-foreground tabular-nums">{fmtDate(i.row.original.IssuedDate)}</span> },
   ];
+
+  const figures = [
+    { label: "NOCs", value: all, note: `${tCounts.Bank ?? 0} bank · ${tCounts.Organisation ?? 0} developer`, go: () => { updateFilter(setStatusFilter)("All"); setTypeFilter("All"); } },
+    { label: "Pending", value: sCounts.Pending ?? 0, note: "Waiting for approval", go: () => updateFilter(setStatusFilter)("Pending") },
+    { label: "Approved", value: sCounts.Approved ?? 0, note: "To be issued", go: () => updateFilter(setStatusFilter)("Approved") },
+    { label: "Issued", value: sCounts.Issued ?? 0, note: `${sCounts.Rejected ?? 0} rejected`, go: () => updateFilter(setStatusFilter)("Issued") },
+  ];
+  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "CRM", "No Objection Certificates"]} />
-      <CrmShell
-        title="No Objection Certificates (NOC)"
-        subtitle="Organisation NOC — no outstanding dues; Bank NOC — lender's charge released after loan clearance"
+      <Breadcrumbs items={["Dashboard", "CRM", "NOC"]} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM · NOC"
+        title="No Objection Certificates"
+        subtitle="One per booking once the agreement is registered: from the bank when it is loan-financed (the lender releases its charge), from the developer otherwise (no dues outstanding)."
         action={
-          <div className="flex items-center gap-3">
-            <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            {rights.canCreate && (
-              <button
-                onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg "
-              >
-                <Plus size={14} /> Request NOC
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {rights.canCreate && <button onClick={() => setDialogOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Request NOC</button>}
           </div>
         }
       >
-        {/* Filter bar */}
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-            {(["All", "Organisation", "Bank"] as const).map((t) => (
-              <button key={t} onClick={() => updateFilter(setTypeFilter)(t)}
-                className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-            {(["All", "Pending", "Approved", "Issued", "Rejected"] as const).map((s) => (
-              <button key={s} onClick={() => updateFilter(setStatusFilter)(s)}
-                className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
-                {s}
-              </button>
-            ))}
-          </div>
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search customer, booking..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-          </div>
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-        </div>
-
-        <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-          data={nocs as any[]}
-          columns={nocColumns}
-          loading={isLoading}
-          emptyMessage="No NOC requests matching the current filter"
-          className="rounded-xl border border-border overflow-hidden bg-card"
-          onRowClick={(row) => setDetailId(row.original.Id)}
-        />
-
-        {/* ── Request dialog ────────────────────────────────────────────── */}
-        <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-          <DialogContent accent="crm" className="max-w-md">
-            <DialogHeader>
-              <DialogTitle className="font-heading text-base">Request NOC</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">A single NOC per booking — Bank (loan-financed) or Organisation (self-funded), decided automatically by how the booking is financed</p>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              {/* Step 1 — Booking */}
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Booking *</label>
-                {bkgFetching ? (
-                  <p className="text-xs text-muted-foreground px-1 py-2">Loading eligible bookings…</p>
-                ) : (eligibleBookings as any[]).length === 0 ? (
-                  <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2.5">
-                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no NOC already on file for the booking.</span>
-                  </div>
-                ) : (
-                  <SearchableNativeSelect value={form.BookingId}
-                    onChange={(e) => handleBookingChange(e.target.value)}
-                    className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
-                    <option value="">Select booking…</option>
-                    {(eligibleBookings as any[]).map((b: any) => (
-                      <option key={b.Id} value={String(b.Id)}>
-                        {b.BookingNo} — {b.ApplicantName} · {b.UnitNo}{b.HasLoan ? " (Home Loan)" : ""}
-                      </option>
-                    ))}
-                  </SearchableNativeSelect>
-                )}
-              </div>
-
-              {/* NOC type — resolved automatically from the booking's financing,
-                  never a free choice (this booking has exactly one NOC). */}
-              {form.BookingId && (
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">NOC Issued By</label>
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-primary bg-primary/10 text-primary text-sm font-medium">
-                    {form.NocType === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
-                    <span>{form.NocType === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
-                    <span className="ml-auto text-[0.6875rem] font-normal text-primary/70">
-                      {form.NocType === "Bank" ? "loan-financed booking" : "self-funded booking"}
-                    </span>
-                  </div>
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={x.go} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
                 </div>
-              )}
-
-              {/* Booking context strip */}
-              {form.BookingId && !contextLoading && context && (
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[0.6875rem] space-y-1">
-                  <div className="font-semibold text-foreground text-xs">
-                    <ApplicantNames name={context.booking.ApplicantName} bookingId={context.booking.Id} applicationId={context.booking.ApplicationId} />
-                    <span className="text-muted-foreground font-normal"> · {context.booking.UnitNo}</span>
-                  </div>
-                  {context.agreement ? (
-                    <div className={cn("flex items-center gap-1.5", agreementRegistered ? "text-green-700" : "text-sky-700")}>
-                      {agreementRegistered ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
-                      {context.agreement.AgreementNo} — {context.agreement.Status}
-                      {!agreementRegistered && <span className="font-medium ml-1">(Registered required)</span>}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-red-600 font-medium">
-                      <AlertTriangle size={11} /> No agreement on file
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Bank loan fields — only for Bank NOC */}
-              {form.NocType === "Bank" && form.BookingId && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
-                      <Landmark size={11} /> Lender Details
-                    </label>
-                    <button type="button" onClick={() => setBankFieldsLocked((l) => !l)}
-                      className="flex items-center gap-1 text-xs text-primary hover:underline">
-                      {bankFieldsLocked ? <><Pencil size={10} /> Edit</> : <><Lock size={10} /> Lock</>}
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {[
-                      { ph: "Bank Name",    val: form.BankName,      key: "BankName" },
-                      { ph: "Loan A/C No.", val: form.LoanAccountNo, key: "LoanAccountNo" },
-                      { ph: "Loan Amount",  val: form.LoanAmount,    key: "LoanAmount", num: true },
-                    ].map(({ ph, val, key, num }) => (
-                      <input key={key} type={num ? "number" : "text"} placeholder={ph} value={val}
-                        readOnly={bankFieldsLocked}
-                        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                        className={cn("text-sm border border-border rounded-lg px-2.5 py-1.5",
-                          bankFieldsLocked ? "bg-muted/40 text-muted-foreground cursor-default" : "bg-background")} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))}
-                placeholder="Reason / purpose (optional)" rows={2}
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background resize-none" />
+              ))}
             </div>
+          </div>
 
-            <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
-              <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
-                className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleCreate} disabled={!canRequest || !rights.canCreate}
-                title={!agreementRegistered && form.BookingId ? "AFS must be Registered first" : undefined}
-                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                {saving ? "Requesting…" : "Request NOC"}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* ── Detail dialog ─────────────────────────────────────────────── */}
-        <Dialog open={detailId != null} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
-          <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
-            {detail && (
-              <>
-                <DialogHeader className="px-6 py-4 border-b border-border">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <ShieldCheck size={15} className="text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <DialogTitle className="text-sm font-semibold font-heading font-mono">{detail.NocNo}</DialogTitle>
-                      <DialogDescription className="text-[0.6875rem] mt-0.5">{detail.NocType} NOC</DialogDescription>
-                    </div>
-                    <div className="ml-auto flex items-center gap-2">
-                      <StatusBadge status={detail.Status} />
-                      {/* Edit button — available while not Issued (no point editing a closed NOC) */}
-                      {detail.Status !== "Issued" && (
-                        <button onClick={() => setEditNoc(detail)} title="Edit details"
-                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-                          <Pencil size={13} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </DialogHeader>
-
-                <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
-                  {/* Customer summary */}
-                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3">
-                    <p className="text-sm font-semibold text-foreground"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{detail.BookingNo} · {detail.UnitNo} · {detail.Mobile}</p>
-                  </div>
-
-                  {/* Fields */}
-                  <div>
-                    <DetailRow label="NOC Date"     value={fmtDate(detail.NocDate)} />
-                    <DetailRow label="Reason"        value={detail.Reason || "—"} />
-                    {detail.NocType === "Bank" && (
-                      <>
-                        <DetailRow label="Bank Name"     value={detail.BankName || "—"} />
-                        <DetailRow label="Loan A/C No."  value={detail.LoanAccountNo || "—"} mono />
-                        <DetailRow label="Loan Amount"   value={detail.LoanAmount ? formatINR(detail.LoanAmount) : "—"} mono />
-                      </>
-                    )}
-                    {detail.ApprovalDate && <DetailRow label="Approved"    value={fmtDate(detail.ApprovalDate)} />}
-                    {detail.IssuedDate   && <DetailRow label="Issued"      value={fmtDate(detail.IssuedDate)} />}
-                    {detail.Notes        && <DetailRow label="Notes"       value={<span className="italic">{detail.Notes}</span>} />}
-                  </div>
-
-                  {/* Action area — strictly status-gated */}
-                  <div>
-                    {detail.Status === "Issued" ? (
-                      <div className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
-                        <CheckCircle2 size={16} />
-                        Issued {fmtDate(detail.IssuedDate)} — no further action required
-                      </div>
-                    ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
-                      <button onClick={handleMarkIssued} disabled={markingIssued}
-                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium btn-module text-white rounded-lg hover:shadow-lg disabled:opacity-40 transition-colors">
-                        <ArrowRight size={14} />
-                        {markingIssued ? "Marking…" : "Mark as Issued"}
-                      </button>
-                    ) : detail.Status === CrmStatus.PENDING ? (
-                      // ApprovalActions renders Approve + Reject for approver roles,
-                      // and a "Pending approval" note for non-approvers.
-                      <ApprovalActions
-                        status={detail.Status}
-                        recordId={detail.Id}
-                        endpoint={API}
-                        onSuccess={() => { invalidate(); setDetailId(null); }}
-                      />
-                    ) : detail.Status === CrmStatus.REJECTED ? (
-                      <ApprovalActions
-                        status={detail.Status}
-                        recordId={detail.Id}
-                        endpoint={API}
-                        submitOnly
-                        onSuccess={() => { invalidate(); setDetailId(null); }}
-                      />
-                    ) : null}
-                  </div>
-                </div>
-
-                <DialogFooter className="px-6 py-3.5 border-t border-border bg-muted/20">
-                  <button onClick={() => setDetailId(null)}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted transition-colors">
-                    Close
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+              <div className="flex items-stretch" style={{ border: RULE }}>
+                {(["All", ...TYPES] as const).map((t) => (
+                  <button key={t} onClick={() => updateFilter(setTypeFilter)(t)} className={tabClass(typeFilter === t)} style={{ borderRight: RULE_SOFT }}>
+                    {t === "All" ? "All" : t === "Bank" ? "Bank" : "Developer"} <span className="tabular-nums">{t === "All" ? all : tCounts[t] ?? 0}</span>
                   </button>
-                </DialogFooter>
-              </>
+                ))}
+              </div>
+              <div className="flex items-stretch flex-wrap" style={{ border: RULE }}>
+                {(["All", ...STATUSES] as const).map((s) => (
+                  <button key={s} onClick={() => updateFilter(setStatusFilter)(s)} className={tabClass(statusFilter === s)} style={{ borderRight: RULE_SOFT }}>
+                    {s} <span className="tabular-nums">{s === "All" ? all : sCounts[s] ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                placeholder="Search customer or booking…"
+                className="h-9 w-full sm:w-64 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+            </div>
+            {isError ? (
+              <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : (
+              <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
+                data={nocs} columns={columns} loading={isLoading} searchable={false} className="border-0"
+                emptyMessage={typeFilter !== "All" || statusFilter !== "All" || search || cpb.projectId ? "No NOC matches these filters." : "No NOC requested yet."}
+                onRowClick={(row) => setOpenNoc(row.original)} getRowId={(n: any) => String(n.Id)} />
             )}
-          </DialogContent>
-        </Dialog>
+          </div>
+        </div>
+      </SheetShell>
 
-        {/* ── Edit dialog ───────────────────────────────────────────────── */}
-        {editNoc && (
-          <EditNocDialog
-            noc={editNoc}
-            onClose={() => setEditNoc(null)}
-            onSaved={invalidate}
-          />
-        )}
-      </CrmShell>
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) closeRequest(); }}>
+        <DialogContent className="max-w-md p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          <Title><ShieldCheck size={14} /> Request NOC</Title>
+          <p className="text-xs text-muted-foreground -mt-2">One NOC per booking: from the bank if it is loan-financed, from the developer if self-funded. Decided by how the booking is financed.</p>
+          <label className="block space-y-1">
+            <span className={`block ${LBL}`}>Booking *</span>
+            {bkgFetching ? (
+              <span className="block text-xs text-muted-foreground py-2">Loading eligible bookings…</span>
+            ) : (eligibleBookings as any[]).length === 0 && !form.BookingId ? (
+              <span className="flex items-start gap-2 text-xs px-3 py-2.5" style={{ border: RULE_SOFT }}>
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" /> No booking can request one: it needs the Agreement for Sale registered and no NOC already on file.
+              </span>
+            ) : (
+              <SearchableSelect value={form.BookingId} onChange={(v) => { setForm((f) => ({ ...f, BookingId: v, BankName: "", LoanAccountNo: "", LoanAmount: "" })); setBankFieldsLocked(true); }}
+                placeholder="Select booking" searchPlaceholder="Search booking, customer or unit…"
+                options={(eligibleBookings as any[]).map((b: any) => ({ value: String(b.Id), label: [b.BookingNo, b.ApplicantName, b.UnitNo, b.HasLoan ? "home loan" : null].filter(Boolean).join(" · ") }))} />
+            )}
+          </label>
+
+          {form.BookingId && (
+            <div className="px-3 py-2.5 space-y-2 bg-card" style={{ border: RULE }}>
+              <div className="flex items-center justify-between gap-2">
+                <span className={LBL}>Issued by</span>
+                <TypeMark type={form.NocType} />
+              </div>
+              {contextLoading ? (
+                <p className="text-xs text-muted-foreground">Checking the agreement…</p>
+              ) : context ? (
+                <div className="text-xs space-y-1">
+                  <p className="font-semibold"><ApplicantNames name={context.booking.ApplicantName} bookingId={context.booking.Id} applicationId={context.booking.ApplicationId} /><span className="text-muted-foreground font-normal"> · {context.booking.UnitNo}</span></p>
+                  {context.agreement ? (
+                    <p className={`flex items-center gap-1.5 ${agreementRegistered ? "" : "text-destructive"}`}>
+                      {agreementRegistered ? <CheckSquare size={12} /> : <AlertTriangle size={12} />}
+                      <span className="tabular-nums">{context.agreement.AgreementNo}</span> · {context.agreement.Status}{!agreementRegistered && " (must be Registered)"}
+                    </p>
+                  ) : <p className="flex items-center gap-1.5 text-destructive"><AlertTriangle size={12} /> No agreement on file</p>}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {form.NocType === "Bank" && form.BookingId && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className={`flex items-center gap-1 ${LBL}`}><Landmark size={11} /> Lender (from Loan Tracking)</span>
+                <button type="button" onClick={() => setBankFieldsLocked((l) => !l)} className={`${KEY_LINE} h-7 px-2`}>
+                  {bankFieldsLocked ? <><PenSquare size={10} /> Edit</> : <><Lock size={10} /> Lock</>}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {([["Bank", "BankName", "text"], ["Loan account no", "LoanAccountNo", "text"], ["Loan amount", "LoanAmount", "number"]] as const).map(([ph, key, type]) => (
+                  <input key={key} type={type} placeholder={ph} value={form[key]} readOnly={bankFieldsLocked}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} className={`${INP} tabular-nums`} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <label className="block space-y-1">
+            <span className={`block ${LBL}`}>Reason</span>
+            <textarea value={form.Reason} onChange={(e) => setForm((f) => ({ ...f, Reason: e.target.value }))} rows={2} placeholder="Purpose (optional)" className={`${INP} h-auto py-2 resize-none`} />
+          </label>
+          <Foot>
+            <button onClick={closeRequest} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+            <button onClick={handleCreate} disabled={!canRequest || !rights.canCreate} title={!agreementRegistered && form.BookingId ? "The agreement must be registered first" : undefined}
+              className={`${KEY_INK} h-9 px-4`}>{saving ? "Requesting…" : "Request NOC"}</button>
+          </Foot>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!detail} onOpenChange={(o) => { if (!o) setOpenNoc(null); }}>
+        <DialogContent className="max-w-lg p-5 gap-4 rounded-none" style={{ border: RULE }}>
+          {detail && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-start justify-between gap-3 pr-6">
+                  <span className="min-w-0">
+                    <span className={`block ${LBL}`}>{detail.NocType === "Bank" ? "Bank NOC" : "Developer NOC"}</span>
+                    <span className="font-heading text-lg font-bold flex items-center gap-2 tabular-nums"><ShieldCheck size={16} /> {detail.NocNo}</span>
+                    <span className="block text-xs text-muted-foreground font-normal mt-0.5">
+                      <ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /> · <span className="tabular-nums">{[detail.BookingNo, detail.UnitNo, detail.Mobile].filter(Boolean).join(" · ")}</span>
+                    </span>
+                  </span>
+                  <SheetMark text={detail.Status} tone={nocTone(detail.Status)} />
+                </DialogTitle>
+              </DialogHeader>
+
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-px" style={{ background: "hsl(var(--foreground) / 0.12)", border: RULE_SOFT }}>
+                {([
+                  ["Requested on", fmtDate(detail.NocDate)],
+                  ["Reason", detail.Reason || "—"],
+                  ...(detail.NocType === "Bank" ? [["Bank", detail.BankName || "—"], ["Loan account no", detail.LoanAccountNo || "—"], ["Loan amount", detail.LoanAmount ? fmtRupees(detail.LoanAmount) : "—"]] : []),
+                  ["Approved on", fmtDate(detail.ApprovalDate)],
+                  ["Issued on", fmtDate(detail.IssuedDate)],
+                ] as [string, string][]).map(([k, v], i, arr) => (
+                  // An odd last fact spans the row, so no empty cell is left.
+                  <div key={k} className={`bg-card px-3 py-2 min-w-0 ${arr.length % 2 && i === arr.length - 1 ? "sm:col-span-2" : ""}`}><dt className={LBL}>{k}</dt><dd className="text-sm font-medium mt-0.5 tabular-nums break-words">{v}</dd></div>
+                ))}
+              </dl>
+              {detail.Notes && <p className="text-sm px-3 py-2" style={{ border: RULE_SOFT }}><span className={`block ${LBL}`}>Notes</span>{detail.Notes}</p>}
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-3" style={{ borderTop: RULE }}>
+                <div className="flex flex-wrap items-center gap-2">
+                  {detail.Status === "Issued" ? (
+                    <span className="flex items-center gap-1.5 text-sm"><CheckSquare size={14} /> Issued {fmtDate(detail.IssuedDate)}; nothing more to do.</span>
+                  ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
+                    <button onClick={handleMarkIssued} disabled={markingIssued} className={`${KEY_INK} h-9 px-4`}>{markingIssued ? "Marking…" : "Mark issued"}</button>
+                  ) : detail.Status === CrmStatus.PENDING ? (
+                    // Approve / Reject for approvers; a "waiting for approval" note for others.
+                    <ApprovalActions sheet status={detail.Status} recordId={detail.Id} endpoint={API} onSuccess={() => { invalidate(); setOpenNoc(null); }} />
+                  ) : detail.Status === CrmStatus.REJECTED ? (
+                    <ApprovalActions sheet status={detail.Status} recordId={detail.Id} endpoint={API} submitOnly onSuccess={() => { invalidate(); setOpenNoc(null); }} />
+                  ) : null}
+                </div>
+                <div className="flex gap-2">
+                  {/* Notes stay editable until issued, with the edit right (it was offered to anyone). */}
+                  {rights.canEdit && detail.Status !== "Issued" && <button onClick={() => setEditNoc(detail)} className={`${KEY_LINE} h-9 px-3`}><PenSquare size={12} /> Notes</button>}
+                  <button onClick={() => setOpenNoc(null)} className={`${KEY_LINE} h-9 px-4`}>Close</button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {editNoc && <EditNocDialog noc={editNoc} onClose={() => setEditNoc(null)} onSaved={() => { invalidate(); fetchNocByBooking(String(editNoc.BookingId), editNoc.NocType).then((n) => n && setOpenNoc(n)); }} />}
     </>
   );
 };

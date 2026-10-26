@@ -440,7 +440,8 @@ export function usePurchaseOrder() {
     const d = new Date(`${form.poDate}T00:00:00`);
     if (isNaN(d.getTime())) return "";
     d.setDate(d.getDate() + maxDaysOfSupply);
-    return d.toISOString().slice(0, 10);
+    // The local calendar date: toISOString() is UTC and read a day early east of Greenwich, under the server's check.
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }, [form.poDate, maxDaysOfSupply]);
 
   // Auto-advance Expected Delivery to the floor: fill it when blank, pull it

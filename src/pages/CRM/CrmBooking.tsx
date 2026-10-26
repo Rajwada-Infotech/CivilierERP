@@ -1,267 +1,69 @@
+// CRM Bookings: every booking with what it is waiting on next. Bookings mostly create themselves when an Application
+// is approved; New Booking is the manual fallback. The booking itself opens in CrmBookingDetail (?view=<id>).
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
-import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
-import {
-  Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
-  Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
-  AlertTriangle, Trash2, Lock,
-} from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  AlertTriangle, ChevronRight, FileSignature, IndianRupee, Landmark, Lock, MoreHorizontal, Phone, Plus, RefreshCw, Repeat, Trash2,
+} from "lucide-react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { CrmBookingDetail } from "./CrmBookingDetail";
 import { VillaOffersPanel } from "@/components/crm/VillaOffersPanel";
-import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { DateInput } from "@/components/ui/date-input";
+import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-
-const API     = "/api/crm/bookings";
-const APP_API = "/api/crm/applications";
-const SA_LEADS_API = "/api/sa/leads";
-const UNIT_API = "/api/unit-master";
-const PLOT_API = "/api/plot-master";
-const PLAN_API = "/api/crm/payment-plans";
-const PROJECT_BANK_API = "/api/crm/project-banks";
-const BANK_MASTER_API = "/api/bank-master";
-
-const STATUSES    = ["Pending", "Approved", "Rejected", "Cancelled", "Transferred"];
-const PAY_MODES   = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
-const TOKEN_TYPES = ["Percentage", "Amount"];
-
-// Shared field styling for the New Booking dialog's restructured 2-column
-// layout — same amber-focus-ring convention as the New Application wizard's
-// inputCls/labelCls (CrmApplication.tsx).
-const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
-const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
-const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
-
-const statusColor: Record<string, string> = {
-  Pending:   "text-orange-600 bg-orange-50 border-orange-200",
-  Approved:  "text-green-600 bg-green-50 border-green-200",
-  Rejected:  "text-red-600 bg-red-50 border-red-200",
-  Cancelled: "text-muted-foreground bg-muted/50 border-border",
-  // Closed by a resale — the sale stands, the land / villa now has a new owner.
-  Transferred: "text-violet-600 bg-violet-50 border-violet-200",
-};
-
-const workflowStageLabel: Record<string, string> = {
-  Review: "Application Review",
-  MarketingHeadApproval: "Marketing Head Approval",
-  DirectorApproval: "Director Approval",
-  Confirmed: "Confirmed",
-};
-
-// Manual/direct Booking creation — brought back at the user's explicit
-// request after the auto-create-only design proved too rigid in practice
-// (e.g. an Application approved with no PreferredUnitId never gets a
-// Booking otherwise, with no way through the UI to fix that). Still
-// requires picking a real Application, same as before — this is not a
-// freeform booking with no Application behind it.
-const EMPTY_FORM = {
-  ApplicationId: "", UnitIds: [] as string[], PlotIds: [] as string[], ProjectName: "", UnitNo: "", BlockName: "",
-  UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
-  TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
-  BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
-  BookingAmount: "", BrokerId: "", BrokerageRatePercent: "", BrokeragePaymentPlan: "OneTime",
-  DepositBankId: "",
-};
-
-async function fetchUnits(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchPlots(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${PLOT_API}?available=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-// Needed to resolve a tagged plan's fixed Booking Amount — Booking is no
-// longer typed per booking, it's decided when the plan itself was created
-// (see CrmPaymentPlans.tsx / crmEntityCreation.js's generateMilestonesForBooking).
-async function fetchPaymentPlans(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${PLAN_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
-}
-// One Application -> at most one Booking, ever (see crmEntityCreation.js's
-// createCrmBookingRecord). This dropdown must only ever offer applications
-// that are both COMPLETE (Status = 'Approved' — Draft/Pending haven't
-// cleared admin approval yet) and OPEN (not already Converted to a Booking)
-// — the exact ?forBooking=1 filter crmApplications.js enforces server-side,
-// never left to client-side filtering that could drift.
-async function fetchApps(): Promise<any[]> {
-  try {
-    const res = await fetchWithAuth(`${APP_API}?forBooking=1`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
-
-// This management page still needs to see and filter to Cancelled/Rejected
-// bookings for record-keeping (its own Status filter includes them) — every
-// other page's booking-selector dropdown deliberately gets the narrower
-// default (see crmBookings.js GET /), so only this one opts back in.
-async function fetchBookings(applicationId?: string): Promise<any[]> {
-  try {
-    const params = new URLSearchParams({ includeCancelled: "1" });
-    if (applicationId) params.set("applicationId", applicationId);
-    const res = await fetchWithAuth(`${API}?${params}`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
-}
-
-const PAGE_SIZE = 20;
-interface BookingListFilters {
-  search: string;
-  status: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-// Main-list fetch: server-side search/status/Company/Project/Block +
-// pagination. Kept entirely separate from fetchBookings() above, which stays
-// exactly as-is for the applicationId-scoped deep-link/legacy callers.
-async function fetchBookingsList(filters: BookingListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ includeCancelled: "1", page: String(page), pageSize: String(pageSize) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.status !== "All") params.set("status", filters.status);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  const res = await fetchWithAuth(`${API}?${params}`);
-  if (!res.ok) return { rows: [], total: 0 };
-  const data = await res.json();
-  return { rows: data.rows || [], total: data.total || 0 };
-}
-// Which real company bank account this booking's token payment lands in —
-// scoped to the selected unit's project (falls back to the open bank list if
-// the project has none tagged), same "Deposited To" pattern already used by
-// CrmBookingDetail.tsx and CrmPaymentMilestones.tsx's own deposit dialogs.
-async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
-  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchAllBanks(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
-}
-async function fetchUsers(): Promise<{ value: string; label: string }[]> {
-  try {
-    const res = await fetchWithAuth(`${SA_LEADS_API}/users`);
-    if (!res.ok) return [];
-    const d: any[] = await res.json();
-    return d.map((u) => ({ value: String(u.Id), label: u.Name }));
-  } catch { return []; }
-}
-
-const fmt = (n: number | null | undefined) =>
-  n != null ? `₹${(n / 1e5).toFixed(2)}L` : "—";
-
-const normalizeRole = (role?: string) => String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-
-// The real workflow gate: Welcome Call -> Agreement (both
-// approvals) -> Payments. Only ever surface the ONE step the booking is
-// actually sitting at right now — never let staff jump ahead to a later
-// step a record hasn't reached yet.
-type NextStep = { label: string; color: string; path: string } | null;
-function getNextStep(b: any): NextStep {
-  if (b.Status !== CrmStatus.APPROVED) return null; // Pending/Rejected/Cancelled have no forward step
-  // HasWelcomeCall means Outcome = 'Welcomed' specifically (see crmBookings.js
-  // BOOKING_SELECT) -- a logged call with any other outcome must NOT satisfy
-  // this, since that's not what unblocks Agreement auto-creation either.
-  if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-sky-500 border-sky-200 bg-sky-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
-  // Bank / KYC details are not a gate for the Agreement (business decision
-  // 2026-09-15, crmWorkflowGuards.js validateAgreementPreparationPrerequisites),
-  // so they are never shown as the step the booking is waiting on.
-  // Milestone 1 (Booking Amount) must actually be Paid before Agreement prep
-  // can succeed (validateAgreementPreparationPrerequisites in
-  // crmWorkflowGuards.js hard-blocks on exactly this) — checked here too so
-  // this chip never points staff at an Agreement page that will reject the
-  // booking as ineligible. No separate "already has an agreement" carve-out
-  // needed: a booking that already has one necessarily cleared this already.
-  if (!b.AgreementId && b.Milestone1Status !== CrmStatus.PAID && !b.Milestone1VirtuallyCovered) {
-    return { label: "Payments", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/payments?bookingId=${b.Id}` };
-  }
-  // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
-  if (!b.AgreementId || b.SeniorApprovalStatus !== CrmStatus.APPROVED || b.CustomerApprovalStatus !== CrmStatus.APPROVED) {
-    return { label: "Agreement", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
-  }
-  if (!b.AgreementDate) {
-    return { label: "Agreement Date", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
-  }
-  if (b.DateApprovalStatus !== CrmStatus.APPROVED) {
-    return { label: "Date Approval", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
-  }
-  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
-  // Post-agreement lifecycle — mirrors GET /:id/lifecycle's own step order
-  // exactly (Agreement Registered -> NOC / Handover -> Sale Deed -> Registry
-  // -> Mutation). Without this the chip declared "All Steps Complete" the
-  // moment payments+agreement cleared, long before the booking's actual
-  // journey (possession, sale deed, registry) had even started.
-  if (!b.AgreementRegistered) {
-    return { label: "Agreement Registration", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/agreements?bookingId=${b.Id}` };
-  }
-  if (!b.NocIssued) return { label: "NOC", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/noc?bookingId=${b.Id}` };
-  if (!b.HandoverDone) return { label: "Handover", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/handover` };
-  if (!b.SalesDeedDone) return { label: "Sale Deed", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/sales-deed?bookingId=${b.Id}` };
-  if (!b.RegistryDone) return { label: "Registry", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/sales-deed?bookingId=${b.Id}&tab=Registry` };
-  if (!b.MutationDone) return { label: "Mutation", color: "text-sky-800 border-sky-200 bg-sky-50", path: `/crm/mutation?bookingId=${b.Id}` };
-  return null; // every gated step, all the way through Mutation, is complete
-}
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { translateError } from "@/lib/translateError";
+import { CrmBookingDetail } from "./CrmBookingDetail";
+import {
+  API, KEY_INK, KEY_LINE, PAGE_SIZE, RULE, RULE_SOFT, STATUSES, bookingTone, fetchBookings, fetchBookingsList, fmt, getNextStep, normalizeRole,
+  workflowStageLabel, type BookingList, type BookingListFilters,
+} from "./bookings/config";
+import { NewBookingDialog } from "./bookings/NewBookingDialog";
+import { ChangeUnitDialog } from "./bookings/ChangeUnitDialog";
 
 const CrmBooking: React.FC = () => {
   const qc = useQueryClient();
   const { canDoAction, currentUser } = useAuth();
-  // Bookings mainly auto-create on Application approval, with this dialog
-  // as the manual fallback (e.g. an Application with no unit preselected).
-  // canEdit gates both this and the other mutating actions on this review
-  // page (see CrmBookingDetail.tsx).
+  // The server creates a booking under the create right; it was offered under edit, so a user with one but not the
+  // other either saw a button that was refused or never saw it.
+  const canCreate = canDoAction("crm-bookings", "create");
   const canEdit = canDoAction("crm-bookings", "edit");
   const canRequestCancellation = canDoAction("crm-cancellations", "create");
   const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
   const viewFilter = sp.get("view") || "";
 
   const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
-  const [saving, setSaving] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
   const [viewingBookingId, setViewingBookingId] = useState<number | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+  const [unitChangeBooking, setUnitChangeBooking] = useState<any | null>(null);
 
-  // Row clicks only ever set local state — the URL stayed plain
-  // /crm/bookings, so a refresh lost the open card and there was nothing to
-  // copy/bookmark/share to jump straight back to this booking. The read
-  // side (?view=X on load, above) already existed; this is the missing
-  // write side, kept in sync with it via the same param name.
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
+
+  // The URL carries the open booking (?view=<id>), so a refresh or a shared link reopens it.
   const openBooking = (id: number) => {
     setViewingBookingId(id);
     navigate(`/crm/bookings?view=${id}`, { replace: true });
@@ -269,341 +71,41 @@ const CrmBooking: React.FC = () => {
 
   const listFilters: BookingListFilters = useMemo(
     () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, statusFilter, cpb]
+    [search, statusFilter, cpb],
   );
 
-  // The applicationId-scoped deep-link mode (?applicationId=X) keeps using
-  // the original unpaginated, unfiltered fetch exactly as before — it's
-  // fetching "the booking(s) for this one application," not a page of the
-  // main list. Only the main list (no appFilter) goes through the new
-  // server-side search/status/Company/Project/Block + pagination path.
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  // ?applicationId= fetches "the booking(s) for this one application", not a page of the list.
+  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery<BookingList>({
     queryKey: ["crm-bookings", appFilter, listFilters, page, pageSize],
     queryFn: async () => {
-      if (appFilter) return { rows: await fetchBookings(appFilter), total: 0 };
+      if (appFilter) { const rows = await fetchBookings(appFilter); return { rows, total: rows.length, statusCounts: {}, frozen: 0 }; }
       return fetchBookingsList(listFilters, page, pageSize);
     },
+    placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
   const bookings = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
+  const counts = listResult?.statusCounts ?? {};
 
-  // Deep-link support: /crm/bookings?applicationId=X (from "View Booking"
-  // elsewhere in the app) opens that booking's detail modal directly in
-  // this same tab/page instead of leaving staff to find and click the one
-  // filtered row themselves. deepLinkOpened is a one-shot guard — without
-  // it, closing the modal would immediately reopen it, since the URL still
-  // carries applicationId (same class of bug already fixed on the Bank &
-  // Nominee page's own deep link).
-  React.useEffect(() => {
+  // Deep links: ?view=<id> opens that booking; ?applicationId=X opens the booking made from that application. The
+  // one-shot guard stops closing the card from reopening it while the URL still carries the param.
+  useEffect(() => {
     if (viewFilter && !deepLinkOpened) {
       const viewId = parseInt(viewFilter, 10);
-      // 0 is a real booking Id (CrmBooking's identity got reseeded to 0 by
-      // the same corruption already fixed for CrmCustomer/other tables —
-      // see migration 441 and its siblings) — only genuinely non-numeric
-      // input (?view=abc, negative) should be treated as invalid.
-      if (Number.isInteger(viewId) && viewId >= 0) {
-        // Valid id — open the detail panel.
-        setViewingBookingId(viewId);
-      } else {
-        // ?view=abc or a negative id — the detail panel will never open
-        // (viewingBookingId stays null, so {viewingBookingId != null && …}
-        // is falsy), which means the onClose handler that normally clears
-        // the URL will never run. Actively navigate to the clean URL here
-        // so the stale bad param doesn't sit in the address bar forever.
-        navigate("/crm/bookings", { replace: true });
-      }
+      // 0 is a real booking Id (the identity was reseeded to 0 once, see migration 441).
+      if (Number.isInteger(viewId) && viewId >= 0) setViewingBookingId(viewId);
+      else navigate("/crm/bookings", { replace: true });
       setDeepLinkOpened(true);
       return;
     }
-    if (!appFilter || deepLinkOpened) return;
+    if (!appFilter || deepLinkOpened || isLoading) return;
     const row = (bookings as any[]).find((b: any) => String(b.ApplicationId) === appFilter);
-    if (row) { setViewingBookingId(row.Id); setDeepLinkOpened(true); }
-  }, [appFilter, viewFilter, bookings, deepLinkOpened]);
-  const { data: apps = [] } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 5 * 60_000 });
-  const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
-  const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 5 * 60_000 });
-  const { data: plots = [] } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 5 * 60_000 });
-  const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans-active"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
-
-  // The plan actually tagged to this booking (via the Application) — its
-  // BookingAmount is the fixed, authoritative figure; nobody types this by
-  // hand anymore.
-  const selectedPlan = useMemo(
-    () => (paymentPlans as any[]).find((p: any) => String(p.Id) === form.PaymentPlanId) || null,
-    [paymentPlans, form.PaymentPlanId],
-  );
-
-  // Booking Amount is decided on the Payment Plan itself now, not typed
-  // here — whenever the tagged plan (or its BookingAmount) is known, force
-  // the form to match it rather than leaving stale/hand-typed data around.
-  React.useEffect(() => {
-    if (selectedPlan?.BookingAmount == null) return;
-    const planAmt = String(selectedPlan.BookingAmount);
-    setForm((f) => f.BookingAmount === planAmt ? f : { ...f, BookingAmount: planAmt });
-  }, [selectedPlan]);
-
-  const selectedAssetProjectId: number | undefined = useMemo(
-    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitIds[0])?.ProjectId
-      || (plots as any[]).find((p: any) => String(p.Id) === form.PlotIds[0])?.ProjectId,
-    [units, plots, form.UnitIds, form.PlotIds],
-  );
-  const { data: projectBanks = [] } = useQuery({
-    queryKey: ["crm-booking-project-banks", selectedAssetProjectId],
-    queryFn: () => fetchProjectBanks(selectedAssetProjectId),
-    enabled: dialogOpen && !!selectedAssetProjectId,
-  });
-  const { data: allBanks = [] } = useQuery({
-    queryKey: ["bank-master-dropdown"],
-    queryFn: fetchAllBanks,
-    enabled: dialogOpen,
-    staleTime: 5 * 60_000,
-  });
-  // /for-project already resolves the full exclusivity rule server-side
-  // (tagged-only, or every untagged bank as the fallback pool) — falling
-  // back further to the raw, unfiltered bank list here would silently
-  // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
-  // the raw list when this unit's Project isn't known yet.
-  const bankOptions = selectedAssetProjectId ? projectBanks : allBanks;
-  React.useEffect(() => {
-    if (projectBanks.length === 1) {
-      // (no deposit bank auto-pick — Accounts assigns it before approval)
-    }
-  }, [projectBanks]);
-
-  const availableUnits = useMemo(() => {
-    // Was filtering against the `bookings` query above — but that query is
-    // scoped to a single Application whenever this page is opened via
-    // ?applicationId= (the common "View Booking" deep link), so it would
-    // silently under-report every OTHER application's booked units as still
-    // available. unit-master's own LockBookingNo/LockHoldId (computed
-    // system-wide, not scoped to this page's filters) is the reliable
-    // source — same fields CrmApplication.tsx's own unit picker now uses.
-    return (units as any[]).filter((u: any) =>
-      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || form.UnitIds.includes(String(u.Id)))
-    );
-  }, [units, form.UnitIds]);
-
-  const availablePlots = useMemo(() => (
-    (plots as any[]).filter((p: any) =>
-      !(p.LockBookingNo || p.LockApplicationNo || p.LockHoldId) || form.PlotIds.includes(String(p.Id))
-    )
-  ), [plots, form.PlotIds]);
-
-  // The selected Application's own PreferredUnitId — auto-fetched and locked
-  // here just like its other fields, since it's already been decided. Only
-  // when that unit is still actually available: two Applications can share
-  // the same PreferredUnitId, and if a different one already booked it, this
-  // dialog's whole reason for existing is to let staff pick a replacement —
-  // so it must fall back to a real picker rather than lock onto a unit the
-  // booking would then fail to save against.
-  const selectedApp = useMemo(
-    () => (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId),
-    [apps, form.ApplicationId]
-  );
-  const appPreferredUnitId: number | undefined = selectedApp?.PreferredUnitId;
-  const appPreferredUnitIds = useMemo(() => {
-    const primary = selectedApp?.PreferredUnitId != null ? String(selectedApp.PreferredUnitId) : null;
-    const saved = String(selectedApp?.PreferredUnitIdsCsv || "").split(",").filter(Boolean);
-    return primary ? [primary, ...saved.filter((id) => id !== primary)] : saved;
-  }, [selectedApp]);
-  const appPreferredUnitAvailable = appPreferredUnitIds.length > 0
-    && appPreferredUnitIds.every((id) => (availableUnits as any[]).some((u: any) => String(u.Id) === id));
-  const unitLockedFromApp = appPreferredUnitIds.length > 0 && appPreferredUnitAvailable;
-  const appPreferredPlotIds = useMemo(
-    () => String(selectedApp?.PreferredPlotIdsCsv || "").split(",").filter(Boolean),
-    [selectedApp],
-  );
-  const appPreferredPlotsAvailable = appPreferredPlotIds.length > 0
-    && appPreferredPlotIds.every((id) => (availablePlots as any[]).some((p: any) => String(p.Id) === id));
-  const plotLockedFromApp = appPreferredPlotIds.length > 0 && appPreferredPlotsAvailable;
-
-  // Everything the Application already captured (rate, token, booking
-  // amount, payment mode, assignee, plan, brokerage, notes) is auto-fetched
-  // and locked here — the exact same data createCrmBookingRecord would have
-  // used had auto-booking succeeded at Application-approval time (see
-  // crmApplications.js PUT /:id/approve). Staff filling this manual fallback
-  // dialog only ever need to pick the Unit; nothing Application-sourced
-  // should be re-typed or drift from what was already approved.
-  const handleApplicationSelect = (applicationId: string) => {
-    const app = (apps as any[]).find((a: any) => String(a.Id) === applicationId);
-    const plotIds = String(app?.PreferredPlotIdsCsv || "").split(",").filter(Boolean);
-    const appPlots = (plots as any[]).filter((p: any) => plotIds.includes(String(p.Id)));
-    const primaryId = app?.PreferredUnitId != null ? String(app.PreferredUnitId) : null;
-    const savedIds = String(app?.PreferredUnitIdsCsv || "").split(",").filter(Boolean);
-    const unitIds = primaryId ? [primaryId, ...savedIds.filter((id) => id !== primaryId)] : savedIds;
-    const appUnits = (units as any[]).filter((u: any) => unitIds.includes(String(u.Id)));
-    const appUnit = appUnits.find((u: any) => String(u.Id) === primaryId) || appUnits[0] || null;
-    const isPlotApplication = plotIds.length > 0;
-    const selectedAssets = isPlotApplication ? appPlots : appUnits;
-    const primaryAsset = isPlotApplication ? appPlots[0] : appUnit;
-    const combinedArea = selectedAssets.reduce((total: number, asset: any) => total + (parseFloat(asset.AreaSqFt) || 0), 0);
-    const area = combinedArea > 0 ? String(combinedArea) : "";
-    const rate = app?.RatePerSqFt != null ? String(app.RatePerSqFt) : "";
-    const areaNum = parseFloat(area);
-    const rateNum = parseFloat(rate);
-    setForm((f) => ({
-      ...f,
-      ApplicationId: applicationId,
-      UnitIds: isPlotApplication ? [] : unitIds,
-      PlotIds: isPlotApplication ? plotIds : [],
-      UnitNo: selectedAssets.map((asset: any) => asset.PlotName || asset.UnitName).join(", ") || "",
-      ProjectName: primaryAsset?.ProjectName || "",
-      BlockName: primaryAsset?.BlockName || "",
-      UnitType: isPlotApplication ? "Plot" : (appUnit?.UnitType || ""),
-      AreaSqFt: area,
-      RatePerSqFt: rate,
-      TotalValue: !isNaN(areaNum) && !isNaN(rateNum) ? String(Math.round(areaNum * rateNum)) : "",
-      PaymentPlanId: app?.PaymentPlanId ? String(app.PaymentPlanId) : "",
-      TokenType: app?.TokenType || "Percentage",
-      TokenValue: app?.TokenValue != null ? String(app.TokenValue) : "",
-      BookingAmount: app?.BookingAmount != null ? String(app.BookingAmount) : "",
-      PaymentMode: app?.PaymentMode || "",
-      AssignedTo: app?.AssignedTo != null ? String(app.AssignedTo) : "",
-      Notes: app?.Notes || "",
-      BrokerId: app?.BrokerId != null ? String(app.BrokerId) : "",
-      BrokerageRatePercent: app?.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
-      BrokerageSplitEnabled: !!app?.BrokerageSplitEnabled,
-    }));
-  };
-
-  const handleUnitsChange = (nextIds: string[]) => {
-    const selectedUnits = (units as any[]).filter((u: any) => nextIds.includes(String(u.Id)));
-    const primary = selectedUnits[0] || null;
-    
-    // Multi-unit pricing: combined area is the sum of all selected units
-    const combinedArea = selectedUnits.reduce((acc, u) => acc + (parseFloat(u.AreaSqFt) || 0), 0);
-    const areaStr = combinedArea > 0 ? String(combinedArea) : "";
-    
-    const rate = parseFloat(form.RatePerSqFt);
-    
-    setForm((f) => ({
-      ...f,
-      UnitIds: nextIds,
-      PlotIds: [],
-      UnitNo: selectedUnits.map((u: any) => u.UnitName).join(", ") || f.UnitNo,
-      ProjectName: primary?.ProjectName || f.ProjectName,
-      BlockName: primary?.BlockName || f.BlockName,
-      UnitType: primary?.UnitType || "",
-      AreaSqFt: areaStr,
-      PaymentPlanId: f.PaymentPlanId,
-      TotalValue: !isNaN(combinedArea) && combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
-    }));
-  };
-
-  const handlePlotsChange = (nextIds: string[]) => {
-    const selectedPlots = (plots as any[]).filter((p: any) => nextIds.includes(String(p.Id)));
-    const primary = selectedPlots[0] || null;
-    const combinedArea = selectedPlots.reduce((acc, p) => acc + (parseFloat(p.AreaSqFt) || 0), 0);
-    const rate = parseFloat(form.RatePerSqFt);
-    setForm((f) => ({
-      ...f,
-      UnitIds: [],
-      PlotIds: nextIds,
-      UnitNo: selectedPlots.map((p: any) => p.PlotName).join(", ") || f.UnitNo,
-      ProjectName: primary?.ProjectName || f.ProjectName,
-      BlockName: primary?.BlockName || f.BlockName,
-      UnitType: "Plot",
-      AreaSqFt: combinedArea > 0 ? String(combinedArea) : "",
-      TotalValue: combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
-    }));
-  };
-
-  // Inclusive saleable area is auto-fetched from Unit Master. Rate applies to
-  // that single agreed area; the structural breakdown stays informational.
-  const handleRateChange = (val: string) => {
-    const rate = parseFloat(val);
-    const area = parseFloat(form.AreaSqFt);
-    setForm((f) => ({
-      ...f,
-      RatePerSqFt: val,
-      TotalValue: !isNaN(area) && !isNaN(rate) ? String(Math.round(area * rate)) : f.TotalValue,
-    }));
-  };
-
-  const isPlotBooking = form.PlotIds.length > 0 || appPreferredPlotIds.length > 0;
-
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
-
-  const handleSave = async () => {
-    if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
-    if (form.UnitIds.length === 0 && form.PlotIds.length === 0) { toast.error("Select at least one unit or plot"); return; }
-    // DepositBankId/DepositBankName were never persisted or read anywhere in
-    // the actual booking-creation path (createCrmBookingRecord in
-    // crmEntityCreation.js) — CrmBooking has no such columns at all. This
-    // block required staff to pick a value that was then silently
-    // discarded end-to-end. The real deposit-bank concept lives at the
-    // Payment/Receipt level (crmPayments.js), recorded when the token
-    // payment is actually receipted, not at booking creation.
-    setSaving(true);
-    try {
-      const res = await fetchWithAuth(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          ApplicationId: parseInt(form.ApplicationId),
-          UnitIds:       form.UnitIds.map(id => parseInt(id)),
-          PlotIds:       form.PlotIds.map(id => parseInt(id)),
-          AreaSqFt:      form.AreaSqFt    || null,
-          RatePerSqFt:   form.RatePerSqFt || null,
-          TotalValue:    form.TotalValue   || null,
-          TokenValue:    form.TokenValue   || null,
-          PaymentPlanId: isPlotBooking ? null : (form.PaymentPlanId || null),
-          AssignedTo:    form.AssignedTo   || null,
-          BookingAmount: form.BookingAmount || null,
-          BrokerId:      form.BrokerId || null,
-          BrokerageRatePercent: form.BrokerageRatePercent || null,
-          BrokeragePaymentPlan: form.BrokerId ? (form.BrokeragePaymentPlan || "OneTime") : "OneTime",
-          // no deposit bank from CRM — Accounts assigns it before approval
-          DepositBankId: null,
-          DepositBankName: null,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to create booking");
-      toast.success(`Booking ${data.BookingNo} created — payment milestones auto-generated`);
-      if (data.tokenWarning) toast.warning(data.tokenWarning, { duration: 8000 });
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM, ApplicationId: appFilter });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["crm-apps"] }); // the Application just became Converted — the New Booking dropdown's app list must reflect that immediately, not after the 5-minute staleTime
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const [unitChangeBooking, setUnitChangeBooking] = useState<any | null>(null);
-  const [unitChangeNewId, setUnitChangeNewId] = useState("");
-  const [unitChangeReason, setUnitChangeReason] = useState("");
-  const [unitChangeSaving, setUnitChangeSaving] = useState(false);
-
-  const handleChangeUnit = async () => {
-    if (!unitChangeNewId) { toast.error("Select a unit"); return; }
-    if (!unitChangeReason.trim()) { toast.error("Reason is required"); return; }
-    setUnitChangeSaving(true);
-    try {
-      const res = await fetchWithAuth(`${API}/${unitChangeBooking.Id}/change-unit`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ NewUnitId: parseInt(unitChangeNewId), Reason: unitChangeReason.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success(`Unit changed to ${data.unitNo}`);
-      setUnitChangeBooking(null);
-      setUnitChangeNewId(""); setUnitChangeReason("");
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setUnitChangeSaving(false);
-    }
-  };
+    if (row) setViewingBookingId(row.Id);
+    // No booking yet for that application: offer to make one, filled in from it.
+    else if (canCreate) setNewOpen(true);
+    setDeepLinkOpened(true);
+  }, [appFilter, viewFilter, bookings, deepLinkOpened, isLoading, canCreate, navigate]);
 
   const canDeleteBooking = (b: any) =>
     isAdmin
@@ -616,221 +118,150 @@ const CrmBooking: React.FC = () => {
     && Number(b.ApprovedOnAccount || 0) <= 0;
 
   const handleDeleteBooking = async (b: any) => {
-    if (!window.confirm(`Delete booking ${b.BookingNo}? This is only allowed before approval/progress and will return the application to the pre-booking list.`)) return;
+    if (!window.confirm(`Delete booking ${b.BookingNo}? Only allowed before approval or any progress; the application returns to the pre-booking list.`)) return;
     try {
       const res = await fetchWithAuth(`${API}/${b.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete booking");
+      if (!res.ok) throw new Error(data.error || "Could not delete the booking.");
       toast.success(data.message || "Booking deleted");
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["crm-apps"] });
-      qc.invalidateQueries({ queryKey: ["unit-master"] });
-      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+      ["crm-bookings", "crm-apps", "unit-master", "unit-matrix"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       if (viewingBookingId === b.Id) setViewingBookingId(null);
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
   };
 
-  const bookingColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "BookingNo", header: "Booking No", size: 115,
+  const columns: ColumnDef<any, unknown>[] = [
+    { accessorKey: "BookingNo", header: "Booking", size: 120,
+      cell: (i) => <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{i.row.original.BookingNo}</span> },
+    { accessorKey: "ApplicantName", header: "Customer", size: 170,
       cell: (i) => (
-        <button onClick={() => openBooking(i.row.original.Id)} className="font-mono text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline">
-          {i.row.original.BookingNo}
-        </button>
-      ) },
-    { accessorKey: "ApplicantName", header: "Customer", size: 160,
-      cell: (i) => (
-        <div onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.Id} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div>
+        <div className="min-w-0">
+          <div className="font-medium truncate"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.Id} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="text-xs text-muted-foreground tabular-nums">{i.row.original.Mobile}</div>
         </div>
       ) },
-    { id: "projectUnit", header: "Project / Unit", size: 180, enableSorting: false,
+    { id: "projectUnit", header: "Project / unit", size: 190, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         return (
-          <div onClick={() => openBooking(b.Id)} className="cursor-pointer">
-            <div>{b.ProjectName || "—"}</div>
-            <div className="text-xs text-muted-foreground">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
-            {b.CompanyName && <div className="text-xs text-muted-foreground">{b.CompanyName}</div>}
+          <div className="min-w-0">
+            <div className="truncate">{b.ProjectName || "—"}</div>
+            <div className="text-xs text-muted-foreground truncate">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
           </div>
         );
       } },
     { accessorKey: "AreaSqFt", header: "Area", size: 90,
-      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-sm">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sqft` : "—"}</span> },
-    { id: "value", header: "Value / Financial", size: 185, enableSorting: false,
+      cell: (i) => <span className="text-xs tabular-nums">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sq ft` : "—"}</span> },
+    { id: "value", header: "Value / received", size: 190, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         const storedGrand = Number(b.GrandTotal ?? 0);
         const grand = storedGrand > 0 ? storedGrand : (Number(b.TotalValue || 0) + Number(b.UnitGstAmount || 0) + Number(b.ParkingTotal || 0) + Number(b.ExtraChargesTotal || 0));
         const cleared = Number(b.TotalCleared ?? 0);
-        // ApprovedOnAccount (CrmOnAccountPayment) is the sole source of
-        // truth for "held, not yet applied" — every approved CRM payment
-        // lands there. Adding CrmMoneyReceipt's total on top double-counted
-        // the same money (that table gets a row for the same approved
-        // payment as a separate receipt document).
+        // ApprovedOnAccount (CrmOnAccountPayment) alone is "held, not yet applied": adding CrmMoneyReceipt double-counted it.
         const onAcc = Number(b.ApprovedOnAccount ?? 0);
         const outstanding = Math.max(0, grand - cleared - onAcc);
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (
-          <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
-            <div className="font-semibold">{fmt(grand)}</div>
-            {(b.ParkingTotal > 0 || b.ExtraChargesTotal > 0) && (
-              <div className="text-[0.625rem] text-muted-foreground">
-                Unit {fmt(b.TotalValue)}
-                {b.UnitGstAmount > 0 && ` + Unit GST ${fmt(b.UnitGstAmount)}`}
-                {b.ParkingTotal > 0 && ` + Parking ${fmt(b.ParkingTotal)}`}
-                {b.ExtraChargesTotal > 0 && ` + Extra ${fmt(b.ExtraChargesTotal)}`}
-              </div>
-            )}
+          <div className="space-y-1">
+            <div className="font-heading font-semibold tabular-nums">{fmt(grand)}</div>
             {grand > 0 && (
-              <div className="space-y-0.5">
-                <div className="h-1 w-full rounded-full bg-muted overflow-hidden flex">
-                  <div className="h-full bg-emerald-500 transition-all" style={{ width: `${clearedPct}%` }} />
-                  <div className="h-full bg-blue-400 transition-all" style={{ width: `${onAccPct}%` }} />
+              <>
+                <div className="h-1.5 w-full flex" style={{ border: RULE_SOFT }} title={`Cleared ${fmt(cleared)} · on account ${fmt(onAcc)} · outstanding ${fmt(outstanding)}`}>
+                  <div className="h-full bg-foreground" style={{ width: `${clearedPct}%` }} />
+                  <div className="h-full" style={{ width: `${onAccPct}%`, background: "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)" }} />
                 </div>
-                <div className="flex gap-2 text-[0.5625rem]">
-                  {cleared > 0 && <span className="text-emerald-600">✓ {fmt(cleared)}</span>}
-                  {onAcc > 0 && <span className="text-blue-600">⬡ {fmt(onAcc)}</span>}
-                  {outstanding > 0 && <span className="text-sky-600">○ {fmt(outstanding)}</span>}
+                <div className="text-[0.625rem] text-muted-foreground tabular-nums">
+                  {fmt(cleared)} cleared{onAcc > 0 ? ` · ${fmt(onAcc)} on account` : ""}{outstanding > 0 ? ` · ${fmt(outstanding)} due` : ""}
                 </div>
-              </div>
+              </>
             )}
           </div>
         );
       } },
-    { accessorKey: "BookingAmount", header: "Booking Amt", size: 110,
-      cell: (i) => <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer">{fmt(i.row.original.BookingAmount)}</span> },
-    { accessorKey: "Status", header: "Status", size: 110,
+    { accessorKey: "BookingAmount", header: "Booking amt", size: 105,
+      cell: (i) => <span className="tabular-nums">{fmt(i.row.original.BookingAmount)}</span> },
+    { accessorKey: "Status", header: "Status", size: 120,
       cell: (i) => {
         const b = i.row.original;
         return (
-          <div onClick={() => openBooking(b.Id)} className="cursor-pointer space-y-1">
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[b.Status] || ""}`}>{b.Status}</span>
-            {b.IsFrozen && (
-              <div className="flex items-center gap-1 text-[0.625rem] font-medium text-red-600 dark:text-red-400">
-                <Lock size={10} /> Frozen
-              </div>
-            )}
+          <div className="space-y-1">
+            <SheetMark text={b.Status} tone={bookingTone(b.Status)} />
+            {b.IsFrozen && <div className="flex items-center gap-1 text-[0.625rem] font-medium text-destructive"><Lock size={10} /> Frozen</div>}
           </div>
         );
       } },
     { accessorKey: "BookingDate", header: "Date", size: 95,
-      cell: (i) => (
-        <span onClick={() => openBooking(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
-          {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
-        </span>
-      ) },
-    { id: "actions", header: "Actions", size: 220, enableSorting: false,
+      cell: (i) => <span className="text-xs text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
+    { id: "actions", header: "Next", size: 230, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         const step = getNextStep(b);
-        // Same sequential gate getNextStep enforces for the primary
-        // step button — a stage is only reachable once every stage
-        // before it is actually done, so "Jump to Stage" can't be used
-        // to route around the gate the button itself respects.
+        // "Jump to" follows the same order as the next step: Welcome Call first, then Payments (the booking amount)
+        // and Agreement. It required Bank Details for the Agreement, which is not a gate, so Agreement was hidden
+        // while the next step pointed at it.
         const approved = b.Status === CrmStatus.APPROVED;
-        const welcomeCallReached = approved;
-        const bankDetailsReached = approved && b.HasWelcomeCall;
-        const agreementReached = bankDetailsReached && b.BankDetailsComplete;
-        const paymentsReached = agreementReached && !!b.AgreementId
-          && b.SeniorApprovalStatus === CrmStatus.APPROVED && b.CustomerApprovalStatus === CrmStatus.APPROVED;
+        const welcomed = approved && !!b.HasWelcomeCall;
         return (
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* submitOnly: Approve/Reject only ever happen from the
-                Admin Approval Inbox (admin/super_admin/marketing_head) */}
-            <ApprovalActions
-              status={b.Status}
-              recordId={b.Id}
-              endpoint={API}
-              submitOnly
-              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })}
-            />
+          <div className="flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+            {/* submitOnly: Approve/Reject happen in the Approval Inbox only. */}
+            <ApprovalActions status={b.Status} recordId={b.Id} endpoint={API} submitOnly onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })} />
             {b.Status === CrmStatus.PENDING && (
               b.WorkflowStage && b.WorkflowStage !== "Review" ? (
-                <span className="text-xs text-muted-foreground">Pending {workflowStageLabel[b.WorkflowStage] || "Approval"}</span>
+                <span className="text-[0.6875rem] text-muted-foreground">Waiting: {workflowStageLabel[b.WorkflowStage] || "approval"}</span>
               ) : b.ReadyForApprovalAt ? (
-                <span className="text-xs text-muted-foreground">Ready for Marketing Head Approval</span>
+                <span className="text-[0.6875rem] text-muted-foreground">Ready for Marketing Head approval</span>
               ) : (
-                <button onClick={() => openBooking(b.Id)}
-                  className="text-xs px-2 py-1 rounded-md border text-sky-600 border-sky-200 bg-sky-50 font-medium flex items-center gap-1">
-                  Review Checklist Incomplete <ChevronRight size={12} />
-                </button>
+                <button onClick={() => openBooking(b.Id)} className={`${KEY_LINE} h-7 px-2`}>Review checklist <ChevronRight size={11} /></button>
               )
             )}
             {step ? (
-              <button onClick={() => navigate(step.path)}
-                className={`text-xs px-2 py-1 rounded-md border font-medium flex items-center gap-1 ${step.color}`}>
-                {step.label} <ChevronRight size={12} />
-              </button>
-            ) : b.Status === CrmStatus.APPROVED ? (
-              <span className="text-xs px-2 py-1 rounded-md border text-emerald-600 border-emerald-200 bg-emerald-50 font-medium flex items-center gap-1">
-                <CheckCircle2 size={12} /> All Steps Complete
-              </span>
+              <button onClick={() => navigate(step.path)} className={`${KEY_INK} h-7 px-2`}>{step.label} <ChevronRight size={11} /></button>
+            ) : approved ? (
+              <SheetMark text="All steps done" tone="done" />
             ) : null}
-            {/* Non-sequential utility actions — not part of the linear
-                flow, so they live in an overflow menu instead of competing
-                with the one active step. */}
-            {/* Row click opens this (see data-row-view in main.tsx) */}
-            <button type="button" data-row-view onClick={() => openBooking(b.Id)} aria-label="View details" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="p-1 rounded-md hover:bg-muted text-muted-foreground" title="More actions">
-                  <MoreHorizontal size={16} />
+                <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                  <MoreHorizontal size={15} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => openBooking(b.Id)} className="gap-2">
-                   View Details / Invoice / Attachments
-                </DropdownMenuItem>
-                {(welcomeCallReached || bankDetailsReached || agreementReached || paymentsReached) && (
+              <DropdownMenuContent align="end" className="w-56 rounded-none">
+                <DropdownMenuItem onClick={() => openBooking(b.Id)}>Open booking</DropdownMenuItem>
+                {approved && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-[0.6875rem] font-medium text-muted-foreground">Jump to Stage</DropdownMenuLabel>
+                    <DropdownMenuLabel className="text-[0.6875rem] font-medium text-muted-foreground">Jump to</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)} className="gap-2"><Phone size={14} /> Welcome call</DropdownMenuItem>
                   </>
                 )}
-                {welcomeCallReached && (
-                  <DropdownMenuItem onClick={() => navigate(`/crm/welcome-calls?bookingId=${b.Id}`)} className="gap-2">
-                    <Phone size={14} className="text-sky-500" /> Welcome Call
-                  </DropdownMenuItem>
-                )}
-                {bankDetailsReached && (
-                  <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)} className="gap-2">
-                    <Landmark size={14} className="text-sky-600" /> Bank Details
-                  </DropdownMenuItem>
-                )}
-                {agreementReached && (
-                  <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)} className="gap-2">
-                    <FileSignature size={14} className="text-sky-500" /> Agreement
-                  </DropdownMenuItem>
-                )}
-                {paymentsReached && (
-                  <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)} className="gap-2">
-                    <IndianRupee size={14} className="text-sky-600" /> Payments
-                  </DropdownMenuItem>
+                {welcomed && (
+                  <>
+                    <DropdownMenuItem onClick={() => navigate(`/crm/payments?bookingId=${b.Id}`)} className="gap-2"><IndianRupee size={14} /> Payments</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate(`/crm/agreements?bookingId=${b.Id}`)} className="gap-2"><FileSignature size={14} /> Agreement</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate(`/crm/customer-bank-details?bookingId=${b.Id}`)} className="gap-2"><Landmark size={14} /> Bank details</DropdownMenuItem>
+                  </>
                 )}
                 {b.Status !== CrmStatus.CANCELLED && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />
-                    {(canRequestCancellation || canEdit) && (
-                      <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${b.Id}`)} className="gap-2 text-rose-600 focus:text-rose-600">
-                        <AlertTriangle size={14} /> Request Cancellation
-                      </DropdownMenuItem>
-                    )}
-                    {canEdit && !b.IsPlotSale && (
-                    <DropdownMenuItem onClick={() => { setUnitChangeBooking(b); setUnitChangeNewId(""); setUnitChangeReason(""); }} className="gap-2 text-rose-600 focus:text-rose-600">
-                      <Repeat size={14} /> Change Unit
+                    <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${b.Id}`)} className="gap-2 text-destructive focus:text-destructive">
+                      <AlertTriangle size={14} /> Request cancellation
                     </DropdownMenuItem>
+                    {canEdit && !b.IsPlotSale && (
+                      <DropdownMenuItem onClick={() => setUnitChangeBooking(b)} className="gap-2 text-destructive focus:text-destructive">
+                        <Repeat size={14} /> Change unit
+                      </DropdownMenuItem>
                     )}
                   </>
                 )}
                 {canDeleteBooking(b) && (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleDeleteBooking(b)} className="gap-2 text-red-600 focus:text-red-600">
-                      <Trash2 size={14} /> Delete Booking
+                    <DropdownMenuItem onClick={() => handleDeleteBooking(b)} className="gap-2 text-destructive focus:text-destructive">
+                      <Trash2 size={14} /> Delete booking
                     </DropdownMenuItem>
                   </>
                 )}
@@ -841,398 +272,117 @@ const CrmBooking: React.FC = () => {
       } },
   ];
 
-  const glassStyle: React.CSSProperties = {
-    background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
-  };
-  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
-
   usePageRights("crm-bookings");
+
+  const n = (s: string) => counts[s] || 0;
+  const all = Object.values(counts).reduce((s, v) => s + v, 0);
+  const pick = (s: string) => () => updateFilter(setStatusFilter)(statusFilter === s ? "All" : s);
+  const stats = [
+    { label: "Bookings", value: all, note: "Under these filters", go: () => updateFilter(setStatusFilter)("All") },
+    { label: "Waiting approval", value: n("Pending"), note: "Review, Marketing Head or Director", go: pick("Pending") },
+    { label: "Approved", value: n("Approved"), note: `${n("Transferred")} transferred by resale`, go: pick("Approved") },
+    { label: "Cancelled / rejected", value: n("Cancelled") + n("Rejected"), note: listResult?.frozen ? `${listResult.frozen} frozen` : "None frozen", go: pick("Cancelled") },
+  ];
+  const anyFilter = !!(search || statusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId);
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Bookings"]} />
-      <CrmShell
-        title="CRM — Applications and Bookings"
-      subtitle="Applications become pending bookings, then move through review, Marketing Head approval, and Director approval"
-      action={
-        <div className="flex items-center gap-3">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          {canEdit && (
-            <button onClick={() => { setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); setDialogOpen(true); }}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
-              <Plus size={14} /> New Booking
-            </button>
-          )}
-        </div>
-      }
-    >
-      <div className="mb-3"><VillaOffersPanel /></div>
-
-      {/* Search + status filter + table live in one continuous glass card,
-          same convention as CrmLeads/CrmApplication, instead of a loose
-          toolbar row floating above a separately-bordered table. */}
-      <div className="rounded-xl overflow-hidden" style={glassStyle}>
-        <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
-          <div className="relative flex-1 min-w-48">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-              placeholder="Search name, booking no, unit..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
+      <SheetShell
+        eyebrow="CivilierERP · CRM"
+        title="Bookings"
+        subtitle="Approved applications become bookings, then move through Review, Marketing Head and Director approval, and on to the agreement and payments."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {canCreate && <button onClick={() => setNewOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New booking</button>}
           </div>
-          <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
-            <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-sky-500/40">
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All">All Statuses</SelectItem>
-              {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-        </div>
-
-        <DataTable serverPagination={!appFilter ? { page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } } : undefined}
-          data={bookings}
-          columns={bookingColumns}
-          searchable={false}
-          loading={isLoading}
-          emptyMessage="No bookings found"
-          className="border-0"
-        />
-      </div>
-
-      {/* New Booking Dialog — manual fallback, still requires a real Application.
-          Widened + restructured into a 2-column layout (Unit/Project+Pricing on
-          the left, Booking/Payment on the right) so every field fits in one
-          screen without an inner scroller, matching the New Application
-          wizard's Step 1 convention. */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>
-        <DialogContent accent="crm" className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
-          <DialogHeader className="space-y-0.5">
-            <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
-              <Building2 size={16} className="text-sky-500" /> New Booking
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className={labelCls}>Application * (Approved, not yet booked)</label>
-              <Select value={form.ApplicationId || undefined} onValueChange={handleApplicationSelect}>
-                <SelectTrigger className={inputCls}>
-                  <SelectValue placeholder="Select application" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(apps as any[]).map((a: any) => (
-                    <SelectItem key={a.Id} value={String(a.Id)}>
-                      {a.ApplicationNo} — <ApplicantNames name={a.ApplicantName} applicationId={a.Id} /> ({a.Mobile})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        }
+      >
+        <div className="space-y-5">
+          {!appFilter && (
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                {stats.map((x) => (
+                  <div key={x.label}>
+                    <button onClick={x.go} className="label link">{x.label}</button>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
+                ))}
+              </div>
             </div>
+          )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {/* ── LEFT: Unit / Project + Pricing ── */}
-              <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">{isPlotBooking ? "Plot / Project" : "Unit / Project"}</p>
-                <div>
-                  <label className={labelCls}>
-                    {isPlotBooking ? "Plot" : "Unit"} * {(unitLockedFromApp || plotLockedFromApp) ? "(from Application — already selected)" : `(from ${isPlotBooking ? "Plot" : "Unit"} Master — mandatory)`}
-                  </label>
-                  {(unitLockedFromApp || plotLockedFromApp) ? (
-                    <input type="text" readOnly disabled
-                      value={`${form.ProjectName} — ${form.BlockName} — ${form.UnitNo}`}
-                      className={inputClsDisabled} />
-                  ) : (
-                    <>
-                      {isPlotBooking ? (
-                        <MultiSelectDropdown
-                          options={(availablePlots as any[]).map((p: any) => ({
-                            id: String(p.Id),
-                            label: `${p.ProjectName} — ${p.BlockName} — ${p.PlotName}`,
-                            group: p.BlockName
-                          }))}
-                          value={form.PlotIds}
-                          onChange={handlePlotsChange}
-                          placeholder="Select plots"
-                          searchPlaceholder="Search plots..."
-                          itemNoun="plot"
-                        />
-                      ) : (
-                        <Select value={form.UnitIds[0] || undefined} onValueChange={(id) => handleUnitsChange([id])}>
-                          <SelectTrigger className={inputCls}>
-                            <SelectValue placeholder="Select unit" />
-                          </SelectTrigger>
-                          <SelectContent className="max-w-[min(90vw,420px)]">
-                            {(availableUnits as any[]).map((u: any) => (
-                              <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                      {appPreferredUnitId != null && !appPreferredUnitAvailable && (
-                        <p className="text-[0.6875rem] text-sky-600 mt-1">
-                          This Application's preferred unit is no longer available — select a different one.
-                        </p>
-                      )}
-                      {appPreferredPlotIds.length > 0 && !appPreferredPlotsAvailable && (
-                        <p className="text-[0.6875rem] text-sky-600 mt-1">
-                          This Application's preferred plot is no longer available — select a different one.
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  <div>
-                    <label className={labelCls}>Project</label>
-                    <input type="text" value={form.ProjectName} readOnly disabled
-                      placeholder="Auto-filled"
-                      className={inputClsDisabled} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Block/Tower</label>
-                    <input type="text" value={form.BlockName} readOnly disabled
-                      placeholder="Auto-filled"
-                      className={inputClsDisabled} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Type of Unit</label>
-                    <input type="text" value={form.UnitType} readOnly disabled
-                      placeholder="Auto-filled"
-                      className={inputClsDisabled} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                  <div>
-                    <label className={labelCls}>Inclusive Saleable Area (sq ft)</label>
-                    <input type="text" value={form.AreaSqFt} readOnly disabled
-                      placeholder="Auto-filled"
-                      className={inputClsDisabled} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>
-                      Rate/sqft (₹) {form.ApplicationId && form.RatePerSqFt ? "(App)" : ""}
-                    </label>
-                    <input type="number" value={form.RatePerSqFt} onChange={(e) => handleRateChange(e.target.value)}
-                      readOnly={!!form.ApplicationId && !!form.RatePerSqFt} disabled={!!form.ApplicationId && !!form.RatePerSqFt}
-                      className={form.ApplicationId && form.RatePerSqFt ? inputClsDisabled : inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Total Value (₹)</label>
-                    <input type="number" value={form.TotalValue} onChange={(e) => setForm((f) => ({ ...f, TotalValue: e.target.value }))}
-                      className={`${inputCls} font-semibold`} />
-                  </div>
-                </div>
-                {form.TotalValue && (
-                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[0.6875rem] text-emerald-700">
-                    Milestone payment schedule (7 stages) will be auto-generated from total value of ₹{Number(form.TotalValue).toLocaleString("en-IN")}
-                  </div>
+          <VillaOffersPanel />
+
+          <div className="bg-card" style={{ border: RULE }}>
+            {appFilter ? (
+              <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-xs" style={{ borderBottom: RULE }}>
+                <span className="text-muted-foreground">Showing the booking made from one application.</span>
+                <button onClick={() => navigate("/crm/bookings", { replace: true })} className={`${KEY_LINE} h-8 px-3`}>All bookings</button>
+              </div>
+            ) : (
+              <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+                <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                  placeholder="Search name, booking no, unit…"
+                  className="h-9 w-full sm:w-72 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+                <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
+                  <SelectTrigger className="w-auto min-w-[140px] h-9 rounded-none border-foreground/40 text-xs"><SelectValue placeholder="All statuses" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All statuses</SelectItem>
+                    {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+                {anyFilter && (
+                  <button onClick={() => { setSearchInput(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
+                    className={`${KEY_LINE} h-9 px-3`}>Clear filters</button>
                 )}
               </div>
-
-              {/* ── RIGHT: Booking / Payment ── */}
-              <div className="rounded-lg border border-border p-2.5 space-y-2.5">
-                <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-sky-600 dark:text-sky-400">Booking & Payment</p>
-                <div className="grid grid-cols-1 sm:grid-cols-[1.3fr_1fr_0.9fr] gap-2.5">
-                  <div>
-                    <label className={labelCls}>Booking Date</label>
-                    <DateInput value={form.BookingDate}
-                      onChange={(e) => setForm((f) => ({ ...f, BookingDate: e.target.value }))}
-                      className={inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Token Type</label>
-                    {form.ApplicationId ? (
-                      <input type="text" value={form.TokenType} readOnly disabled className={inputClsDisabled} />
-                    ) : (
-                      <Select value={form.TokenType} onValueChange={(v) => setForm((f) => ({ ...f, TokenType: v }))}>
-                        <SelectTrigger className={inputCls}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {TOKEN_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                  <div>
-                    <label className={labelCls}>
-                      Token {form.TokenType === "Percentage" ? "(%)" : "(₹)"}
-                    </label>
-                    <input type="number" value={form.TokenValue}
-                      onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
-                      readOnly={!!form.ApplicationId && !!form.TokenValue} disabled={!!form.ApplicationId && !!form.TokenValue}
-                      className={form.ApplicationId && form.TokenValue ? inputClsDisabled : inputCls} />
-                  </div>
-                </div>
-                <div>
-                  <label className={labelCls}>{isPlotBooking ? "Payment Schedule" : "Payment Plan (from the Application — not editable here)"}</label>
-                  <input type="text" readOnly disabled
-                    value={isPlotBooking
-                      ? "No payment plan — Booking Amount, then the balance"
-                      : (selectedPlan?.PlanName
-                        || (apps as any[]).find((a: any) => String(a.Id) === form.ApplicationId)?.PaymentPlanName
-                        || "Default 7-stage split")}
-                    className={inputClsDisabled} />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className={labelCls}>Payment Mode</label>
-                    {form.ApplicationId && form.PaymentMode ? (
-                      <input type="text" value={form.PaymentMode} readOnly disabled className={inputClsDisabled} />
-                    ) : (
-                      <Select value={form.PaymentMode || undefined} onValueChange={(v) => setForm((f) => ({ ...f, PaymentMode: v }))}>
-                        <SelectTrigger className={inputCls}>
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PAY_MODES.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                  <div>
-                    <label className={labelCls}>Deposited To</label>
-                    <p className="text-[0.6875rem] text-muted-foreground pt-2">Assigned by Accounts on the Received Payment before approval.</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className={labelCls}>
-                      Booking Amount (₹) {!isPlotBooking && selectedPlan ? "(Plan)" : ""}
-                    </label>
-                    {/* A plot sale has no plan: the amount typed here is the
-                        Booking milestone, the rest is the Balance. */}
-                    <input type="number" value={form.BookingAmount}
-                      onChange={(e) => setForm((f) => ({ ...f, BookingAmount: e.target.value }))}
-                      readOnly={!isPlotBooking && !!selectedPlan} disabled={!isPlotBooking && !!selectedPlan}
-                      placeholder={isPlotBooking ? "Leave empty for one full payment" : selectedPlan ? undefined : "From Payment Plan"}
-                      className={!isPlotBooking && selectedPlan ? inputClsDisabled : inputCls} />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Assigned To</label>
-                    {form.ApplicationId && form.AssignedTo ? (
-                      <input type="text" readOnly disabled
-                        value={users.find((u) => u.value === form.AssignedTo)?.label || "— Assigned on Application —"}
-                        className={inputClsDisabled} />
-                    ) : (
-                      <Select value={form.AssignedTo || undefined} onValueChange={(v) => setForm((f) => ({ ...f, AssignedTo: v }))}>
-                        <SelectTrigger className={inputCls}>
-                          <SelectValue placeholder="— Unassigned —" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {users.map((u) => <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className={labelCls}>
-                Notes {form.ApplicationId && form.Notes ? "(from Application — add to it below if needed)" : ""}
-              </label>
-              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className={`${inputCls} resize-none`} />
-            </div>
+            )}
+            {isError ? (
+              <p className="px-5 py-10 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+            ) : (
+              <DataTable
+                serverPagination={!appFilter ? { page, pageSize, total, onPageChange: setPage, onPageSizeChange: (s) => { setPageSize(s); setPage(1); } } : undefined}
+                data={bookings}
+                columns={columns}
+                searchable={false}
+                loading={isLoading}
+                onRowClick={(row) => openBooking(row.original.Id)}
+                getRowId={(b: any) => String(b.Id)}
+                emptyMessage={appFilter ? "No booking has been made from this application yet." : anyFilter ? "No bookings match these filters." : "No bookings yet. They are made when an application is approved, or with New booking."}
+                className="border-0"
+              />
+            )}
           </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
-              Cancel
-            </button>
-            <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
-              {saving ? "Creating..." : "Create Booking"}
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </SheetShell>
 
-      {/* Any close path for the booking-detail card — the X button, clicking
-          outside, or pressing Escape — funnels through CrmBookingDetail's
-          single onClose prop (its Dialog uses onOpenChange={(o) => !o &&
-          onClose()}, which Radix fires for all three). So handling it once
-          here covers all three. Besides clearing local state, drop the
-          ?applicationId= param back to a plain /crm/bookings — leaving it
-          in place kept the underlying list silently filtered to just this
-          one application even after the card closed, and left a stale
-          deep-link sitting in the address bar.
-          Deliberately NOT resetting deepLinkOpened here — appFilter itself
-          clears once the URL updates, so the auto-open effect's own
-          `!appFilter` guard already covers it. Resetting deepLinkOpened
-          too raced against that URL update: for one render, appFilter could
-          still read the old id while deepLinkOpened had already flipped
-          back to false, matching the effect's condition and reopening the
-          same card immediately after it closed. */}
+      {newOpen && canCreate && (
+        <NewBookingDialog
+          applicationId={appFilter}
+          onClose={() => { setNewOpen(false); if (appFilter) navigate("/crm/bookings", { replace: true }); }}
+        />
+      )}
+
+      {/* Every close path of the booking card funnels through onClose; it also drops ?view= / ?applicationId= so the
+          list isn't left filtered to one application. deepLinkOpened stays set: appFilter clears with the URL. */}
       {viewingBookingId != null && (
         <CrmBookingDetail
           bookingId={viewingBookingId}
           onClose={() => {
             setViewingBookingId(null);
-            // Always clear any ?view= / ?applicationId= param so the URL is
-            // clean after closing — previously conditioned on appFilter ||
-            // viewFilter which meant ?view=0 (an invalid id that never opened
-            // the panel) was never cleaned up since the close path never ran.
             navigate("/crm/bookings", { replace: true });
           }}
         />
       )}
 
-      {unitChangeBooking && (
-        <Dialog open onOpenChange={(o) => !o && setUnitChangeBooking(null)}>
-          <DialogContent accent="crm" className="max-w-md">
-            <DialogHeader>
-              <DialogTitle className="font-heading flex items-center gap-2">
-                <Repeat size={16} className="text-rose-500" /> Change Unit — {unitChangeBooking.BookingNo}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">New Unit</label>
-                <select value={unitChangeNewId} onChange={(e) => setUnitChangeNewId(e.target.value)}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">— Select unit —</option>
-                  {(units as any[])
-                    .filter((u: any) => u.IsActive && u.Id !== unitChangeBooking.UnitId)
-                    .map((u: any) => (
-                      <option key={u.Id} value={u.Id}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</option>
-                    ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
-                <textarea value={unitChangeReason} onChange={(e) => setUnitChangeReason(e.target.value)}
-                  rows={3} placeholder="Reason for changing the unit..."
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <button onClick={() => setUnitChangeBooking(null)}
-                  className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={handleChangeUnit} disabled={unitChangeSaving || !unitChangeNewId || !unitChangeReason.trim()}
-                  className="px-4 py-1.5 text-sm bg-rose-500 text-white rounded-lg font-medium hover:bg-rose-600 disabled:opacity-40">
-                  {unitChangeSaving ? "Changing..." : "Change Unit"}
-                </button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-    </CrmShell>
+      {unitChangeBooking && <ChangeUnitDialog booking={unitChangeBooking} onClose={() => setUnitChangeBooking(null)} />}
     </>
   );
 };
 
 export default CrmBooking;
-
-
-

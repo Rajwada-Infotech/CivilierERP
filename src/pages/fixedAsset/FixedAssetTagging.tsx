@@ -1,1106 +1,311 @@
-import React, { useState, useMemo, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+// FA Inventory: received fixed-asset stock and the FA Item Codes generated for it. Parts under ./tagging:
+//   config (types, helpers, export) · TaggingForm · InventoryImport · TaggingDialogs
+import React, { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  Plus, ArrowLeft, AlertCircle, Search,
-  Building2, Package, Calendar, FileText, Hash, Tag as TagIcon, X, Boxes,
-  Download, Upload, Loader2, Check, Pencil, Trash2, FileSpreadsheet,
-} from "lucide-react";
-import { GlassShell } from "@/components/dashboard/GlassShell";
+import { FileSpreadsheet, Hash, PenSquare, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { DateInput } from "@/components/ui/date-input";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useFinYear } from "@/contexts/FinYearContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getGodowns, type Godown } from "@/api/godownsApi";
-import { getItems, type DbItem } from "@/api/itemMasterApi";
-import { parseSheetDate } from "@/lib/xlsxBook";
-import { exportToXlsx } from "@/lib/export";
-import { createInventoryImport } from "@/api/fixedAssetInventoryImportApi";
-import { getActiveDepreciationSetups } from "@/api/depreciationApi";
-import { downloadFaInventoryTemplate, readFaImportFile } from "./faInventoryExcel";
-import { godownMatches, validateFaImportRows, type FaImportResultRow } from "./faImportValidation";
 import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
-import {
-  getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
-  updateFixedAssetTagging, deleteFixedAssetTagging,
-  type EligibleAssetItem, type PendingBatch, type TaggingListItem,
-} from "@/api/fixedAssetTaggingApi";
-import { DateInput } from "@/components/ui/date-input";
+import { getFixedAssetTaggings, getPendingBatches, type PendingBatch, type TaggingListItem } from "@/api/fixedAssetTaggingApi";
+import { INP, KEY_INK, KEY_LINE, RULE } from "./record/config";
+import { type InventoryRow, type TaggingPrefill, ensureArray, exportInventory, fmt, fmtDate } from "./tagging/config";
+import { TaggingForm } from "./tagging/TaggingForm";
+import { InventoryImport } from "./tagging/InventoryImport";
+import { DeletePendingDialog, DeleteTaggingDialog, EditTaggingDialog } from "./tagging/TaggingDialogs";
 
-function ensureArray<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
-
-function fmt(n: number | null | undefined) {
-  if (n == null) return "—";
-  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n);
-}
-function fmtDate(s: string | null | undefined) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("en-IN");
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  Tagged:    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  Cancelled: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  Transferred: "bg-slate-200 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300",
-};
-
-const RECORD_COLORS: Record<string, string> = {
-  Pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  Done:    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-};
-
-const inputCls   = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
-const labelCls   = "flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1";
-const sectionCls = "bg-card border border-border rounded-xl p-5 space-y-4";
-
-function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 shrink-0">
-        <Icon size={14} />
-      </span>
-      <p className="text-sm font-semibold text-foreground">{children}</p>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value, color = "", icon: Icon }: { label: string; value: string; color?: string; icon?: React.ElementType }) {
-  return (
-    <div className="bg-muted/40 rounded-lg p-3 text-center">
-      {Icon && <Icon size={13} className={`mx-auto mb-1 ${color || "text-muted-foreground"}`} />}
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className={`text-base font-bold tabular-nums ${color}`}>{value}</p>
-    </div>
-  );
-}
-
-interface FormState {
-  docDate: string;
-  companyId: string;
-  projectId: string;
-  godownId: string;
-  itemId: string;
-  numberOfItems: string;
-  remarks: string;
-}
-
-const emptyForm = (overrides: Partial<FormState> = {}): FormState => ({
-  docDate:   new Date().toISOString().slice(0, 10),
-  companyId: "",
-  projectId: "",
-  godownId:  "",
-  itemId:    "",
-  numberOfItems: "",
-  remarks:   "",
-  ...overrides,
-});
-
-// Financial Year is always derived from the Document Date — never picked
-// manually — so a tagging entry's date and its FinYear can never drift
-// apart the way independently-selected values could (which is exactly what
-// broke the Tagging Transaction History "Financial Year" filter before).
-function deriveFinYear(docDate: string, finYears: { year: string; startDate: string; endDate: string }[]): string {
-  if (!docDate) return "";
-  const match = finYears.find((f) => f.startDate && f.endDate && docDate >= f.startDate && docDate <= f.endDate);
-  return match?.year || "";
-}
-
-type ViewMode = "list" | "form";
-
-// ── bulk import (Excel/CSV) ────────────────────────────────────────────────────
-// Two modes share one importer: "Bulk" keeps the Quantity column (one row can
-// tag several identical units at once, exactly as before); "Individual" drops
-// it entirely — every row is always exactly one unit, so importing 10
-// laptops means 10 rows instead of one row with Quantity=10.
-type ImportMode = "bulk" | "individual";
-
-type ImportRow = FaImportResultRow;
+const inRange = (d: string | null, from: string, to: string) => (!from || (!!d && d.slice(0, 10) >= from)) && (!to || (!!d && d.slice(0, 10) <= to));
 
 export default function FixedAssetTagging() {
   const rights = usePageRights("fixed-asset-tagging");
-  const qc     = useQueryClient();
-  const { finYears } = useFinYear();
-
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [form, setForm] = useState<FormState>(emptyForm());
-
-  const effectiveFinYear = useMemo(() => deriveFinYear(form.docDate, finYears), [form.docDate, finYears]);
-
-  const [filterCompany, setFilterCompany] = useState("");
-  const [filterProject, setFilterProject] = useState("");
-  const [filterFromDate, setFilterFromDate] = useState("");
-  const [filterToDate, setFilterToDate] = useState("");
-  const [search, setSearch] = useState("");
-
-  // ── edit / delete (cancel) ──
+  const [view, setView] = useState<"list" | "form">("list");
+  const [prefill, setPrefill] = useState<TaggingPrefill | null>(null);
+  const [companyId, setCompanyId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [show, setShow] = useState<"all" | "untagged" | "waiting">("all");
   const [editTag, setEditTag] = useState<TaggingListItem | null>(null);
-  const [editDocDate, setEditDocDate] = useState("");
-  const [editRemarks, setEditRemarks] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deletePendingId, setDeletePendingId] = useState<number | null>(null);
 
-  // ── bulk import (Excel/CSV) ──
-  const importFileInputRef = useRef<HTMLInputElement>(null);
-  const [importMode, setImportMode] = useState<ImportMode>("bulk");
-  const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null);
-  const [importDone, setImportDone] = useState(false);
-  const [importSubmitting, setImportSubmitting] = useState(false);
-  const [importValidating, setImportValidating] = useState(false);
+  const { data: taggings = [], isLoading, isFetching, refetch } = useQuery({ queryKey: ["fixed-asset-taggings"], queryFn: () => getFixedAssetTaggings() });
+  // Received stock not tagged yet. Auto-tagging skips a project with no ID Template, so this keeps that stock in sight.
+  const { data: pendingBatches = [], refetch: refetchPending } = useQuery({ queryKey: ["fixed-asset-pending-batches"], queryFn: getPendingBatches });
+  const { data: companies = [] } = useQuery({ queryKey: ["enterprise-options-C"], queryFn: () => getEnterpriseOptions(undefined, "C") });
+  const { data: allProjects = [] } = useQuery({ queryKey: ["enterprise-options-P"], queryFn: () => getEnterpriseOptions(undefined, "P") });
+  const { data: godownsData } = useQuery({ queryKey: ["godowns"], queryFn: getGodowns });
 
-  // Received Fixed Asset stock (GRN / Inventory Import) not tagged yet — auto-tagging
-  // skips a project that has no ID Template, so this keeps that stock visible.
-  const { data: pendingBatches = [] } = useQuery({
-    queryKey: ["fixed-asset-pending-batches"],
-    queryFn: getPendingBatches,
-  });
+  const companyList = ensureArray<{ id: number; label: string }>(companies);
+  const projectList = ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects);
+  const filterProjects = useMemo(() => (companyId ? projectList.filter((p) => projectBelongsToCompany(p, companyId)) : []), [projectList, companyId]);
 
-  const setField = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
-    setForm((p) => ({ ...p, [k]: v }));
-  }, []);
+  const tags = ensureArray<TaggingListItem>(taggings);
+  const pending = ensureArray<PendingBatch>(pendingBatches);
+  const matches = (c: number | null, p: number | null, d: string | null) =>
+    (!companyId || String(c) === companyId) && (!projectId || String(p) === projectId) && inRange(d, fromDate, toDate);
 
-  // ── data queries ──────────────────────────────────────────────────────────
-  const { data: taggings = [], isLoading } = useQuery({
-    queryKey: ["fixed-asset-taggings"],
-    queryFn:  () => getFixedAssetTaggings(),
-  });
+  // Untagged stock first, then the tagging entries.
+  const rows = useMemo<InventoryRow[]>(() => {
+    const p = show === "waiting" ? [] : pending.filter((b) => matches(b.CompanyId, b.ProjectId, b.DocDate)).map((b) => ({ kind: "pending" as const, key: `p${b.AssetId}`, b }));
+    const t = show === "untagged" ? [] : tags
+      .filter((x) => matches(x.CompanyId, x.ProjectId, x.DocDate) && (show !== "waiting" || x.RecordStatus === "Pending"))
+      .map((x) => ({ kind: "tag" as const, key: `t${x.TagId}`, t: x }));
+    return [...p, ...t];
+  }, [tags, pending, companyId, projectId, fromDate, toDate, show]); // eslint-disable-line react-hooks/exhaustive-deps
+  const anyFilter = !!(companyId || projectId || fromDate || toDate);
 
-  const { data: companies = [] } = useQuery({
-    queryKey: ["enterprise-options-C"],
-    queryFn:  () => getEnterpriseOptions(undefined, "C"),
-  });
-  const { data: allProjects = [] } = useQuery({
-    queryKey: ["enterprise-options-P"],
-    queryFn:  () => getEnterpriseOptions(undefined, "P"),
-  });
-  const { data: godownsData } = useQuery({
-    queryKey: ["godowns"],
-    queryFn:  getGodowns,
-  });
+  const stats = [
+    { label: "Untagged stock", value: fmt(pending.reduce((s, b) => s + (Number(b.Quantity) || 0), 0)), note: `in ${fmt(pending.length)} received batch${pending.length === 1 ? "" : "es"}` },
+    { label: "No ID template", value: fmt(pending.filter((b) => b.Reason === "NO_TEMPLATE").length), note: "batches that can't be tagged yet" },
+    { label: "FA codes tagged", value: fmt(tags.filter((t) => t.Status === "Tagged").reduce((s, t) => s + (t.TaggedQty || 0), 0)), note: `${fmt(tags.length)} tagging entries` },
+    { label: "Waiting for a record", value: fmt(tags.filter((t) => t.RecordStatus === "Pending").length), note: "codes not yet a fixed asset" },
+  ];
 
-  // Eligible Fixed Asset items — re-fetched whenever the form's
-  // company/project/finYear/godown scope changes; a Godown is required
-  // since untagged quantity is computed per (item, godown).
-  const { data: eligibleItems = [], isLoading: loadingEligible } = useQuery({
-    queryKey: ["fixed-asset-eligible-items", form.companyId, form.projectId, effectiveFinYear, form.godownId],
-    queryFn: () => getEligibleAssetItems({
-      godownId:  Number(form.godownId),
-      companyId: form.companyId ? Number(form.companyId) : undefined,
-      projectId: form.projectId ? Number(form.projectId) : undefined,
-      finYear:   effectiveFinYear || undefined,
-    }),
-    enabled: viewMode === "form" && !!form.godownId,
-  });
+  const openNew = (p: TaggingPrefill | null = null) => { setPrefill(p); setView("form"); };
+  const tagBatch = (b: PendingBatch) =>
+    openNew({ companyId: String(b.CompanyId ?? ""), projectId: String(b.ProjectId ?? ""), godownId: String(b.GodownId ?? ""), itemId: b.SourceItemId ?? "", numberOfItems: String(b.Quantity ?? "") });
 
-  const projects = useMemo(() => {
-    if (!form.companyId) return [];
-    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
-      .filter((p) => projectBelongsToCompany(p, form.companyId));
-  }, [allProjects, form.companyId]);
-
-  const filterProjects = useMemo(() => {
-    if (!filterCompany) return [];
-    return ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects)
-      .filter((p) => projectBelongsToCompany(p, filterCompany));
-  }, [allProjects, filterCompany]);
-
-  const godowns = useMemo(() => {
-    if (!form.companyId) return [];
-    return ensureArray<Godown>(godownsData?.data)
-      .filter((g) => !g.IsDeleted && g.IsActive)
-      .filter((g) => godownMatches(g, Number(form.companyId), form.projectId ? Number(form.projectId) : null));
-  }, [godownsData, form.companyId, form.projectId]);
-
-  const selectedItem = useMemo(
-    () => ensureArray<EligibleAssetItem>(eligibleItems).find((i) => i.ItemId === form.itemId) || null,
-    [eligibleItems, form.itemId],
-  );
-
-  // ── filtered list ─────────────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    let r = ensureArray<TaggingListItem>(taggings);
-    if (filterCompany) r = r.filter((t) => String(t.CompanyId) === filterCompany);
-    if (filterProject) r = r.filter((t) => String(t.ProjectId) === filterProject);
-    if (filterFromDate) r = r.filter((t) => t.DocDate && new Date(t.DocDate) >= new Date(filterFromDate));
-    if (filterToDate)   r = r.filter((t) => t.DocDate && new Date(t.DocDate) <= new Date(`${filterToDate}T23:59:59`));
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      r = r.filter((t) =>
-        (t.DocNo || "").toLowerCase().includes(s) ||
-        (t.AssetName || "").toLowerCase().includes(s) ||
-        (t.AssetCode || "").toLowerCase().includes(s)
-      );
-    }
-    return r;
-  }, [taggings, filterCompany, filterProject, filterFromDate, filterToDate, search]);
-
-  // Received Fixed Asset stock with no tags yet — listed in the same table, above the tagged units.
-  const filteredPending = useMemo(() => {
-    let r = ensureArray<PendingBatch>(pendingBatches);
-    if (filterCompany) r = r.filter((b) => String(b.CompanyId) === filterCompany);
-    if (filterProject) r = r.filter((b) => String(b.ProjectId) === filterProject);
-    if (filterFromDate) r = r.filter((b) => b.DocDate && new Date(b.DocDate) >= new Date(filterFromDate));
-    if (filterToDate)   r = r.filter((b) => b.DocDate && new Date(b.DocDate) <= new Date(`${filterToDate}T23:59:59`));
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      r = r.filter((b) => (b.SourceDocNo || "").toLowerCase().includes(s) || (b.AssetName || "").toLowerCase().includes(s));
-    }
-    return r;
-  }, [pendingBatches, filterCompany, filterProject, filterFromDate, filterToDate, search]);
-
-  const stats = useMemo(() => {
-    const live = ensureArray<TaggingListItem>(taggings);
-    return {
-      count: live.length,
-      totalQty: live.reduce((s, t) => s + (t.TaggedQty || 0), 0),
-    };
-  }, [taggings]);
-
-  // ── mutations ─────────────────────────────────────────────────────────────
-  const createMut = useMutation({
-    mutationFn: createFixedAssetTagging,
-    onSuccess: (r) => {
-      const preview = r.codes.slice(0, 3).join(", ") + (r.codes.length > 3 ? `, +${r.codes.length - 3} more` : "");
-      toast.success(`Generated ${r.codes.length} FA Item Code${r.codes.length === 1 ? "" : "s"} — ${r.docNo}`, {
-        description: preview,
-      });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
-      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
-      resetForm();
-      setViewMode("list");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: { docDate?: string; remarks?: string } }) =>
-      updateFixedAssetTagging(id, data),
-    onSuccess: () => {
-      toast.success("Tagging entry updated");
-      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
-      setEditTag(null);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: deleteFixedAssetTagging,
-    onSuccess: () => {
-      toast.success("Tagging entry deleted");
-      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
-      qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
-      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
-      setDeleteId(null);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const deletePendingMut = useMutation({
-    mutationFn: deletePendingBatch,
-    onSuccess: () => {
-      toast.success("Removed from FA Inventory");
-      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
-      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
-      setDeletePendingId(null);
-    },
-    onError: (e: Error) => { toast.error(e.message); setDeletePendingId(null); },
-  });
-
-  const openEdit = (t: TaggingListItem) => {
-    setEditTag(t);
-    setEditDocDate(t.DocDate?.slice(0, 10) || "");
-    setEditRemarks(t.Remarks || "");
-  };
-  const handleSaveEdit = () => {
-    if (!editTag) return;
-    if (!editDocDate) return toast.error("Date is required");
-    updateMut.mutate({ id: editTag.TagId, data: { docDate: editDocDate, remarks: editRemarks || undefined } });
-  };
-
-  const resetForm = () => setForm(emptyForm());
-  const goToCreate = () => { resetForm(); setViewMode("form"); };
-
-  // Exports every item, whatever the filters and search show: all untagged stock first, then every tagging entry.
   const handleExport = async () => {
-    const pendingRows = ensureArray<PendingBatch>(pendingBatches).map((b) => ({
-      docNo: b.SourceDocNo || "",
-      source: b.SourceType === "GRN" ? "GRN" : "Imported Stock / Without GRN",
-      date: b.DocDate ? fmtDate(b.DocDate) : "",
-      item: b.AssetName || "",
-      itemCode: "",
-      category: "",
-      faItemCode: "",
-      transfer: "",
-      company: b.CompanyName || "",
-      project: b.ProjectName || "",
-      godown: b.GodownName || "",
-      qty: b.Quantity ?? "",
-      status: "Untagged",
-      record: "",
-      remarks: b.Reason === "NO_TEMPLATE" ? "No Project Alias - add one in ID Template Master" : "Ready to tag",
-    }));
-    const tagRows = ensureArray<TaggingListItem>(taggings).map((t) => ({
-      docNo: t.DocNo || "",
-      source: t.StockSource === "IMPORT" ? "Imported Stock / Without GRN" : t.StockSource || "",
-      date: t.DocDate ? fmtDate(t.DocDate) : "",
-      item: t.AssetName || "",
-      itemCode: t.AssetCode || "",
-      category: t.AssetCategory || "",
-      faItemCode: t.FAItemCode || "",
-      transfer: t.TransferredToCode ? `Moved to ${t.TransferredToCode}` : t.TransferredFromCode ? `Came from ${t.TransferredFromCode}` : "",
-      company: t.CompanyName || "",
-      project: t.ProjectName || "",
-      godown: t.GodownName || "",
-      qty: t.TaggedQty ?? "",
-      status: t.Status === "Transferred" ? "Transferred - Not Available" : t.Status,
-      record: t.RecordStatus || "",
-      remarks: t.Remarks || "",
-    }));
-    const rows = [...pendingRows, ...tagRows];
-    if (rows.length === 0) return toast.error("Nothing to export");
-    await exportToXlsx(
-      rows,
-      [
-        { header: "Doc No", accessor: "docNo" },
-        { header: "Stock Source", accessor: "source" },
-        { header: "Date", accessor: "date" },
-        { header: "Item", accessor: "item" },
-        { header: "Item Code", accessor: "itemCode" },
-        { header: "Asset Category", accessor: "category" },
-        { header: "FA Item Code", accessor: "faItemCode" },
-        { header: "Transfer", accessor: "transfer" },
-        { header: "Company", accessor: "company" },
-        { header: "Project", accessor: "project" },
-        { header: "Godown", accessor: "godown" },
-        { header: "Quantity", accessor: "qty" },
-        { header: "Status", accessor: "status" },
-        { header: "Record", accessor: "record" },
-        { header: "Remarks", accessor: "remarks" },
-      ],
-      `FA_Inventory_${new Date().toISOString().slice(0, 10)}`,
-      "FA Inventory",
-    );
-    toast.success(`Exported ${rows.length} row${rows.length === 1 ? "" : "s"}`);
+    const n = await exportInventory(pending, tags);
+    if (n) toast.success(`Exported ${n} row${n === 1 ? "" : "s"}`);
+    else toast.error("Nothing to export.");
   };
 
-  // ── bulk import (Excel/CSV) ────────────────────────────────────────────────
-  const handleImportClick = () => importFileInputRef.current?.click();
-
-  const handleDownloadImportTemplate = async () => {
-    try {
-      const [items, setups] = await Promise.all([getItems(), getActiveDepreciationSetups()]);
-      await downloadFaInventoryTemplate(importMode, {
-        assetCategories: [...new Set(setups.map((s) => s.AssetCategory.trim()).filter(Boolean))].sort(),
-        companies: ensureArray<{ id: number; label: string }>(companies),
-        projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
-        godowns: ensureArray<Godown>(godownsData?.data)
-          .filter((g) => !g.IsDeleted && g.IsActive)
-          .map((g) => ({ GodownName: g.GodownName, EnterpriseID: g.EnterpriseID ?? null, ProjectID: g.ProjectID ?? null })),
-        // Only Fixed Asset items can be imported, so only they are offered.
-        faItems: items
-          .filter((i) => (i.M_Type || "").trim().toLowerCase() === "fixed asset")
-          .map((i) => ({ code: i.M_code || "", name: i.M_Name || "", uom: i.M_UOM || "" })),
-      });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create the template");
-    }
-  };
-
-  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file after a fix
-    if (!file) return;
-
-    setImportValidating(true);
-    try {
-      const rawRows = await readFaImportFile(file);
-      const itemMaster: DbItem[] = await getItems();
-      const assetCategories = [...new Set((await getActiveDepreciationSetups()).map((s) => s.AssetCategory.trim()).filter(Boolean))];
-      if (rawRows.length === 0) {
-        toast.error("The file has no data rows");
-        return;
-      }
-
-      const results: ImportRow[] = validateFaImportRows(rawRows, {
-        mode: importMode,
-        companies: ensureArray<{ id: number; label: string }>(companies),
-        projects: ensureArray<ProjectCompanyLike & { id: number; label: string }>(allProjects),
-        godowns: ensureArray<Godown>(godownsData?.data)
-          .filter((g) => !g.IsDeleted && g.IsActive)
-          .map((g) => ({ GodownID: g.GodownID, GodownName: g.GodownName, EnterpriseID: g.EnterpriseID, ProjectID: g.ProjectID })),
-        itemMaster,
-        assetCategories,
-        deriveFinYear: (iso) => deriveFinYear(iso, finYears),
-      });
-
-      setImportPreview(results);
-      setImportDone(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to read the file");
-    } finally {
-      setImportValidating(false);
-    }
-  };
-
-  const handleConfirmImport = async () => {
-    if (!importPreview) return;
-    const validRows = importPreview.filter((r) => r.status === "valid");
-    if (validRows.length === 0) return;
-
-    setImportSubmitting(true);
-    const finalResults = [...importPreview];
-
-    // Sequential, not Promise.all — mirrors the manual "Generate ID" flow
-    // (one create call at a time) and keeps per-row error attribution clean.
-    for (const row of validRows) {
-      const idx = finalResults.findIndex((r) => r.row === row.row);
-      try {
-        // Imported stock goes straight into the godown (no GRN), then follows the
-        // normal FA tagging / FA Code generation — same call Inventory Import uses.
-        const created = await createInventoryImport({
-          docDate: row.docDate,
-          companyId: row.companyId,
-          projectId: row.projectId!,
-          godownId: row.godownId!,
-          itemId: row.itemId!,
-          assetCategory: row.assetCategory,
-          quantity: row.quantity,
-          rate: row.rate,
-          remarks: row.remarks || undefined,
-        });
-        finalResults[idx] = { ...row, status: "success", tagged: created.tagged };
-      } catch (err) {
-        finalResults[idx] = { ...row, status: "error", message: err instanceof Error ? err.message : "Failed to create" };
-      }
-    }
-
-    setImportPreview(finalResults);
-    setImportDone(true);
-    setImportSubmitting(false);
-
-    const successCount = finalResults.filter((r) => r.status === "success").length;
-    const errorCount = finalResults.length - successCount;
-    if (successCount > 0) {
-      qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-inventory-imports"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
-      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
-      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
-    }
-    if (errorCount === 0) {
-      toast.success(`Imported ${successCount} row${successCount === 1 ? "" : "s"} ✓`);
-    } else if (successCount === 0) {
-      toast.error(`Import failed for all ${errorCount} row${errorCount === 1 ? "" : "s"}.`);
-    } else {
-      toast.warning(`Imported ${successCount} of ${finalResults.length} rows — ${errorCount} failed.`);
-    }
-  };
-
-  const closeImportDialog = () => { setImportPreview(null); setImportDone(false); };
-
-  const handleSave = () => {
-    if (!form.companyId)  return toast.error("Company is required");
-    if (!form.docDate)    return toast.error("Date is required");
-    if (!effectiveFinYear) return toast.error("This date doesn't fall in any configured Financial Year");
-    if (!form.projectId)  return toast.error("Project is required");
-    if (!form.godownId)   return toast.error("Godown is required");
-    if (!form.itemId)     return toast.error("Item is required");
-    const count = parseInt(form.numberOfItems, 10);
-    if (!Number.isFinite(count) || count <= 0 || String(count) !== form.numberOfItems.trim()) {
-      return toast.error("Enter a valid whole number of items");
-    }
-    if (!selectedItem) return toast.error("Selected item is no longer available");
-    if (count > selectedItem.UntaggedQty) {
-      return toast.error(`Only ${fmt(selectedItem.UntaggedQty)} unit(s) are untagged for this item`);
-    }
-
-    createMut.mutate({
-      docDate:   form.docDate,
-      companyId: Number(form.companyId),
-      projectId: Number(form.projectId),
-      finYear:   effectiveFinYear,
-      godownId:  Number(form.godownId),
-      itemId:    form.itemId,
-      numberOfItems: count,
-      remarks:   form.remarks || undefined,
-    });
-  };
-
-  const saving = createMut.isPending;
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // FORM VIEW
-  // ═══════════════════════════════════════════════════════════════════════════
-  if (viewMode === "form") {
-    return (
-      <GlassShell
-        title="New FA Inventory"
-        subtitle="Tag received fixed-asset stock against a purchase batch"
-        icon={TagIcon}
-        accentColor="#eab308"
-        action={
-          <div className="flex gap-2">
-            <button onClick={() => { resetForm(); setViewMode("list"); }}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-              <ArrowLeft size={13} /> Cancel
-            </button>
-            <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
-              <Hash size={13} /> {saving ? "Generating…" : "Generate ID"}
-            </button>
+  const COLUMNS: ColumnDef<InventoryRow>[] = [
+    {
+      id: "doc",
+      accessorFn: (r) => (r.kind === "pending" ? r.b.SourceDocNo : r.t.DocNo) ?? "",
+      header: "Doc no",
+      cell: ({ row: { original: r } }) => (
+        <div className="leading-tight">
+          <p className="font-heading tabular-nums text-xs">{(r.kind === "pending" ? r.b.SourceDocNo : r.t.DocNo) || "—"}</p>
+          <p className="text-[0.625rem] text-muted-foreground">
+            {r.kind === "pending" ? (r.b.SourceType === "GRN" ? "Received by GRN" : "Imported, no GRN") : r.t.StockSource === "IMPORT" ? "Imported, no GRN" : r.t.StockSource || ""}
+          </p>
+        </div>
+      ),
+    },
+    { id: "date", accessorFn: (r) => (r.kind === "pending" ? r.b.DocDate : r.t.DocDate) ?? "", header: "Date", cell: ({ getValue }) => <span className="text-xs tabular-nums whitespace-nowrap">{fmtDate(getValue() as string)}</span> },
+    {
+      id: "item",
+      accessorFn: (r) => (r.kind === "pending" ? r.b.AssetName : `${r.t.AssetName ?? ""} ${r.t.AssetCode ?? ""}`),
+      header: "Item",
+      cell: ({ row: { original: r } }) => (
+        <div className="leading-tight max-w-[220px]">
+          <p className="text-sm text-foreground truncate">{(r.kind === "pending" ? r.b.AssetName : r.t.AssetName) || "—"}</p>
+          <p className="text-[0.6875rem] text-muted-foreground truncate">
+            {r.kind === "pending" ? `Qty ${fmt(r.b.Quantity)}${r.b.GodownName ? ` · ${r.b.GodownName}` : ""}` : [r.t.AssetCategory, r.t.GodownName].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      ),
+    },
+    {
+      id: "code",
+      accessorFn: (r) => (r.kind === "tag" ? `${r.t.FAItemCode ?? ""} ${r.t.TransferredToCode ?? ""} ${r.t.TransferredFromCode ?? ""}` : ""),
+      header: "FA Item Code",
+      cell: ({ row: { original: r } }) =>
+        r.kind === "pending" ? <span className="text-xs text-muted-foreground">—</span> : (
+          <div className="font-heading tabular-nums text-xs leading-tight">
+            <p className={r.t.Status === "Transferred" ? "text-muted-foreground line-through" : "text-foreground"}>{r.t.FAItemCode || "—"}</p>
+            {r.t.TransferredToCode && <p className="text-[0.625rem] text-muted-foreground">→ {r.t.TransferredToCode}</p>}
+            {r.t.TransferredFromCode && <p className="text-[0.625rem] text-muted-foreground">← {r.t.TransferredFromCode}</p>}
           </div>
-        }
-      >
-        <div className="max-w-3xl space-y-5">
-          <div className={sectionCls}>
-            <SectionHeader icon={FileText}>Header Information</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
-              <div>
-                <label className={labelCls}><Building2 size={11} /> Company *</label>
-                <select value={form.companyId}
-                  onChange={(e) => { setField("companyId", e.target.value); setField("projectId", ""); setField("godownId", ""); setField("itemId", ""); }}
-                  className={inputCls}>
-                  <option value="">Select company…</option>
-                  {ensureArray<{ id: number; label: string }>(companies).map((c) => (
-                    <option key={c.id} value={c.id}>{c.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Project *</label>
-                <select value={form.projectId}
-                  onChange={(e) => { setField("projectId", e.target.value); setField("godownId", ""); setField("itemId", ""); }}
-                  className={inputCls} disabled={!form.companyId}>
-                  <option value="">Select project…</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <DateInput value={form.docDate}
-                  onChange={(e) => setForm((p) => ({ ...p, docDate: e.target.value, itemId: "" }))}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Financial Year</label>
-                <input type="text" value={effectiveFinYear || "No FY configured for this date"} readOnly
-                  className={`${inputCls} bg-muted/30 text-muted-foreground`} />
-              </div>
-              <div>
-                <label className={labelCls}><Boxes size={11} /> Godown / Stock *</label>
-                <select value={form.godownId}
-                  onChange={(e) => { setField("godownId", e.target.value); setField("itemId", ""); }}
-                  className={inputCls} disabled={!form.companyId || !form.projectId}>
-                  <option value="">Select godown…</option>
-                  {godowns.map((g) => <option key={g.GodownID} value={g.GodownID}>{g.GodownName}</option>)}
-                </select>
-              </div>
+        ),
+    },
+    {
+      id: "project",
+      accessorFn: (r) => (r.kind === "pending" ? `${r.b.ProjectName ?? ""} ${r.b.CompanyName ?? ""}` : `${r.t.ProjectName ?? ""} ${r.t.CompanyName ?? ""}`),
+      header: "Company / project",
+      cell: ({ row: { original: r } }) => {
+        const x = r.kind === "pending" ? r.b : r.t;
+        return (
+          <div className="text-xs leading-tight">
+            <p className="text-foreground">{x.ProjectName || "—"}</p>
+            <p className="text-muted-foreground">{x.CompanyName || ""}</p>
+          </div>
+        );
+      },
+    },
+    {
+      id: "status",
+      accessorFn: (r) => (r.kind === "pending" ? "Untagged" : r.t.Status),
+      header: "Status",
+      cell: ({ row: { original: r } }) => {
+        if (r.kind === "pending") {
+          return (
+            <div className="space-y-1 max-w-[240px]">
+              <SheetMark text="Untagged" tone={r.b.Reason === "NO_TEMPLATE" ? "stopped" : "waiting"} />
+              <p className="text-[0.6875rem] text-muted-foreground whitespace-normal">
+                {r.b.Reason === "NO_TEMPLATE" ? `${r.b.ProjectName || "This project"} has no ID template: add one in ID Template Master and these units tag themselves.` : "Ready to tag."}
+              </p>
             </div>
+          );
+        }
+        const t = r.t;
+        return (
+          <div className="space-y-1">
+            <SheetMark text={t.Status === "Transferred" ? "Transferred" : t.Status} tone={t.Status === "Tagged" ? "done" : t.Status === "Transferred" ? "waiting" : "stopped"} />
+            {t.RecordStatus && <p className="text-[0.6875rem] text-muted-foreground">{t.RecordStatus === "Done" ? "Fixed asset made" : "No fixed asset yet"}</p>}
           </div>
+        );
+      },
+    },
+    {
+      id: "remarks",
+      accessorFn: (r) => (r.kind === "tag" ? r.t.Remarks ?? "" : ""),
+      header: "Remarks",
+      cell: ({ getValue }) => <span className="text-xs text-muted-foreground block max-w-[180px] truncate" title={getValue() as string}>{(getValue() as string) || "—"}</span>,
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row: { original: r } }) => {
+        if (r.kind === "pending") {
+          const b = r.b;
+          return (
+            <div className="flex items-center gap-1 justify-end">
+              {rights.canCreate && b.Reason === "READY" && (
+                <button onClick={() => tagBatch(b)} title="Tag this stock" className={`${KEY_LINE} h-7 px-2`}><Hash size={12} /> Tag</button>
+              )}
+              {rights.canDelete && (
+                <button onClick={() => setDeletePendingId(b.AssetId)} title="Remove from FA Inventory" className="p-1.5 text-muted-foreground hover:text-destructive"><Trash2 size={13} /></button>
+              )}
+            </div>
+          );
+        }
+        const t = r.t;
+        const locked = t.Status === "Transferred" || !!t.SourceICTId;
+        return (
+          <div className="flex items-center gap-1 justify-end">
+            {rights.canEdit && (
+              <button onClick={() => setEditTag(t)} title="Edit date and remarks" className="p-1.5 text-muted-foreground hover:text-foreground"><PenSquare size={13} /></button>
+            )}
+            {rights.canDelete && (
+              <button
+                onClick={() => setDeleteId(t.TagId)}
+                disabled={t.RecordStatus === "Done" || locked}
+                title={locked ? "Moved by an Inter-Company Transfer: delete the transfer to undo it" : t.RecordStatus === "Done" ? "It has a fixed asset record: delete that first" : "Delete"}
+                className="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-muted-foreground"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
 
-          <div className={sectionCls}>
-            <SectionHeader icon={Package}>Item to Tag</SectionHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 xl:gap-5">
-              <div className="sm:col-span-2">
-                <label className={labelCls}><Hash size={11} /> Item *</label>
-                <select value={form.itemId} onChange={(e) => setField("itemId", e.target.value)} className={inputCls}
-                  disabled={!form.godownId}>
-                  <option value="">
-                    {loadingEligible ? "Loading items…" : "Select item…"}
-                  </option>
-                  {ensureArray<EligibleAssetItem>(eligibleItems).map((i) => (
-                    <option key={i.ItemId} value={i.ItemId}>
-                      {i.ItemName}{i.AssetCategory ? ` (${i.AssetCategory})` : ""} — Untagged: {fmt(i.UntaggedQty)}
-                    </option>
-                  ))}
-                </select>
-                {form.godownId && !loadingEligible && eligibleItems.length === 0 && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-1.5">
-                    <AlertCircle size={12} /> No untagged fixed-asset items available at this godown.
-                  </p>
-                )}
-              </div>
+  const select = `${INP} !h-9 text-xs w-full sm:w-48`;
+  const SHOW = [
+    { k: "all" as const, label: "All" },
+    { k: "untagged" as const, label: "Untagged" },
+    { k: "waiting" as const, label: "No record yet" },
+  ];
 
-              {selectedItem && (
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "Fixed Asset", "FA Inventory"]} />
+      <SheetShell
+        eyebrow="CivilierERP · Fixed Asset"
+        title={view === "form" ? "New tagging" : "FA inventory"}
+        subtitle={
+          view === "form"
+            ? "Pick received fixed-asset stock at a godown and generate one FA Item Code per unit."
+            : "Fixed-asset stock received by GRN or import, and the FA Item Codes generated for it. Each code becomes a fixed asset on Fixed Asset Depreciation Tag."
+        }
+        action={
+          view === "list" ? (
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button onClick={() => { refetch(); refetchPending(); }} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh">
+                <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              </button>
+              {rights.canExport && (
+                <button onClick={handleExport} className={`${KEY_LINE} h-9 px-3`} title="Every FA Inventory line, whatever the filters show">
+                  <FileSpreadsheet size={13} /> <span className="hidden sm:inline">Export</span>
+                </button>
+              )}
+              {rights.canCreate && (
                 <>
-                  <div className="sm:col-span-2">
-                    <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5 mb-3">
-                      Stock Item Info
-                    </p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <SummaryCard label="Available Stock Qty" value={fmt(selectedItem.AvailableQty)} icon={Boxes} />
-                      <SummaryCard label="Tagged Qty" value={fmt(selectedItem.TaggedQty)} color="text-muted-foreground" icon={TagIcon} />
-                      <SummaryCard label="Untagged Qty" value={fmt(selectedItem.UntaggedQty)} color="text-violet-600 dark:text-violet-400" icon={AlertCircle} />
-                    </div>
-                  </div>
-                  <div>
-                    <label className={labelCls}><Hash size={11} /> Number of Items *</label>
-                    <input type="number" min="1" step="1" max={selectedItem.UntaggedQty}
-                      value={form.numberOfItems} onChange={(e) => setField("numberOfItems", e.target.value)}
-                      placeholder="0" className={`${inputCls} font-semibold border-yellow-500/30 focus:ring-yellow-500/30 bg-yellow-500/[0.03]`} />
-                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
-                      Clicking "Generate ID" creates this many unique FA Item Codes and saves them.
-                    </p>
-                  </div>
+                  <InventoryImport companies={companyList} allProjects={projectList} godowns={ensureArray<Godown>(godownsData?.data)} />
+                  <button onClick={() => openNew()} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New tagging</button>
                 </>
               )}
             </div>
-          </div>
-
-          <div className={sectionCls}>
-            <SectionHeader icon={FileText}>Remarks</SectionHeader>
-            <input type="text" value={form.remarks} onChange={(e) => setField("remarks", e.target.value)}
-              placeholder="Optional remarks…" className={inputCls} />
-          </div>
-        </div>
-      </GlassShell>
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // LIST VIEW
-  // ═══════════════════════════════════════════════════════════════════════════
-  return (
-    <>
-    <Breadcrumbs items={["Dashboard", "Fixed Asset", "FA Inventory"]} />
-    <GlassShell
-      title="FA Inventory"
-      subtitle="Tag received fixed-asset stock and track untagged quantities"
-      icon={TagIcon}
-      accentColor="#eab308"
-      action={
-        rights.canCreate || rights.canExport ? (
-          <div className="flex items-center gap-2">
-            {rights.canExport && (
-              <button onClick={handleExport}
-                title="Export every FA Inventory item to Excel"
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-                <FileSpreadsheet size={13} /> <span className="hidden sm:inline">Export</span>
-              </button>
-            )}
-            {rights.canCreate && (<>
-            <input ref={importFileInputRef} type="file" accept=".xlsx,.csv"
-              onChange={handleImportFileChange} className="hidden" />
-            <div className="inline-flex rounded-lg border border-border p-0.5 text-xs font-heading font-semibold" role="group" aria-label="Import mode">
-              <button type="button" onClick={() => setImportMode("bulk")}
-                title="One row can tag several identical units at once (Quantity column)"
-                className={`px-2.5 py-1 rounded-md transition-colors ${importMode === "bulk" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400" : "text-muted-foreground hover:text-foreground"}`}>
-                Bulk
-              </button>
-              <button type="button" onClick={() => setImportMode("individual")}
-                title="Every row is exactly one unit — no Quantity column"
-                className={`px-2.5 py-1 rounded-md transition-colors ${importMode === "individual" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400" : "text-muted-foreground hover:text-foreground"}`}>
-                Individual
-              </button>
-            </div>
-            <button onClick={handleDownloadImportTemplate}
-              title="Download the FA Inventory Excel template (all required columns, dropdowns from your masters)"
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-              <Download size={13} /> <span className="hidden sm:inline">Template</span>
-            </button>
-            <button onClick={handleImportClick} disabled={importValidating}
-              title={importMode === "individual" ? "Import FA Inventory rows from Excel/CSV — one row per unit" : "Bulk import FA Inventory rows from Excel/CSV"}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
-              {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-              {importValidating ? "Validating…" : "Import from Excel"}
-            </button>
-            </>)}
-          </div>
-        ) : undefined
-      }
-    >
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        <SummaryCard label="Tagging Entries" value={fmt(stats.count)} icon={Boxes} />
-        <SummaryCard label="Total Tagged Qty" value={fmt(stats.totalQty)} color="text-emerald-600 dark:text-emerald-400" icon={TagIcon} />
-      </div>
-
-      <Card className="border-border shadow-sm mb-5">
-        <CardContent className="p-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-            <div className="lg:col-span-2">
-              <label className={labelCls}>Search</label>
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <input value={search} onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search doc no, asset name, code…"
-                  className={`${inputCls} pl-8`} />
-                {search && (
-                  <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-            </div>
-            <div>
-              <label className={labelCls}>Company</label>
-              <select value={filterCompany} onChange={(e) => { setFilterCompany(e.target.value); setFilterProject(""); }} className={inputCls}>
-                <option value="">All Companies</option>
-                {ensureArray<{ id: number; label: string }>(companies).map((c) => (
-                  <option key={c.id} value={c.id}>{c.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>Project</label>
-              <select value={filterProject} onChange={(e) => setFilterProject(e.target.value)} className={inputCls} disabled={!filterCompany}>
-                <option value="">All Projects</option>
-                {filterProjects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}><Calendar size={11} /> From Date</label>
-              <DateInput value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}><Calendar size={11} /> To Date</label>
-              <DateInput value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} className={inputCls} />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
-            {(filterCompany || filterProject || filterFromDate || filterToDate || search) && (
-              <button
-                onClick={() => { setFilterCompany(""); setFilterProject(""); setFilterFromDate(""); setFilterToDate(""); setSearch(""); }}
-                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0"
-              >
-                Clear filters
-              </button>
-            )}
-            <span className="text-xs text-muted-foreground shrink-0">
-              {filtered.length} of {stats.count} entries
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border">
-          <CardTitle className="text-base font-semibold">Tagging Transaction History</CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">Full audit trail of tagging entries</p>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
-          ) : filtered.length === 0 && filteredPending.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
-              <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60">
-                <TagIcon size={26} className="opacity-40" />
-              </span>
-              <p className="text-sm">No tagging entries found</p>
-              {rights.canCreate && (
-                <button onClick={goToCreate}
-                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
-                  <Plus size={13} /> Add First Tagging
-                </button>
-              )}
-            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1020px]">
-                <thead>
-                  <tr className="bg-muted/50 text-muted-foreground text-xs uppercase tracking-wide">
-                    <th className="px-4 py-3 text-left">Doc No</th>
-                    <th className="px-4 py-3 text-left">Date</th>
-                    <th className="px-4 py-3 text-left">Item</th>
-                    <th className="px-4 py-3 text-left">FA Item Code</th>
-                    <th className="px-4 py-3 text-left">Company / Project</th>
-                    <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-left">Record</th>
-                    <th className="px-4 py-3 text-left">Remarks</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filteredPending.map((b) => (
-                    <tr key={`pending-${b.AssetId}`} className="bg-amber-500/5 hover:bg-[#ffe2021a] transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs">{b.SourceDocNo || "—"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(b.DocDate)}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium truncate">{b.AssetName}</p>
-                        <p className="text-[0.6875rem] text-muted-foreground">{b.SourceType === "GRN" ? "Received via GRN" : "Inventory Import"} · Qty {fmt(b.Quantity)}</p>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">—</td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {b.CompanyName || "—"}{b.ProjectName ? ` / ${b.ProjectName}` : ""}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Untagged</span>
-                      </td>
-                      <td className="px-4 py-3"><span className="text-muted-foreground text-xs">—</span></td>
-                      <td className="px-4 py-3 text-xs text-amber-700 dark:text-amber-400 max-w-[260px]">
-                        {b.Reason === "NO_TEMPLATE"
-                          ? `No Project Alias for ${b.ProjectName || "this project"} — add one in ID Template Master to tag these units automatically.`
-                          : "Ready to tag — use New Tagging."}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          {rights.canDelete && (
-                            <button onClick={() => setDeletePendingId(b.AssetId)} title="Delete"
-                              className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500">
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+            <button onClick={() => setView("list")} className={`${KEY_LINE} h-9 px-3`}>Back to inventory</button>
+          )
+        }
+      >
+        {view === "form" ? (
+          <TaggingForm key={JSON.stringify(prefill)} prefill={prefill} onClose={() => setView("list")} />
+        ) : (
+          <div className="space-y-5">
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                {stats.map((x) => (
+                  <div key={x.label}>
+                    <p className="label">{x.label}</p>
+                    <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                    <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-card" style={{ border: RULE }}>
+              <div className="px-5 py-4 flex flex-wrap items-center gap-3" style={{ borderBottom: RULE }}>
+                <span className="inline-flex h-9 border border-foreground" role="group" aria-label="Show">
+                  {SHOW.map((s) => (
+                    <button key={s.k} onClick={() => setShow(s.k)} aria-pressed={show === s.k}
+                      className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] px-3 transition-colors ${show === s.k ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}>
+                      {s.label}
+                    </button>
                   ))}
-                  {filtered.map((t) => {
-                    const hasRecord = t.RecordStatus === "Done";
-                    return (
-                    <tr key={t.TagId} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {t.DocNo || "—"}
-                        {t.StockSource === "IMPORT" && (
-                          <span title="Stock added by import — no GRN" className="mt-1 block w-fit rounded-full bg-sky-100 px-2 py-0.5 text-[0.625rem] font-sans font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">
-                            Imported Stock / Without GRN
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.DocDate)}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium truncate">{t.AssetName || "—"}</p>
-                        <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs">
-                        <span className={t.Status === "Transferred" ? "text-muted-foreground line-through" : "text-yellow-600 dark:text-yellow-400"}>{t.FAItemCode || "—"}</span>
-                        {t.TransferredToCode && (
-                          <p className="text-[0.625rem] text-slate-500 dark:text-slate-400 no-underline">→ {t.TransferredToCode}</p>
-                        )}
-                        {t.TransferredFromCode && (
-                          <p className="text-[0.625rem] text-teal-600 dark:text-teal-400">← {t.TransferredFromCode}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {t.CompanyName || "—"}{t.ProjectName ? ` / ${t.ProjectName}` : ""}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[t.Status] ?? ""}`}
-                          title={t.Status === "Transferred" ? "Not available — transferred to another company's project" : undefined}>
-                          {t.Status === "Transferred" ? "Transferred · Not Available" : t.Status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {t.RecordStatus ? (
-                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${RECORD_COLORS[t.RecordStatus] ?? ""}`}>
-                            {t.RecordStatus}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{t.Remarks || "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          {rights.canEdit && (
-                            <button onClick={() => openEdit(t)}
-                              className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="Edit">
-                              <Pencil size={13} />
-                            </button>
-                          )}
-                          {rights.canDelete && (
-                            <button
-                              onClick={() => setDeleteId(t.TagId)}
-                              disabled={hasRecord || t.Status === "Transferred" || !!t.SourceICTId}
-                              title={t.Status === "Transferred" || t.SourceICTId ? "Moved by an Inter-Company Transfer — delete the transfer to undo it" : hasRecord ? "Has a Fixed Asset Record — delete that first" : "Delete"}
-                              className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:cursor-not-allowed">
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── edit dialog ── */}
-      <Dialog open={!!editTag} onOpenChange={(open) => { if (!open) setEditTag(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-heading text-base">Edit Tagging Entry</DialogTitle>
-          </DialogHeader>
-          {editTag && (
-            <div className="space-y-4 pt-1">
-              <p className="text-xs text-muted-foreground -mt-2">
-                {editTag.DocNo} · <span className="font-mono text-yellow-600 dark:text-yellow-400">{editTag.FAItemCode}</span>
-              </p>
-              <div>
-                <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <DateInput value={editDocDate} onChange={(e) => setEditDocDate(e.target.value)} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Remarks</label>
-                <input type="text" value={editRemarks} onChange={(e) => setEditRemarks(e.target.value)}
-                  placeholder="Optional remarks…" className={inputCls} />
-              </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <button onClick={() => setEditTag(null)}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-                  Cancel
-                </button>
-                <button onClick={handleSaveEdit} disabled={updateMut.isPending}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
-                  <Check size={13} /> {updateMut.isPending ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* ── delete untagged received stock ── */}
-      {deletePendingId != null && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
-              <div>
-                <p className="font-semibold text-sm">Remove this received stock?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it from FA Inventory and cannot be undone. The GRN itself is not changed.</p>
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeletePendingId(null)}
-                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-                Keep
-              </button>
-              <button onClick={() => deletePendingMut.mutate(deletePendingId)} disabled={deletePendingMut.isPending}
-                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
-                {deletePendingMut.isPending ? "Deleting…" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
-
-      {/* ── delete confirm ── */}
-      {deleteId && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
-              <div>
-                <p className="font-semibold text-sm">Delete this tagging entry?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it and cannot be undone. Its FA Item Code will be released back to untagged stock.</p>
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteId(null)}
-                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-                Keep
-              </button>
-              <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
-                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
-                {deleteMut.isPending ? "Deleting…" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      <Dialog open={!!importPreview} onOpenChange={(open) => { if (!open) closeImportDialog(); }}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle className="font-heading text-base">
-              {importDone ? "Import Results" : "Review Import"}
-            </DialogTitle>
-          </DialogHeader>
-          {importPreview && (
-            <div className="space-y-3 pt-1">
-              <div className="flex items-center gap-3 text-sm">
-                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-                  <Check size={14} />
-                  {importPreview.filter((r) => r.status === "valid" || r.status === "success").length}{" "}
-                  {importDone ? "succeeded" : "valid"}
                 </span>
-                {importPreview.some((r) => r.status === "error") && (
-                  <span className="flex items-center gap-1.5 text-destructive">
-                    <X size={14} />
-                    {importPreview.filter((r) => r.status === "error").length}{" "}
-                    {importDone ? "failed" : "rejected"}
-                  </span>
+                <select value={companyId} onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); }} className={select} aria-label="Company">
+                  <option value="">All companies</option>
+                  {companyList.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+                <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={select} disabled={!companyId} aria-label="Project">
+                  <option value="">All projects</option>
+                  {filterProjects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <DateInput value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={`${INP} !h-9 text-xs sm:w-36`} aria-label="From date" />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <DateInput value={toDate} onChange={(e) => setToDate(e.target.value)} className={`${INP} !h-9 text-xs sm:w-36`} aria-label="To date" />
+                </div>
+                {anyFilter && (
+                  <button onClick={() => { setCompanyId(""); setProjectId(""); setFromDate(""); setToDate(""); }} className={`${KEY_LINE} h-9 px-3`}>Clear</button>
                 )}
               </div>
-              <div className="max-h-96 overflow-auto rounded-lg border border-border">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/50 text-muted-foreground uppercase tracking-wide sticky top-0">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Row</th>
-                      <th className="px-3 py-2 text-left">Company / Project</th>
-                      <th className="px-3 py-2 text-left">Godown</th>
-                      <th className="px-3 py-2 text-left">Item</th>
-                      <th className="px-3 py-2 text-left">Date</th>
-                      <th className="px-3 py-2 text-left">Qty</th>
-                      <th className="px-3 py-2 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {importPreview.map((r) => (
-                      <tr key={r.row} className={r.status === "error" ? "bg-destructive/5" : ""}>
-                        <td className="px-3 py-2">{r.row}</td>
-                        <td className="px-3 py-2 max-w-[160px] truncate">{r.companyLabel} / {r.projectLabel}</td>
-                        <td className="px-3 py-2 max-w-[120px] truncate">{r.godownLabel}</td>
-                        <td className="px-3 py-2 max-w-[180px] truncate" title={r.itemName}>{r.itemCode ? `${r.itemCode} · ` : ""}{r.itemName}{r.assetCategory ? <span className="block text-[0.625rem] text-muted-foreground">{r.assetCategory}</span> : null}</td>
-                        <td className="px-3 py-2">{r.docDate}</td>
-                        <td className="px-3 py-2">{r.quantity || "—"}</td>
-                        <td className="px-3 py-2 min-w-[260px] max-w-[460px] whitespace-normal break-words align-top">
-                          {r.status === "error" ? (
-                            <span className="text-destructive">{r.message}</span>
-                          ) : r.status === "success" ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check size={12} /> Imported{r.tagged ? ` · ${r.tagged} FA code${r.tagged === 1 ? "" : "s"}` : " · awaiting tagging"}</span>
-                          ) : (
-                            <span className="text-emerald-600 dark:text-emerald-400">Valid</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                data={rows}
+                columns={COLUMNS}
+                loading={isLoading}
+                searchable
+                searchPlaceholder="Search doc no, item, FA code…"
+                paginated
+                getRowId={(r) => r.key}
+                rowClassName={(row) => (row.original.kind === "pending" ? "bg-primary/[0.04]" : "")}
+                emptyMessage={anyFilter || show !== "all" ? "Nothing matches these filters." : "No FA inventory yet. Receive fixed-asset stock by GRN or Import, then tag it here."}
+              />
             </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
-            {!importDone ? (
-              <>
-                <button onClick={closeImportDialog}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
-                  Cancel
-                </button>
-                <button onClick={handleConfirmImport}
-                  disabled={importSubmitting || !importPreview?.some((r) => r.status === "valid")}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
-                  {importSubmitting ? "Importing…" : `Import ${importPreview?.filter((r) => r.status === "valid").length || 0} Valid Row(s)`}
-                </button>
-              </>
-            ) : (
-              <button onClick={closeImportDialog}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
-                Close
-              </button>
-            )}
           </div>
-        </DialogContent>
-      </Dialog>
-    </GlassShell>
+        )}
+      </SheetShell>
+
+      {editTag && <EditTaggingDialog tag={editTag} onClose={() => setEditTag(null)} />}
+      {deleteId != null && <DeleteTaggingDialog tagId={deleteId} onClose={() => setDeleteId(null)} />}
+      {deletePendingId != null && <DeletePendingDialog assetId={deletePendingId} onClose={() => setDeletePendingId(null)} />}
     </>
   );
 }

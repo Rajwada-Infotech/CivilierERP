@@ -6,6 +6,7 @@ router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { rebuildFAItemCode } = require("../services/faItemCodeRebuild");
@@ -46,7 +47,7 @@ router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"),
         AND fa.AssetStatus <> 'Transferred'   -- code retired by an Inter-Company Transfer
         AND NOT EXISTS (
           SELECT 1 FROM dbo.FixedAssetAssignment a WHERE a.AssetId = fa.AssetId
-        )
+        )${projectPredicate(req.projectScope, "fa.ProjectId")}
       ORDER BY fa.FAItemCode
     `);
     res.json(result.recordset);
@@ -67,6 +68,7 @@ router.get("/", requirePageRight("fixed-asset-assignment", "view"), async (req, 
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("h.ProjectId = @ProjectId"); }
     if (req.query.assetId)   { request.input("AssetId",   sql.Int, parseInt(req.query.assetId, 10));   where.push("h.AssetId = @AssetId"); }
     if (req.query.userId)    { request.input("UserId",    sql.Int, parseInt(req.query.userId, 10));    where.push("h.UserId = @UserId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "h.ProjectId", "").trim());
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -146,6 +148,7 @@ router.post("/", requirePageRight("fixed-asset-assignment", "create"), async (re
   if (!responsibleUserIdVal) return res.status(400).json({ error: "responsibleUserId is required" });
   if (!companyIdVal) return res.status(400).json({ error: "companyId is required" });
   if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
+  if (!projectAllowed(req.projectScope, projectIdVal)) return res.status(403).json({ error: "You don't have access to that project." });
   if (!docDate) return res.status(400).json({ error: "docDate is required" });
   if (!finYear) return res.status(400).json({ error: "finYear is required" });
 

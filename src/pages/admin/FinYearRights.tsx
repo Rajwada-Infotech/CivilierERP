@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { finYearSchema, type FinYearForm } from "@/schemas/finYearSchema";
+import { finYearSchema, type FinYearForm, type FinYearFormInput } from "@/schemas/finYearSchema";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DateInput } from "@/components/ui/date-input";
 
@@ -200,7 +200,7 @@ function FinYearDialog({
     setValue,
     watch,
     formState: { errors },
-  } = useForm<FinYearForm>({
+  } = useForm<FinYearFormInput, unknown, FinYearForm>({
     resolver: zodResolver(finYearSchema),
     defaultValues: EMPTY_FORM,
   });

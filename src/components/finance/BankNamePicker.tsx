@@ -63,13 +63,17 @@ export function BankNamePicker({
   placeholder = "Select bank…",
   otherPlaceholder = "Bank name",
   className,
+  sheet = false,
 }: {
   value: string;
   onChange: (name: string) => void;
   placeholder?: string;
   otherPlaceholder?: string;
   className?: string;
+  /** Square and inked, for drawing-sheet pages (a dialog renders outside the page, so it can't be detected). */
+  sheet?: boolean;
 }) {
+  const SHEET = "h-9 text-sm rounded-none border-foreground/40 bg-card focus:ring-0 focus:ring-offset-0 focus:border-foreground";
   // Starts in "Other" mode whenever the current value isn't one of the
   // listed banks (including empty, so a freshly-typed name doesn't get
   // silently reset to the dropdown's placeholder on every keystroke).
@@ -97,7 +101,7 @@ export function BankNamePicker({
           }
         }}
       >
-        <SelectTrigger className={className ?? "h-9 text-sm"}>
+        <SelectTrigger className={className ?? (sheet ? SHEET : "h-9 text-sm")}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
@@ -118,7 +122,7 @@ export function BankNamePicker({
       </Select>
       {customBank && (
         <Input
-          className="h-9 text-sm"
+          className={sheet ? SHEET : "h-9 text-sm"}
           placeholder={otherPlaceholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
