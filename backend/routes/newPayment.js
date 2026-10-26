@@ -400,6 +400,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
         COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
+        mproj.Names                                        AS PMergedProjectNames,
         -- Supplier/contractor name — from the ExpenseBooking resolved chain
         -- when this payment is linked to an invoice, otherwise fall back to
         -- the party (PPartyId) picked directly on a direct/TOD payment.
@@ -498,6 +499,16 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           ELSE np.Status
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
+      -- A merged payment's every project (its invoices can span the company's projects).
+      OUTER APPLY (
+        SELECT STRING_AGG(x.ProjName, ', ') AS Names FROM (
+          SELECT DISTINCT COALESCE(lp.name, leb.EProjectName) AS ProjName
+          FROM dbo.PaymentExpenseBookingLink pl
+          JOIN dbo.ExpenseBooking leb ON leb.Eid = pl.ExpenseBookingId
+          LEFT JOIN dbo.enterprise lp ON lp.id = TRY_CAST(leb.EProjectName AS INT)
+          WHERE pl.PPaymentID = np.PPaymentID
+        ) x
+      ) mproj
       LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
@@ -2179,6 +2190,7 @@ router.get("/:id", async (req, res) => {
         COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
+        mproj.Names                                        AS PMergedProjectNames,
         COALESCE(
           CASE
             WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
@@ -2211,6 +2223,16 @@ router.get("/:id", async (req, res) => {
         cmast.card_holder_name                             AS PCardHolderName,
         ahm.LHeadName                                      AS BankAccountName
       FROM dbo.NewPayment np
+      -- A merged payment's every project (its invoices can span the company's projects).
+      OUTER APPLY (
+        SELECT STRING_AGG(x.ProjName, ', ') AS Names FROM (
+          SELECT DISTINCT COALESCE(lp.name, leb.EProjectName) AS ProjName
+          FROM dbo.PaymentExpenseBookingLink pl
+          JOIN dbo.ExpenseBooking leb ON leb.Eid = pl.ExpenseBookingId
+          LEFT JOIN dbo.enterprise lp ON lp.id = TRY_CAST(leb.EProjectName AS INT)
+          WHERE pl.PPaymentID = np.PPaymentID
+        ) x
+      ) mproj
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId

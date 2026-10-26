@@ -115,7 +115,7 @@ export function buildPaymentLetterhead(rec: any, companyDetail: any, chain: any)
             ]
           : [rec.paidTo || "—"],
       },
-      { label: "Project / Site :", lines: [rec.project || "—", rec.projectSite || ""] },
+      { label: "Project / Site :", lines: rec.mergedProjects ? [rec.mergedProjects] : [rec.project || "—", rec.projectSite || ""] },
       { label: "Payment Mode :", lines: [rec.mode || "—"] },
     ],
     columns: [{ header: "Particulars" }, { header: "Amount", align: "right" as const, widthMm: 40 }],

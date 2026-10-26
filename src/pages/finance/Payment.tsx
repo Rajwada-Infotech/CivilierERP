@@ -1641,7 +1641,7 @@ const Payment: React.FC = () => {
         const due = o.remainingAmount != null && o.remainingAmount > 0 && o.remainingAmount < payable
           ? o.remainingAmount
           : payable;
-        return { expenseBookingId: o.expenseBookingId ?? Number(o.id), docNo: o.docNo || o.label, amount: due };
+        return { expenseBookingId: o.expenseBookingId ?? Number(o.id), docNo: o.docNo || o.label, amount: due, projectName: o.projectName || "" };
       });
       const total = mergedInvoices.reduce((s, m) => s + m.amount, 0);
       const anchor = selected[0];
@@ -1669,6 +1669,7 @@ const Payment: React.FC = () => {
     },
     [companyOptions],
   );
+  const mergedProjectNames = [...new Set(form.mergedInvoices.map((m) => (m.projectName || "").trim()).filter(Boolean))];
   const handleMergeClear = useCallback(() => {
     setForm((prev) => ({ ...prev, mergedInvoices: [] }));
   }, []);
@@ -2459,6 +2460,13 @@ const Payment: React.FC = () => {
                       </div>
                     </Field>
                     <Field label="Project / Site">
+                      {/* A merge across the company's projects names every one of them, not just the first. */}
+                      {mergedProjectNames.length > 1 ? (
+                        <div className="flex items-center gap-2">
+                          <FolderKanban size={13} className="text-muted-foreground shrink-0" />
+                          <ReadOnlyField value={mergedProjectNames.join(", ")} placeholder="" />
+                        </div>
+                      ) : (
                       <div className="relative">
                         <FolderKanban
                           size={13}
@@ -2511,6 +2519,7 @@ const Payment: React.FC = () => {
                           className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                         />
                       </div>
+                      )}
                     </Field>
                     <Field
                       label="Payee / Party"
@@ -5415,7 +5424,7 @@ const Payment: React.FC = () => {
                   { label: "Date", value: viewingRec.date || "—" },
                   { label: "Mode", value: viewingRec.mode || "—" },
                   { label: "Company", value: viewingRec.company || "—" },
-                  { label: "Project", value: viewingRec.project || "—" },
+                  { label: "Project", value: viewingRec.mergedProjects || viewingRec.project || "—" },
                   {
                     label: "Expense Ref",
                     value: viewingRec.expenseRef || viewingRec.jvNo || "—",
