@@ -57,7 +57,13 @@ export const ActivityGroupCard: React.FC<{
       ),
     0,
   );
-  const groupTotal = groupLabourTotal + groupMaterialsTotal;
+  // The group's figure is the sum of its activities' totals WITH tax (each activity's HSN / SAC GST on its labour + materials),
+  // the same figure each activity row shows as "Activity total".
+  const groupGst = group.activities.reduce((sum, a) => {
+    const sub = actLabour(a) + a.materials.reduce((ms, m) => ms + matCost(m, a), 0);
+    return sum + (a.hsnGstRate > 0 ? (sub * a.hsnGstRate) / 100 : 0);
+  }, 0);
+  const groupTotal = groupLabourTotal + groupMaterialsTotal + groupGst;
 
   const filteredActivities =
     group.groupId !== null
