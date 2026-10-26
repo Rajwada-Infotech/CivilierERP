@@ -195,7 +195,18 @@ export const reverseAssetDepreciation = async (
   return res.json();
 };
 
-export const createFixedAsset = async (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string }> => {
+/** What posting the new asset's depreciation from its Purchase / Activation Date up to the last closed month did. */
+export interface DepreciationBackfill {
+  posted: number;
+  alreadyPosted: number;
+  totalAmount: number;
+  fromMonth: string | null;
+  toMonth: string | null;
+  notConfigured: string | null;
+  errors: string[];
+}
+
+export const createFixedAsset = async (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string; depreciationBackfill?: DepreciationBackfill | null }> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

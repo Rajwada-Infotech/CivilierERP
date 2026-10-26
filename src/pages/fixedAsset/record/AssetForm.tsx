@@ -197,6 +197,11 @@ export function AssetForm({ editingId, onClose, onSaved }: { editingId: number |
     mutationFn: createFixedAsset,
     onSuccess: (r) => {
       toast.success(`Asset recorded: ${r.docNo} (${r.assetCode})`);
+      // Depreciation is posted automatically from the Purchase / Activation Date up to the last closed month.
+      const b = r.depreciationBackfill;
+      if (b?.posted) toast.success(`Depreciation posted automatically: ${b.posted} month${b.posted === 1 ? "" : "s"} (${b.fromMonth} to ${b.toMonth}), ₹${b.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}.`);
+      else if (b?.notConfigured) toast.warning(`Depreciation was not posted: ${b.notConfigured}`);
+      if (b?.errors?.length) toast.warning(`Some depreciation months could not be posted: ${b.errors[0]}`);
       afterWrite();
       onSaved(r.assetId);
     },

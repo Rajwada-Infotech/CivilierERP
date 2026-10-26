@@ -182,6 +182,68 @@ async function previewDepreciationForPeriod(pool, { year, month }) {
   return out;
 }
 
+/**
+ * Post a newly tagged asset's depreciation from its start month (Activation Date, else Purchase Date) up to the last
+ * CLOSED month — the same months the monthly engine would have posted had the asset been tagged on time. Used when
+ * a Fixed Asset Record is created from a Fixed Asset Depreciation Tag. Safe to call again: months already posted are
+ * counted, not posted twice. Never throws — a problem is reported in `errors` so the record itself is never lost.
+ */
+async function backfillDepreciationForAsset(pool, assetId, { runBy = AUTO_USER, today = todayIst() } = {}) {
+  const out = { assetId, posted: 0, alreadyPosted: 0, totalAmount: 0, fromMonth: null, toMonth: null, notConfigured: null, errors: [] };
+  try {
+    const r = await pool.request().input("Id", sql.Int, assetId).query(`
+      SELECT fa.AssetId, fa.AssetCode, fa.FAItemCode, fa.AssetName, fa.CompanyId, fa.ProjectId,
+             fa.PurchaseCost, fa.PurchaseDate, fa.ActivationDate, fa.FinYear,
+             fa.DepreciationType, fa.DepreciationRate, fa.AssetStatus, fa.Status, fa.TransferredAt
+      FROM dbo.FixedAssetRecord fa
+      JOIN dbo.FixedAssetTagging t ON t.TagId = fa.SourceTagId
+      WHERE fa.AssetId = @Id AND fa.AssetCode IS NOT NULL AND fa.Status <> 'Deleted'
+    `);
+    const asset = r.recordset[0];
+    if (!asset) return out;
+    if (!["Active", "Under Maintenance"].includes(asset.AssetStatus) || asset.TransferredAt) return out;
+    const cfgProblem = validateAssetForDepreciation(asset);
+    if (cfgProblem) { out.notConfigured = cfgProblem.message; return out; }
+
+    const raw = asset.ActivationDate || asset.PurchaseDate;
+    const d = new Date(raw);
+    const startIdx = periodIndex(d.getFullYear(), d.getMonth() + 1);
+    const last = prevMonth(today.y, today.m);
+    const endIdx = periodIndex(last.y, last.m);
+    if (startIdx > endIdx) return out; // bought this month — the 1st-of-month run posts it once the month closes
+    out.fromMonth = `${(startIdx % 12) + 1}/${Math.floor(startIdx / 12)}`;
+    out.toMonth = `${last.m}/${last.y}`;
+
+    const docTypeId = await resolveDocTypeId(pool, sql, DEP_DOC_PREFIX);
+    const lockDocNo = (finYear) => lockNextDocNumber(pool, sql, {
+      docTypeId, finYear, tableName: "FixedAssetDepreciationEntry", docNoColumn: "VoucherNo", issuedBy: runBy,
+    });
+    const MAX_MONTHS = 240;
+    for (let i = Math.max(startIdx, endIdx - (MAX_MONTHS - 1)); i <= endIdx; i++) {
+      const y = Math.floor(i / 12), m = (i % 12) + 1;
+      try {
+        const res = await postDepreciation(pool, asset, y, m, runBy, lockDocNo);
+        if (res.reason === "already posted") out.alreadyPosted++;
+        else { out.posted++; out.totalAmount += Number(res.depreciation?.depreciationAmount) || 0; }
+      } catch (e) {
+        if (e.code === "CONFIG_MISSING") { out.errors.push(`${m}/${y}: ${e.message}`); break; } // fully depreciated / stopped — nothing later either
+        out.errors.push(`${m}/${y}: ${e.message}`);
+        logger.error({ event: "FA_BACKFILL_DEP_FAILED", assetId, year: y, month: m, err: e.message }, "Backfill depreciation failed for a month");
+        break; // later months build on this one's closing value — stop rather than leave a gap
+      }
+    }
+    out.totalAmount = Math.round(out.totalAmount * 100) / 100;
+    if (out.posted > 0) {
+      await bumpCacheVersion("fixed-assets");
+      await bumpCacheVersion("general-ledger");
+    }
+  } catch (e) {
+    out.errors.push(e.message);
+    logger.error({ event: "FA_BACKFILL_DEP_ERROR", assetId, err: e.message }, "Backfill depreciation failed");
+  }
+  return out;
+}
+
 /** Closed months that still need their automatic run: since the last auto run, up to last month. */
 async function pendingAutoPeriods(pool, today = todayIst()) {
   const target = prevMonth(today.y, today.m);
@@ -245,6 +307,7 @@ module.exports = {
   AUTO_USER,
   todayIst,
   runDepreciationForPeriod,
+  backfillDepreciationForAsset,
   previewDepreciationForPeriod,
   runAutoDepreciationCheck,
   pendingAutoPeriods,
