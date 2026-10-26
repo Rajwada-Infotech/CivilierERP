@@ -57,7 +57,8 @@ async function replaceLinks(requestFactory, sql, paymentId, links) {
 async function getLinks(pool, sql, paymentId) {
   const r = await pool.request().input("PPaymentID", sql.Int, paymentId).query(`
     SELECT l.LinkId, l.ExpenseBookingId, l.EDocNo, l.AllocatedAmount, l.TDSAmount,
-           eb.EBillStatus, ISNULL(eb.ENetAmount, eb.EAmount) AS InvoiceAmount
+           eb.EBillStatus, ISNULL(eb.ENetAmount, eb.EAmount) AS InvoiceAmount,
+           TRY_CAST(eb.EProjectName AS INT) AS ProjectId
     FROM dbo.PaymentExpenseBookingLink l
     LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = l.ExpenseBookingId
     WHERE l.PPaymentID = @PPaymentID
@@ -71,6 +72,8 @@ async function getLinks(pool, sql, paymentId) {
     tdsAmount: Number(row.TDSAmount),
     billStatus: row.EBillStatus ?? null,
     invoiceAmount: row.InvoiceAmount != null ? Number(row.InvoiceAmount) : null,
+    // The invoice's own project — a merge can span projects, and each Dr-Supplier leg is posted to its own.
+    projectId: row.ProjectId ?? null,
   }));
 }
 

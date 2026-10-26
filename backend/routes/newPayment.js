@@ -118,6 +118,7 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
       -- project" here means exactly what the picker already showed the
       -- user as matching.
       COALESCE(proj.name, eb.EProjectName) AS ProjectKey,
+      proj.id AS ProjectId,
       ISNULL(eb.TDSAmount, 0) AS TDSAmount,
       ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS RemainingAmount,
       CASE
@@ -148,7 +149,9 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
     WHERE eb.Eid IN (${placeholders.join(",")})
   `);
 
-  const rows = result.recordset;
+  // In the order the ids came — the first picked invoice's project is the payment's own, and the links
+  // (which the GL posting reads first-to-last) keep that order.
+  const rows = result.recordset.sort((a, b) => ids.indexOf(a.Eid) - ids.indexOf(b.Eid));
   const bad = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
 
   if (rows.length !== ids.length) bad("One or more invoices in this merge could not be found.");
@@ -168,8 +171,23 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
   const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
   if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
-  if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
   if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
+  // Different projects merge when the company is on each of them — its own project or one tagged to it
+  // (Project Master's extra companies), e.g. Delta Realty paying its Boulevard and Magnus invoices together.
+  // Each invoice's ledger line keeps its own project.
+  if (distinctProjects.size > 1) {
+    const projectIds = [...new Set(rows.map((r) => r.ProjectId))];
+    if (projectIds.some((id) => !id)) bad("Invoices of different projects can be merged only when each is on a project from Project Master.");
+    const preq = pool.request().input("co", sql.Int, Number(rows[0].ECompanyId));
+    const pph = projectIds.map((id, i) => { preq.input(`p${i}`, sql.Int, id); return `@p${i}`; });
+    const off = (await preq.query(`
+      SELECT p.name FROM dbo.enterprise p
+      WHERE p.id IN (${pph.join(",")})
+        AND ISNULL(p.company_id, 0) <> @co
+        AND NOT EXISTS (SELECT 1 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id AND pc.CompanyId = @co)
+    `)).recordset;
+    if (off.length) bad(`${off.map((p) => p.name).join(", ")} is not tagged to the invoices' company.`);
+  }
 
   const links = rows.map((r) => ({
     expenseBookingId: r.Eid,
@@ -2909,7 +2927,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
              -- A merged payment (migration 501) has no single PExpenseRef to
              -- join ExpenseBooking through — fall back to its first merged
              -- invoice's own Company/Project (every merged invoice shares
-             -- the same one, enforced at merge time).
+             -- the company; a merge may span projects, and then each
+             -- supplier leg carries its own invoice's project).
              COALESCE(eb.ECompanyId, ebLink.ECompanyId) AS CompanyId,
              COALESCE(TRY_CAST(eb.EProjectName AS INT), TRY_CAST(ebLink.EProjectName AS INT)) AS ProjectId
       FROM dbo.NewPayment np
@@ -3002,7 +3021,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const legs = [
       ...(mergedLinks.length > 0
         ? mergedLinks.map((l) => ({
-            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0,
+            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0, projectId: l.projectId ?? undefined,
             narration: `Payment: ${pmt.DocNo} (${l.eDocNo}) — Supplier/Creditor`,
           }))
         : [{ lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` }]),

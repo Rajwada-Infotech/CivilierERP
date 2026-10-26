@@ -1,7 +1,7 @@
-// One work order opened: details, activities, linked documents, approval, print.
+// One work order opened: details, activities, linked documents, approval, print (printWorkOrder).
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Printer, Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart } from "lucide-react";
+import { Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getWorkOrder, deleteWorkOrder, getMaterialRequestPrefillFromWO, MaterialRequestExistsError } from "@/api/workOrderApi";
@@ -261,14 +261,16 @@ export const WorkOrderDetailPanel: React.FC<{
                   );
                 }}
               />
-              <button
-                onClick={() => { if (!printWorkOrder(detail)) toast.error("Allow pop-ups to print the Work Order."); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-foreground text-xs font-medium hover:bg-primary/5 transition-colors"
-                title="Print the Work Order"
-              >
-                <Printer size={12} />
-                Print
-              </button>
+              {rights.canPrint && (
+                <button
+                  onClick={() => printWorkOrder(detail)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/30 text-muted-foreground text-xs font-medium hover:bg-primary/5 transition-colors"
+                  title="Print this work order with its activities and material breakdown"
+                >
+                  <Printer size={12} />
+                  Print
+                </button>
+              )}
               {rights.canEdit && (
                 <button
                   onClick={() => onEdit(workOrderId)}

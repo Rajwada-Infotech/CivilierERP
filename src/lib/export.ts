@@ -54,7 +54,7 @@ export interface PdfExportOptions {
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
-function getCell(row: Record<string, unknown>, col: ExportColumn): string {
+export function getCell(row: Record<string, unknown>, col: ExportColumn): string {
   const raw =
     typeof col.accessor === "function" ? col.accessor(row) : row[col.accessor];
   if (raw === null || raw === undefined) return "";
