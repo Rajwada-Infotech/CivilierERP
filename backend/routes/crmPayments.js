@@ -1636,76 +1636,68 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
 // GET /on-account — global list of all CRM on-account deposits across all bookings.
 // Supports filters: status, projectId, search (applicant name / booking no), dateFrom, dateTo.
 // Used by the On Account management page.
+// The On Account list's filters, built once onto any request — the list, its count and the summary all use it, so
+// they always agree. Project scope included: these listed every project's deposits to a restricted user.
+// 'Held' rows are frozen cancellation credit managed from the Refunds page — out unless asked for.
+const OA_FROM = `
+  FROM dbo.CrmOnAccountPayment o
+  JOIN dbo.CrmBooking b ON b.Id = o.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'`;
+function onAccountWhere(request, query, projectScope, { withStatus = true } = {}) {
+  const { status, projectId, companyId, blockId, search, dateFrom, dateTo, mode } = query;
+  let where = "WHERE o.BookingId IS NOT NULL";
+  if (projectScope) where += ` AND ${require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim()}`;
+  if (withStatus && status) { where += " AND o.Status = @status"; request.input("status", sql.NVarChar(30), status); }
+  else                      { where += " AND ISNULL(o.Status,'') <> 'Held'"; }
+  if (projectId) { where += " AND b.ProjectId = @pid";    request.input("pid",  sql.Int, parseInt(projectId, 10)); }
+  if (companyId) { where += " AND b.CompanyId = @cid";    request.input("cid",  sql.Int, parseInt(companyId, 10)); }
+  if (blockId)   { where += " AND b.BlockId = @bid2";     request.input("bid2", sql.Int, parseInt(blockId, 10)); }
+  if (dateFrom)  { where += " AND o.ReceivedDate >= @df"; request.input("df",   sql.Date, dateFrom); }
+  if (dateTo)    { where += " AND o.ReceivedDate <= @dt"; request.input("dt",   sql.Date, dateTo); }
+  // Payment mode was filtered on the page over the 50 rows it had, so the count and the other pages ignored it.
+  if (mode)      { where += " AND o.PaymentMode = @mode"; request.input("mode", sql.NVarChar(50), mode); }
+  if (search) {
+    where += " AND (a.ApplicantName LIKE @s OR a.Mobile LIKE @s OR b.BookingNo LIKE @s OR o.ReceiptNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
+    request.input("s", sql.NVarChar(200), `%${search}%`);
+  }
+  return where;
+}
+
 router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, projectId, companyId, blockId, search, dateFrom, dateTo } = req.query;
     const { page, pageSize, offset } = applyPagination(req, 50);
 
     const req_ = pool.request()
       .input("pageSize", sql.Int, pageSize)
       .input("offset",   sql.Int, offset);
-
-    let where = "WHERE o.BookingId IS NOT NULL";
-    // 'Held' rows are frozen cancellation credit managed from the Refunds page —
-    // keep them out of the normal On Account list unless explicitly asked for.
-    if (status)    { where += " AND o.Status = @status";     req_.input("status",    sql.NVarChar(30), status); }
-    else           { where += " AND ISNULL(o.Status,'') <> 'Held'"; }
-    if (projectId) { where += " AND b.ProjectId = @pid";     req_.input("pid",       sql.Int, parseInt(projectId)); }
-    if (companyId) { where += " AND b.CompanyId = @cid";     req_.input("cid",       sql.Int, parseInt(companyId)); }
-    if (blockId)   { where += " AND b.BlockId = @bid2";     req_.input("bid2",      sql.Int, parseInt(blockId)); }
-    if (dateFrom)  { where += " AND o.ReceivedDate >= @df";  req_.input("df",        sql.Date, dateFrom); }
-    if (dateTo)    { where += " AND o.ReceivedDate <= @dt";  req_.input("dt",        sql.Date, dateTo); }
-    if (search) {
-      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
-      req_.input("s", sql.NVarChar(200), `%${search}%`);
-    }
-
-    const result = await req_.query(`
-      SELECT
-        o.Id, o.ReceiptNo, o.BookingId, o.Amount, o.AppliedAmount,
-        CAST(o.Amount - o.AppliedAmount AS DECIMAL(18,2)) AS AvailableBalance,
-        o.Status, o.ReceivedDate, o.PaymentMode, o.TransactionRef, o.Notes,
-        o.CreatedAt, o.DepositBankId, o.DepositBankName, o.SourceReceivedPaymentId,
-        b.BookingNo, b.ProjectId,
-        COALESCE(proj.name, b.ProjectName) AS ProjectName,
-        COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
-        b.GrandTotal,
-        a.ApplicantName, a.Mobile,
-        u.name AS CreatedByName
-      FROM dbo.CrmOnAccountPayment o
-      JOIN dbo.CrmBooking b ON b.Id = o.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      LEFT JOIN dbo.Users u ON u.id = o.CreatedBy
-      ${where}
-      ORDER BY o.CreatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
-    `);
-
+    const where = onAccountWhere(req_, req.query, req.projectScope);
     const countReq = pool.request();
-    let countWhere = "WHERE o.BookingId IS NOT NULL";
-    if (status)    { countWhere += " AND o.Status = @status";     countReq.input("status",    sql.NVarChar(30), status); }
-    else           { countWhere += " AND ISNULL(o.Status,'') <> 'Held'"; }
-    if (projectId) { countWhere += " AND b.ProjectId = @pid";     countReq.input("pid",       sql.Int, parseInt(projectId)); }
-    if (companyId) { countWhere += " AND b.CompanyId = @cid";     countReq.input("cid",       sql.Int, parseInt(companyId)); }
-    if (blockId)   { countWhere += " AND b.BlockId = @bid2";     countReq.input("bid2",      sql.Int, parseInt(blockId)); }
-    if (dateFrom)  { countWhere += " AND o.ReceivedDate >= @df";  countReq.input("df",        sql.Date, dateFrom); }
-    if (dateTo)    { countWhere += " AND o.ReceivedDate <= @dt";  countReq.input("dt",        sql.Date, dateTo); }
-    if (search) {
-      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
-      countReq.input("s", sql.NVarChar(200), `%${search}%`);
-    }
-    const countResult = await countReq.query(`
-      SELECT COUNT(*) AS Total
-      FROM dbo.CrmOnAccountPayment o
-      JOIN dbo.CrmBooking b ON b.Id = o.BookingId
-      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      ${countWhere}
-    `);
+    const countWhere = onAccountWhere(countReq, req.query, req.projectScope);
+
+    const [result, countResult] = await Promise.all([
+      req_.query(`
+        SELECT
+          o.Id, o.ReceiptNo, o.BookingId, o.Amount, o.AppliedAmount,
+          CAST(o.Amount - o.AppliedAmount AS DECIMAL(18,2)) AS AvailableBalance,
+          o.Status, o.ReceivedDate, o.PaymentMode, o.TransactionRef, o.Notes,
+          o.CreatedAt, o.DepositBankId, o.DepositBankName, o.SourceReceivedPaymentId,
+          b.BookingNo, b.ProjectId,
+          COALESCE(proj.name, b.ProjectName) AS ProjectName,
+          COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
+          b.GrandTotal,
+          a.ApplicantName, a.Mobile,
+          u.name AS CreatedByName
+        ${OA_FROM}
+        LEFT JOIN dbo.Users u ON u.id = o.CreatedBy
+        ${where}
+        ORDER BY o.CreatedAt DESC
+        OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+      `),
+      countReq.query(`SELECT COUNT(*) AS Total ${OA_FROM} ${countWhere}`),
+    ]);
 
     res.json({
       deposits: result.recordset,
@@ -1719,23 +1711,26 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
   }
 });
 
-// GET /on-account/summary — aggregate totals for the On Account dashboard tiles.
+// GET /on-account/summary — the On Account figures, for the same filters as the list (status aside) and the
+// user's projects. It used to total every project, ignore the filters and count 'Held' cancellation credit.
 router.get("/on-account/summary", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const request = pool.request();
+    const where = onAccountWhere(request, req.query, req.projectScope, { withStatus: false });
+    const result = await request.query(`
       SELECT
         COUNT(*)                                                          AS TotalCount,
         ISNULL(SUM(o.Amount), 0)                                        AS TotalReceived,
         ISNULL(SUM(o.Amount - o.AppliedAmount), 0)                      AS TotalAvailable,
         ISNULL(SUM(o.AppliedAmount), 0)                                 AS TotalApplied,
-        SUM(CASE WHEN o.Status = 'Unapplied'        THEN 1 ELSE 0 END) AS UnappliedCount,
-        SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN 1 ELSE 0 END) AS PartialCount,
-        SUM(CASE WHEN o.Status = 'Applied'          THEN 1 ELSE 0 END) AS AppliedCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'Unapplied'        THEN 1 ELSE 0 END), 0) AS UnappliedCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN 1 ELSE 0 END), 0) AS PartialCount,
+        ISNULL(SUM(CASE WHEN o.Status = 'Applied'          THEN 1 ELSE 0 END), 0) AS AppliedCount,
         ISNULL(SUM(CASE WHEN o.Status = 'Unapplied'        THEN o.Amount - o.AppliedAmount ELSE 0 END), 0) AS UnappliedBalance,
         ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN o.Amount - o.AppliedAmount ELSE 0 END), 0) AS PartialBalance
-      FROM dbo.CrmOnAccountPayment o
-      JOIN dbo.CrmBooking b ON b.Id = o.BookingId AND b.IsActive = 1
+      ${OA_FROM}
+      ${where}
     `);
     res.json(result.recordset[0]);
   } catch (e) {
