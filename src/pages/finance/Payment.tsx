@@ -1645,6 +1645,11 @@ const Payment: React.FC = () => {
       });
       const total = mergedInvoices.reduce((s, m) => s + m.amount, 0);
       const anchor = selected[0];
+      // Sister companies' invoices are paid by their parent — the company set up under the parent's name.
+      const sisters = selected.some((o) => Number(o.companyId) !== Number(anchor?.companyId));
+      const parentName = sisters ? String(companyOptions.find((c) => c.id === Number(anchor?.companyId))?.belongs_to ?? "").trim() : "";
+      const parentCompany = parentName ? companyOptions.find((c) => c.label.trim().toLowerCase() === parentName.toLowerCase()) : undefined;
+      if (sisters && !parentCompany) toast.error(`The payment is booked for the parent${parentName ? `, ${parentName}` : ""} — set it up as a company in Company Master first.`);
       setForm((prev) => ({
         ...prev,
         expenseId: "",
@@ -1658,6 +1663,7 @@ const Payment: React.FC = () => {
         project: anchor?.projectName || prev.project,
         projectSite: anchor?.projectName || prev.projectSite,
         company: (() => {
+          if (parentCompany) return parentCompany.label;
           const name = anchor?.companyName;
           if (name && name.trim()) return name.trim();
           const matched = companyOptions.find((c) => c.id === anchor?.companyId);

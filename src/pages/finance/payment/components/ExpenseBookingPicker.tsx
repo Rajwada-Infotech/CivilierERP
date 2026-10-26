@@ -61,7 +61,8 @@ export function ExpenseBookingPicker({
    *  staleness down further. */
   onRefreshOptions?: () => void;
   /** True when two invoices of DIFFERENT companies may still merge: the companies share one parent
-   *  enterprise and the project is tagged to both. The server checks the same. */
+   *  enterprise and the project is tagged to both. The server checks the same, and the payment is then
+   *  booked under the parent. */
   sisterCompanies?: (a: ExpenseOption, b: ExpenseOption) => boolean;
 }) {
   const [open, setOpen] = React.useState(false);
