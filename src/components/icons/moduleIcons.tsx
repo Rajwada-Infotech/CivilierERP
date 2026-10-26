@@ -14,7 +14,6 @@ import {
   IconCrown,
   IconDatabase,
   IconHeartHandshake,
-  IconHelmet,
   IconLayoutGrid,
   IconLayoutSidebarLeftCollapse,
   IconMenu2,
@@ -31,6 +30,7 @@ import {
   IconUser,
   IconUsers,
 } from "@tabler/icons-react";
+import { HardHat } from "lucide-react";
 
 // The icons of the app's chrome - module strip, sidebar headers, top bar - come from one pack (Tabler Icons: a single
 // 1.5px outline weight on a 24px grid, which sits well beside the ruled, drawing-sheet look of those surfaces).
@@ -47,12 +47,21 @@ const adapt = (Icon: React.ElementType): React.FC<ChromeIconProps> => {
   return Adapted;
 };
 
+// Tabler has no construction hard hat (its helmet is a biker's), so Engineering takes lucide's, drawn at the same
+// weight: lucide sets the line with strokeWidth (its own `stroke` is the colour).
+const adaptLucide = (Icon: React.ElementType): React.FC<ChromeIconProps> => {
+  const Adapted: React.FC<ChromeIconProps> = ({ variant, strokeWidth, size = 18, ...rest }) => (
+    <Icon size={size} strokeWidth={strokeWidth ?? (variant === "Bold" ? 2 : 1.5)} {...rest} />
+  );
+  return Adapted;
+};
+
 export const ModuleIcons = {
   finance: adapt(IconBuildingBank),
   material: adapt(IconPackage),
   fixedAsset: adapt(IconCpu),
   loan: adapt(IconCoinRupee),
-  engineering: adapt(IconHelmet),
+  engineering: adaptLucide(HardHat),
   civilWorkDpr: adapt(IconTimeline),
   followup: adapt(IconChecklist),
   ticket: adapt(IconTicket),
