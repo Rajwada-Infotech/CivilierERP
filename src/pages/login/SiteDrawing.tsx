@@ -2,8 +2,9 @@
 // in, the footings, then the columns rise and the floors are cast one above another, each with its level mark; the
 // tower crane goes up beside it and hoists the three girders waiting in the yard onto the roof one by one, then parks;
 // then the view zooms out to the board the sheet is pinned on (two engineers in front of it), pans to the next sheet —
-// the layout plan of a plotted villa project — and zooms into it while it draws itself (boundary, road, plots, trees,
-// dimensions) and its plots are booked one by one; then it keeps moving between the two. The crane's warning lights blink and the building's windows light up. A gyrocompass
+// the typical floor plan of a residential tower — and zooms into it while it draws itself (walls, the lift and stair
+// core, each flat's rooms, doors, windows and names) and its flats are booked one by one; then it keeps moving between
+// the two. The crane's warning lights blink and the building's windows light up. A gyrocompass
 // gives north. The sheet has a drawing border with zone marks and a title block holding the company's figures.
 // On phones the same drawing fills the screen behind the form (SiteBackdrop). Everything is still under reduced
 // motion (MotionConfig on the page) apart from the line drawing, which just completes.
@@ -257,7 +258,7 @@ function Building() {
 }
 
 // ── The camera: after the crane parks it zooms out to the board, pans to the bridge sheet and zooms in, then keeps
-// moving between the two sheets. World: sheet A (the building) at 0..800, sheet B (the layout plan) at 900..1700.
+// moving between the two sheets. World: sheet A (the building) at 0..800, sheet B (the floor plan) at 900..1700.
 const ZOOM_AT = END + 0.8;
 const MOVE = 2.6;                       // one zoom or pan
 const HOLD = 1;                         // a beat at the overview
@@ -266,7 +267,7 @@ const K_OUT = 0.44;                     // the overview scale: both sheets in vi
 const OVER = { k: K_OUT, x: (800 - 1700 * K_OUT) / 2, y: (900 - 900 * K_OUT) / 2 };
 const VIEW_A = { k: 1, x: 0, y: 0 };
 const VIEW_B = { k: 1, x: -B_X, y: 0 };
-const B_AT = ZOOM_AT + MOVE * 2 + HOLD; // the camera reaches the layout plan: it starts drawing
+const B_AT = ZOOM_AT + MOVE * 2 + HOLD; // the camera reaches the floor plan: it starts drawing
 const STAY = 11;                        // seconds on a sheet before moving on
 
 // ── Two engineers in front of the board ──────────────────────────────────────
@@ -325,80 +326,160 @@ function Engineers() {
   return <g>{person(132, false, 0)}{person(262, true, 1)}</g>;
 }
 
-// ── Sheet B: the layout plan of a plotted villa project ───────────────────────
-// 24 plots in four rows of six either side of the main road; content kept clear of the note box (top left) and the
-// title block (bottom right).
-const LX = 70, LW = 660;                 // the plots' extent across
-const PW = LW / 6;                       // plot frontage
-const ROAD_Y = 470, ROAD_H = 44;
-const ROWS = [278, 372, ROAD_Y + ROAD_H + 6, ROAD_Y + ROAD_H + 100];
-const PH = 88;                           // plot depth
-// The order they're booked in, and how many: the rest stay available.
-const BOOK_ORDER = [8, 3, 15, 20, 1, 11, 17, 6, 22, 13, 4, 18];
+// ── Sheet B: the typical floor plan of a residential tower ───────────────────
+// Four 2 BHK flats around a central core (two lifts, the lobby, a dog-leg stair and a service shaft). The walls go in,
+// then the core, each flat's rooms, doors with their swings, windows and room names; then the flats are booked one
+// by one. Content kept clear of the note box (top left) and the title block (bottom right).
+const PX0 = 70, PY0 = 290;               // the slab's top-left
+const FW = 275, FD = 200;                // one flat: from the outside wall to the core, and to the middle line
+const PX1 = PX0 + FW * 2 + 110;          // the core is 110 wide between the flats
+const PY1 = PY0 + FD * 2;
+const CORE_X = PX0 + FW;
 
-function Layout() {
+/** The four flats: A1 top left, A2 top right, A3 bottom left, A4 bottom right. Each is the same flat drawn in its own
+ *  local frame (x from its outside wall toward the core, y from its outside wall toward the middle) and mirrored. */
+const FLATS = [
+  { name: "A1", sx: 1, sy: 1, ox: PX0, oy: PY0 },
+  { name: "A2", sx: -1, sy: 1, ox: PX1, oy: PY0 },
+  { name: "A3", sx: 1, sy: -1, ox: PX0, oy: PY1 },
+  { name: "A4", sx: -1, sy: -1, ox: PX1, oy: PY1 },
+];
+// The order they're booked in; the one not listed stays available.
+const FLAT_BOOK_ORDER = ["A2", "A4", "A1"];
+
+// One flat's rooms in its local frame (1 unit ≈ 3.27 cm: a 110-unit bedroom is 3.60 m).
+const ROOMS: { x: number; y: number; w: number; h: number; name: string; size: string; small?: boolean }[] = [
+  { x: 0, y: 0, w: 110, h: 115, name: "M. BED", size: "3.60 × 3.80" },
+  { x: 0, y: 115, w: 110, h: 85, name: "BED 2", size: "3.60 × 2.80" },
+  { x: 110, y: 0, w: 165, h: 115, name: "LIVING / DINING", size: "5.40 × 3.80" },
+  { x: 110, y: 115, w: 55, h: 85, name: "TOILET", size: "1.80 × 2.80", small: true },
+  { x: 165, y: 115, w: 110, h: 85, name: "KITCHEN", size: "3.60 × 2.80" },
+];
+// Doors: the leaf and its swing, from the hinge (all open away from the core or the living room).
+const DOORS = [
+  "M275 30 H253 A22 22 0 0 0 275 52",     // entry, from the lobby into the living room
+  "M110 80 H88 A22 22 0 0 0 110 102",     // master bedroom
+  "M110 150 H88 A22 22 0 0 0 110 172",    // bedroom 2
+  "M125 115 V137 A22 22 0 0 0 147 115",   // toilet
+];
+// Windows on the two outside walls: [along the top wall, x from..to] and [down the side wall, y from..to].
+const WIN_TOP: [number, number][] = [[25, 85], [148, 252]];
+const WIN_SIDE: [number, number][] = [[30, 85], [132, 182]];
+
+function FloorPlan() {
   const still = useReducedMotion();
   const at = (d: number) => (still ? 0 : B_AT + d);
-  const plots = ROWS.flatMap((y, r) => Array.from({ length: 6 }, (_, c) => ({ n: r * 6 + c + 1, x: LX + c * PW, y })));
-  const trees = Array.from({ length: 11 }, (_, i) => LX + 30 + i * 60);
+  // A point of a flat's local frame on the sheet.
+  const place = (f: (typeof FLATS)[number], x: number, y: number) => ({ x: f.ox + f.sx * x, y: f.oy + f.sy * y });
+  const label = (s: string, x: number, y: number, size: number, fill: string, weight = 500) => (
+    <text x={x} y={y} fill={fill} fontSize={size} fontWeight={weight} fontFamily="Sora, sans-serif" textAnchor="middle" letterSpacing="0.06em">{s}</text>
+  );
   return (
     <g>
-      {/* Site boundary */}
-      <motion.rect x={LX - 20} y={ROWS[0] - 20} width={LW + 40} height={ROWS[3] + PH + 20 - (ROWS[0] - 20)} fill="none"
-        stroke={LINE} strokeWidth={1.6} strokeDasharray="16 5 3 5" {...draw(at(0), 1.4)} />
-      {/* Main road with its centre line, and the gate on the left */}
-      <motion.path d={`M${LX - 20} ${ROAD_Y} H${LX + LW + 20} M${LX - 20} ${ROAD_Y + ROAD_H} H${LX + LW + 20}`} stroke={LINE} strokeWidth={1.4} fill="none" {...draw(at(0.4), 1)} />
-      <motion.line x1={LX - 10} y1={ROAD_Y + ROAD_H / 2} x2={LX + LW + 10} y2={ROAD_Y + ROAD_H / 2} stroke={SOFT} strokeWidth={1.2} strokeDasharray="14 10" {...draw(at(0.9), 1)} />
-      <motion.g {...appear(at(1.2))}>
-        <path d={`M${LX - 26} ${ROAD_Y - 6} V${ROAD_Y + 8} M${LX - 26} ${ROAD_Y + ROAD_H - 8} V${ROAD_Y + ROAD_H + 6}`} stroke={SAFETY} strokeWidth={3} />
-        <text x={LX - 34} y={ROAD_Y + ROAD_H / 2 + 4} fill={SOFT} fontSize={9.5} fontFamily="Sora, sans-serif" textAnchor="end">GATE</text>
-        <text x={LX + LW / 2} y={ROAD_Y + ROAD_H / 2 - 7} fill={SOFT} fontSize={9.5} letterSpacing="0.14em" fontFamily="Sora, sans-serif" textAnchor="middle">12.00 m ROAD</text>
+      {/* Outside walls: the slab drawn as a double line */}
+      <motion.rect x={PX0} y={PY0} width={PX1 - PX0} height={PY1 - PY0} fill="none" stroke={LINE} strokeWidth={2.4} {...draw(at(0), 1.4)} />
+      <motion.rect x={PX0 + 6} y={PY0 + 6} width={PX1 - PX0 - 12} height={PY1 - PY0 - 12} fill="none" stroke={SOFT} strokeWidth={1} {...draw(at(0.3), 1.4)} />
+      <motion.line x1={PX0} y1={PY0 + FD} x2={PX1} y2={PY0 + FD} stroke={LINE} strokeWidth={1.6} {...draw(at(0.5), 0.9)} />
+
+      {/* The core: two lifts, the lobby, a dog-leg stair and a service shaft */}
+      <motion.g {...appear(at(0.7), 0.5)}>
+        <path d={`M${CORE_X} ${PY0} V${PY1} M${CORE_X + 110} ${PY0} V${PY1}`} stroke={LINE} strokeWidth={1.6} />
+        {[CORE_X + 12, CORE_X + 58].map((x) => (
+          <g key={x}>
+            <rect x={x} y={PY0 + 14} width={40} height={46} fill="rgba(220,236,255,0.04)" stroke={LINE} strokeWidth={1.2} />
+            <path d={`M${x} ${PY0 + 14} L${x + 40} ${PY0 + 60} M${x + 40} ${PY0 + 14} L${x} ${PY0 + 60}`} stroke={SOFT} strokeWidth={1} />
+          </g>
+        ))}
+        {label("LIFTS", CORE_X + 55, PY0 + 76, 9, SOFT)}
+        {label("LOBBY", CORE_X + 55, PY0 + 168, 10, LINE, 600)}
+        <rect x={CORE_X + 70} y={PY0 + 228} width={28} height={28} fill="none" stroke={SOFT} strokeWidth={1} />
+        <path d={`M${CORE_X + 70} ${PY0 + 228} l28 28 m0 -28 l-28 28`} stroke={FAINT} strokeWidth={1} />
+        {label("SHAFT", CORE_X + 84, PY0 + 270, 7.5, SOFT)}
+        {/* Stair: two flights either side of the mid wall, a landing at the top, and the way up */}
+        <rect x={CORE_X + 12} y={PY0 + 280} width={86} height={110} fill="none" stroke={LINE} strokeWidth={1.2} />
+        <line x1={CORE_X + 55} y1={PY0 + 296} x2={CORE_X + 55} y2={PY0 + 390} stroke={LINE} strokeWidth={1.2} />
+        {Array.from({ length: 10 }, (_, i) => PY0 + 300 + i * 9).map((y) => (
+          <path key={y} d={`M${CORE_X + 12} ${y} H${CORE_X + 53} M${CORE_X + 57} ${y} H${CORE_X + 98}`} stroke={SOFT} strokeWidth={0.9} />
+        ))}
+        <path d={`M${CORE_X + 33} ${PY0 + 384} V${PY0 + 302} M${CORE_X + 29} ${PY0 + 309} L${CORE_X + 33} ${PY0 + 302} L${CORE_X + 37} ${PY0 + 309}`}
+          stroke={SAFETY} strokeWidth={1.3} fill="none" />
+        {label("UP", CORE_X + 77, PY0 + 292, 7.5, SOFT)}
       </motion.g>
-      {/* Avenue trees along the road */}
-      {trees.map((x, i) => (
-        <motion.g key={x} {...appear(at(1.4 + i * 0.05))}>
-          <circle cx={x} cy={ROAD_Y - 3} r={5} fill="rgba(120,200,150,0.18)" stroke="rgba(150,220,170,0.55)" strokeWidth={1} />
-          <circle cx={x + 30} cy={ROAD_Y + ROAD_H + 3} r={5} fill="rgba(120,200,150,0.18)" stroke="rgba(150,220,170,0.55)" strokeWidth={1} />
-        </motion.g>
-      ))}
-      {/* The plots, each with its number; booked ones fill in one by one and take a tick */}
-      {plots.map((pl, i) => {
-        const k = BOOK_ORDER.indexOf(pl.n);
+
+      {FLATS.map((f, fi) => {
+        const k = FLAT_BOOK_ORDER.indexOf(f.name);
         const booked = k >= 0;
-        const bookAt = at(3.2 + k * 0.55);
+        const bookAt = at(3.4 + k * 0.7);
+        const box = { x: Math.min(f.ox, f.ox + f.sx * FW), y: Math.min(f.oy, f.oy + f.sy * FD) };
+        const tag = place(f, 192, 92);
+        const tick = place(f, 258, 14);
+        const balcony = place(f, 200, -9);
         return (
-          <g key={pl.n}>
-            <motion.rect x={pl.x + 3} y={pl.y} width={PW - 6} height={PH} stroke={LINE} strokeWidth={1.2}
-              initial={{ pathLength: 0, opacity: 0, fill: "rgba(220,236,255,0.03)" }}
-              animate={{ pathLength: 1, opacity: 1, fill: booked ? ["rgba(220,236,255,0.03)", "rgba(244,180,0,0.88)"] : "rgba(220,236,255,0.03)" }}
-              transition={{ pathLength: { delay: at(1.6 + i * 0.04), duration: 0.5 }, opacity: { delay: at(1.6 + i * 0.04), duration: 0.01 },
-                fill: still ? { duration: 0 } : { delay: bookAt, duration: 0.4 } }} />
-            <motion.text x={pl.x + PW / 2} y={pl.y + PH / 2 + 4} fontSize={12} fontWeight={600} fontFamily="Sora, sans-serif" textAnchor="middle"
-              initial={{ opacity: 0, fill: LINE }}
-              animate={{ opacity: 1, fill: booked ? [LINE, "#0b2742"] : LINE }}
-              transition={{ opacity: { delay: at(2.2 + i * 0.03), duration: 0.35 }, fill: still ? { duration: 0 } : { delay: bookAt, duration: 0.4 } }}>
-              {`P-${String(pl.n).padStart(2, "0")}`}</motion.text>
+          <g key={f.name}>
+            {/* Booked: the flat takes a wash of the crane's yellow */}
+            <motion.rect x={box.x} y={box.y} width={FW} height={FD}
+              initial={{ fill: "rgba(244,180,0,0)" }} animate={{ fill: booked ? "rgba(244,180,0,0.2)" : "rgba(244,180,0,0)" }}
+              transition={still ? { duration: 0 } : { delay: bookAt, duration: 0.5 }} />
+            {/* Walls, doors, windows and the balcony, drawn in the flat's own frame */}
+            <g transform={`translate(${f.ox} ${f.oy}) scale(${f.sx} ${f.sy})`}>
+              {ROOMS.map((r, ri) => (
+                <motion.rect key={ri} x={r.x} y={r.y} width={r.w} height={r.h} fill="none" stroke={LINE} strokeWidth={1.2}
+                  {...draw(at(0.9 + fi * 0.25 + ri * 0.08), 0.8)} />
+              ))}
+              {DOORS.map((d, di) => (
+                <motion.path key={di} d={d} stroke={SOFT} strokeWidth={1.1} fill="none" {...draw(at(1.9 + fi * 0.1 + di * 0.06), 0.5)} />
+              ))}
+              <motion.g {...appear(at(2.1 + fi * 0.1))}>
+                {WIN_TOP.map(([a, b]) => (
+                  <g key={a}><rect x={a} y={-1} width={b - a} height={8} fill="#0f3354" stroke={LINE} strokeWidth={1} /><line x1={a} y1={3} x2={b} y2={3} stroke={SOFT} strokeWidth={1} /></g>
+                ))}
+                {WIN_SIDE.map(([a, b]) => (
+                  <g key={a}><rect x={-1} y={a} width={8} height={b - a} fill="#0f3354" stroke={LINE} strokeWidth={1} /><line x1={3} y1={a} x2={3} y2={b} stroke={SOFT} strokeWidth={1} /></g>
+                ))}
+                <rect x={140} y={-24} width={120} height={23} fill="none" stroke={SOFT} strokeWidth={1} strokeDasharray="5 3" />
+                {/* Kitchen counter along two walls, with the sink */}
+                <path d="M175 188 H263 V125" stroke={SOFT} strokeWidth={1} fill="none" />
+                <rect x={225} y={181} width={18} height={12} rx={3} fill="none" stroke={SOFT} strokeWidth={1} />
+              </motion.g>
+            </g>
+            {/* Room names and sizes, upright whichever way the flat is mirrored */}
+            <motion.g {...appear(at(2.4 + fi * 0.1))}>
+              {ROOMS.map((r, ri) => {
+                const c = place(f, r.x + r.w / 2, r.y + (r.small ? r.h * 0.62 : r.h * 0.42));
+                return (
+                  <g key={ri}>
+                    {label(r.name, c.x, c.y, r.small ? 7.5 : 9, LINE, 600)}
+                    {label(r.size, c.x, c.y + 12, r.small ? 7 : 8, SOFT)}
+                  </g>
+                );
+              })}
+              {label("BALCONY", balcony.x, balcony.y + 3, 7.5, SOFT)}
+              {label(`FLAT ${f.name} · 2 BHK`, tag.x, tag.y, 9.5, LINE, 700)}
+            </motion.g>
             {booked && (
               <motion.g initial={{ opacity: 0, scale: still ? 1 : 0 }} animate={{ opacity: 1, scale: 1 }} style={{ originX: "50%", originY: "50%" }}
                 transition={still ? { duration: 0 } : { delay: bookAt + 0.15, type: "spring", stiffness: 420, damping: 14 }}>
-                <circle cx={pl.x + PW - 18} cy={pl.y + 15} r={8} fill="#0b2742" />
-                <path d={`M${pl.x + PW - 22} ${pl.y + 15} l3 3 l6 -6`} stroke={SAFETY} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx={tick.x} cy={tick.y} r={8} fill="#0b2742" stroke={SAFETY} strokeWidth={1} />
+                <path d={`M${tick.x - 4} ${tick.y} l3 3 l6 -6`} stroke={SAFETY} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
               </motion.g>
             )}
           </g>
         );
       })}
-      {/* A plot's size, and the legend */}
-      <motion.g {...appear(at(2.8))}>
-        <path d={`M${LX + 3} ${ROWS[0] - 9} H${LX + PW - 3} M${LX + 3} ${ROWS[0] - 13} V${ROWS[0] - 5} M${LX + PW - 3} ${ROWS[0] - 13} V${ROWS[0] - 5}`} stroke={SOFT} strokeWidth={1} />
-        <text x={LX + PW / 2} y={ROWS[0] - 12} fill={SOFT} fontSize={9} fontFamily="Sora, sans-serif" textAnchor="middle">12.00 × 9.60 m</text>
-        <g transform={`translate(${LX - 20} 760)`}>
-          <rect width={14} height={10} fill="rgba(244,180,0,0.88)" stroke={LINE} strokeWidth={1} />
+
+      {/* Overall sizes, the legend and the sheet's name */}
+      <motion.g {...appear(at(2.9))}>
+        <path d={`M${PX0} 732 H${PX1} M${PX0} 726 V738 M${PX1} 726 V738 M${PX0 - 4} 736 L${PX0 + 4} 728 M${PX1 - 4} 736 L${PX1 + 4} 728`} stroke={SOFT} strokeWidth={1} />
+        {label("21.60 m", (PX0 + PX1) / 2, 727, 9, SOFT)}
+        <path d={`M48 ${PY0} V${PY1} M42 ${PY0} H54 M42 ${PY1} H54 M44 ${PY0 + 4} L52 ${PY0 - 4} M44 ${PY1 + 4} L52 ${PY1 - 4}`} stroke={SOFT} strokeWidth={1} />
+        <text x={0} y={0} transform={`translate(43 ${(PY0 + PY1) / 2}) rotate(-90)`} fill={SOFT} fontSize={9} fontFamily="Sora, sans-serif" textAnchor="middle">13.10 m</text>
+        <g transform={`translate(${PX0 - 20} 760)`}>
+          <rect width={14} height={10} fill="rgba(244,180,0,0.45)" stroke={LINE} strokeWidth={1} />
           <text x={20} y={9} fill={SOFT} fontSize={10} fontFamily="Sora, sans-serif">BOOKED</text>
           <rect x={90} width={14} height={10} fill="rgba(220,236,255,0.03)" stroke={LINE} strokeWidth={1} />
           <text x={110} y={9} fill={SOFT} fontSize={10} fontFamily="Sora, sans-serif">AVAILABLE</text>
         </g>
-        <text x={LX - 20} y={810} fill={LINE} fillOpacity={0.8} fontSize={12} fontWeight={600} letterSpacing="0.16em" fontFamily="Sora, sans-serif">LP-002 · LAYOUT PLAN · PHASE 2 · 24 PLOTS</text>
+        <text x={PX0 - 20} y={810} fill={LINE} fillOpacity={0.8} fontSize={12} fontWeight={600} letterSpacing="0.16em" fontFamily="Sora, sans-serif">TP-02 · TYPICAL FLOOR PLAN · TOWER A · 4 FLATS PER FLOOR</text>
       </motion.g>
     </g>
   );
@@ -497,7 +578,7 @@ function Drawing() {
         )}
         {!still && (
           <g clipPath={`url(#${id("sheet-b")})`}>
-            <g transform={`translate(${B_X} 0)`}><Layout /></g>
+            <g transform={`translate(${B_X} 0)`}><FloorPlan /></g>
           </g>
         )}
       </g>
