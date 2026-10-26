@@ -12,8 +12,8 @@ import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import {
-  generateDepreciation, getGeneratePreview, getGenerateRuns, getPostingHistory,
-  type GenerateOutcome, type GenerateResult,
+  generateDepreciation, generateDepreciationRange, getGeneratePreview, getGenerateRuns, getPostingHistory,
+  type GenerateOutcome, type GenerateRangeResult, type GenerateResult,
 } from "@/api/fixedAssetDepreciationGenerateApi";
 import { Field, INP, Mark, KEY_INK, KEY_LINE, LBL, RULE, fmt } from "./record/config";
 import { currentMonth, fmtAmt, lastClosedMonth, monthLabel, monthMark } from "./depreciationRun/config";
@@ -33,17 +33,31 @@ export default function FixedAssetDepreciationGenerate() {
 
   const [projectId, setProjectId] = useState("");
   const [monthValue, setMonthValue] = useState(lastClosedMonth());
+  // Custom month range: run every month from `fromValue` to `toValue` in one go (oldest first).
+  const [rangeMode, setRangeMode] = useState(false);
+  const [fromValue, setFromValue] = useState(lastClosedMonth());
+  const [toValue, setToValue] = useState(lastClosedMonth());
+  const [rangeResult, setRangeResult] = useState<GenerateRangeResult | null>(null);
   const [tab, setTab] = useState<Tab>("assets");
   const [confirmOpen, setConfirmOpen] = useState(false);
   // What the last Generate click did for the selected project + month (to show "generated now").
   const [lastResult, setLastResult] = useState<GenerateResult | null>(null);
 
+  // In range mode the asset list shows the range's last month; the run itself covers the whole range.
+  const shownMonthValue = rangeMode ? toValue : monthValue;
   const [year, month] = useMemo(() => {
-    const [y, m] = monthValue.split("-").map(Number);
+    const [y, m] = shownMonthValue.split("-").map(Number);
     return [y || 0, m || 0] as const;
-  }, [monthValue]);
+  }, [shownMonthValue]);
+  const rangeMonths = useMemo(() => {
+    const [fy, fm] = fromValue.split("-").map(Number);
+    const [ty, tm] = toValue.split("-").map(Number);
+    if (!fy || !fm || !ty || !tm) return 0;
+    return (ty * 12 + tm) - (fy * 12 + fm) + 1;
+  }, [fromValue, toValue]);
+  const rangeError = !rangeMode ? null : rangeMonths < 1 ? "The 'To' month can't be before the 'From' month." : rangeMonths > 36 ? "A range can cover at most 36 months." : null;
 
-  useEffect(() => { setLastResult(null); }, [projectId, monthValue]);
+  useEffect(() => { setLastResult(null); setRangeResult(null); }, [projectId, monthValue, fromValue, toValue, rangeMode]);
 
   const { data: projects = [] } = useQuery({ queryKey: ["enterprise-options-P"], queryFn: () => getEnterpriseOptions(undefined, "P") });
 
@@ -82,6 +96,26 @@ export default function FixedAssetDepreciationGenerate() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const runRange = useMutation({
+    mutationFn: () => {
+      const [fy, fm] = fromValue.split("-").map(Number);
+      const [ty, tm] = toValue.split("-").map(Number);
+      return generateDepreciationRange(pid, { year: fy, month: fm }, { year: ty, month: tm });
+    },
+    onSuccess: (res) => {
+      setRangeResult(res);
+      const c = res.counts;
+      if (res.stoppedAt) toast.error(`Stopped at ${monthLabel(res.stoppedAt.year, res.stoppedAt.month)}: ${res.stoppedAt.message}`);
+      if (c.generated > 0) toast.success(`${c.generated} posting${c.generated === 1 ? "" : "s"} generated across ${res.months.length} month${res.months.length === 1 ? "" : "s"} — ₹${fmtAmt(res.totalAmount)}`);
+      else if (!res.stoppedAt) toast.info(`Nothing new to generate — ${c.alreadyPosted} already posted${c.skipped ? `, ${c.skipped} not due` : ""}`);
+      if (c.failed > 0) toast.warning(`${c.failed} posting(s) failed — see the month list`);
+      ["fa-dep-generate-preview", "fa-dep-generate-history", "fa-dep-generate-runs", "fixed-asset-dashboard"].forEach((k) =>
+        qc.invalidateQueries({ queryKey: [k] }),
+      );
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const outcomeOf = useMemo(() => {
     const m = new Map<number, GenerateOutcome>();
     for (const r of lastResult?.results ?? []) m.set(r.assetId, r.outcome);
@@ -100,6 +134,9 @@ export default function FixedAssetDepreciationGenerate() {
   );
   const projectLabel = projects.find((p) => String(p.id) === projectId)?.label;
   const monthName = year && month ? monthLabel(year, month) : "";
+  const fromParts = fromValue.split("-").map(Number);
+  const rangeLabel = rangeMode && rangeMonths > 1 && fromParts[0] && fromParts[1] ? `${monthLabel(fromParts[0], fromParts[1])} – ${monthName}` : monthName;
+  const working = generate.isPending || runRange.isPending;
   const due = preview?.counts.pending ?? 0;
   const mark = preview && monthMark(preview.monthStatus);
 
@@ -134,28 +171,77 @@ export default function FixedAssetDepreciationGenerate() {
         <div className="space-y-5">
           {/* ── The run: project, month, Generate ── */}
           <div className="bg-card" style={{ border: RULE }}>
-            <div className="p-5 grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_14rem_auto] gap-5 items-end">
+            <div className={`p-5 grid grid-cols-1 gap-5 items-end ${rangeMode ? "md:grid-cols-[minmax(0,1fr)_12rem_12rem_auto]" : "md:grid-cols-[minmax(0,1fr)_14rem_auto]"}`}>
               <Field label="Project" required>
                 <SearchableNativeSelect className={INP} value={projectId} onChange={(e) => setProjectId(e.target.value)} searchPlaceholder="Search project…">
                   <option value="">Select project</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </SearchableNativeSelect>
               </Field>
-              <Field label="Month" required>
-                <MonthInput className={INP} value={monthValue} max={currentMonth()} clearable={false} onChange={(e) => setMonthValue(e.target.value)} />
-              </Field>
+              {rangeMode ? (
+                <>
+                  <Field label="From month" required>
+                    <MonthInput className={INP} value={fromValue} max={currentMonth()} clearable={false} onChange={(e) => setFromValue(e.target.value)} />
+                  </Field>
+                  <Field label="To month" required>
+                    <MonthInput className={INP} value={toValue} max={currentMonth()} clearable={false} onChange={(e) => setToValue(e.target.value)} />
+                  </Field>
+                </>
+              ) : (
+                <Field label="Month" required>
+                  <MonthInput className={INP} value={monthValue} max={currentMonth()} clearable={false} onChange={(e) => setMonthValue(e.target.value)} />
+                </Field>
+              )}
               {rights.canCreate && (
                 <button
-                  onClick={() => preview && setConfirmOpen(true)}
-                  disabled={!ready || !preview || due === 0 || generate.isPending}
-                  title={preview && due === 0 ? "Nothing is due for this project and month" : "Generate depreciation"}
+                  onClick={() => (rangeMode ? setConfirmOpen(true) : preview && setConfirmOpen(true))}
+                  disabled={rangeMode ? !ready || !!rangeError || working : !ready || !preview || due === 0 || working}
+                  title={rangeMode ? "Run depreciation for every month in the range" : preview && due === 0 ? "Nothing is due for this project and month" : "Generate depreciation"}
                   className={`${KEY_INK} h-10 px-5 w-full md:w-auto`}
                 >
-                  {generate.isPending ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                  Generate{due > 0 ? ` (${due})` : ""}
+                  {working ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                  {rangeMode ? `Run${rangeMonths > 1 ? ` (${rangeMonths} months)` : ""}` : `Generate${due > 0 ? ` (${due})` : ""}`}
                 </button>
               )}
             </div>
+            <div className="px-5 pb-4 flex flex-wrap items-center gap-3">
+              <label className="inline-flex items-center gap-2 text-xs text-foreground cursor-pointer select-none">
+                <input type="checkbox" checked={rangeMode} onChange={(e) => setRangeMode(e.target.checked)} />
+                Custom month range <span className="text-muted-foreground">— run several months at once</span>
+              </label>
+              {rangeError && <span className="text-xs text-destructive">{rangeError}</span>}
+            </div>
+
+            {rangeResult && (
+              <div className="px-5 py-4" style={{ borderTop: RULE }}>
+                <p className={LBL}>Range result · {rangeResult.counts.generated} generated · {rangeResult.counts.alreadyPosted} already posted · ₹{fmtAmt(rangeResult.totalAmount)}</p>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-muted-foreground"><th className="py-1 pr-4">Month</th><th className="pr-4">Generated</th><th className="pr-4">Already posted</th><th className="pr-4">Not due</th><th className="pr-4">Failed</th><th className="text-right">Amount</th></tr>
+                    </thead>
+                    <tbody>
+                      {rangeResult.months.map((m) => (
+                        <tr key={`${m.year}-${m.month}`} style={{ borderTop: "1px solid hsl(var(--foreground) / 0.12)" }}>
+                          <td className="py-1 pr-4 font-semibold text-foreground">{monthLabel(m.year, m.month)}</td>
+                          {m.error ? (
+                            <td colSpan={5} className="text-destructive">{m.error}</td>
+                          ) : (
+                            <>
+                              <td className="pr-4">{m.counts?.generated}</td>
+                              <td className="pr-4">{m.counts?.alreadyPosted}</td>
+                              <td className="pr-4">{m.counts?.skipped}</td>
+                              <td className={`pr-4 ${m.counts?.failed ? "text-destructive font-semibold" : ""}`}>{m.counts?.failed}</td>
+                              <td className="text-right">₹{fmtAmt(m.totalAmount ?? 0)}</td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {ready && preview && (
               <>
@@ -242,12 +328,13 @@ export default function FixedAssetDepreciationGenerate() {
 
       {confirmOpen && (
         <GenerateConfirm
-          month={monthName}
+          month={rangeLabel}
           project={projectLabel}
           due={due}
           posted={preview?.counts.posted ?? 0}
           amount={dueAmount}
-          onConfirm={() => generate.mutate()}
+          range={rangeMode}
+          onConfirm={() => (rangeMode ? runRange.mutate() : generate.mutate())}
           onClose={() => setConfirmOpen(false)}
         />
       )}

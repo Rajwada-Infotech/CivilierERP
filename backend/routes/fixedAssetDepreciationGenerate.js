@@ -9,7 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { projectAllowed } = require("../services/projectScope");
 const { todayIst } = require("../services/fixedAssetAutoDepreciation");
 const {
-  previewProjectMonth, generateProjectMonth, postingHistory, generateRuns,
+  previewProjectMonth, generateProjectMonth, generateProjectRange, postingHistory, generateRuns,
 } = require("../services/fixedAssetDepreciationGenerate");
 
 router.use(authenticateToken);
@@ -61,6 +61,27 @@ router.post("/generate", requirePageRight(PAGE, "create"), async (req, res) => {
   } catch (err) {
     console.error("[fixedAssetDepreciationGenerate] POST /generate:", err.message);
     const status = err.code === "BAD_PERIOD" ? 400 : err.code === "BUSY" ? 409 : err.code === "CONFIG_MISSING" ? 409 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── POST /generate-range { projectId, fromYear, fromMonth, toYear, toMonth } — bulk run over a custom month range ──
+router.post("/generate-range", requirePageRight(PAGE, "create"), async (req, res) => {
+  const email = requireUser(req, res);
+  if (!email) return;
+  const projectId = toInt(req.body.projectId);
+  const from = { year: toYear(req.body.fromYear), month: toMonth(req.body.fromMonth) };
+  const to = { year: toYear(req.body.toYear), month: toMonth(req.body.toMonth) };
+  if (!projectId || !from.year || !from.month || !to.year || !to.month) {
+    return res.status(400).json({ error: "projectId, fromYear, fromMonth, toYear and toMonth are required" });
+  }
+  if (!projectOk(req, res, projectId)) return;
+  try {
+    const result = await generateProjectRange(getPool(), { projectId, from, to, email, today: todayIst() });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("[fixedAssetDepreciationGenerate] POST /generate-range:", err.message);
+    const status = err.code === "BAD_PERIOD" ? 400 : err.code === "BUSY" ? 409 : 500;
     res.status(status).json({ error: err.message });
   }
 });
