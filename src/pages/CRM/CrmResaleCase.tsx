@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { translateError } from "@/lib/translateError";
@@ -11,6 +10,10 @@ import { DateInput } from "@/components/ui/date-input";
 import {
   ArrowLeft, ArrowRight, ArrowRightLeft, Check, ChevronDown, Eye, Loader2, Lock, Undo2, Upload, X, ExternalLink,
 } from "lucide-react";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
+import { localDay } from "./salesDeed/config";
 
 // One resale / buy-back CASE, as a guided flow: the step you're on is open
 // with its checklist (✓ done / ○ still needed), the documents that step needs
@@ -19,13 +22,13 @@ import {
 // server from the real records (GET /api/crm/resales/:id/case).
 
 const API = "/api/crm/resales";
-const fmt = (n: any) => (n == null || n === "" ? "—" : `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+const fmt = (n: any) => (n == null || n === "" ? "—" : fmtRupees(Number(n)));
 const date = (d: any) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
-const label = "text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1";
-const input = "w-full h-9 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
-const btn = "inline-flex items-center justify-center gap-1.5 px-3 h-8 text-xs rounded-lg font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap";
-const primary = `${btn} bg-primary text-primary-foreground hover:bg-primary/90`;
-const ghost = `${btn} border border-border text-foreground hover:bg-muted`;
+const label = `block mb-1 ${LBL}`;
+const input = INP;
+const primary = `${KEY_INK} h-8 px-3 whitespace-nowrap`;
+const ghost = `${KEY_LINE} h-8 px-3 whitespace-nowrap`;
+const headTitle = "px-4 py-2.5 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]";
 
 interface CheckItem { label: string; ok: boolean; hint?: string | null; doc?: string; action?: string; link?: string | null; step?: string }
 interface Stage { key: string; label: string; ok: boolean; na: boolean; state: "done" | "current" | "waiting" | "stopped"; blockers: string[]; detail: string | null; checks: CheckItem[] }
@@ -40,10 +43,11 @@ const ACTION_LABEL: Record<string, string> = {
   clearance: "Confirm seller is clear", noc: "Issue NOC", "buyer-application": "Open buyer's application", "fee-invoice": "Issue fee invoice",
   submit: "Send for approval",
 };
+const docTone = (s: string): "done" | "waiting" | "stopped" => (s === "Verified" ? "done" : s === "Rejected" ? "stopped" : "waiting");
 
 const Tick = ({ ok }: { ok: boolean }) => ok
-  ? <span className="mt-0.5 w-5 h-5 shrink-0 rounded-full bg-emerald-500 text-white grid place-items-center"><Check size={12} /></span>
-  : <span className="mt-0.5 w-5 h-5 shrink-0 rounded-full border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/30" aria-label="still needed" />;
+  ? <span className="mt-0.5 w-5 h-5 shrink-0 bg-foreground text-card grid place-items-center"><Check size={12} /></span>
+  : <span className="mt-0.5 w-5 h-5 shrink-0 border-2 border-foreground/50 bg-card" aria-label="still needed" />;
 
 const CrmResaleCase: React.FC = () => {
   const { id } = useParams();
@@ -53,7 +57,8 @@ const CrmResaleCase: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [deed, setDeed] = useState<any>({ method: "", seller: false, buyer: false, executionDate: "", stampDuty: "", registrationFee: "", paidRef: "", paidBy: "Buyer", regNo: "", regDate: "", regOffice: "" });
-  const [fee, setFee] = useState({ PaymentMode: "", TransactionRef: "", ReceivedDate: new Date().toISOString().slice(0, 10) });
+  // Local today: toISOString gave yesterday before 05:30 IST.
+  const [fee, setFee] = useState({ PaymentMode: "", TransactionRef: "", ReceivedDate: localDay() });
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingDocType = useRef<string>("");
 
@@ -123,11 +128,15 @@ const CrmResaleCase: React.FC = () => {
     call(`doc-${d.Id}`, `documents/${d.Id}/review`, { decision, remarks }, decision);
   };
 
-  if (q.isLoading) return <CrmShell title="Resale case" subtitle=""><div className="p-10 grid place-items-center text-muted-foreground"><Loader2 className="animate-spin" /></div></CrmShell>;
+  if (q.isLoading) return (
+    <SheetShell eyebrow="CivilierERP · CRM · Resale" title="Resale case">
+      <div className="p-10 grid place-items-center text-muted-foreground"><Loader2 className="animate-spin" /></div>
+    </SheetShell>
+  );
   if (q.isError || !st || !c) return (
-    <CrmShell title="Resale case" subtitle="">
-      <div className="p-6 text-sm text-red-600">{(q.error as any)?.message || "Case not found"} · <Link className="underline" to="/crm/resales">All cases</Link></div>
-    </CrmShell>
+    <SheetShell eyebrow="CivilierERP · CRM · Resale" title="Resale case">
+      <div className="p-6 text-sm text-destructive">{(q.error as any)?.message || "Case not found"} · <Link className="underline" to="/crm/resales">All cases</Link></div>
+    </SheetShell>
   );
 
   const steps = st.stages;
@@ -140,17 +149,17 @@ const CrmResaleCase: React.FC = () => {
   // A document slot inside a checklist row: its state, and what can be done with it now.
   const DocSlot = ({ type, active }: { type: string; active: boolean }) => {
     const d = latestDoc(type);
-    const chip = !d ? null
-      : d.Status === "Verified" ? <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-900">Verified</span>
-      : d.Status === "Rejected" ? <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900" title={d.Remarks || undefined}>Rejected</span>
-      : <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900">Waiting to be verified</span>;
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        {chip}
+        {d && (
+          <span title={d.Status === "Rejected" ? d.Remarks || undefined : undefined}>
+            <SheetMark text={d.Status === "Uploaded" ? "Waiting to be verified" : d.Status} tone={docTone(d.Status)} />
+          </span>
+        )}
         {d && <button className={ghost} onClick={() => viewDoc(d)}><Eye size={12} /> View</button>}
         {canEdit && active && d?.Status === "Uploaded" && <>
-          <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={busy === `doc-${d.Id}`} onClick={() => review(d, "Verified")}>Verify</button>
-          <button className={ghost} disabled={busy === `doc-${d.Id}`} onClick={() => review(d, "Rejected")}>Reject</button>
+          <button className={primary} disabled={busy === `doc-${d.Id}`} onClick={() => review(d, "Verified")}>Verify</button>
+          <button className={`${ghost} !text-destructive !border-destructive`} disabled={busy === `doc-${d.Id}`} onClick={() => review(d, "Rejected")}>Reject</button>
         </>}
         {canEdit && active && (!d || d.Status === "Rejected") && (
           <button className={ghost} disabled={busy === `up-${type}`} onClick={() => pickFile(type)}>
@@ -165,16 +174,16 @@ const CrmResaleCase: React.FC = () => {
   const deedFields = (step: string) => {
     if (step === "Consented") return (
       <div className="grid sm:grid-cols-3 gap-2 items-end">
-        <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={deed.seller} onChange={(e) => setDeed({ ...deed, seller: e.target.checked })} /> Seller consents</label>
-        {isResale && <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={deed.buyer} onChange={(e) => setDeed({ ...deed, buyer: e.target.checked })} /> Buyer consents</label>}
+        <label className="text-sm flex items-center gap-2"><input type="checkbox" className="accent-foreground" checked={deed.seller} onChange={(e) => setDeed({ ...deed, seller: e.target.checked })} /> Seller consents</label>
+        {isResale && <label className="text-sm flex items-center gap-2"><input type="checkbox" className="accent-foreground" checked={deed.buyer} onChange={(e) => setDeed({ ...deed, buyer: e.target.checked })} /> Buyer consents</label>}
         <div><span className={label}>How</span><input className={input} value={deed.method} onChange={(e) => setDeed({ ...deed, method: e.target.value })} placeholder="Signed draft, in person, email…" /></div>
       </div>
     );
-    if (step === "Executed") return <div className="max-w-xs"><span className={label}>Signed on</span><DateInput value={deed.executionDate} onChange={(e: any) => setDeed({ ...deed, executionDate: e.target.value })} /></div>;
+    if (step === "Executed") return <div className="max-w-xs"><span className={label}>Signed on</span><DateInput className={input} max={localDay()} value={deed.executionDate} onChange={(e: any) => setDeed({ ...deed, executionDate: e.target.value })} /></div>;
     if (step === "DutyPaid") return (
       <div className="grid sm:grid-cols-4 gap-2">
-        <div><span className={label}>Stamp duty (as assessed)</span><input type="number" min={0} className={input} value={deed.stampDuty} onChange={(e) => setDeed({ ...deed, stampDuty: e.target.value })} /></div>
-        <div><span className={label}>Registration fee</span><input type="number" min={0} className={input} value={deed.registrationFee} onChange={(e) => setDeed({ ...deed, registrationFee: e.target.value })} /></div>
+        <div><span className={label}>Stamp duty (as assessed)</span><input type="number" min={0} className={`${input} tabular-nums`} value={deed.stampDuty} onChange={(e) => setDeed({ ...deed, stampDuty: e.target.value })} /></div>
+        <div><span className={label}>Registration fee</span><input type="number" min={0} className={`${input} tabular-nums`} value={deed.registrationFee} onChange={(e) => setDeed({ ...deed, registrationFee: e.target.value })} /></div>
         <div><span className={label}>GRN / challan no.</span><input className={input} value={deed.paidRef} onChange={(e) => setDeed({ ...deed, paidRef: e.target.value })} /></div>
         <div><span className={label}>Paid by</span><select className={input} value={deed.paidBy} onChange={(e) => setDeed({ ...deed, paidBy: e.target.value })}>{["Buyer", "Seller", "Developer", "Shared"].map((x) => <option key={x}>{x}</option>)}</select></div>
       </div>
@@ -182,7 +191,7 @@ const CrmResaleCase: React.FC = () => {
     if (step === "Registered") return (
       <div className="grid sm:grid-cols-3 gap-2">
         <div><span className={label}>Registration no.</span><input className={input} value={deed.regNo} onChange={(e) => setDeed({ ...deed, regNo: e.target.value })} /></div>
-        <div><span className={label}>Registered on</span><DateInput value={deed.regDate} onChange={(e: any) => setDeed({ ...deed, regDate: e.target.value })} /></div>
+        <div><span className={label}>Registered on</span><DateInput className={input} max={localDay()} value={deed.regDate} onChange={(e: any) => setDeed({ ...deed, regDate: e.target.value })} /></div>
         <div><span className={label}>Sub-Registrar office</span><input className={input} value={deed.regOffice} onChange={(e) => setDeed({ ...deed, regOffice: e.target.value })} /></div>
       </div>
     );
@@ -200,7 +209,7 @@ const CrmResaleCase: React.FC = () => {
     const isNextDeed = !!ch.step && ch.step === c.DeedNext;
     const docReady = ch.doc ? latestDoc(ch.doc)?.Status === "Verified" : true;
     return (
-      <li key={i} className="py-2.5 flex flex-col gap-2">
+      <li key={i} className="py-2.5 flex flex-col gap-2" style={i ? { borderTop: RULE_SOFT } : undefined}>
         <div className="flex items-start gap-3">
           <Tick ok={ch.ok} />
           <div className="flex-1 min-w-0">
@@ -232,18 +241,18 @@ const CrmResaleCase: React.FC = () => {
           </div>
         </div>
         {canEdit && active && firstOpen && ch.action === "fee-payment" && (
-          <div className="ml-8 grid sm:grid-cols-4 gap-2 items-end rounded-lg border border-dashed border-border p-3">
+          <div className="ml-8 grid sm:grid-cols-4 gap-2 items-end p-3" style={{ border: RULE_SOFT }}>
             <div><span className={label}>Mode</span>
               <select className={input} value={fee.PaymentMode} onChange={(e) => setFee({ ...fee, PaymentMode: e.target.value })}>
                 <option value="">Choose</option>{["NEFT", "RTGS", "IMPS", "UPI", "Cheque", "Cash"].map((m) => <option key={m}>{m}</option>)}
               </select></div>
             <div><span className={label}>Reference</span><input className={input} value={fee.TransactionRef} onChange={(e) => setFee({ ...fee, TransactionRef: e.target.value })} placeholder="UTR / cheque no." /></div>
-            <div><span className={label}>Received on</span><DateInput value={fee.ReceivedDate} onChange={(e: any) => setFee({ ...fee, ReceivedDate: e.target.value })} /></div>
-            <button className={primary} disabled={busy === "fee"} onClick={() => call("fee", "case/fee-payment", fee, "Sent to Finance for approval")}>Send to Finance</button>
+            <div><span className={label}>Received on</span><DateInput className={input} max={localDay()} value={fee.ReceivedDate} onChange={(e: any) => setFee({ ...fee, ReceivedDate: e.target.value })} /></div>
+            <button className={`${primary} h-9`} disabled={busy === "fee"} onClick={() => call("fee", "case/fee-payment", fee, "Sent to Finance for approval")}>Send to Finance</button>
           </div>
         )}
         {canEdit && active && isNextDeed && (
-          <div className="ml-8 rounded-lg border border-dashed border-border p-3 space-y-2">
+          <div className="ml-8 p-3 space-y-2" style={{ border: RULE_SOFT }}>
             {deedFields(ch.step!)}
             {ch.doc && !docReady && <p className="text-[0.6875rem] text-muted-foreground">{ch.step === "Draft" ? "Upload the draft above first." : "Upload the document above and have it verified first."}</p>}
             <button className={primary} disabled={busy === "deed" || (ch.step === "Draft" ? !latestDoc("DeedDraft") : !docReady)}
@@ -255,110 +264,125 @@ const CrmResaleCase: React.FC = () => {
   };
 
   return (
-    <CrmShell title={`${isResale ? "Resale" : "Buy-back"} · ${c.Property}`} subtitle={`Case #${c.Id} · Booking ${c.BookingNo}`}>
+    <>
       <Breadcrumbs items={["CRM", "Resale", `Case #${c.Id}`]} />
-      <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Resale"
+        title={`${isResale ? "Resale" : "Buy-back"} · ${c.Property}`}
+        subtitle={`Case #${c.Id} · Booking ${c.BookingNo}`}
+        action={<button onClick={() => nav("/crm/resales")} className={`${KEY_LINE} h-9 px-3`}><ArrowLeft size={13} /> All cases</button>}
+      >
+        <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
 
-      {/* Who → who, and where it stands */}
-      <section className="rounded-xl border border-border bg-card p-4 mb-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <button onClick={() => nav("/crm/resales")} className={ghost}><ArrowLeft size={13} /> All cases</button>
-          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full border border-border">
-            {isResale ? <><ArrowRightLeft size={11} /> Resale</> : <><Undo2 size={11} /> Buy-back</>}
-          </span>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="font-semibold">{c.FromName}</span>
-            <ArrowRight size={14} className="text-muted-foreground" />
-            <span className="font-semibold">{isResale ? c.ToName || "new buyer" : "back to us"}</span>
-          </div>
-          <span className="ml-auto text-xs font-medium">
-            {finished ? (c.Status === "Completed" ? `Completed ${date(c.CompletedAt)}` : c.Status) : `Step ${curIdx + 1} of ${steps.length}: ${steps[curIdx]?.label}`}
-          </span>
-        </div>
-        <div className="mt-3 h-1.5 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={doneCount} aria-valuemax={steps.length}>
-          <div className={`h-full ${c.Status === "Rejected" || c.Status === "Cancelled" ? "bg-muted-foreground/40" : "bg-emerald-500"}`} style={{ width: `${Math.round((doneCount / steps.length) * 100)}%` }} />
-        </div>
-        {["Rejected", "Cancelled"].includes(c.Status) && c.RejectionNote && <p className="mt-3 text-sm text-red-600">{c.Status === "Rejected" ? "Sent back: " : ""}{c.RejectionNote}</p>}
-      </section>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-        {/* The guided steps */}
-        <ol className="space-y-2">
-          {steps.map((s, i) => {
-            const isOpen = open === s.key;
-            const active = s.state === "current";
-            const locked = s.state === "waiting";
-            const todo = s.checks.filter((x) => !x.ok).length;
-            return (
-              <li key={s.key} className={`rounded-xl border bg-card ${active ? "border-primary/60 ring-1 ring-primary/20" : "border-border"} ${s.na ? "opacity-60" : ""}`}>
-                <button className="w-full flex items-center gap-3 px-4 py-3 text-left" onClick={() => setOpen(isOpen ? null : s.key)} aria-expanded={isOpen}>
-                  <span className={`w-7 h-7 shrink-0 rounded-full grid place-items-center text-xs font-semibold ${s.ok || s.na ? "bg-emerald-500 text-white" : active ? "bg-primary text-primary-foreground" : s.state === "stopped" ? "bg-muted text-muted-foreground" : "border border-dashed border-border text-muted-foreground"}`}>
-                    {s.ok || s.na ? <Check size={14} /> : s.state === "stopped" ? <X size={13} /> : locked ? <Lock size={12} /> : i + 1}
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className={`block text-sm font-semibold ${active ? "text-primary" : ""}`}>{s.label}</span>
-                    <span className="block text-[0.6875rem] text-muted-foreground truncate">
-                      {s.na ? "Not needed" : s.ok ? s.detail || "Done" : active ? `${todo} thing${todo === 1 ? "" : "s"} left` : locked ? "Opens after the steps above" : s.detail || ""}
-                    </span>
-                  </span>
-                  {active && <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-primary">You are here</span>}
-                  <ChevronDown size={16} className={`text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
-                </button>
-                {isOpen && (
-                  <div className="px-4 pb-4 border-t border-border">
-                    {locked && <p className="pt-3 text-xs text-muted-foreground">Opens once "{steps[curIdx]?.label}" is done. It will need:</p>}
-                    <ul className="divide-y divide-border">{s.checks.map((ch, ci) => renderCheck(s, ch, ci, active))}</ul>
-                    {s.key === "clearance" && active && canEdit && !c.SellerClearedAt && (
-                      <button className="text-xs text-primary underline mt-1" onClick={() => call("loan", "case/seller-loan", { hasLoan: !c.SellerHasLoan }, "Saved")}>
-                        {c.SellerHasLoan ? "The seller has no home loan" : "The seller has a home loan"}
-                      </button>
-                    )}
-                    {s === last && active && rights.canEdit && (
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-3">
-                        <p className="text-xs text-muted-foreground max-w-prose">
-                          {isResale ? "The booking, its schedule and everything paid pass to the buyer. The seller's agreement stays as history and the buyer gets portal access."
-                            : "Finance pays the agreed price; when they approve it the property returns to stock."}
-                        </p>
-                        {isResale
-                          ? <button className={primary} disabled={!readyToFinish || busy === "finish"} onClick={() => { if (window.confirm(`Pass ${c.Property} to ${c.ToName}?`)) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
-                          : <button className={primary} disabled={!readyToFinish || busy === "finish" || !!c.PayoutNewPaymentId} onClick={() => call("finish", "send-to-finance", {}, "Sent to Finance")}>Send payout to Finance</button>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-
-        {/* Summary rail */}
-        <aside className="space-y-4">
-          <section className="rounded-xl border border-border bg-card p-4 text-sm space-y-3">
-            <div><span className={label}>Property</span>{c.Property}<span className="block text-[0.6875rem] text-muted-foreground">Booking {c.BookingNo}{c.BookingIds?.length > 1 ? ` + ${c.BookingIds.length - 1} more, moving as one property` : ""}</span></div>
-            <div className="grid grid-cols-2 gap-2">
-              <div><span className={label}>Paid so far</span><span className="tabular-nums">{fmt(c.OriginalValue)}</span></div>
-              <div><span className={label}>{isResale ? "Price between buyers" : "Buy-back price"}</span><span className="tabular-nums">{fmt(c.AgreedValue)}</span></div>
+        {/* Who → who, and where it stands */}
+        <section className="bg-card p-4 mb-4" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] px-2 h-7" style={{ border: RULE }}>
+              {isResale ? <><ArrowRightLeft size={11} /> Resale</> : <><Undo2 size={11} /> Buy-back</>}
+            </span>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-semibold">{c.FromName}</span>
+              <ArrowRight size={14} className="text-muted-foreground" />
+              <span className="font-semibold">{isResale ? c.ToName || "new buyer" : "back to us"}</span>
             </div>
-            {isResale && <div><span className={label}>Our transfer fee</span><span className="tabular-nums">{Number(c.DeveloperFeeAmount) > 0 ? (Number(c.DeveloperFeeGstAmount) > 0 ? `${fmt(c.DeveloperFeeAmount)} + GST = ${fmt(c.FeeTotal)}` : `${fmt(c.DeveloperFeeAmount)} (no GST)`) : "None"}</span></div>}
-            {c.NocNo && <div><span className={label}>NOC</span>{c.NocNo}</div>}
-            {c.DeedRegNo && <div><span className={label}>Registered deed</span>{c.DeedRegNo}<span className="block text-[0.6875rem] text-muted-foreground">{date(c.DeedRegDate)} · {c.DeedRegOffice}</span></div>}
-          </section>
-          <section className="rounded-xl border border-border bg-card p-4">
-            <h3 className="text-sm font-semibold mb-2">All documents</h3>
-            {st.documents.length === 0 ? <p className="text-xs text-muted-foreground">Each step asks for its own documents.</p> : (
-              <ul className="space-y-1.5">
-                {st.documents.map((d) => (
-                  <li key={d.Id} className="flex items-center justify-between gap-2 text-xs">
-                    <button className="text-left truncate hover:underline" onClick={() => viewDoc(d)}>{st.docTypes[d.DocumentType] || d.DocumentType}</button>
-                    <span className={d.Status === "Verified" ? "text-emerald-600" : d.Status === "Rejected" ? "text-red-600" : "text-amber-600"}>{d.Status === "Uploaded" ? "To verify" : d.Status}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </aside>
-      </div>
-    </CrmShell>
+            <span className="ml-auto">
+              {finished
+                ? <SheetMark text={c.Status === "Completed" ? `Completed ${date(c.CompletedAt)}` : c.Status} tone={c.Status === "Completed" ? "done" : "stopped"} />
+                : <span className="text-xs font-medium"><span className="font-heading tabular-nums">Step {curIdx + 1} of {steps.length}</span>: {steps[curIdx]?.label}</span>}
+            </span>
+          </div>
+          <div className="mt-3 h-2" style={{ border: RULE_SOFT }} role="progressbar" aria-valuenow={doneCount} aria-valuemax={steps.length}>
+            <div className={`h-full ${c.Status === "Rejected" || c.Status === "Cancelled" ? "bg-foreground/30" : "bg-foreground"}`} style={{ width: `${Math.round((doneCount / steps.length) * 100)}%` }} />
+          </div>
+          {["Rejected", "Cancelled"].includes(c.Status) && c.RejectionNote && <p className="mt-3 text-sm text-destructive">{c.Status === "Rejected" ? "Sent back: " : ""}{c.RejectionNote}</p>}
+        </section>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+          {/* The guided steps */}
+          <ol className="space-y-2">
+            {steps.map((s, i) => {
+              const isOpen = open === s.key;
+              const active = s.state === "current";
+              const locked = s.state === "waiting";
+              const todo = s.checks.filter((x) => !x.ok).length;
+              return (
+                <li key={s.key} className={`bg-card ${s.na ? "opacity-60" : ""}`} style={{ border: RULE, borderLeft: active ? "3px solid hsl(var(--foreground))" : RULE }}>
+                  <button className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-primary/5 transition-colors" onClick={() => setOpen(isOpen ? null : s.key)} aria-expanded={isOpen}>
+                    <span className={`w-7 h-7 shrink-0 grid place-items-center font-heading text-xs font-bold tabular-nums ${
+                      s.ok || s.na ? "bg-foreground text-card border border-foreground"
+                      : active ? "bg-card text-foreground border-2 border-foreground"
+                      : s.state === "stopped" ? "bg-destructive text-white border border-destructive"
+                      : "border border-dashed border-foreground/30 text-muted-foreground"}`}>
+                      {s.ok || s.na ? <Check size={14} /> : s.state === "stopped" ? <X size={13} /> : locked ? <Lock size={12} /> : i + 1}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-heading text-[0.75rem] font-bold uppercase tracking-[0.1em]">{s.label}</span>
+                      <span className="block text-[0.6875rem] text-muted-foreground truncate">
+                        {s.na ? "Not needed" : s.ok ? s.detail || "Done" : active ? `${todo} thing${todo === 1 ? "" : "s"} left` : locked ? "Opens after the steps above" : s.detail || ""}
+                      </span>
+                    </span>
+                    {active && <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] px-1.5 py-0.5 bg-foreground text-card">You are here</span>}
+                    <ChevronDown size={16} className={`text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {isOpen && (
+                    <div className="px-4 pb-4" style={{ borderTop: RULE_SOFT }}>
+                      {locked && <p className="pt-3 text-xs text-muted-foreground">Opens once "{steps[curIdx]?.label}" is done. It will need:</p>}
+                      <ul>{s.checks.map((ch, ci) => renderCheck(s, ch, ci, active))}</ul>
+                      {s.key === "clearance" && active && canEdit && !c.SellerClearedAt && (
+                        <button className="text-xs underline underline-offset-2 mt-1" onClick={() => call("loan", "case/seller-loan", { hasLoan: !c.SellerHasLoan }, "Saved")}>
+                          {c.SellerHasLoan ? "The seller has no home loan" : "The seller has a home loan"}
+                        </button>
+                      )}
+                      {s === last && active && canEdit && (
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 p-3" style={{ border: RULE_SOFT }}>
+                          <p className="text-xs text-muted-foreground max-w-prose">
+                            {isResale ? "The booking, its schedule and everything paid pass to the buyer. The seller's agreement stays as history and the buyer gets portal access."
+                              : "Finance pays the agreed price; when they approve it the property returns to stock."}
+                          </p>
+                          {isResale
+                            ? <button className={primary} disabled={!readyToFinish || busy === "finish"} onClick={() => { if (window.confirm(`Pass ${c.Property} to ${c.ToName}?`)) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
+                            : <button className={primary} disabled={!readyToFinish || busy === "finish" || !!c.PayoutNewPaymentId} onClick={() => call("finish", "send-to-finance", {}, "Sent to Finance")}>Send payout to Finance</button>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+
+          {/* Summary rail */}
+          <aside className="space-y-4">
+            <section className="bg-card" style={{ border: RULE }}>
+              <h3 className={headTitle} style={{ borderBottom: RULE }}>The property</h3>
+              <div className="p-4 text-sm space-y-3">
+                <div><span className={label}>Property</span>{c.Property}<span className="block text-[0.6875rem] text-muted-foreground tabular-nums">Booking {c.BookingNo}{c.BookingIds?.length > 1 ? ` + ${c.BookingIds.length - 1} more, moving as one property` : ""}</span></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><span className={label}>Paid so far</span><span className="font-heading tabular-nums">{fmt(c.OriginalValue)}</span></div>
+                  <div><span className={label}>{isResale ? "Price between buyers" : "Buy-back price"}</span><span className="font-heading tabular-nums">{fmt(c.AgreedValue)}</span></div>
+                </div>
+                {isResale && <div><span className={label}>Our transfer fee</span><span className="font-heading tabular-nums">{Number(c.DeveloperFeeAmount) > 0 ? (Number(c.DeveloperFeeGstAmount) > 0 ? `${fmt(c.DeveloperFeeAmount)} + GST = ${fmt(c.FeeTotal)}` : `${fmt(c.DeveloperFeeAmount)} (no GST)`) : "None"}</span></div>}
+                {c.NocNo && <div><span className={label}>NOC</span><span className="tabular-nums">{c.NocNo}</span></div>}
+                {c.DeedRegNo && <div><span className={label}>Registered deed</span><span className="tabular-nums">{c.DeedRegNo}</span><span className="block text-[0.6875rem] text-muted-foreground">{date(c.DeedRegDate)} · {c.DeedRegOffice}</span></div>}
+              </div>
+            </section>
+            <section className="bg-card" style={{ border: RULE }}>
+              <h3 className={headTitle} style={{ borderBottom: RULE }}>All documents</h3>
+              {st.documents.length === 0 ? <p className="p-4 text-xs text-muted-foreground">Each step asks for its own documents.</p> : (
+                <ul>
+                  {st.documents.map((d) => (
+                    <li key={d.Id} className="flex items-center justify-between gap-2 text-xs px-4 py-2" style={{ borderBottom: RULE_SOFT }}>
+                      <button className="text-left truncate hover:underline" onClick={() => viewDoc(d)}>{st.docTypes[d.DocumentType] || d.DocumentType}</button>
+                      <SheetMark text={d.Status === "Uploaded" ? "To verify" : d.Status} tone={docTone(d.Status)} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </aside>
+        </div>
+      </SheetShell>
+    </>
   );
 };
 

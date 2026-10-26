@@ -3,6 +3,9 @@ const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmMutation")); }
+const { projectParamGuard, projectPredicate, assertBookingAllowed } = require("../services/projectScope");
+// A document id in the path (the file download takes nothing else) follows its mutation's project.
+router.param("docId", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmMutationDocument x JOIN dbo.CrmMutation m ON m.Id = x.MutationId JOIN dbo.CrmBooking b ON b.Id = m.BookingId WHERE x.Id = @id"));
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -81,17 +84,20 @@ router.get("/", requirePageRight("crm-mutation", "view"), async (req, res) => {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    const reqs = [pool.request(), pool.request(), pool.request()];
+    const req0 = reqs[0];
+    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
     const where = [];
-    if (status) { req0.input("st", sql.NVarChar(20), status); where.push("m.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) where.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (blockId) { bind("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       where.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
+    const countsWhere = where.length ? "WHERE " + where.join(" AND ") : "";
+    if (status) { bind("st", sql.NVarChar(20), status); where.push("m.Status = @st"); }
     const whereClause = where.length ? "WHERE " + where.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${MUT_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
@@ -103,28 +109,17 @@ router.get("/", requirePageRight("crm-mutation", "view"), async (req, res) => {
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmMutation m
+    const FROM = `FROM dbo.CrmMutation m
           JOIN dbo.CrmBooking b ON b.Id = m.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR m.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
-        `),
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, statusResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${whereClause}`),
+      reqs[2].query(`SELECT m.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY m.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = Object.fromEntries(statusResult.recordset.map((r) => [r.Status, r.n]));
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-mutation] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -159,7 +154,7 @@ router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async
       JOIN dbo.CrmRegistry reg ON reg.BookingId = b.Id AND reg.Status = 'Completed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND ISNULL(sd.Status, '') <> 'Cancelled'
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)${projectPredicate(req.projectScope, "b.ProjectId")}
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -205,6 +200,7 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

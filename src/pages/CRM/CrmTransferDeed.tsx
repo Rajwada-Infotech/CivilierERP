@@ -4,9 +4,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
-import { Check, ExternalLink, Eye, Loader2, ScrollText, Upload, UserCheck } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, CheckCircle2, ExternalLink, Eye, Loader2, ScrollText, Upload, UserCheck } from "lucide-react";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
+import { localDay } from "./salesDeed/config";
 
 // The detail of one TRANSFER DEED (a resale's deed of assignment: seller +
 // buyer + us; a buy-back's cancellation deed: seller + us), laid out like the
@@ -19,25 +22,25 @@ import { Check, ExternalLink, Eye, Loader2, ScrollText, Upload, UserCheck } from
 const API = "/api/crm/transfer-deeds";
 type Tab = "Overview" | "Documents" | "Legal & Approval" | "Stamp Duty" | "Registry" | "History";
 const TABS: Tab[] = ["Overview", "Documents", "Legal & Approval", "Stamp Duty", "Registry", "History"];
-const label = "text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1";
-const input = "w-full h-9 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
-const btn = "inline-flex items-center justify-center gap-1.5 px-3 h-8 text-xs rounded-lg font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap";
-const primary = `${btn} btn-module text-white hover:shadow-lg`;
-const ghost = `${btn} border border-border text-foreground hover:bg-muted`;
-const danger = `${btn} border border-red-200 text-red-600 bg-red-50/50 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300`;
-const card = "rounded-xl border border-border p-4 space-y-3";
-const money = (n: any) => (n == null ? "—" : `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+const label = `block mb-1 ${LBL}`;
+const input = INP;
+const primary = `${KEY_INK} h-8 px-3 whitespace-nowrap`;
+const ghost = `${KEY_LINE} h-8 px-3 whitespace-nowrap`;
+const danger = `${KEY_LINE} h-8 px-3 whitespace-nowrap !text-destructive !border-destructive`;
+const card = "bg-card border border-foreground p-4 space-y-3";
+const head = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
+const money = (n: any) => (n == null ? "—" : fmtRupees(Number(n)));
 const when = (d: any) => (d ? new Date(d).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
-const docChip = (s: string) => s === "Verified" ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300 dark:border-green-900"
-  : s === "Rejected" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900"
-  : s === "Uploaded" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900"
-  : "bg-muted text-muted-foreground border-border";
+const docTone = (s: string): "done" | "waiting" | "stopped" | "none" => (s === "Verified" || s === "Approved" ? "done" : s === "Rejected" ? "stopped" : s === "Uploaded" || s === "Pending" ? "waiting" : "none");
+const Mark = ({ s, text }: { s: string; text: string }) => docTone(s) === "none"
+  ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{text}</span>
+  : <SheetMark text={text} tone={docTone(s) as "done" | "waiting" | "stopped"} />;
 const docWord: Record<string, string> = { Requested: "Not uploaded", Uploaded: "To verify", Verified: "Verified", Rejected: "Rejected" };
 const STEP_TAB: Record<string, Tab> = { papers: "Documents", legal: "Legal & Approval", parties: "Legal & Approval", date: "Legal & Approval", duty: "Stamp Duty", executed: "Legal & Approval", registry: "Registry" };
 
 const Tick = ({ ok }: { ok: boolean }) => ok
-  ? <span className="mt-0.5 w-5 h-5 shrink-0 rounded-full bg-emerald-500 text-white grid place-items-center"><Check size={12} /></span>
-  : <span className="mt-0.5 w-5 h-5 shrink-0 rounded-full border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/30" aria-label="still needed" />;
+  ? <span className="mt-0.5 w-5 h-5 shrink-0 bg-foreground text-card grid place-items-center"><Check size={12} /></span>
+  : <span className="mt-0.5 w-5 h-5 shrink-0 border-2 border-foreground/50 bg-card" aria-label="still needed" />;
 
 /** "Who told us, and how" — the record staff keep when acting for a party (proxy). */
 function ProxyFields({ methods, value, onChange, who }: { methods: string[]; value: { ProxyMethod: string; ProxyRemarks: string }; onChange: (v: any) => void; who: string }) {
@@ -56,10 +59,11 @@ function ProxyFields({ methods, value, onChange, who }: { methods: string[]; val
 export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { id: number; canEdit: boolean; initialTab?: Tab }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>(initialTab || "Overview");
+  // ?tab= comes from links: only a real tab is taken (another value left the page with no tab open).
+  const [tab, setTab] = useState<Tab>(initialTab && TABS.includes(initialTab) ? initialTab : "Overview");
   const [proxy, setProxy] = useState<Record<string, { ProxyMethod: string; ProxyRemarks: string }>>({});
   const [remarks, setRemarks] = useState<Record<string, string>>({});
-  const [f, setF] = useState<any>({ date: "", dateBy: "Company", StampDuty: "", RegistrationFee: "", PayableBy: "", DutyRemarks: "", PaidRef: "", AmountPaid: "", PaidOn: new Date().toISOString().slice(0, 10), Office: "", ScheduledAt: "", Attendees: "", RegNo: "", RegDate: "", newDoc: "", newDocParty: "Company", exec: "" });
+  const [f, setF] = useState<any>({ date: "", dateBy: "Company", StampDuty: "", RegistrationFee: "", PayableBy: "", DutyRemarks: "", PaidRef: "", AmountPaid: "", PaidOn: localDay(), Office: "", ScheduledAt: "", Attendees: "", RegNo: "", RegDate: "", newDoc: "", newDocParty: "Company", exec: "" });
   const fileRef = useRef<HTMLInputElement>(null);
   const pending = useRef<{ url: string; fields: Record<string, string> } | null>(null);
   const P = (k: string) => proxy[k] || { ProxyMethod: "", ProxyRemarks: "" };
@@ -72,7 +76,11 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       return r.json();
     },
   });
-  const execs = useQuery<any[]>({ queryKey: ["crm-transfer-deed-execs"], queryFn: async () => (await fetchWithAuth(`${API}/legal-executives`)).json(), staleTime: 300_000 });
+  const execs = useQuery<any[]>({
+    queryKey: ["crm-transfer-deed-execs"],
+    queryFn: async () => { const r = await fetchWithAuth(`${API}/legal-executives`); const j = await r.json().catch(() => []); return r.ok && Array.isArray(j) ? j : []; },
+    staleTime: 300_000,
+  });
   const st = q.data;
   const d = st?.deed;
   // A new deed (or one that moved on) opens on the tab its current stage lives on.
@@ -127,7 +135,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
   };
 
   if (q.isLoading) return <div className="p-10 grid place-items-center text-muted-foreground"><Loader2 className="animate-spin" /></div>;
-  if (q.isError || !st || !d) return <div className="p-6 text-sm text-red-600">{(q.error as any)?.message || "Not found"}</div>;
+  if (q.isError || !st || !d) return <div className="p-6 text-sm text-destructive">{(q.error as any)?.message || "Not found"}</div>;
 
   const methods: string[] = st.proxyMethods || [];
   const docs: any[] = st.documents;
@@ -159,48 +167,44 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
     <div className="space-y-3">
       <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && sendFile(e.target.files[0])} />
 
-      <div className="rounded-xl border border-border bg-card px-3 py-2">
+      <div className="bg-card p-3 space-y-3" style={{ border: RULE }}>
         <div className="flex items-center overflow-x-auto thin-scroll pb-1">
           {chips.map((s, i) => (
             <React.Fragment key={s.label}>
-              <button onClick={() => setTab(s.tab)} className={cn("flex items-center gap-1.5 shrink-0 rounded-lg px-2 py-1.5 hover:bg-muted/60 transition-colors", tab === s.tab ? "bg-muted/50" : "")}>
-                <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ring-2",
-                  s.state === "done" ? "bg-emerald-500 text-white ring-emerald-200 dark:ring-emerald-900" : s.state === "current" ? "bg-primary text-primary-foreground ring-primary/25" : "bg-muted text-muted-foreground ring-transparent")}>
-                  {s.state === "done" ? <Check size={11} /> : i + 1}
+              <button onClick={() => setTab(s.tab)} className={`flex items-center gap-1.5 shrink-0 px-2 py-1.5 hover:bg-primary/10 transition-colors ${tab === s.tab ? "bg-primary/10" : ""}`}>
+                <span className={`w-6 h-6 flex items-center justify-center text-[0.625rem] font-bold shrink-0 border ${
+                  s.state === "done" ? "bg-foreground text-card border-foreground" : s.state === "current" ? "bg-card text-foreground border-foreground border-2" : "bg-card text-muted-foreground border-foreground/25"}`}>
+                  {s.state === "done" ? <Check size={11} /> : <span className="font-heading tabular-nums">{i + 1}</span>}
                 </span>
-                <span className={cn("text-[0.6875rem] font-semibold whitespace-nowrap", s.state === "done" ? "text-emerald-600 dark:text-emerald-400" : s.state === "current" ? "text-foreground" : "text-muted-foreground/60")}>{s.label}</span>
+                <span className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap ${s.state === "upcoming" ? "text-muted-foreground/60" : "text-foreground"}`}>{s.label}</span>
               </button>
-              {i < chips.length - 1 && <div className={cn("w-4 h-px mx-0.5 shrink-0", chips[i + 1].state !== "upcoming" ? "bg-emerald-400" : "bg-border")} />}
+              {i < chips.length - 1 && <div className={`w-4 h-px mx-0.5 shrink-0 ${chips[i + 1].state !== "upcoming" ? "bg-foreground" : "bg-foreground/20"}`} />}
             </React.Fragment>
           ))}
         </div>
+        {banner && (
+          <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-3 bg-card"
+            style={{ border: RULE_SOFT, borderLeft: `3px solid ${banner.v === "error" ? "hsl(var(--destructive))" : banner.v === "success" ? "hsl(var(--foreground) / 0.3)" : "hsl(var(--foreground))"}` }}>
+            <span className={`text-sm font-semibold flex items-center gap-2 ${banner.v === "error" ? "text-destructive" : ""}`}>
+              {banner.v === "error" ? <AlertCircle size={15} /> : banner.v === "success" ? <CheckCircle2 size={15} /> : <ArrowRight size={15} />}{banner.t}
+            </span>
+            {banner.tab && banner.tab !== tab && <button className={`${KEY_INK} h-9 px-4`} onClick={() => setTab(banner.tab as Tab)}>Go to {banner.tab}</button>}
+          </div>
+        )}
       </div>
 
-      {banner && (
-        <div className={cn("rounded-xl border px-4 py-2.5 flex items-center justify-between gap-3",
-          banner.v === "error" ? "border-red-200 bg-red-50/60 text-red-700 dark:bg-red-950/20 dark:border-red-900 dark:text-red-300"
-          : banner.v === "success" ? "border-green-200 bg-green-50/60 text-green-700 dark:bg-green-950/20 dark:border-green-900 dark:text-green-300"
-          : "border-primary/30 bg-primary/5")}>
-          <span className="text-sm font-medium">{banner.t}</span>
-          {banner.tab && banner.tab !== tab && <button className={primary} onClick={() => setTab(banner.tab as Tab)}>Go to {banner.tab}</button>}
-        </div>
-      )}
 
       {/* Header */}
-      <div className="rounded-xl border border-border overflow-hidden">
-        <div className={cn("px-4 py-3 flex items-center justify-between gap-3 flex-wrap border-b",
-          d.Status === "Registered" ? "bg-gradient-to-r from-green-500/10 to-green-500/5 border-green-200/60 dark:border-green-900/40"
-          : d.Status === "Cancelled" ? "bg-gradient-to-r from-red-500/10 to-red-500/5 border-red-200/60 dark:border-red-900/40" : "bg-muted/20 border-border")}>
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-xl shrink-0 bg-primary/10"><ScrollText size={16} className="text-primary" /></div>
-            <div className="min-w-0">
-              <h2 className="font-bold text-[0.9375rem] leading-tight truncate">{d.SellerName}<span className="font-normal opacity-60"> → {d.DeedType === "Assignment" ? d.BuyerName : "us (buy-back)"}</span></h2>
-              <p className="text-[0.6875rem] font-mono text-muted-foreground mt-0.5">{d.DeedNo}{d.VersionNo > 1 && <span className="ml-1.5 text-violet-600">· v{d.VersionNo}</span>}<span className="ml-1.5">· {d.BookingNo} · {d.Property}</span></p>
-            </div>
+      <div className="bg-card" style={{ border: RULE }}>
+        <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <span className={`block ${LBL}`}>{d.DeedType === "Assignment" ? "Deed of assignment" : "Cancellation deed"}</span>
+            <h2 className="font-heading font-bold text-lg leading-tight truncate flex items-center gap-2"><ScrollText size={16} /> {d.SellerName}<span className="font-normal text-muted-foreground"> → {d.DeedType === "Assignment" ? d.BuyerName : "us (buy-back)"}</span></h2>
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">{d.DeedNo}{d.VersionNo > 1 && <span className="ml-1.5 font-semibold text-foreground">· version {d.VersionNo}</span>}<span className="ml-1.5">· {d.BookingNo} · {d.Property}</span></p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs px-2.5 py-1 rounded-lg border font-semibold bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-900">{d.DeedType === "Assignment" ? "Deed of assignment" : "Cancellation deed"} · {d.StatusLabel}</span>
-            <Link to={`/crm/resales/${d.ResaleId}`} className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted inline-flex items-center gap-1">Case #{d.ResaleId} <ExternalLink size={10} /></Link>
+            <SheetMark text={d.StatusLabel || d.Status} tone={d.Status === "Registered" ? "done" : d.Status === "Cancelled" ? "stopped" : "waiting"} />
+            <Link to={`/crm/resales/${d.ResaleId}`} className={`${KEY_LINE} h-8 px-2.5`}>Case #{d.ResaleId} <ExternalLink size={10} /></Link>
             {canEdit && !["Executed"].includes(d.Status) && (
               <button className={danger} onClick={() => { const r = window.prompt("Why is this deed cancelled?") || ""; if (r.trim()) call("cancel", "cancel", { remarks: r }, "Cancelled"); }}>Cancel</button>
             )}
@@ -209,10 +213,11 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       </div>
 
       {/* Tabs (same pattern as the Sale Deed page) */}
-      <div className="flex items-center gap-x-1 border-b border-border px-1 overflow-x-auto">
-        {TABS.map((t, i) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>{i + 1}</span>{t}
+      <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+        {TABS.map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${
+            tab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`} style={{ borderRight: RULE_SOFT }}>
+            {t}
           </button>
         ))}
       </div>
@@ -220,12 +225,12 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       {tab === "Overview" && (
         <div className="grid gap-3 md:grid-cols-2">
           <div className={card}>
-            <div className="text-sm font-semibold">Parties</div>
+            <div className={head}>Parties</div>
             {["Seller", ...(d.DeedType === "Assignment" ? ["Buyer"] : [])].map((p) => <div key={p} className="text-sm"><span className={label}>{p}</span>{partyName(p)}</div>)}
             <div className="text-sm"><span className={label}>Developer</span>Us — {d.DeedType === "Assignment" ? "consenting party (our NOC)" : "taking the property back"}</div>
           </div>
           <div className={card}>
-            <div className="text-sm font-semibold">Legal executive</div>
+            <div className={head}>Legal executive</div>
             <div className="flex flex-wrap items-end gap-2">
               <div className="min-w-[220px] flex-1">
                 <select className={input} disabled={!canEdit || !["Draft", "UnderReview", "LegalApproved", "WithParties", "PartiesApproved", "DateApproved"].includes(d.Status)} value={f.exec || d.LegalExecutiveId || ""} onChange={(e) => setF({ ...f, exec: e.target.value })}>
@@ -241,7 +246,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
 
       {tab === "Documents" && (
         <div className="space-y-3">
-          <ul className="divide-y divide-border rounded-xl border border-border">
+          <ul className="bg-card divide-y divide-foreground/15 border border-foreground">
             {papers.map((x) => {
               const pk = `doc-${x.Id}`;
               return (
@@ -252,16 +257,16 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
                       <div className="text-sm font-medium">{x.Label}{!x.IsMandatory && <span className="text-[0.625rem] text-muted-foreground"> · optional</span>}</div>
                       <div className="text-[0.6875rem] text-muted-foreground">{x.Party === "Company" ? "Ours" : `${x.Party} — ${partyName(x.Party)}`}{x.UploadedByType ? ` · uploaded ${x.UploadedByType === "Portal" ? "by them in the portal" : x.UploadedByType === "Proxy" ? "by staff for them" : "by staff"}` : ""}{x.Remarks ? ` · ${x.Remarks}` : ""}</div>
                     </div>
-                    <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border ${docChip(x.Status)}`}>{docWord[x.Status] || x.Status}</span>
+                    <Mark s={x.Status} text={docWord[x.Status] || x.Status} />
                     {x.FileName && <button className={ghost} onClick={() => view(`documents/${x.Id}/file`)}><Eye size={12} /> View</button>}
                     {papersEditable && x.Status === "Uploaded" && <>
-                      <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={!!busy} onClick={() => call(pk, `documents/${x.Id}/review`, { decision: "Verified" }, "Verified")}>Verify</button>
+                      <button className={primary} disabled={!!busy} onClick={() => call(pk, `documents/${x.Id}/review`, { decision: "Verified" }, "Verified")}>Verify</button>
                       <button className={ghost} disabled={!!busy} onClick={() => reject(pk, `documents/${x.Id}/review`, "Reject this document")}>Reject</button>
                     </>}
                     {papersEditable && x.Party === "Company" && !["Verified", "Uploaded"].includes(x.Status) && <button className={ghost} disabled={!!busy} onClick={() => pickFile(`documents/${x.Id}/upload`)}><Upload size={12} /> Upload</button>}
                   </div>
                   {papersEditable && x.Party !== "Company" && !["Verified", "Uploaded"].includes(x.Status) && (
-                    <div className="ml-8 rounded-lg border border-dashed border-border p-2.5 space-y-2">
+                    <div className="ml-8 border border-foreground/15 p-2.5 space-y-2">
                       <p className="text-[0.6875rem] text-muted-foreground">{partyName(x.Party)} uploads it in their portal — or upload what they sent you:</p>
                       <ProxyFields methods={methods} who={x.Party.toLowerCase()} value={P(pk)} onChange={(v) => setProxy({ ...proxy, [pk]: v })} />
                       <button className={ghost} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={() => pickFile(`documents/${x.Id}/upload`, P(pk))}><Upload size={12} /> Upload for them</button>
@@ -286,7 +291,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
         <div className="space-y-3">
           {/* Legal Head */}
           <div className={card}>
-            <div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold">Legal Head approval</div><span className="text-[0.6875rem] text-muted-foreground">{steps[1].ok ? "Approved" : d.SeniorApprovalStatus === "Pending" ? "Waiting" : "Not sent yet"}</span></div>
+            <div className="flex items-center justify-between gap-2"><div className={head}>Legal Head approval</div><span className="text-[0.6875rem] text-muted-foreground">{steps[1].ok ? "Approved" : d.SeniorApprovalStatus === "Pending" ? "Waiting" : "Not sent yet"}</span></div>
             {d.SeniorRemarks && <p className="text-xs text-muted-foreground">{d.SeniorRemarks}</p>}
             {canEdit && d.Status === "Draft" && <button className={primary} disabled={busy === "submit"} onClick={() => call("submit", "submit", {}, "Sent to the Legal Head")}>Send to the Legal Head</button>}
             {canEdit && d.Status === "UnderReview" && (
@@ -299,21 +304,21 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           </div>
           {/* Parties */}
           <div className={card}>
-            <div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold">{st.parties.length > 1 ? "Seller & buyer review the draft" : "Seller reviews the draft"}</div>
+            <div className="flex items-center justify-between gap-2"><div className={head}>{st.parties.length > 1 ? "Seller & buyer review the draft" : "Seller reviews the draft"}</div>
               {canEdit && d.Status === "LegalApproved" && <button className={primary} disabled={busy === "send"} onClick={() => call("send", "send-to-parties", {}, "Sent — they can answer in the portal")}>Send to the portal</button>}</div>
             {st.parties.map((p: string) => {
               const s = d[`${p}Approval`];
               const pk = `party-${p}`;
               return (
-                <div key={p} className="rounded-lg border border-border p-3 space-y-2">
+                <div key={p} className="border border-foreground/15 p-3 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <UserCheck size={14} className="text-muted-foreground" />
                     <span className="text-sm font-medium flex-1">{p} — {partyName(p)}</span>
-                    <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border ${s === "Approved" ? docChip("Verified") : s === "Pending" ? docChip("Uploaded") : docChip("")}`}>{s === "Approved" ? "Approved" : s === "Pending" ? "Reviewing in the portal" : "Not sent yet"}</span>
+                    <Mark s={s || ""} text={s === "Approved" ? "Approved" : s === "Pending" ? "Reviewing in the portal" : "Not sent yet"} />
                   </div>
                   {d[`${p}Remarks`] && <p className="text-[0.6875rem] text-muted-foreground">{d[`${p}Remarks`]}</p>}
                   {canEdit && d.Status === "WithParties" && s === "Pending" && (
-                    <div className="rounded-lg border border-dashed border-border p-2.5 space-y-2">
+                    <div className="border border-foreground/15 p-2.5 space-y-2">
                       <p className="text-[0.6875rem] text-muted-foreground">If {partyName(p)} answered you directly, record it for them:</p>
                       <ProxyFields methods={methods} who={p.toLowerCase()} value={P(pk)} onChange={(v) => setProxy({ ...proxy, [pk]: v })} />
                       <div className="flex flex-wrap gap-2">
@@ -328,14 +333,14 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           </div>
           {/* Signing date */}
           <div className={card}>
-            <div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold">Signing date</div>
+            <div className="flex items-center justify-between gap-2"><div className={head}>Signing date</div>
               <span className="text-[0.6875rem] text-muted-foreground">{d.DeedDate ? `Approved: ${d.DeedDate}` : d.ProposedDate ? `Proposed ${d.ProposedDate} by ${d.ProposedBy === "Company" ? "us" : d.ProposedBy}` : "Not proposed"}</span></div>
             {canEdit && d.Status === "PartiesApproved" && d.DateApprovalStatus !== "Pending" && (
-              <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
+              <div className="border border-foreground/15 p-3 space-y-2">
                 <div className="grid sm:grid-cols-[180px_200px] gap-2">
                   <div><span className={label}>Proposed by</span><select className={input} value={f.dateBy} onChange={(e) => setF({ ...f, dateBy: e.target.value })}>
                     {["Company", ...st.parties].map((p: string) => <option key={p} value={p}>{p === "Company" ? "Us" : `${p} (for them)`}</option>)}</select></div>
-                  <div><span className={label}>Date</span><DateInput value={f.date} onChange={(e: any) => setF({ ...f, date: e.target.value })} /></div>
+                  <div><span className={label}>Date</span><DateInput className={input} min={localDay()} value={f.date} onChange={(e: any) => setF({ ...f, date: e.target.value })} /></div>
                 </div>
                 {f.dateBy !== "Company" && <ProxyFields methods={methods} who={f.dateBy.toLowerCase()} value={P("dateprop")} onChange={(v) => setProxy({ ...proxy, dateprop: v })} />}
                 <button className={primary} disabled={!f.date || !!busy || (f.dateBy !== "Company" && (!P("dateprop").ProxyMethod || !P("dateprop").ProxyRemarks.trim()))}
@@ -346,7 +351,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
               const ok = d[`${p}DateAccepted`];
               const pk = `date-${p}`;
               return (
-                <div key={p} className="rounded-lg border border-border p-3 space-y-2">
+                <div key={p} className="border border-foreground/15 p-3 space-y-2">
                   <div className="flex items-center gap-2"><Tick ok={!!ok} /><span className="text-sm flex-1">{p} — {partyName(p)} {ok ? "accepted the date" : "hasn't accepted it yet"}</span></div>
                   {canEdit && !ok && d.DateApprovalStatus !== "Pending" && <>
                     <ProxyFields methods={methods} who={p.toLowerCase()} value={P(pk)} onChange={(v) => setProxy({ ...proxy, [pk]: v })} />
@@ -365,7 +370,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           </div>
           {/* Execution */}
           <div className={card}>
-            <div className="flex items-center justify-between gap-2"><div className="text-sm font-semibold">Execution (signing)</div><span className="text-[0.6875rem] text-muted-foreground">{d.ExecutedAt ? `Executed ${when(d.ExecutedAt)}` : "After the stamp duty is confirmed"}</span></div>
+            <div className="flex items-center justify-between gap-2"><div className={head}>Execution (signing)</div><span className="text-[0.6875rem] text-muted-foreground">{d.ExecutedAt ? `Executed ${when(d.ExecutedAt)}` : "After the stamp duty is confirmed"}</span></div>
             {canEdit && d.Status === "DateApproved" && <button className={primary} disabled={busy === "x" || payment?.Status !== "Confirmed"} title={payment?.Status !== "Confirmed" ? "Confirm the stamp duty first" : undefined}
               onClick={() => { if (window.confirm(`Every party signed ${d.DeedNo} on ${d.DeedDate}?`)) call("x", "execute", {}, "Marked executed"); }}>Mark executed</button>}
           </div>
@@ -375,17 +380,17 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       {tab === "Stamp Duty" && (
         <div className="space-y-3">
           <div className={card}>
-            <div className="text-sm font-semibold">Stamp duty & registration fee</div>
+            <div className={head}>Stamp duty & registration fee</div>
             {!payment && d.Status !== "DateApproved" && <p className="text-xs text-muted-foreground">Assessed once the signing date is approved — the deed is stamped before it is signed.</p>}
-            {payment && <div className="text-sm">Assessed {money(payment.StampDuty)} stamp duty + {money(payment.RegistrationFee)} registration fee · paid by <b>{payment.PayableBy}</b>{payment.InfoRemarks ? ` · ${payment.InfoRemarks}` : ""}</div>}
-            {payment?.PaidRef && <div className="text-sm flex flex-wrap items-center gap-2">Paid {money(payment.AmountPaid)} · {payment.PaidRef} · {payment.ProofUploadedByType === "Portal" ? "uploaded by them" : payment.ProofUploadedByType === "Proxy" ? "uploaded by staff for them" : "uploaded by staff"}
+            {payment && <div className="text-sm tabular-nums">Assessed {money(payment.StampDuty)} stamp duty + {money(payment.RegistrationFee)} registration fee · paid by <b>{payment.PayableBy}</b>{payment.InfoRemarks ? ` · ${payment.InfoRemarks}` : ""}</div>}
+            {payment?.PaidRef && <div className="text-sm tabular-nums flex flex-wrap items-center gap-2">Paid {money(payment.AmountPaid)} · {payment.PaidRef} · {payment.ProofUploadedByType === "Portal" ? "uploaded by them" : payment.ProofUploadedByType === "Proxy" ? "uploaded by staff for them" : "uploaded by staff"}
               <button className={ghost} onClick={() => view("duty/proof")}><Eye size={12} /> Proof</button></div>}
             {payment?.ConfirmRemarks && <p className="text-[0.6875rem] text-muted-foreground">{payment.ConfirmRemarks}</p>}
-            {payment?.Status === "Confirmed" && <p className="text-sm text-green-700 dark:text-green-300">Confirmed</p>}
+            {payment?.Status === "Confirmed" && <SheetMark text="Confirmed" tone="done" />}
           </div>
           {canEdit && d.Status === "DateApproved" && (!payment || (payment.Status === "InfoSent" && !payment.PaidRef)) && (
             <div className={card}>
-              <div className="text-xs font-medium">{payment ? "Change the assessment" : "Assessment from the Sub-Registrar"}</div>
+              <div className={head}>{payment ? "Change the assessment" : "Assessment from the Sub-Registrar"}</div>
               <div className="grid sm:grid-cols-4 gap-2">
                 <div><span className={label}>Stamp duty</span><input type="number" min={0} className={input} value={f.StampDuty} onChange={(e) => setF({ ...f, StampDuty: e.target.value })} /></div>
                 <div><span className={label}>Registration fee</span><input type="number" min={0} className={input} value={f.RegistrationFee} onChange={(e) => setF({ ...f, RegistrationFee: e.target.value })} /></div>
@@ -398,11 +403,11 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           )}
           {canEdit && payment?.Status === "InfoSent" && (
             <div className={card}>
-              <div className="text-xs font-medium">Paid? The payer uploads the challan in their portal — or upload what they sent you</div>
+              <div className={head}>Paid? The payer uploads the challan in their portal — or upload what they sent you</div>
               <div className="grid sm:grid-cols-3 gap-2">
                 <div><span className={label}>GRN / challan no.</span><input className={input} value={f.PaidRef} onChange={(e) => setF({ ...f, PaidRef: e.target.value })} /></div>
                 <div><span className={label}>Amount paid</span><input type="number" min={0} className={input} value={f.AmountPaid} onChange={(e) => setF({ ...f, AmountPaid: e.target.value })} /></div>
-                <div><span className={label}>Paid on</span><DateInput value={f.PaidOn} onChange={(e: any) => setF({ ...f, PaidOn: e.target.value })} /></div>
+                <div><span className={label}>Paid on</span><DateInput className={input} max={localDay()} value={f.PaidOn} onChange={(e: any) => setF({ ...f, PaidOn: e.target.value })} /></div>
               </div>
               {payment.PayableBy !== "Developer" && <ProxyFields methods={methods} who="payer" value={P("duty")} onChange={(v) => setProxy({ ...proxy, duty: v })} />}
               <button className={ghost} disabled={!f.PaidRef || !(Number(f.AmountPaid) > 0) || !!busy || (payment.PayableBy !== "Developer" && (!P("duty").ProxyMethod || !P("duty").ProxyRemarks.trim()))}
@@ -410,7 +415,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
             </div>
           )}
           {canEdit && payment?.Status === "ProofUploaded" && (
-            <div className={cn(card, "flex flex-wrap items-end gap-2 space-y-0")}>
+            <div className={`${card} flex flex-wrap items-end gap-2 space-y-0`}>
               <div className="flex-1 min-w-[200px]"><span className={label}>Remarks</span><input className={input} value={remarks.duty || ""} onChange={(e) => setRemarks({ ...remarks, duty: e.target.value })} placeholder="Needed if the amount differs from the assessment" /></div>
               <button className={primary} disabled={!!busy} onClick={() => call("dutyok", "duty/confirm", { remarks: remarks.duty }, "Confirmed")}>Confirm the payment</button>
               <button className={danger} disabled={!!busy || !(remarks.duty || "").trim()} onClick={() => call("dutyok", "duty/return", { remarks: remarks.duty }, "Sent back")}>Send back</button>
@@ -422,11 +427,11 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       {tab === "Registry" && (
         <div className="space-y-3">
           <div className={card}>
-            <div className="text-sm font-semibold">Sub-Registrar visit</div>
+            <div className={head}>Sub-Registrar visit</div>
             {registry ? <p className="text-sm"><b>{registry.Office}</b> · {when(registry.ScheduledAt)}{registry.Attendees ? ` · ${registry.Attendees}` : ""}{registry.RegNo ? ` · registered ${registry.RegNo}` : ""}</p>
               : <p className="text-xs text-muted-foreground">Scheduled once the deed is executed.</p>}
             {canEdit && d.Status === "Executed" && (
-              <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
+              <div className="border border-foreground/15 p-3 space-y-2">
                 <div className="grid sm:grid-cols-3 gap-2">
                   <div><span className={label}>Office</span><input className={input} value={f.Office} onChange={(e) => setF({ ...f, Office: e.target.value })} placeholder="e.g. ADSR Bidhannagar" /></div>
                   <div><span className={label}>Date & time</span><input type="datetime-local" className={input} value={f.ScheduledAt} onChange={(e) => setF({ ...f, ScheduledAt: e.target.value })} /></div>
@@ -440,19 +445,19 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
             <div className={card}>
               <div className="flex flex-wrap items-center gap-2">
                 <Tick ok={regCopy?.Status === "Verified"} />
-                <span className="text-sm font-semibold flex-1">Registered deed (copy)</span>
-                {regCopy && <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border ${docChip(regCopy.Status)}`}>{docWord[regCopy.Status]}</span>}
+                <span className={`${head} flex-1`}>Registered deed (copy)</span>
+                {regCopy && <Mark s={regCopy.Status} text={docWord[regCopy.Status] || regCopy.Status} />}
                 {regCopy?.FileName && <button className={ghost} onClick={() => view(`documents/${regCopy.Id}/file`)}><Eye size={12} /> View</button>}
                 {canEdit && d.Status === "Executed" && regCopy && !["Verified", "Uploaded"].includes(regCopy.Status) && <button className={ghost} disabled={!!busy} onClick={() => pickFile("registry/copy")}><Upload size={12} /> Upload</button>}
                 {canEdit && regCopy?.Status === "Uploaded" && <>
-                  <button className={`${btn} bg-emerald-600 text-white hover:bg-emerald-700`} disabled={!!busy} onClick={() => call("copy", "registry/copy/verify", {}, "Verified")}>Verify</button>
+                  <button className={primary} disabled={!!busy} onClick={() => call("copy", "registry/copy/verify", {}, "Verified")}>Verify</button>
                   <button className={ghost} disabled={!!busy} onClick={() => reject("copy", "registry/copy/reject", "Reject the copy")}>Reject</button>
                 </>}
               </div>
               {canEdit && d.Status === "Executed" && (
                 <div className="grid sm:grid-cols-[1fr_200px_auto] gap-2 items-end">
                   <div><span className={label}>Registration no.</span><input className={input} value={f.RegNo} onChange={(e) => setF({ ...f, RegNo: e.target.value })} /></div>
-                  <div><span className={label}>Registered on</span><DateInput value={f.RegDate} onChange={(e: any) => setF({ ...f, RegDate: e.target.value })} /></div>
+                  <div><span className={label}>Registered on</span><DateInput className={input} max={localDay()} value={f.RegDate} onChange={(e: any) => setF({ ...f, RegDate: e.target.value })} /></div>
                   <button className={primary} disabled={!f.RegNo.trim() || !f.RegDate || regCopy?.Status !== "Verified" || !!busy} onClick={() => call("done", "registry/complete", { RegNo: f.RegNo, RegDate: f.RegDate }, "Registered")}>Mark registered</button>
                 </div>
               )}
@@ -462,9 +467,9 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       )}
 
       {tab === "History" && (
-        <ol className="rounded-xl border border-border p-4 space-y-2.5">
+        <ol className="bg-card border border-foreground divide-y divide-foreground/15">
           {st.history.map((h: any, i: number) => (
-            <li key={i} className="text-sm flex gap-3">
+            <li key={i} className="text-sm flex gap-3 px-4 py-2.5">
               <span className="text-[0.6875rem] text-muted-foreground w-36 shrink-0 tabular-nums">{when(h.At)}</span>
               <span className="flex-1"><span className="font-medium">{h.Action}</span>
                 <span className="block text-[0.6875rem] text-muted-foreground">

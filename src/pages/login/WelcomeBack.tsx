@@ -9,7 +9,7 @@ export function WelcomeBack({ name }: { name?: string }) {
   return (
     <motion.div
       className="absolute inset-0 z-[60] flex items-center justify-center px-4"
-      style={{ background: "rgba(232,227,217,0.75)", backdropFilter: "blur(6px)" }}
+      style={{ background: "rgba(221,227,232,0.78)", backdropFilter: "blur(6px)" }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, transition: { duration: 0.18 } }}

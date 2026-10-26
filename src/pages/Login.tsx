@@ -1,4 +1,5 @@
-// Sign in. Parts under ./login: config (the look, public figures type) · LoginCard · LoginPhoto · WelcomeBack
+// Sign in. Parts under ./login: config (the look, public figures type) · LoginCard · SiteDrawing · SitePlan · FloatingBits ·
+// WelcomeBack
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
@@ -6,9 +7,10 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { LOGIN_CSS, type PublicStats } from "./login/config";
-import { LoginBackdrop, LoginPhoto } from "./login/LoginPhoto";
+import { SiteBackdrop, SiteDrawing } from "./login/SiteDrawing";
 import { LoginCard } from "./login/LoginCard";
 import { FloatingBits } from "./login/FloatingBits";
+import { SitePlan } from "./login/SitePlan";
 import { WelcomeBack } from "./login/WelcomeBack";
 import { FLOW } from "./login/motion";
 
@@ -77,23 +79,25 @@ export default function Login() {
 
       <AnimatePresence>{loginSuccess && <WelcomeBack name={loginName} />}</AnimatePresence>
 
-      {/* Phone and tablet: the sky and the building fill the screen behind the form. */}
-      <LoginBackdrop />
+      {/* Phone and tablet: the blueprint fills the screen behind the form. */}
+      <SiteBackdrop />
 
-      {/* Wide screens: one white panel on the grey page, the form on the left and the photo on the right. Narrower,
-          the panel goes clear and the form sits in a frosted card over the backdrop. The form stays the last child in
-          the markup (the photo moves right with order): the black-and-white theme keeps the logo in colour through it. */}
+      {/* Wide screens: one drafting-film panel on the grey page, the form on the left and the blueprint on the right.
+          Narrower, the panel goes clear and the form sits in a frosted card over the blueprint. The form stays the last
+          child in the markup (the drawing moves right with order): the black-and-white theme keeps the logo in colour
+          through it. */}
       <div className="min-h-screen flex items-center justify-center p-4 sm:p-5 lg:p-[min(2rem,3vh)]">
         <motion.div
           initial={{ opacity: 0, y: 40, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={FLOW}
-          className="ls-panel bw-login-lift relative z-10 w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-6 lg:rounded-[28px] lg:p-4"
+          className="ls-panel bw-login-lift relative z-10 w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-6 lg:rounded-[24px] lg:p-4"
         >
           <div className="hidden lg:block lg:order-2">
-            <LoginPhoto stats={stats} />
+            <SiteDrawing stats={stats} />
           </div>
           <div className="ls-form-side relative overflow-hidden flex justify-center items-center">
+            <SitePlan />
             <LoginCard
               email={email}
               password={password}

@@ -435,6 +435,8 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
   const agreed = num(b.AgreedValue);
   if (!(agreed > 0)) return res.status(400).json({ error: kind === "BuyBack" ? "Enter the agreed buy-back price" : "Enter the price the buyers agreed (it goes on the transfer and the GL)" });
   try {
+    // The property is named in the body: the path guards don't see it.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
     const pool = getPool();
     const { movingBookings, openResaleOn } = require("../services/crmResaleTransfer");
     const bookings = await movingBookings(pool, bookingId);

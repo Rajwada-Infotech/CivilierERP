@@ -2,97 +2,46 @@ import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import {
-  Plus, CheckCircle2, Search, Upload, Download, Eye, Loader2, AlertTriangle,
-  File as FileIcon, FileImage, FileText as FileTextIcon, History, ScrollText, Link2, Landmark,
-} from "lucide-react";
+import { Plus, CheckCircle2, Upload, AlertTriangle, History, Link2, Landmark, RefreshCw, ScrollText } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePageRights } from "@/hooks/usePageRights";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
+import { downloadFile, fetchFileBlob, fmtDate, localDay, roleKey } from "./salesDeed/config";
+import { DocRow, Panel } from "./salesDeed/parts";
 
 const API = "/api/crm/mutation";
+const STATUS_LABEL: Record<string, string> = { Applied: "Applied", QueryRaised: "Query raised", Approved: "Approved" };
+const mutTone = (s: string): "done" | "waiting" | "stopped" => s === "Approved" ? "done" : s === "QueryRaised" ? "stopped" : "waiting";
 
-const STATUS_COLOR: Record<string, string> = {
-  Applied:     "text-sky-600 bg-sky-50 border-sky-200",
-  QueryRaised: "text-sky-600 bg-sky-50 border-sky-200",
-  Approved:    "text-emerald-600 bg-emerald-50 border-emerald-200",
-};
-
-const DOC_STATUS_COLOR: Record<string, string> = {
-  Requested: 'text-sky-600 bg-sky-50 border-sky-200',
-  Uploaded:  'text-blue-600 bg-blue-50 border-blue-200',
-  Verified:  'text-emerald-600 bg-emerald-50 border-emerald-200',
-  Rejected:  'text-red-600 bg-red-50 border-red-200',
-};
-
-function isSynced(doc: any): boolean {
-  return !!doc.Remarks?.startsWith('Synced automatically');
-}
-
-function docNextStep(doc: any): string {
-  if (isSynced(doc)) return "Pulled from the Registry's own verified copy — nothing to do here.";
-  if (doc.Status === 'Verified') return 'Checked and accepted.';
-  if (doc.Status === 'Rejected') return 'Rejected — attach a corrected file.';
-  if (doc.Status === 'Uploaded') return 'Uploaded — awaiting staff review.';
-  return doc.IsMandatory ? 'Required — attach a file to proceed.' : 'Requested — attach a file.';
-}
-
-function mimeIcon(mime: string | null | undefined) {
-  if (!mime) return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
-  if (mime.startsWith("image/")) return <FileImage size={16} className="text-blue-500 shrink-0" />;
-  if (mime === "application/pdf") return <FileTextIcon size={16} className="text-red-500 shrink-0" />;
-  return <FileIcon size={16} className="text-muted-foreground shrink-0" />;
-}
-
-function fmtBytes(n: number | null | undefined) {
-  if (!n) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function fmtDate(d?: string | null) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-}
+const isSynced = (doc: any): boolean => !!doc.Remarks?.startsWith("Synced automatically");
 
 type DetailTab = "Overview" | "Documents" | "History";
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Mutation records");
-  return r.json();
-}
-
 const PAGE_SIZE = 20;
-interface MutationListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchMutationList(filters: MutationListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+interface MutationListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
+async function fetchMutationList(filters: MutationListFilters, page: number): Promise<{ rows: any[]; total: number; statusCounts: Record<string, number> }> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
   if (filters.search) params.set("search", filters.search);
+  if (filters.status) params.set("status", filters.status);
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
   const r = await fetchWithAuth(`${API}?${params}`);
-  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Mutation records");
-  const data = await r.json();
-  return { rows: data.rows || [], total: data.total || 0 };
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || "Failed to load Mutation records");
+  return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {} };
 }
 async function fetchEligible(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
@@ -101,21 +50,22 @@ async function fetchEligible(): Promise<any[]> {
 }
 
 const CRM_MUTATION_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
+const emptyStart = () => ({ ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
 
 const CrmMutation: React.FC = () => {
   const qc = useQueryClient();
+  const rights = usePageRights("crm-mutation");
   const { currentUser, canDoAction } = useAuth();
-  const canApproveMutation =
-    CRM_MUTATION_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
-    canDoAction("approval-inbox" as any, "edit");
+  const canApproveMutation = rights.canEdit && (
+    CRM_MUTATION_APPROVER_ROLES.includes(roleKey(currentUser?.role)) || canDoAction("approval-inbox" as any, "edit"));
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
-  const mutationIdFilter = sp.get("mutationId");
+  const mutationIdParam = sp.get("mutationId");
 
   const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   function updateFilter<T>(setter: (v: T) => void) {
@@ -123,18 +73,18 @@ const CrmMutation: React.FC = () => {
   }
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");
-  const [startForm, setStartForm] = useState({ ApplicationNo: "", ApplicationDate: new Date().toISOString().slice(0, 10), Authority: "", OldKhataNo: "", MutationFee: "" });
+  const [startForm, setStartForm] = useState(emptyStart);
   const [saving, setSaving] = useState(false);
 
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(mutationIdParam && /^\d+$/.test(mutationIdParam) ? Number(mutationIdParam) : null);
   const [activeTab, setActiveTab] = useState<DetailTab>("Overview");
-  const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+  const [deepLinkDone, setDeepLinkDone] = useState(false);
 
   const [queryOpen, setQueryOpen] = useState(false);
   const [queryRemarks, setQueryRemarks] = useState("");
-
   const [approveOpen, setApproveOpen] = useState(false);
-  const [approveForm, setApproveForm] = useState({ ApprovedNo: "", ApprovedDate: new Date().toISOString().slice(0, 10), NewKhataNo: "" });
+  const [approveForm, setApproveForm] = useState({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" });
+  const [busy, setBusy] = useState(false);
 
   const [newDocType, setNewDocType] = useState("Other");
   const [newDocLabel, setNewDocLabel] = useState("");
@@ -145,58 +95,56 @@ const CrmMutation: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState<number | null>(null);
 
   const listFilters: MutationListFilters = useMemo(
-    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, cpb]
+    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, statusFilter, cpb]
   );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["crm-mutation", listFilters, page],
     queryFn: () => fetchMutationList(listFilters, page),
     staleTime: 30_000,
   });
   const rows = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
-  const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-mutation-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
+  const counts = listResult?.statusCounts ?? {};
+  const allCount = Object.values(counts).reduce((s, n) => s + n, 0);
+  const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-mutation-eligible"], queryFn: fetchEligible, staleTime: 60_000, enabled: rights.canCreate });
 
-  const { data: detailData } = useQuery({
+  const { data: detailData, isError: detailIsError, error: detailError } = useQuery({
     queryKey: ["crm-mutation-detail", detailId],
     queryFn: async () => {
-      if (detailId == null) return null;
       const r = await fetchWithAuth(`${API}/${detailId}`);
-      if (!r.ok) return null;
-      return r.json();
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || `Could not load the mutation (${r.status}).`);
+      return data;
     },
     enabled: detailId != null,
     staleTime: 15_000,
+    retry: false,
   });
 
   const detail = detailData?.mutation ?? (detailId != null ? (rows as any[]).find((r: any) => r.Id === detailId) : null);
   const documents: any[] = detailData?.documents || [];
   const history: any[] = detailData?.history || [];
 
-  const trackedBookingIds = new Set((rows as any[]).map((r: any) => r.BookingId));
-
+  // ?bookingId opens the booking's mutation (found on the server: the page used to look in the 20 rows on screen),
+  // or the Start dialog when it has none and is eligible.
   useEffect(() => {
-    if (!deepLinkBookingId || dialogOpen || trackedBookingIds.has(parseInt(deepLinkBookingId))) return;
-    if (startableBookings.some((b: any) => String(b.Id) === deepLinkBookingId)) {
-      setBookingId(deepLinkBookingId);
-      setDialogOpen(true);
-    }
+    if (deepLinkDone || !deepLinkBookingId || mutationIdParam) return;
+    let stop = false;
+    (async () => {
+      const r = await fetchWithAuth(`${API}/booking/${deepLinkBookingId}`).catch(() => null);
+      const row = r?.ok ? await r.json().catch(() => null) : null;
+      if (stop) return;
+      if (row?.Id) { setDeepLinkDone(true); selectDetail(row.Id); return; }
+      if (rights.canCreate && startableBookings.some((b: any) => String(b.Id) === deepLinkBookingId)) {
+        setDeepLinkDone(true);
+        setBookingId(deepLinkBookingId);
+        setDialogOpen(true);
+      }
+    })();
+    return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, rows.length, startableBookings.length]);
-
-  useEffect(() => {
-    if (!mutationIdFilter || deepLinkOpened || !(rows as any[]).length) return;
-    const match = (rows as any[]).find((r: any) => String(r.Id) === mutationIdFilter);
-    if (match) {
-      setDeepLinkOpened(true);
-      selectDetail(match.Id);
-    } else {
-      // mutationId is present but not found in the current list — clear the stale param
-      setDeepLinkOpened(true);
-      setSp((prev) => { prev.delete("mutationId"); return prev; }, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mutationIdFilter, deepLinkOpened, rows]);
+  }, [deepLinkBookingId, mutationIdParam, deepLinkDone, startableBookings.length, rights.canCreate]);
 
   const invalidateDetail = () => qc.invalidateQueries({ queryKey: ["crm-mutation-detail", detailId] });
   const invalidate = () => {
@@ -213,289 +161,232 @@ const CrmMutation: React.FC = () => {
     setSp((p) => { p.set("mutationId", String(id)); return p; }, { replace: true });
   };
 
+  const send = async (url: string, method: string, body?: any) => {
+    const res = await fetchWithAuth(url, body instanceof FormData ? { method, body } : {
+      method, headers: { "Content-Type": "application/json" }, body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  };
+
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(API, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ BookingId: parseInt(bookingId), ...startForm }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await send(API, "POST", { BookingId: parseInt(bookingId), ...startForm });
       toast.success(`${data.MutationNo} started`);
       setDialogOpen(false);
       setBookingId("");
-      setStartForm({ ApplicationNo: "", ApplicationDate: new Date().toISOString().slice(0, 10), Authority: "", OldKhataNo: "", MutationFee: "" });
+      setStartForm(emptyStart());
       invalidate();
       selectDetail(data.id);
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSaving(false); }
   };
-
   const handleQuery = async () => {
     if (detailId == null || !queryRemarks.trim()) { toast.error("Remarks are required"); return; }
+    setBusy(true);
     try {
-      const res = await fetchWithAuth(`${API}/${detailId}/query`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ Remarks: queryRemarks.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await send(`${API}/${detailId}/query`, "PUT", { Remarks: queryRemarks.trim() });
       toast.success("Query recorded — documents reset for correction");
       setQueryOpen(false); setQueryRemarks("");
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setBusy(false); }
   };
-
   const handleResubmit = async () => {
     if (detailId == null) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${detailId}/resubmit`, { method: "PUT" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Resubmitted to the authority");
-      invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
+    setBusy(true);
+    try { await send(`${API}/${detailId}/resubmit`, "PUT"); toast.success("Resubmitted to the authority"); invalidate(); }
+    catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setBusy(false); }
   };
-
   const handleApprove = async () => {
     if (detailId == null) return;
     if (!approveForm.NewKhataNo.trim()) { toast.error("New Khata No. is required"); return; }
+    setBusy(true);
     try {
-      const res = await fetchWithAuth(`${API}/${detailId}/approve`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(approveForm),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await send(`${API}/${detailId}/approve`, "PUT", approveForm);
       toast.success("Mutation approved — municipal records updated");
       setApproveOpen(false);
       invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setBusy(false); }
   };
-
   const handleUploadDoc = async (file: File, documentType: string, label?: string) => {
     if (detailId == null) return;
     setUploadingDoc(true);
     try {
-      const formData = new FormData();
-      formData.append('files', file);
-      formData.append('DocumentType', documentType);
-      if (label) formData.append('Label', label);
-      const res = await fetchWithAuth(`${API}/${detailId}/documents/upload`, { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const fd = new FormData(); fd.append("files", file); fd.append("DocumentType", documentType);
+      if (label) fd.append("Label", label);
+      await send(`${API}/${detailId}/documents/upload`, "POST", fd);
       toast.success("Document uploaded");
       invalidateDetail();
-      setNewDocLabel('');
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setNewDocLabel("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setUploadingDoc(false); }
   };
-
   const handleRequestDoc = async (documentType: string, label?: string) => {
     if (detailId == null) return;
     setRequestingDoc(true);
     try {
-      const res = await fetchWithAuth(`${API}/${detailId}/documents/request`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ DocumentType: documentType, Label: label, IsMandatory: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      await send(`${API}/${detailId}/documents/request`, "POST", { DocumentType: documentType, Label: label, IsMandatory: true });
       toast.success("Document requested");
       invalidateDetail();
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setRequestingDoc(false); }
   };
-
-  const handleVerifyDoc = async (docId: number) => {
+  const handleReviewDoc = async (docId: number, verify: boolean) => {
     if (detailId == null) return;
+    let remarks: string | undefined;
+    if (!verify) {
+      remarks = window.prompt("Describe what's wrong with this document (required):")?.trim();
+      if (!remarks) return;
+    }
     try {
-      const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Status: 'Verified' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document verified");
+      await send(`${API}/${detailId}/documents/${docId}`, "PUT", verify ? { Status: "Verified" } : { Status: "Rejected", Remarks: remarks });
+      toast.success(verify ? "Document verified" : "Document rejected");
       invalidateDetail();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
-
-  const handleRejectDoc = async (docId: number) => {
-    if (detailId == null) return;
-    const remarks = window.prompt("Describe what's wrong with this document (required):");
-    if (!remarks?.trim()) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Document rejected");
-      invalidateDetail();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
+  const fileUrl = (doc: any) => `${API}/documents/file/${doc.Id}`;
   const handlePreviewDoc = async (doc: any) => {
     setPreviewLoading(doc.Id);
     try {
-      const res = await fetchWithAuth(`${API}/documents/file/${doc.Id}`);
-      if (!res.ok) throw new Error("Could not load file");
-      const blob = await res.blob();
+      const blob = await fetchFileBlob(fileUrl(doc));
       setPreviewDoc({ url: URL.createObjectURL(blob), mime: doc.MimeType, name: doc.FileName || doc.DocumentType });
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setPreviewLoading(null); }
   };
   const closePreview = () => { if (previewDoc) URL.revokeObjectURL(previewDoc.url); setPreviewDoc(null); };
-  const handleDownloadDoc = async (doc: any) => {
-    try {
-      const res = await fetchWithAuth(`${API}/documents/file/${doc.Id}`);
-      if (!res.ok) throw new Error("Could not download file");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = doc.FileName || doc.DocumentType || 'document';
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const filtered = rows as any[];
 
   const required = documents.filter((d) => d.IsMandatory);
   const supporting = documents.filter((d) => !d.IsMandatory);
-  const verifiedCount = required.filter((d) => d.Status === 'Verified').length;
+  const verifiedCount = required.filter((d) => d.Status === "Verified").length;
   const docsReady = required.length > 0 && verifiedCount === required.length;
   const locked = detail?.Status === "Approved";
+  const canDocs = rights.canEdit && !locked;
 
-  const DocRow = ({ doc }: { doc: any }) => (
-    <div className="border border-border rounded-lg p-3 text-sm bg-card">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5">{mimeIcon(doc.MimeType)}</div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-            <span className="font-medium">{doc.Label || doc.DocumentType}</span>
-            <span className={cn("text-[0.625rem] px-2 py-0.5 rounded-full border font-medium", DOC_STATUS_COLOR[doc.Status] || "bg-muted border-border text-muted-foreground")}>{doc.Status}</span>
-            {isSynced(doc) && (
-              <span className="text-[0.625rem] px-2 py-0.5 rounded-full border font-medium text-indigo-600 bg-indigo-50 border-indigo-200 flex items-center gap-1">
-                <Link2 size={9} /> Synced from Registry
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">{docNextStep(doc)}</p>
-          {doc.HasFile && <p className="text-xs text-muted-foreground/80 truncate mt-0.5">{doc.FileName} · {fmtBytes(doc.FileSize)}</p>}
-          {doc.Status === 'Rejected' && doc.Remarks && (
-            <p className="text-xs text-red-600 mt-1 bg-red-50 border border-red-200 rounded px-2 py-1">"{doc.Remarks}"</p>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 mt-2 pl-7">
-        {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
-          <button data-row-view onClick={() => handlePreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-xs text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
-            {previewLoading === doc.Id ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />} Preview
-          </button>
-        )}
-        {doc.HasFile && (
-          <button onClick={() => handleDownloadDoc(doc)} className="text-xs text-primary hover:underline flex items-center gap-1">
-            <Download size={12} /> Download
-          </button>
-        )}
-        {['Requested', 'Rejected'].includes(doc.Status) && !locked && (
-          <>
-            <input type="file" className="hidden" id={`doc-attach-${doc.Id}`} onChange={(e) => e.target.files?.[0] && handleUploadDoc(e.target.files[0], doc.DocumentType, doc.Label)} />
-            <button onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()} className="text-xs btn-module text-white px-2.5 py-1 rounded font-medium ">
-              {doc.Status === 'Rejected' ? 'Re-attach File' : 'Attach File'}
-            </button>
-          </>
-        )}
-        {doc.HasFile && doc.Status === 'Uploaded' && !locked && (
-          <>
-            <button onClick={() => handleVerifyDoc(doc.Id)} className="text-xs bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded hover:bg-green-100 font-medium">Verify</button>
-            <button onClick={() => handleRejectDoc(doc.Id)} className="text-xs bg-red-50 text-red-700 border border-red-200 px-2.5 py-1 rounded hover:bg-red-100 font-medium">Reject</button>
-          </>
-        )}
-      </div>
-    </div>
+  const docRow = (doc: any) => (
+    <DocRow key={doc.Id} doc={doc} previewing={previewLoading === doc.Id}
+      nextStep={isSynced(doc) ? "Pulled from the Registry's own verified copy — nothing to do here." : undefined}
+      onPreview={() => handlePreviewDoc(doc)}
+      onDownload={() => downloadFile(fileUrl(doc), doc.FileName || doc.DocumentType || "document").catch((e) => toast.error(translateError(e.message)))}
+      attach={canDocs ? { onFile: (f) => handleUploadDoc(f, doc.DocumentType, doc.Label) } : undefined}
+      review={canDocs ? { onVerify: () => handleReviewDoc(doc.Id, true), onReject: () => handleReviewDoc(doc.Id, false) } : undefined}
+      extraTag={isSynced(doc)
+        ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border border-foreground/30 border-dashed inline-flex items-center gap-1"><Link2 size={9} /> Synced from registry</span>
+        : undefined} />
   );
+
+  const figures = [
+    { label: "Mutations", value: allCount, note: "Khata transfers tracked", go: () => updateFilter(setStatusFilter)("") },
+    { label: "Applied", value: counts.Applied ?? 0, note: "With the authority", go: () => updateFilter(setStatusFilter)("Applied") },
+    { label: "Query raised", value: counts.QueryRaised ?? 0, note: "To correct and resubmit", go: () => updateFilter(setStatusFilter)("QueryRaised") },
+    { label: "Approved", value: counts.Approved ?? 0, note: "New khata issued", go: () => updateFilter(setStatusFilter)("Approved") },
+  ];
+  const note = (edge: string) => ({ border: RULE_SOFT, borderLeft: `3px solid ${edge}` });
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Property Mutation"]} />
-      <CrmShell
-        title="Property Mutation — Khata Transfer"
-        subtitle="Application to update the municipal land records (Khata) with the new owner's name — can only be done after the Sale Deed is officially registered"
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Sale deed"
+        title="Property Mutation"
+        subtitle="Khata transfer: the application to put the new owner's name on the municipal land records — only once the sale deed is registered."
         action={
-          <div className="flex items-center gap-3">
-            <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            <button onClick={() => setDialogOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
-              <Plus size={14} /> Start Mutation
-            </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {/* The server starts a mutation under the create right; the button was offered to everyone. */}
+            {rights.canCreate && <button onClick={() => setDialogOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Start mutation</button>}
           </div>
         }
       >
+      <div className="space-y-4">
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {figures.map((x) => (
+              <div key={x.label}>
+                <button onClick={x.go} className="label link">{x.label}</button>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="flex flex-col md:flex-row gap-4 md:h-[calc(100vh-220px)]">
-          {/* List (Left Pane) */}
-          <div className="w-full md:w-80 shrink-0 flex flex-col gap-2">
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          {/* List */}
+          <div className="w-full md:w-80 shrink-0 flex flex-col bg-card min-h-0" style={{ border: RULE }}>
+            <div className="p-3 space-y-2" style={{ borderBottom: RULE }}>
               <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-                placeholder="Search mutations..."
-                className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                placeholder="Search customer or booking…"
+                className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+              <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)} className={`${INP} text-xs`}>
+                <option value="">All statuses ({allCount})</option>
+                {Object.keys(STATUS_LABEL).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]} ({counts[s] ?? 0})</option>)}
+              </select>
+              <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
             </div>
-            <CrmCompanyProjectBlockFilter stacked value={cpb} onChange={updateFilter(setCpb)} />
-            <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5 max-h-[45vh] md:max-h-none">
-              {isLoading ? (
-                <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
-              ) : filtered.length === 0 ? (
-                <div className="p-4 text-center text-muted-foreground text-sm">No mutation trackers yet</div>
-              ) : filtered.map((r: any) => {
-                const railColor = r.Status === "Approved" ? "#10b981" : r.Status === "QueryRaised" ? "#f97316" : "var(--border)";
+            <div className="flex-1 overflow-y-auto thin-scroll max-h-[45vh] md:max-h-none">
+              {isError ? (
+                <p className="p-4 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+              ) : isLoading ? (
+                <p className="p-4 text-center text-muted-foreground text-sm">Loading…</p>
+              ) : rows.length === 0 ? (
+                <p className="p-4 text-center text-muted-foreground text-sm">{search || statusFilter || cpb.projectId ? "No mutation matches." : "No mutation trackers yet."}</p>
+              ) : (rows as any[]).map((r: any) => {
+                const on = detailId === r.Id;
                 return (
                   <button key={r.Id} onClick={() => selectDetail(r.Id)}
-                    className={cn("w-full text-left rounded-lg border overflow-hidden transition-colors", detailId === r.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20")}>
-                    <div className="flex">
-                      <div className="w-1 shrink-0" style={{ background: railColor }} />
-                      <div className="flex-1 p-3 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-sm truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
-                          <span className={cn("text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0", STATUS_COLOR[r.Status] || "")}>{r.Status}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 truncate">{r.MutationNo} · {r.BookingNo} · {r.UnitNo}</div>
-                      </div>
+                    className={`w-full text-left px-3 py-2.5 transition-colors ${on ? "bg-foreground text-card" : "hover:bg-primary/5"}`}
+                    style={{ borderBottom: RULE_SOFT }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-semibold leading-tight truncate"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></span>
+                      <span className={on ? "[&_*]:!text-card" : ""}><SheetMark text={STATUS_LABEL[r.Status] || r.Status} tone={mutTone(r.Status)} /></span>
+                    </div>
+                    <div className={`mt-1 text-[0.6875rem] tabular-nums truncate ${on ? "opacity-80" : "text-muted-foreground"}`}>
+                      {[r.MutationNo, r.BookingNo, r.UnitNo].filter(Boolean).join(" · ")}
                     </div>
                   </button>
                 );
               })}
             </div>
-            <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+            <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
           </div>
 
-          {/* Detail (Right Pane) */}
-          <div className="flex-1 min-w-0 border border-border rounded-xl bg-card overflow-y-auto thin-scroll">
-            {!detail ? (
+          {/* Detail */}
+          <div className="flex-1 min-w-0 overflow-y-auto thin-scroll space-y-4">
+            {detailId == null ? (
               <div className="h-full flex items-center justify-center text-sm text-muted-foreground">Select a mutation to view details</div>
+            ) : detailIsError && !detail ? (
+              <div className="h-full flex items-center justify-center text-sm text-destructive">{(detailError as Error)?.message}</div>
+            ) : !detail ? (
+              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
             ) : (
-              <div className="p-5">
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></h3>
-                      <span className={cn("text-xs px-2 py-0.5 rounded-full border font-medium", STATUS_COLOR[detail.Status] || "")}>{detail.Status}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{detail.MutationNo} · {detail.BookingNo} · {detail.UnitNo} {detail.DeedNo && `· Deed ${detail.DeedNo}`}</p>
+              <>
+                <div className="bg-card px-4 py-3 flex items-center justify-between gap-3 flex-wrap" style={{ border: RULE }}>
+                  <div className="min-w-0">
+                    <span className={`block ${LBL}`}>Mutation</span>
+                    <h2 className="font-heading font-bold text-lg text-foreground leading-tight truncate flex items-center gap-2">
+                      <Landmark size={16} /> <ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} />
+                    </h2>
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">
+                      {[detail.MutationNo, detail.BookingNo, detail.UnitNo, detail.DeedNo && `Deed ${detail.DeedNo}`].filter(Boolean).join(" · ")}
+                    </p>
                   </div>
+                  <SheetMark text={STATUS_LABEL[detail.Status] || detail.Status} tone={mutTone(detail.Status)} />
                 </div>
 
-                <div className="flex gap-1 border-b border-border mb-4">
+                <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
                   {(["Overview", "Documents", "History"] as DetailTab[]).map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)}
-                      className={cn("px-3 py-2 text-sm font-medium border-b-2 -mb-px", activeTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                      className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${
+                        activeTab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"
+                      }`} style={{ borderRight: RULE_SOFT }}>
                       {t}
                     </button>
                   ))}
@@ -504,269 +395,235 @@ const CrmMutation: React.FC = () => {
                 {activeTab === "Overview" && (
                   <div className="space-y-4">
                     {detail.Status === "Applied" && (
-                      <div className="border border-sky-200 bg-sky-50 rounded-lg p-4">
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div>
-                            <p className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><Landmark size={14} /> Application pending with the authority</p>
-                            <p className="text-xs text-sky-700 mt-0.5">
-                              {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button onClick={() => setQueryOpen(true)} className="text-xs border border-sky-300 text-sky-700 px-3 py-1.5 rounded hover:bg-sky-100 font-medium">Raise Query</button>
-                            {canApproveMutation ? (
-                              <button onClick={() => setApproveOpen(true)} disabled={!docsReady}
-                                title={!docsReady ? "Verify the mandatory documents first" : undefined}
-                                className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                                Approve
-                              </button>
-                            ) : (
-                              <span className="text-xs text-sky-600 border border-sky-200 bg-sky-50 px-2.5 py-1.5 rounded flex items-center gap-1">
-                                🔒 Requires Legal Head / Admin
-                              </span>
-                            )}
-                          </div>
+                      <div className="bg-card px-4 py-3 flex items-center justify-between gap-3 flex-wrap" style={note("hsl(var(--foreground))")}>
+                        <div>
+                          <p className="text-sm font-semibold flex items-center gap-1.5"><Landmark size={14} /> Application pending with the authority</p>
+                          <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">
+                            {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {rights.canEdit && <button onClick={() => setQueryOpen(true)} className={`${KEY_LINE} h-8 px-3 !text-destructive !border-destructive`}>Raise query</button>}
+                          {canApproveMutation ? (
+                            <button onClick={() => { setApproveForm({ ApprovedNo: "", ApprovedDate: localDay(), NewKhataNo: "" }); setApproveOpen(true); }} disabled={!docsReady}
+                              title={!docsReady ? "Verify the mandatory documents first" : undefined} className={`${KEY_INK} h-8 px-3`}>
+                              Approve
+                            </button>
+                          ) : rights.canEdit ? (
+                            <span className="text-[0.6875rem] text-muted-foreground">Approving needs the Legal head / an admin</span>
+                          ) : null}
                         </div>
                       </div>
                     )}
                     {detail.Status === "QueryRaised" && (
-                      <div className="border border-sky-200 bg-sky-50 rounded-lg p-4">
-                        <p className="text-sm font-semibold text-orange-800 flex items-center gap-1.5"><AlertTriangle size={14} /> Query raised by the authority</p>
-                        {detail.QueryRemarks && <p className="text-xs text-sky-700 mt-1 bg-white/60 border border-sky-200 rounded px-2 py-1.5">"{detail.QueryRemarks}"</p>}
-                        <p className="text-xs text-sky-700 mt-2">
+                      <div className="bg-card px-4 py-3 space-y-2" style={note("hsl(var(--destructive))")}>
+                        <p className="text-sm font-semibold text-destructive flex items-center gap-1.5"><AlertTriangle size={14} /> Query raised by the authority</p>
+                        {detail.QueryRemarks && <p className="text-xs px-2 py-1.5" style={{ border: RULE_SOFT }}>"{detail.QueryRemarks}"</p>}
+                        <p className="text-xs text-muted-foreground tabular-nums">
                           {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
                         </p>
-                        <button onClick={handleResubmit} disabled={!docsReady}
-                          title={!docsReady ? "Fix and verify the flagged documents first" : undefined}
-                          className="mt-2 text-xs btn-module text-white px-3 py-1.5 rounded hover:shadow-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                          Resubmit to Authority
-                        </button>
+                        {rights.canEdit && (
+                          <button onClick={handleResubmit} disabled={!docsReady || busy}
+                            title={!docsReady ? "Fix and verify the flagged documents first" : undefined} className={`${KEY_INK} h-8 px-3`}>
+                            Resubmit to authority
+                          </button>
+                        )}
                       </div>
                     )}
                     {detail.Status === "Approved" && (
-                      <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-4">
-                        <p className="text-sm font-semibold text-emerald-800 flex items-center gap-1.5"><CheckCircle2 size={14} /> Mutation Approved {fmtDate(detail.ApprovedDate)}</p>
-                        <p className="text-xs text-emerald-700 mt-0.5">New Khata No. {detail.NewKhataNo} · Mutation No. {detail.ApprovedNo || "—"}</p>
+                      <div className="bg-card px-4 py-3" style={note("hsl(var(--foreground))")}>
+                        <p className="text-sm font-semibold flex items-center gap-1.5 tabular-nums"><CheckCircle2 size={14} /> Mutation approved {fmtDate(detail.ApprovedDate)}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 tabular-nums">New khata no. {detail.NewKhataNo} · mutation no. {detail.ApprovedNo || "—"}</p>
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                      <div><p className="text-xs text-muted-foreground">Booking</p><p className="font-medium">{detail.BookingNo}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Unit</p><p className="font-medium">{detail.UnitNo}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Applicant</p><p className="font-medium"><ApplicantNames name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} /></p></div>
-                      <div><p className="text-xs text-muted-foreground">Sale Deed</p><p className="font-medium">{detail.DeedNo || "—"} {detail.RegistrationNo && `(Reg. ${detail.RegistrationNo})`}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Application No.</p><p className="font-mono font-medium">{detail.ApplicationNo || "—"}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Applied On</p><p className="font-medium">{fmtDate(detail.ApplicationDate)}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Authority</p><p className="font-medium">{detail.Authority || "—"}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Old Khata No.</p><p className="font-medium">{detail.OldKhataNo || "—"}</p></div>
-                      <div><p className="text-xs text-muted-foreground">Mutation Fee</p><p className="font-medium">{detail.MutationFee != null ? `₹${Number(detail.MutationFee).toLocaleString('en-IN')}` : "—"}</p></div>
-                      {detail.Status === "Approved" && (
-                        <>
-                          <div><p className="text-xs text-muted-foreground">New Khata No.</p><p className="font-mono font-medium">{detail.NewKhataNo}</p></div>
-                          <div><p className="text-xs text-muted-foreground">Mutation No.</p><p className="font-mono font-medium">{detail.ApprovedNo || "—"}</p></div>
-                        </>
-                      )}
-                    </div>
+                    <Panel title="Application">
+                      <div className="grid grid-cols-1 sm:grid-cols-2">
+                        {([
+                          ["Booking", detail.BookingNo],
+                          ["Unit", detail.UnitNo],
+                          ["Applicant", <ApplicantNames key="a" name={detail.ApplicantName} bookingId={detail.BookingId} applicationId={detail.ApplicationId} />],
+                          ["Sale deed", `${detail.DeedNo || "—"}${detail.RegistrationNo ? ` (reg. ${detail.RegistrationNo})` : ""}`],
+                          ["Application no.", detail.ApplicationNo || "—"],
+                          ["Applied on", fmtDate(detail.ApplicationDate)],
+                          ["Authority", detail.Authority || "—"],
+                          ["Old khata no.", detail.OldKhataNo || "—"],
+                          ["Mutation fee", detail.MutationFee != null ? fmtRupees(detail.MutationFee) : "—"],
+                          ...(detail.Status === "Approved" ? [["New khata no.", detail.NewKhataNo], ["Mutation no.", detail.ApprovedNo || "—"]] : []),
+                        ] as [string, React.ReactNode][]).map(([l, v], i, arr) => (
+                          <div key={l} className={`px-4 py-2.5 ${i === arr.length - 1 && arr.length % 2 === 1 ? "sm:col-span-2" : ""}`} style={{ borderBottom: RULE_SOFT, borderRight: i % 2 === 0 ? RULE_SOFT : undefined }}>
+                            <p className={LBL}>{l}</p>
+                            <p className="text-sm font-medium tabular-nums mt-0.5">{v}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </Panel>
                   </div>
                 )}
 
                 {activeTab === "Documents" && (
-                  <div className="space-y-5">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-xs font-semibold text-foreground uppercase tracking-wide">Required Documents</h4>
-                        {required.length > 0 && (
-                          <span className={cn("text-[0.6875rem] font-semibold", verifiedCount === required.length ? "text-emerald-600" : "text-sky-600")}>{verifiedCount}/{required.length} verified</span>
-                        )}
-                      </div>
+                  <div className="space-y-4">
+                    <Panel title="Required documents"
+                      right={required.length > 0 ? <span className={`font-heading text-[0.6875rem] font-semibold tabular-nums ${verifiedCount === required.length ? "text-foreground" : "text-muted-foreground"}`}>{verifiedCount}/{required.length} verified</span> : undefined}>
                       {required.length === 0 ? (
-                        <div className="border border-sky-200 bg-sky-50 rounded-lg p-3 flex items-center justify-between gap-3">
-                          <p className="text-xs text-sky-800"><span className="font-semibold">No mandatory document requested yet.</span> Approval is blocked until one is requested and verified.</p>
-                          {!locked && (
-                            <button onClick={() => handleRequestDoc('MutationApplicationForm', 'Mutation Application Form')} disabled={requestingDoc}
-                              className="shrink-0 text-xs bg-sky-600 text-white px-3 py-1.5 rounded hover:bg-sky-700 disabled:opacity-50 font-medium">
-                              {requestingDoc ? "Requesting..." : "Request Application Form"}
+                        <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                          <p className="text-xs"><span className="font-semibold">No mandatory document requested yet.</span> Approval is blocked until one is requested and verified.</p>
+                          {canDocs && (
+                            <button onClick={() => handleRequestDoc("MutationApplicationForm", "Mutation Application Form")} disabled={requestingDoc} className={`${KEY_INK} h-8 px-3 shrink-0`}>
+                              {requestingDoc ? "Requesting…" : "Request application form"}
                             </button>
                           )}
                         </div>
-                      ) : (
-                        <div className="space-y-2">{required.map((d) => <DocRow key={d.Id} doc={d} />)}</div>
-                      )}
-                    </div>
+                      ) : required.map(docRow)}
+                    </Panel>
 
-                    <div>
-                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Supporting Documents</h4>
-                      {supporting.length > 0 ? (
-                        <div className="space-y-2">{supporting.map((d) => <DocRow key={d.Id} doc={d} />)}</div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground italic">None added.</p>
-                      )}
-                    </div>
-
-                    {!locked && (
-                      <div className="border border-dashed border-border rounded-lg p-4 bg-muted/20">
-                        <p className="text-xs font-semibold mb-0.5 text-foreground">Add a Supporting Document</p>
-                        <p className="text-xs text-muted-foreground mb-2">For reference material only — use the request action above for anything approval needs to check.</p>
-                        <div className="flex items-end gap-2">
-                          <div className="flex-1 space-y-1">
-                            <label className="text-[0.625rem] font-medium text-muted-foreground">Type</label>
-                            <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className="w-full h-8 text-xs border border-border rounded px-2 bg-background">
-                              <option value="IdentityProof">Identity Proof</option>
-                              <option value="Other">Other</option>
-                            </select>
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <label className="text-[0.625rem] font-medium text-muted-foreground">Label (Optional)</label>
-                            <Input className="h-8 text-xs" value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="e.g. Aadhaar copy" />
-                          </div>
-                          <div className="shrink-0 space-y-1">
-                            <label className="text-[0.625rem] font-medium text-transparent">.</label>
+                    <Panel title="Supporting documents">
+                      {supporting.length > 0 ? supporting.map(docRow) : <p className="px-4 py-3 text-xs text-muted-foreground italic">None added.</p>}
+                      {canDocs && (
+                        <div className="p-4" style={{ borderTop: supporting.length ? undefined : RULE_SOFT }}>
+                          <p className={`${LBL} mb-0.5`}>Add a supporting document</p>
+                          <p className="text-xs text-muted-foreground mb-2">Reference material only — anything approval checks goes through the request above.</p>
+                          <div className="flex items-end gap-2 flex-wrap">
+                            <div className="flex-1 min-w-[9rem] space-y-1">
+                              <label className={`block ${LBL}`}>Type</label>
+                              <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className={INP}>
+                                <option value="IdentityProof">Identity proof</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </div>
+                            <div className="flex-1 min-w-[9rem] space-y-1">
+                              <label className={`block ${LBL}`}>Label (optional)</label>
+                              <input className={INP} value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="e.g. Aadhaar copy" />
+                            </div>
                             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleUploadDoc(e.target.files[0], newDocType, newDocLabel)} />
-                            <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc}
-                              className="h-8 px-3 text-xs btn-module text-white rounded flex items-center gap-1.5 font-medium disabled:opacity-50">
-                              <Upload size={12} /> {uploadingDoc ? "Uploading..." : "Upload"}
+                            <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc} className={`${KEY_INK} h-9 px-3`}>
+                              <Upload size={12} /> {uploadingDoc ? "Uploading…" : "Upload"}
                             </button>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </Panel>
                   </div>
                 )}
 
                 {activeTab === "History" && (
-                  <div className="space-y-0">
-                    {history.length > 0 ? (
-                      <div className="relative border-l border-border ml-3 pl-4 space-y-4 py-2">
-                        {history.map((log: any) => (
-                          <div key={log.Id} className="relative">
-                            <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-border ring-4 ring-card" />
-                            <div className="text-sm">
-                              <div className="flex items-baseline gap-2">
-                                <span className="font-medium flex items-center gap-1"><ScrollText size={12} /> {log.Action}</span>
-                                <span className="text-xs text-muted-foreground">{fmtDate(log.CreatedAt)}</span>
-                              </div>
-                              <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"} ({log.ActorType})</div>
-                              {log.Remarks && <div className="text-xs bg-muted/30 border border-border rounded p-2 mt-1.5 text-foreground">{log.Remarks}</div>}
-                            </div>
-                          </div>
-                        ))}
+                  <Panel title="History" icon={<History size={13} />}>
+                    {history.length > 0 ? history.map((log: any) => (
+                      <div key={log.Id} className="px-4 py-2.5 text-sm" style={{ borderBottom: RULE_SOFT }}>
+                        <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                          <span className="font-medium flex items-center gap-1"><ScrollText size={12} /> {log.Action}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">{fmtDate(log.CreatedAt)}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"} ({log.ActorType})</div>
+                        {log.Remarks && <div className="text-xs px-2 py-1.5 mt-1.5" style={{ border: RULE_SOFT }}>{log.Remarks}</div>}
                       </div>
-                    ) : (
-                      <div className="text-center py-8 text-xs text-muted-foreground flex flex-col items-center gap-1"><History size={20} className="opacity-40" />No history recorded yet.</div>
-                    )}
-                  </div>
+                    )) : <p className="px-4 py-6 text-center text-xs text-muted-foreground">No history recorded yet.</p>}
+                  </Panel>
                 )}
-              </div>
+              </>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Start Mutation */}
+        {/* Start mutation */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader><DialogTitle className="font-heading">Start Mutation</DialogTitle></DialogHeader>
+          <DialogContent className="max-w-md rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="font-heading">Start mutation</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-                <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Booking *</label>
+                <SearchableNativeSelect value={bookingId} onChange={(e) => setBookingId(e.target.value)} className={INP}>
                   <option value="">Select booking</option>
                   {startableBookings.map((b: any) => (
-                    <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
+                    <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName}`}</option>
                   ))}
                 </SearchableNativeSelect>
-                <p className="text-[0.6875rem] text-muted-foreground mt-1">Requires Sale Deed Registry to be Completed.</p>
-                {!startableBookings.length && <p className="text-[0.6875rem] text-sky-600 mt-1">No bookings are eligible yet — Sale Deed Registry must be Completed first.</p>}
+                <p className="text-[0.6875rem] text-muted-foreground">{startableBookings.length ? "Needs the sale deed registry completed." : "No booking is eligible yet — the sale deed registry must be completed first."}</p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Application No</label>
-                  <Input value={startForm.ApplicationNo} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationNo: e.target.value }))} placeholder="Optional" />
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Application no.</label>
+                  <input className={INP} value={startForm.ApplicationNo} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationNo: e.target.value }))} placeholder="Optional" />
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Application Date</label>
-                  <DateInput value={startForm.ApplicationDate} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Application date</label>
+                  <DateInput value={startForm.ApplicationDate} max={localDay()} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))} className={INP} />
                 </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Authority</label>
-                <Input value={startForm.Authority} onChange={(e) => setStartForm((f) => ({ ...f, Authority: e.target.value }))} placeholder="e.g. GHMC, MCGM, BDA" />
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Authority</label>
+                <input className={INP} value={startForm.Authority} onChange={(e) => setStartForm((f) => ({ ...f, Authority: e.target.value }))} placeholder="e.g. GHMC, MCGM, BDA" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Old Khata No.</label>
-                  <Input value={startForm.OldKhataNo} onChange={(e) => setStartForm((f) => ({ ...f, OldKhataNo: e.target.value }))} />
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Old khata no.</label>
+                  <input className={INP} value={startForm.OldKhataNo} onChange={(e) => setStartForm((f) => ({ ...f, OldKhataNo: e.target.value }))} />
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Mutation Fee</label>
-                  <Input type="number" value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Mutation fee</label>
+                  <input type="number" className={`${INP} tabular-nums`} value={startForm.MutationFee} onChange={(e) => setStartForm((f) => ({ ...f, MutationFee: e.target.value }))} />
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
-              <button onClick={() => { setDialogOpen(false); setBookingId(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleStart} disabled={saving || !bookingId} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                {saving ? "Starting..." : "Start"}
-              </button>
-            </div>
+            <DialogFooter className="gap-2">
+              <button onClick={() => { setDialogOpen(false); setBookingId(""); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleStart} disabled={saving || !bookingId} className={`${KEY_INK} h-9 px-4`}>{saving ? "Starting…" : "Start"}</button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Raise Query */}
+        {/* Raise query */}
         <Dialog open={queryOpen} onOpenChange={(o) => !o && setQueryOpen(false)}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader><DialogTitle className="font-heading">Raise Query</DialogTitle></DialogHeader>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">What did the authority flag? *</label>
-              <textarea value={queryRemarks} onChange={(e) => setQueryRemarks(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background min-h-[80px]" />
-              <p className="text-[0.6875rem] text-muted-foreground mt-1">Mandatory documents will be reset so staff must genuinely correct and reattach them before resubmitting.</p>
+          <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="font-heading">Raise query</DialogTitle></DialogHeader>
+            <div className="space-y-1">
+              <label className={`block ${LBL}`}>What did the authority flag? *</label>
+              <textarea value={queryRemarks} onChange={(e) => setQueryRemarks(e.target.value)} className={`${TEXTAREA} min-h-[80px]`} />
+              <p className="text-[0.6875rem] text-muted-foreground">The mandatory documents are reset, so staff must correct and reattach them before resubmitting.</p>
             </div>
-            <div className="flex justify-end gap-2 pt-3 border-t border-border">
-              <button onClick={() => setQueryOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleQuery} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg ">Confirm Query</button>
-            </div>
+            <DialogFooter className="gap-2">
+              <button onClick={() => setQueryOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleQuery} disabled={busy || !queryRemarks.trim()} className={`${KEY_INK} h-9 px-4`}>{busy ? "Saving…" : "Record query"}</button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Approve */}
         <Dialog open={approveOpen} onOpenChange={(o) => !o && setApproveOpen(false)}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader><DialogTitle className="font-heading">Approve Mutation</DialogTitle></DialogHeader>
+          <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="font-heading">Approve mutation</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">New Khata No. *</label>
-                <Input value={approveForm.NewKhataNo} onChange={(e) => setApproveForm((f) => ({ ...f, NewKhataNo: e.target.value }))} placeholder="e.g. 456/2026" />
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>New khata no. *</label>
+                <input className={`${INP} tabular-nums`} value={approveForm.NewKhataNo} onChange={(e) => setApproveForm((f) => ({ ...f, NewKhataNo: e.target.value }))} placeholder="e.g. 456/2026" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Mutation No.</label>
-                  <Input value={approveForm.ApprovedNo} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedNo: e.target.value }))} />
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Mutation no.</label>
+                  <input className={`${INP} tabular-nums`} value={approveForm.ApprovedNo} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedNo: e.target.value }))} />
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Approved Date</label>
-                  <DateInput value={approveForm.ApprovedDate} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Approved date</label>
+                  <DateInput value={approveForm.ApprovedDate} max={localDay()} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))} className={INP} />
                 </div>
               </div>
             </div>
-            <DialogFooter className="pt-3 border-t border-border">
-              <button onClick={() => setApproveOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleApprove} disabled={!approveForm.NewKhataNo.trim()}
-                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
-                Confirm Approval
-              </button>
+            <DialogFooter className="gap-2">
+              <button onClick={() => setApproveOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleApprove} disabled={busy || !approveForm.NewKhataNo.trim()} className={`${KEY_INK} h-9 px-4`}>{busy ? "Saving…" : "Confirm approval"}</button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Preview */}
         <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent accent="crm" className="max-w-3xl p-0 gap-0 overflow-hidden">
-            <DialogHeader className="px-4 py-2.5 border-b border-border">
-              <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
+          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden rounded-none" style={{ border: RULE }}>
+            <DialogHeader className="px-4 py-2.5" style={{ borderBottom: RULE }}>
+              <DialogTitle className="font-heading text-sm truncate">{previewDoc?.name}</DialogTitle>
             </DialogHeader>
-            <div className="bg-muted/30 flex items-center justify-center" style={{ height: '75vh' }}>
-              {previewDoc?.mime === 'application/pdf' ? (
+            <div className="bg-muted/30 flex items-center justify-center" style={{ height: "75vh" }}>
+              {previewDoc?.mime === "application/pdf" ? (
                 <iframe src={previewDoc.url} title={previewDoc.name} className="w-full h-full border-0" />
               ) : previewDoc ? (
                 <img src={previewDoc.url} alt={previewDoc.name} className="max-w-full max-h-full object-contain" />
@@ -774,7 +631,7 @@ const CrmMutation: React.FC = () => {
             </div>
           </DialogContent>
         </Dialog>
-      </CrmShell>
+      </SheetShell>
     </>
   );
 };
