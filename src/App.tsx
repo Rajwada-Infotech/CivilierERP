@@ -442,9 +442,7 @@ const SaLeadDistribution = lazy(() => import("./pages/SalesAutomation/SaLeadDist
 const SaInquiryDashboard = lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard"));
 const SaSiteVisits = lazy(() => import("./pages/SalesAutomation/SaSiteVisits"));
 const SaMarketingInvoices = lazy(() => import("./pages/SalesAutomation/SaMarketingInvoices"));
-const SaMarketingDashboard = lazy(() => import("./pages/SalesAutomation/SaMarketingDashboard"));
-const SaSalesDashboard = lazy(() => import("./pages/SalesAutomation/SaSalesDashboard"));
-const SaTeamLeadDashboard = lazy(() => import("./pages/SalesAutomation/SaTeamLeadDashboard"));
+const SaDashboard = lazy(() => import("./pages/SalesAutomation/SaDashboard"));
 const SaReports = lazy(() => import("./pages/SalesAutomation/SaReports"));
 const SaTeamManagement = lazy(() => import("./pages/SalesAutomation/SaTeamManagement"));
 const SaLeadTransfers = lazy(() => import("./pages/SalesAutomation/SaLeadTransfers"));
@@ -2588,9 +2586,11 @@ function AppRoutes() {
       <Route path="/sales-automation/site-visits" element={<ProtectedRoute pageKey="sa-site-visits"><SaSiteVisits /></ProtectedRoute>} />
       <Route path="/sales-automation/invoices" element={<ProtectedRoute pageKey="sa-marketing-invoices"><SaMarketingInvoices /></ProtectedRoute>} />
       <Route path="/sales-automation/commissions" element={<ProtectedRoute pageKey="sa-commissions"><SaCommissions /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard/marketing" element={<ProtectedRoute pageKey="sa-campaigns"><SaMarketingDashboard /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard/sales" element={<ProtectedRoute pageKey="sa-leads"><SaSalesDashboard /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard/team-lead" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaTeamLeadDashboard /></ProtectedRoute>} />
+      <Route path="/sales-automation/dashboard" element={<ProtectedRoute pageKey="sa-leads"><SaDashboard /></ProtectedRoute>} />
+      {/* Old 3-dashboard routes -> one unified dashboard (user: "THERE SHOULD ONLY ONE DASHBOARD") */}
+      <Route path="/sales-automation/dashboard/marketing" element={<Navigate to="/sales-automation/dashboard" replace />} />
+      <Route path="/sales-automation/dashboard/sales" element={<Navigate to="/sales-automation/dashboard" replace />} />
+      <Route path="/sales-automation/dashboard/team-lead" element={<Navigate to="/sales-automation/dashboard" replace />} />
       <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-reports"><SaReports /></ProtectedRoute>} />
       <Route path="/sales-automation/teams" element={<ProtectedRoute pageKey="sa-teams"><SaTeamManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />
