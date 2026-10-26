@@ -15,6 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { printList } from "@/lib/printList";
+import { fetchAllPages } from "@/lib/fetchAllPages";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { BoqExcelImportModal } from "./BoqExcelImportModal";
@@ -79,6 +83,16 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   },
 ];
 
+// What Export and Print put out: the list's own columns, as plain values.
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "BOQ No", accessor: (r) => (r.BoqNo || r.DocNo || "") as string },
+  { header: "Date", accessor: (r) => fmtDate(r.BoqDate as string) },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Total Amount", accessor: (r) => Number(r.TotalAmount ?? 0) },
+  { header: "Status", accessor: (r) => (r.Status || "Draft") as string },
+];
+
 const RULE = "1px solid hsl(var(--foreground))";
 const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
@@ -133,6 +147,29 @@ export default function BOQ() {
   });
 
   const rows: BoqRecord[] = listData?.data ?? [];
+
+  // Every BOQ the search and status filter match, all pages (the server sends at most 100 at a time).
+  const fetchAllBoqs = () =>
+    fetchAllPages<Record<string, unknown>>((p, limit) =>
+      apiFetch(`/boq?${new URLSearchParams({
+        page: String(p),
+        limit: String(limit),
+        ...(search ? { search } : {}),
+        ...(filterStatus && filterStatus !== "All" ? { status: filterStatus } : {}),
+      })}`),
+    );
+  const filterNote = [filterStatus !== "All" ? `Status: ${filterStatus}` : "", search ? `Search: ${search}` : ""].filter(Boolean).join(" · ");
+  const [printing, setPrinting] = useState(false);
+  const handlePrintList = async () => {
+    setPrinting(true);
+    try {
+      printList({ title: "Bills of Quantities", subtitle: filterNote || undefined, columns: EXPORT_COLUMNS, rows: await fetchAllBoqs(), numeric: ["Total Amount"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't load the BOQs to print");
+    } finally {
+      setPrinting(false);
+    }
+  };
   const totalPages = listData?.totalPages ?? 1;
   const total = listData?.total ?? 0;
 
@@ -556,6 +593,20 @@ export default function BOQ() {
               <button onClick={() => loadList()} disabled={loading} className={`${KEY_LINE} h-9 w-9`} title="Refresh">
                 <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
               </button>
+              <ExportMenu
+                data={rows as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllBoqs}
+                columns={EXPORT_COLUMNS}
+                title="Bills of Quantities"
+                filename="boq"
+                subtitle={filterNote || undefined}
+                disabled={loading || total === 0 || !rights.canExport}
+              />
+              {rights.canPrint && (
+                <button onClick={handlePrintList} disabled={loading || printing || total === 0} className={`${KEY_LINE} h-9 px-3`} title="Print the list">
+                  <Printer size={13} /> {printing ? "Preparing…" : "Print"}
+                </button>
+              )}
               {rights.canCreate && (
                 <button onClick={() => setShowImport(true)} className={`${KEY_LINE} h-9 px-3`}>
                   <FileSpreadsheet size={13} /> Excel import
