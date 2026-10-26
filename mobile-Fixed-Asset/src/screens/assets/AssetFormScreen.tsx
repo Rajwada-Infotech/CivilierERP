@@ -20,7 +20,7 @@ import {
   getCompanies, getProjects, getSuppliers, getSacCodes, getActiveDepreciationSetups,
 } from "@/api/mastersApi";
 import {
-  getFixedAsset, createFixedAsset, updateFixedAsset, getUnassignedFAItemCodes,
+  getFixedAsset, createFixedAsset, updateFixedAsset, getUnassignedFAItemCodes, type DepreciationBackfill,
   type FixedAssetPayload, type UnassignedFAItemCode,
 } from "@/api/fixedAssetApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
@@ -192,6 +192,12 @@ export default function AssetFormScreen() {
     },
     onSuccess: (r) => {
       toast.success(editingId ? "Asset updated" : `Asset created — ${r.docNo ?? ""}`);
+      // A tagged asset's depreciation is posted automatically (Purchase / Activation Date → last closed month).
+      const b = (r as { depreciationBackfill?: DepreciationBackfill | null }).depreciationBackfill;
+      if (b?.posted) toast.info(`Depreciation posted automatically: ${b.posted} month${b.posted === 1 ? "" : "s"} (${b.fromMonth} to ${b.toMonth}), ₹${b.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}.`);
+      else if (b?.notConfigured) toast.info(`Depreciation was not posted: ${b.notConfigured}`);
+      else if (b?.errors?.length) toast.info(`Some depreciation months could not be posted: ${b.errors[0]}`);
+      qc.invalidateQueries({ queryKey: ["fa-asset-dep"] });
       qc.invalidateQueries({ queryKey: ["fa-assets"] });
       qc.invalidateQueries({ queryKey: ["fa-asset", editingId] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });

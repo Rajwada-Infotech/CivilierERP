@@ -161,7 +161,18 @@ async function mutate<T>(url: string, method: string, body: unknown, fallback: s
   return res.json().catch(() => ({} as T));
 }
 
-export const createFixedAsset = (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string }> =>
+/** What posting a new asset's depreciation from its Purchase / Activation Date up to the last closed month did. */
+export interface DepreciationBackfill {
+  posted: number;
+  alreadyPosted: number;
+  totalAmount: number;
+  fromMonth: string | null;
+  toMonth: string | null;
+  notConfigured: string | null;
+  errors: string[];
+}
+
+export const createFixedAsset = (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string; depreciationBackfill?: DepreciationBackfill | null }> =>
   mutate("/api/fixed-assets", "POST", data, "Failed to create fixed asset");
 
 export const updateFixedAsset = (id: number, data: Partial<FixedAssetPayload>): Promise<{ ok: true }> =>
