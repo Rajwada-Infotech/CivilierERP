@@ -16,7 +16,7 @@ const { projectPredicate } = require("../services/projectScope");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
@@ -673,7 +673,8 @@ router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "
 // finalised/sanctioned loan (that lives in dbo.CrmLoanDetail).
 
 // GET /:bookingId/bank-preferences
-router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+// Home Loan Tracking offers these as suggestions when recording the loan, so its right reads them too.
+router.get("/:bookingId/bank-preferences", requireAnyPageRight(["crm-welcome-calls", "crm-loan-details"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);

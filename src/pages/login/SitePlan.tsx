@@ -15,17 +15,55 @@ const draw = (delay: number, duration = 1.2) => ({
 });
 const fade = (delay: number) => ({ initial: { opacity: 0 }, animate: { opacity: 1 }, transition: { delay, duration: 0.6 } });
 
-/** A footprint with its column grid: outline, then the grid inside it. */
-function Footprint({ x, y, w, h, cols, rows, at }: { x: number; y: number; w: number; h: number; cols: number; rows: number; at: number }) {
-  const grid: string[] = [];
-  for (let c = 1; c < cols; c++) grid.push(`M${x + (w / cols) * c} ${y} V${y + h}`);
-  for (let r = 1; r < rows; r++) grid.push(`M${x} ${y + (h / rows) * r} H${x + w}`);
+/** A building footprint as the plan shows it: its outline (an L, a U, a stepped block…), a hatched service core, and
+ *  a dot at each column of its grid that falls inside it. `cells` marks which cells of a cols × rows grid it covers. */
+function Footprint({ x, y, cell, cells, core, at }: { x: number; y: number; cell: number; cells: string[]; core: [number, number]; at: number }) {
+  const rows = cells.length, cols = cells[0].length;
+  const on = (c: number, r: number) => r >= 0 && r < rows && c >= 0 && c < cols && cells[r][c] === "#";
+  // The outline: every edge of a filled cell that borders an empty one.
+  const edges: string[] = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (!on(c, r)) continue;
+    const X = x + c * cell, Y = y + r * cell;
+    if (!on(c, r - 1)) edges.push(`M${X} ${Y} H${X + cell}`);
+    if (!on(c, r + 1)) edges.push(`M${X} ${Y + cell} H${X + cell}`);
+    if (!on(c - 1, r)) edges.push(`M${X} ${Y} V${Y + cell}`);
+    if (!on(c + 1, r)) edges.push(`M${X + cell} ${Y} V${Y + cell}`);
+  }
+  // Column dots at the grid points touching a filled cell.
+  const dots: [number, number][] = [];
+  for (let r = 0; r <= rows; r++) for (let c = 0; c <= cols; c++) {
+    if (on(c, r) || on(c - 1, r) || on(c, r - 1) || on(c - 1, r - 1)) dots.push([x + c * cell, y + r * cell]);
+  }
+  const [cc, cr] = core;
   return (
     <g>
-      <motion.rect x={x} y={y} width={w} height={h} fill="rgba(15,51,84,0.035)" stroke={INK} strokeWidth={1.4} {...draw(at, 0.9)} />
-      <motion.path d={grid.join(" ")} stroke={INK_2} strokeWidth={1} strokeDasharray="5 4" fill="none" {...draw(at + 0.5, 0.9)} />
-      <motion.path d={`M${x} ${y} L${x + w} ${y + h} M${x + w} ${y} L${x} ${y + h}`} stroke={INK_2} strokeWidth={0.8} fill="none" {...draw(at + 0.8, 0.7)} />
+      {cells.map((row, r) => row.split("").map((ch, c) => ch === "#" && (
+        <motion.rect key={`${r}-${c}`} x={x + c * cell} y={y + r * cell} width={cell} height={cell} fill="rgba(15,51,84,0.04)" {...fade(at)} />
+      )))}
+      <motion.path d={edges.join(" ")} stroke={INK} strokeWidth={1.5} fill="none" {...draw(at, 1)} />
+      <motion.rect x={x + cc * cell + 4} y={y + cr * cell + 4} width={cell - 8} height={cell - 8} fill="url(#ls-plan-hatch)" stroke={INK_2} strokeWidth={1} {...fade(at + 0.6)} />
+      <motion.g {...fade(at + 0.8)}>
+        {dots.map(([dx, dy], i) => <rect key={i} x={dx - 2} y={dy - 2} width={4} height={4} fill={INK} />)}
+      </motion.g>
     </g>
+  );
+}
+
+/** A tree as the plan draws it: a scalloped canopy around its trunk point. */
+function Tree({ x, y, r, at }: { x: number; y: number; r: number; at: number }) {
+  const n = 9, pts: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2;
+    const p0 = [x + r * Math.cos(a0), y + r * Math.sin(a0)], p1 = [x + r * Math.cos(a1), y + r * Math.sin(a1)];
+    if (i === 0) pts.push(`M${p0[0].toFixed(1)} ${p0[1].toFixed(1)}`);
+    pts.push(`A${(r * 0.36).toFixed(1)} ${(r * 0.36).toFixed(1)} 0 0 1 ${p1[0].toFixed(1)} ${p1[1].toFixed(1)}`);
+  }
+  return (
+    <motion.g {...fade(at)}>
+      <path d={pts.join(" ") + " Z"} fill="rgba(28,77,53,0.05)" stroke="rgba(28,77,53,0.26)" strokeWidth={1} />
+      <circle cx={x} cy={y} r={1.6} fill="rgba(28,77,53,0.35)" />
+    </motion.g>
   );
 }
 
@@ -33,6 +71,11 @@ export function SitePlan() {
   return (
     <div className="ls-siteplan absolute inset-0 z-0 pointer-events-none hidden lg:block" aria-hidden>
       <svg viewBox="0 0 600 900" preserveAspectRatio="xMidYMid slice" className="w-full h-full">
+        <defs>
+          <pattern id="ls-plan-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(15,51,84,0.22)" strokeWidth="1" />
+          </pattern>
+        </defs>
         {/* Plot boundary with survey stations at its corners */}
         <motion.path d="M36 64 L560 40 L574 418 L548 868 L52 846 L24 452 Z" stroke={INK} strokeWidth={1.6} strokeDasharray="14 5 3 5" fill="none" {...draw(0.3, 2.2)} />
         {[[36, 64], [560, 40], [574, 418], [548, 868], [52, 846], [24, 452]].map(([x, y], i) => (
@@ -49,11 +92,12 @@ export function SitePlan() {
         <motion.path d="M-20 786 C 160 756, 420 816, 640 774" stroke={INK_2} strokeWidth={1} strokeDasharray="16 10" fill="none" {...draw(0.9, 1.6)} />
         <motion.text x={470} y={826} fill={INK} fontSize={10} fontFamily="Sora, sans-serif" letterSpacing="0.12em" {...fade(2.2)}>9.00 M ROAD</motion.text>
 
-        {/* Footprints in the corners: towers top left and right, a clubhouse bottom left */}
-        <Footprint x={70} y={110} w={120} h={86} cols={4} rows={3} at={0.9} />
-        <Footprint x={420} y={96} w={110} h={120} cols={3} rows={4} at={1.1} />
-        <Footprint x={78} y={612} w={104} h={74} cols={3} rows={2} at={1.3} />
-        <Footprint x={430} y={600} w={96} h={90} cols={3} rows={3} at={1.5} />
+        {/* Footprints in the corners: an L-shaped tower and a U-shaped block at the top, a stepped clubhouse and a
+            courtyard block at the bottom */}
+        <Footprint x={70} y={104} cell={30} cells={["####", "#...", "#..."]} core={[0, 0]} at={0.9} />
+        <Footprint x={414} y={92} cell={30} cells={["#.#", "#.#", "###"]} core={[1, 2]} at={1.1} />
+        <Footprint x={74} y={606} cell={28} cells={["##..", "###.", "####"]} core={[1, 1]} at={1.3} />
+        <Footprint x={428} y={598} cell={28} cells={["###", "#.#", "###"]} core={[0, 0]} at={1.5} />
 
         {/* Contours sweeping down the sides */}
         {[0, 1, 2].map((i) => (
@@ -66,11 +110,8 @@ export function SitePlan() {
         ))}
 
         {/* Trees */}
-        {[[230, 92], [262, 118], [330, 80], [218, 700], [268, 676], [360, 706], [392, 664]].map(([x, y], i) => (
-          <motion.g key={i} {...fade(1.8 + i * 0.08)}>
-            <circle cx={x} cy={y} r={11} fill="rgba(28,77,53,0.05)" stroke="rgba(28,77,53,0.22)" strokeWidth={1} />
-            <path d={`M${x - 4} ${y} H${x + 4} M${x} ${y - 4} V${y + 4}`} stroke="rgba(28,77,53,0.22)" strokeWidth={0.8} />
-          </motion.g>
+        {[[232, 96, 13], [266, 124, 10], [330, 82, 12], [216, 700, 12], [270, 676, 9], [358, 708, 13], [392, 664, 10]].map(([x, y, r], i) => (
+          <Tree key={i} x={x} y={y} r={r} at={1.8 + i * 0.08} />
         ))}
 
         {/* A dimension along the top, a section callout and the scale bar */}

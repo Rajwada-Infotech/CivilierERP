@@ -4,66 +4,50 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import {
-  Landmark, Pencil, Lock, Sparkles, CheckCircle2,
-  CircleDot, Circle, XCircle, IndianRupee, Phone, User,
-  Hash, Building2, BadgeCheck, CalendarDays, Wallet,
-} from "lucide-react";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { Landmark, Pencil, Lock, Sparkles, Check, X, CalendarDays, RefreshCw, Wallet } from "lucide-react";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
+import { localDay } from "./salesDeed/config";
 
 const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
 
-// ── Status meta ───────────────────────────────────────────────────────────────
 // "Closed" is set by the system only — a previous owner's loan after a resale.
 type LoanStatus = "NotApplied" | "Applied" | "Sanctioned" | "Disbursed" | "Rejected" | "Closed";
-
 const STATUS_ORDER: LoanStatus[] = ["NotApplied", "Applied", "Sanctioned", "Disbursed"];
-
-const STATUS_META: Record<string, { label: string; pill: string; icon: React.ElementType }> = {
-  NotApplied: { label: "Not Applied", pill: "text-muted-foreground bg-muted/60 border-border",            icon: Circle },
-  Applied:    { label: "Applied",     pill: "text-blue-700 bg-blue-50 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800", icon: CircleDot },
-  Sanctioned: { label: "Sanctioned",  pill: "text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700", icon: BadgeCheck },
-  Disbursed:  { label: "Disbursed",   pill: "text-purple-700 bg-purple-50 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-700", icon: CheckCircle2 },
-  Rejected:   { label: "Rejected",    pill: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800", icon: XCircle },
-  Closed:     { label: "Closed (previous owner)", pill: "text-muted-foreground bg-muted border-border", icon: XCircle },
-};
-
 const SANCTION_STATUSES: LoanStatus[] = ["NotApplied", "Applied", "Sanctioned", "Disbursed", "Rejected"];
+const statusText = (s: string) => (s === "NotApplied" ? "Not applied" : s === "Closed" ? "Closed (previous owner)" : s);
+const statusTone = (s: string): "done" | "waiting" | "stopped" | "none" =>
+  s === "Disbursed" || s === "Sanctioned" ? "done" : s === "Rejected" ? "stopped" : s === "Applied" ? "waiting" : "none";
 
 const EMPTY_FORM = {
   BankName: "", BranchName: "", LoanAmount: "", SanctionStatus: "NotApplied" as LoanStatus,
   SanctionDate: "", LoanAccountNo: "", RmName: "", RmContact: "", Notes: "",
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-const fmt = (n: number | null | undefined) =>
-  n != null && n !== 0 ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+const fmt = (n: number | null | undefined) => (n != null && n !== 0 ? fmtRupees(Number(n)) : "—");
 
 interface LoanCpb { companyId: string; projectId: string; blockId: string }
-// NOTE on scale: still fetched in full — status-tab counts and disbursed
-// totals are computed client-side from the whole set (see `stats` below),
-// same as CrmDemands. Company/Project/Block narrows the set server-side.
+// Fetched in full: the status counts and disbursed total are worked out from the whole set; company / project / block
+// narrow it server-side.
 async function fetchLoanSummary(cpb?: LoanCpb): Promise<any[]> {
   const params = new URLSearchParams();
   if (cpb?.companyId) params.set("companyId", cpb.companyId);
   if (cpb?.projectId) params.set("projectId", cpb.projectId);
   if (cpb?.blockId) params.set("blockId", cpb.blockId);
   const qs = params.toString();
-  try {
-    const r = await fetchWithAuth(`/api/crm/loan-summary${qs ? `?${qs}` : ""}`);
-    return r.ok ? r.json() : [];
-  } catch { return []; }
+  // A failed load used to read as "No bookings match".
+  const r = await fetchWithAuth(`/api/crm/loan-summary${qs ? `?${qs}` : ""}`);
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(data?.error || `Could not load the loans (${r.status}).`);
+  return Array.isArray(data) ? data : [];
 }
 async function fetchBankPreferences(bookingId: number): Promise<any[]> {
   try {
@@ -72,90 +56,60 @@ async function fetchBankPreferences(bookingId: number): Promise<any[]> {
   } catch { return []; }
 }
 
-// ── Stepper ───────────────────────────────────────────────────────────────────
+/** The loan's four steps as squares, inked once reached; a rejected loan ends in a red square. */
 function LoanStepper({ status }: { status: string }) {
-  const steps = STATUS_ORDER;
-  const idx = steps.indexOf(status as LoanStatus);
-  const isRejected = status === "Rejected";
+  const idx = STATUS_ORDER.indexOf(status as LoanStatus);
+  const rejected = status === "Rejected";
   return (
-    <div className="flex items-center gap-0 w-full">
-      {steps.map((step, i) => {
-        const done  = !isRejected && idx >= i;
-        const curr  = !isRejected && idx === i;
-        const meta  = STATUS_META[step];
-        const Icon  = meta.icon;
+    <div className="flex items-center w-full">
+      {STATUS_ORDER.map((step, i) => {
+        const done = !rejected && idx >= i;
+        const curr = !rejected && idx === i;
         return (
           <React.Fragment key={step}>
             <div className="flex flex-col items-center flex-1 min-w-0">
-              <div className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-colors ${
-                done
-                  ? "border-emerald-500 bg-emerald-500 text-white"
-                  : curr
-                  ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-600"
-                  : "border-border bg-muted/30 text-muted-foreground"
-              }`}>
-                <Icon size={13} />
-              </div>
-              <span className={`text-[0.625rem] mt-1 text-center leading-tight ${
-                done ? "text-emerald-600 dark:text-emerald-400 font-medium" :
-                curr ? "text-blue-600 dark:text-blue-400 font-medium" : "text-muted-foreground"
-              }`}>{meta.label}</span>
+              <span className={`w-7 h-7 flex items-center justify-center font-heading text-[0.6875rem] font-bold tabular-nums ${
+                done && !curr ? "bg-foreground text-card border border-foreground" : curr ? "bg-card text-foreground border-2 border-foreground" : "bg-card text-muted-foreground border border-foreground/25"}`}>
+                {done && !curr ? <Check size={13} /> : i + 1}
+              </span>
+              <span className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em] mt-1.5 text-center leading-tight ${done ? "text-foreground" : "text-muted-foreground"}`}>{statusText(step)}</span>
             </div>
-            {i < steps.length - 1 && (
-              <div className={`flex-shrink-0 h-0.5 w-6 mx-0.5 rounded ${
-                !isRejected && idx > i ? "bg-emerald-400" : "bg-border"
-              }`} />
-            )}
+            {i < STATUS_ORDER.length - 1 && <div className={`shrink-0 h-px w-6 mx-0.5 ${!rejected && idx > i ? "bg-foreground" : "bg-foreground/20"}`} />}
           </React.Fragment>
         );
       })}
-      {isRejected && (
+      {rejected && (
         <div className="flex flex-col items-center ml-2">
-          <div className="flex items-center justify-center w-7 h-7 rounded-full border-2 border-red-400 bg-red-50 dark:bg-red-950/40 text-red-500">
-            <XCircle size={13} />
-          </div>
-          <span className="text-[0.625rem] mt-1 text-red-500 font-medium">Rejected</span>
+          <span className="w-7 h-7 flex items-center justify-center bg-destructive text-white"><X size={13} /></span>
+          <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em] mt-1.5 text-destructive">Rejected</span>
         </div>
       )}
     </div>
   );
 }
 
-// ── Status pill ───────────────────────────────────────────────────────────────
-function StatusPill({ status }: { status: string }) {
-  const m = STATUS_META[status] ?? STATUS_META.NotApplied;
-  return (
-    <span className={`inline-flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium whitespace-nowrap ${m.pill}`}>
-      {status === "NotApplied" ? "Not Applied" : status}
-    </span>
-  );
-}
+const Mark = ({ status }: { status: string }) => statusTone(status) === "none"
+  ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground whitespace-nowrap">{statusText(status)}</span>
+  : <SheetMark text={statusText(status)} tone={statusTone(status) as "done" | "waiting" | "stopped"} />;
 
-// ── Main component ────────────────────────────────────────────────────────────
 const CrmLoanTracking: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("crm-loan-details");
-  const [sp, setSp] = useSearchParams();
+  const [sp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
 
   const [activeTab, setActiveTab] = useState<string>("All");
-  const [editingRow, setEditingRow]   = useState<any | null>(null);
-  const [form, setForm]     = useState({ ...EMPTY_FORM });
+  const [editingRow, setEditingRow] = useState<any | null>(null);
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [locked, setLocked] = useState(false);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
-  const inputCls = `w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 ${
-    locked ? "opacity-60 cursor-not-allowed bg-muted/20" : ""
-  }`;
-
-  // ── Data ────────────────────────────────────────────────────────────────────
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: rows = [], isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ["crm-loan-summary", cpb],
     queryFn: () => fetchLoanSummary(cpb),
     staleTime: 30_000,
   });
-
   const { data: bankPreferences = [] } = useQuery({
     queryKey: ["crm-bank-preferences", editingRow?.BookingId],
     queryFn: () => fetchBankPreferences(editingRow!.BookingId),
@@ -163,432 +117,289 @@ const CrmLoanTracking: React.FC = () => {
     staleTime: 60_000,
   });
 
-  // ── Derived stats ───────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const r = rows as any[];
-    const notApplied  = r.filter((x) => x.SanctionStatus === "NotApplied").length;
-    const applied     = r.filter((x) => x.SanctionStatus === "Applied").length;
-    const sanctioned  = r.filter((x) => x.SanctionStatus === "Sanctioned").length;
-    const disbursed   = r.filter((x) => x.SanctionStatus === "Disbursed").length;
-    const rejected    = r.filter((x) => x.SanctionStatus === "Rejected").length;
-    const totalDisbursedAmt = r.reduce((s, x) => s + (x.DisbursedAmount || 0), 0);
-    return { notApplied, applied, sanctioned, disbursed, rejected, totalDisbursedAmt };
+    const count = (s: string) => r.filter((x) => x.SanctionStatus === s).length;
+    return {
+      notApplied: count("NotApplied"), applied: count("Applied"), sanctioned: count("Sanctioned"), disbursed: count("Disbursed"), rejected: count("Rejected"),
+      totalDisbursedAmt: r.reduce((s, x) => s + (x.DisbursedAmount || 0), 0),
+      sanctionedAmt: r.filter((x) => ["Sanctioned", "Disbursed"].includes(x.SanctionStatus)).reduce((s, x) => s + Number(x.LoanAmount || 0), 0),
+    };
   }, [rows]);
 
   const TABS = [
-    { key: "All",        label: "All",          count: (rows as any[]).length },
-    { key: "NotApplied", label: "Not Applied",   count: stats.notApplied },
-    { key: "Applied",    label: "Applied",        count: stats.applied },
-    { key: "Sanctioned", label: "Sanctioned",     count: stats.sanctioned },
-    { key: "Disbursed",  label: "Disbursed",      count: stats.disbursed },
-    { key: "Rejected",   label: "Rejected",       count: stats.rejected },
+    { key: "All", label: "All", count: (rows as any[]).length },
+    { key: "NotApplied", label: "Not applied", count: stats.notApplied },
+    { key: "Applied", label: "Applied", count: stats.applied },
+    { key: "Sanctioned", label: "Sanctioned", count: stats.sanctioned },
+    { key: "Disbursed", label: "Disbursed", count: stats.disbursed },
+    { key: "Rejected", label: "Rejected", count: stats.rejected },
   ];
+  const filtered = useMemo(() => (rows as any[]).filter((r: any) => activeTab === "All" || r.SanctionStatus === activeTab), [rows, activeTab]);
 
-  const filtered = useMemo(() =>
-    (rows as any[]).filter((r: any) => activeTab === "All" || r.SanctionStatus === activeTab),
-    [rows, activeTab]
-  );
-
-  // ── Dialog helpers ──────────────────────────────────────────────────────────
   const openRow = (row: any) => {
     setEditingRow(row);
     setForm(row.LoanId != null ? {
-      BankName:      row.BankName      || "",
-      BranchName:    row.BranchName    || "",
-      LoanAmount:    row.LoanAmount    != null ? String(row.LoanAmount) : "",
+      BankName: row.BankName || "",
+      BranchName: row.BranchName || "",
+      LoanAmount: row.LoanAmount != null ? String(row.LoanAmount) : "",
       SanctionStatus: row.SanctionStatus || "NotApplied",
-      SanctionDate:  row.SanctionDate ? String(row.SanctionDate).slice(0, 10) : "",
+      SanctionDate: row.SanctionDate ? String(row.SanctionDate).slice(0, 10) : "",
       LoanAccountNo: row.LoanAccountNo || "",
-      RmName:        row.RmName        || "",
-      RmContact:     row.RmContact     || "",
-      Notes:         row.Notes         || "",
+      RmName: row.RmName || "",
+      RmContact: row.RmContact || "",
+      Notes: row.Notes || "",
     } : { ...EMPTY_FORM });
-    setLocked(row.LoanId != null);
+    // A recorded loan opens read-only (Edit unlocks it); without the edit right everything does — a booking with
+    // no loan used to open straight into a form the server would refuse to save.
+    setLocked(row.LoanId != null || !rights.canEdit);
   };
+  const closeDialog = () => { setEditingRow(null); setLocked(false); setForm({ ...EMPTY_FORM }); };
 
-  const closeDialog = () => {
-    setEditingRow(null);
-    setLocked(false);
-    setForm({ ...EMPTY_FORM });
-  };
-
-  // Deep-link: jump into a specific booking's dialog on mount
+  // Deep link: open that booking's loan once the list is in.
   useEffect(() => {
     if (!deepLinkBookingId || editingRow || (rows as any[]).length === 0) return;
-    const id = parseInt(deepLinkBookingId, 10);
-    const row = (rows as any[]).find((r: any) => r.BookingId === id);
+    const row = (rows as any[]).find((r: any) => r.BookingId === parseInt(deepLinkBookingId, 10));
     if (row) openRow(row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkBookingId, (rows as any[]).length]);
 
-  // ── Save ─────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!editingRow) return;
+    if (["Sanctioned", "Disbursed"].includes(form.SanctionStatus) && !(Number(form.LoanAmount) > 0)) { toast.error("Enter the sanctioned amount"); return; }
+    if (["Applied", "Sanctioned", "Disbursed"].includes(form.SanctionStatus) && !form.BankName.trim()) { toast.error("Enter the bank"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${BKG_API}/${editingRow.BookingId}/loan`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
       toast.success("Loan details saved");
       closeDialog();
       qc.invalidateQueries({ queryKey: ["crm-loan-summary"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setSaving(false); }
   };
 
-  // ── Columns ───────────────────────────────────────────────────────────────────
-  const columns: ColumnDef<any, unknown>[] = [
-    {
-      accessorKey: "BookingNo", header: "Booking", size: 110,
-      cell: (i) => <span className="font-mono text-xs">{i.getValue() as string}</span>,
-    },
-    {
-      accessorKey: "ApplicantName", header: "Customer", size: 180,
-      cell: (i) => (
-        <div>
-          <div className="font-medium text-sm"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">{i.row.original.UnitNo} · {i.row.original.Mobile}</div>
-        </div>
-      ),
-    },
-    {
-      id: "totalValue", header: "Booking Value", size: 120,
-      cell: (i) => <span className="text-sm">{fmt(i.row.original.TotalValue)}</span>,
-    },
-    {
-      id: "bank", header: "Bank", size: 130, enableSorting: false,
-      cell: (i) => (
-        <div>
-          <div className="text-sm">{i.row.original.BankName || <span className="text-muted-foreground">—</span>}</div>
-          {i.row.original.BranchName && <div className="text-xs text-muted-foreground">{i.row.original.BranchName}</div>}
-        </div>
-      ),
-    },
-    {
-      id: "loanAmount", header: "Sanctioned", size: 110, enableSorting: false,
-      cell: (i) => <span className="text-sm">{fmt(i.row.original.LoanAmount)}</span>,
-    },
-    {
-      id: "disbursed", header: "Disbursed (Actual)", size: 130, enableSorting: false,
-      cell: (i) => {
-        const d = i.row.original.DisbursedAmount;
-        return <span className={`text-sm font-medium ${d > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{fmt(d)}</span>;
-      },
-    },
-    {
-      id: "status", header: "Status", size: 110, enableSorting: false,
-      cell: (i) => <StatusPill status={i.row.original.SanctionStatus} />,
-    },
-    {
-      id: "rm", header: "Bank RM", size: 150, enableSorting: false,
-      cell: (i) => {
-        const { RmName, RmContact } = i.row.original;
-        return RmName
-          ? <div><div className="text-sm">{RmName}</div><div className="text-xs text-muted-foreground">{RmContact}</div></div>
-          : <span className="text-muted-foreground">—</span>;
-      },
-    },
+  const figures = [
+    { label: "Not applied", value: String(stats.notApplied), note: "Bookings without a loan yet", tab: "NotApplied" },
+    { label: "Applied", value: String(stats.applied), note: `${stats.rejected} rejected`, tab: "Applied" },
+    { label: "Sanctioned", value: String(stats.sanctioned + stats.disbursed), note: fmt(stats.sanctionedAmt), tab: "Sanctioned" },
+    { label: "Disbursed", value: String(stats.disbursed), note: `${fmt(stats.totalDisbursedAmt)} via home-loan receipts`, tab: "Disbursed" },
   ];
-
-  // ── Render ────────────────────────────────────────────────────────────────────
-  return (
-    <CrmShell
-      title="Home Loan Tracking"
-      subtitle="Track bank coordination and disbursement status for every booking"
-      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
-    >
-
-      {/* ── Summary metric cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Not Applied",  value: stats.notApplied,  color: "text-muted-foreground", bg: "bg-muted/40" },
-          { label: "Applied",      value: stats.applied,     color: "text-blue-600 dark:text-blue-400",   bg: "bg-blue-50 dark:bg-blue-950/30" },
-          { label: "Sanctioned",   value: stats.sanctioned,  color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-950/30" },
-          { label: "Disbursed",    value: stats.disbursed,   color: "text-purple-600 dark:text-purple-400", bg: "bg-purple-50 dark:bg-purple-950/30" },
-        ].map((m) => (
-          <div key={m.label} className={`rounded-xl border border-border px-4 py-3 ${m.bg}`}>
-            <div className={`text-2xl font-bold font-heading ${m.color}`}>{m.value}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{m.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Total disbursed callout ── */}
-      {stats.totalDisbursedAmt > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 text-sm font-medium">
-          <Wallet size={14} />
-          Total disbursed via Home Loan receipts: {fmt(stats.totalDisbursedAmt)}
-        </div>
+  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
+  const th = `!px-4 !py-2.5 text-left ${LBL}`;
+  const td = "!px-4 !py-3.5";
+  const field = (key: keyof typeof EMPTY_FORM, label: string, type = "text", span2 = false) => (
+    <div key={key} className={span2 ? "sm:col-span-2" : ""}>
+      <label className={`block mb-1 ${LBL}`}>{label}</label>
+      {locked ? (
+        <p className={`text-sm px-2.5 py-2 ${type === "number" ? "font-heading tabular-nums" : ""}`} style={{ border: RULE_SOFT }}>
+          {type === "number" ? fmt(Number(form[key]) || null) : (form[key] as string) || <span className="text-muted-foreground">—</span>}
+        </p>
+      ) : (
+        <AutoInput type={type} value={form[key] as string} max={type === "date" ? localDay() : undefined}
+          onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} className={`${INP} ${type === "number" ? "tabular-nums" : ""}`} />
       )}
+    </div>
+  );
 
-      {/* ── Status filter tabs ── */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
-      </div>
-      <div className="flex items-center gap-1 overflow-x-auto pb-1 thin-scroll">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-              activeTab === tab.key
-                ? "btn-module text-white border-primary"
-                : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-            }`}
-          >
-            {tab.label}
-            <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full ${
-              activeTab === tab.key ? "bg-primary-foreground/20" : "bg-muted"
-            }`}>{tab.count}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* ── Table ── */}
-      <DataTable
-        data={filtered}
-        columns={columns}
-        loading={isLoading}
-        emptyMessage="No bookings match the selected filter"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-        onRowClick={(row) => openRow(row.original)}
-        getRowId={(r) => String(r.BookingId)}
-      />
-
-      {/* ── Edit / View Dialog ── */}
-      <Dialog open={!!editingRow} onOpenChange={(o) => { if (!o) closeDialog(); }}>
-        <DialogContent accent="crm" className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
-          <DialogHeader>
-            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
-              <span className="flex items-center gap-2"><Landmark size={16} /> Home Loan Details</span>
-              {editingRow?.LoanId != null && locked && rights.canEdit && (
-                <button
-                  onClick={() => setLocked(false)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0"
-                >
-                  <Pencil size={11} /> Edit
-                </button>
-              )}
-            </DialogTitle>
-          </DialogHeader>
-
-          {editingRow && (
-            <div className="space-y-4">
-
-              {/* Booking info card */}
-              <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold text-sm flex items-center gap-1.5">
-                    <User size={13} className="text-muted-foreground" />
-                    <ApplicantNames name={editingRow.ApplicantName} bookingId={editingRow.BookingId} applicationId={editingRow.ApplicationId} />
-                  </div>
-                  <StatusPill status={editingRow.SanctionStatus} />
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "CRM", "Home Loan Tracking"]} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Finance"
+        title="Home Loan Tracking"
+        subtitle="Every booking's home loan: the bank, sanction and disbursement, compared with what actually came in on home-loan receipts."
+        action={<button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>}
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={() => setActiveTab(x.tab)} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }} className="tabular-nums">{x.note}</p>
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1"><Hash size={10} /> {editingRow.BookingNo}</span>
-                  <span className="flex items-center gap-1"><Building2 size={10} /> Unit {editingRow.UnitNo}</span>
-                  <span className="flex items-center gap-1"><Phone size={10} /> {editingRow.Mobile}</span>
-                  <span className="flex items-center gap-1"><IndianRupee size={10} /> {fmt(editingRow.TotalValue)} booking value</span>
-                </div>
-              </div>
+              ))}
+            </div>
+          </div>
 
-              {/* Loan progress stepper */}
-              <div className="px-2 py-3 rounded-xl border border-border bg-card">
-                <p className="text-[0.625rem] text-muted-foreground font-medium uppercase tracking-widest mb-3 px-1">Loan Progress</p>
-                <LoanStepper status={editingRow.SanctionStatus} />
-              </div>
-
-              {/* Disbursement comparison (only when a loan record exists) */}
-              {editingRow.LoanId != null && (
-                <div className={`rounded-xl border px-4 py-3 text-sm ${
-                  editingRow.SanctionStatus === "Disbursed" && editingRow.LoanAmount > 0 &&
-                  Math.abs((editingRow.DisbursedAmount || 0) - editingRow.LoanAmount) > 1
-                    ? "border-sky-300 bg-sky-50 dark:bg-sky-950/20 dark:border-sky-700"
-                    : "border-border bg-muted/20"
-                }`}>
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">Sanctioned Amount</p>
-                      <p className="font-semibold">{fmt(editingRow.LoanAmount)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mb-0.5">Disbursed via Receipts</p>
-                      <p className={`font-semibold ${editingRow.DisbursedAmount > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
-                        {fmt(editingRow.DisbursedAmount)}
-                      </p>
-                    </div>
-                  </div>
-                  {editingRow.SanctionStatus === "Disbursed" && editingRow.LoanAmount > 0 &&
-                   Math.abs((editingRow.DisbursedAmount || 0) - editingRow.LoanAmount) > 1 && (
-                    <p className="text-xs text-sky-700 dark:text-sky-400 mt-2">
-                      Sanctioned and disbursed amounts don't match — check with Accounts.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Lock notice */}
-              {locked && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5">
-                  <Lock size={11} /> Viewing only — click Edit to make changes.
-                </div>
-              )}
-
-              {/* Welcome Call bank suggestions (edit mode only) */}
-              {!locked && (bankPreferences as any[]).length > 0 && (
-                <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 px-4 py-3">
-                  <div className="flex items-center gap-1.5 text-[0.6875rem] font-semibold text-blue-700 dark:text-blue-400 mb-2">
-                    <Sparkles size={11} /> Bank preferences from Welcome Call
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(bankPreferences as any[]).map((bp: any) => (
-                      <button
-                        key={bp.Id}
-                        type="button"
-                        onClick={() => setForm((f) => ({ ...f, BankName: bp.BankName }))}
-                        title={bp.Remarks ? `Note: ${bp.Remarks}` : `Use ${bp.BankName}`}
-                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border border-blue-300 bg-white dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors"
-                      >
-                        <Landmark size={10} />
-                        {bp.BankName}
-                        {bp.Remarks && <span className="text-blue-400 dark:text-blue-500"> · {bp.Remarks}</span>}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[0.625rem] text-blue-500 mt-1.5">Tap a bank to auto-fill the Bank Name below.</p>
-                </div>
-              )}
-
-              {/* Sanction Status */}
-              {!locked && (
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1 font-medium">Sanction Status</label>
-                  <select
-                    value={form.SanctionStatus}
-                    onChange={(e) => setForm((f) => ({ ...f, SanctionStatus: e.target.value as LoanStatus }))}
-                    className={inputCls}
-                  >
-                    {SANCTION_STATUSES.map((s) => (
-                      <option key={s} value={s}>{s === "NotApplied" ? "Not Applied" : s}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Bank details */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  { key: "BankName",     label: "Bank Name",        type: "text", span: 1 },
-                  { key: "BranchName",   label: "Branch",           type: "text", span: 1 },
-                  { key: "LoanAmount",   label: "Sanctioned Amount (₹)", type: "number", span: 1 },
-                  { key: "SanctionDate", label: "Sanction Date",    type: "date",   span: 1 },
-                  { key: "LoanAccountNo", label: "Loan Account No", type: "text", span: 2 },
-                ].map(({ key, label, type, span }) => (
-                  <div key={key} className={span === 2 ? "col-span-2" : ""}>
-                    <label className="text-xs text-muted-foreground block mb-1 font-medium">{label}</label>
-                    {locked ? (
-                      <p className="text-sm px-3 py-2 rounded-lg border border-border bg-muted/20">
-                        {(form as any)[key] || <span className="text-muted-foreground">—</span>}
-                      </p>
-                    ) : (
-                      <AutoInput
-                        type={type}
-                        value={(form as any)[key]}
-                        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                        className={inputCls}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* RM details */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {[
-                  { key: "RmName",    label: "RM Name",    type: "text" },
-                  { key: "RmContact", label: "RM Contact", type: "text" },
-                ].map(({ key, label, type }) => (
-                  <div key={key}>
-                    <label className="text-xs text-muted-foreground block mb-1 font-medium">{label}</label>
-                    {locked ? (
-                      <p className="text-sm px-3 py-2 rounded-lg border border-border bg-muted/20">
-                        {(form as any)[key] || <span className="text-muted-foreground">—</span>}
-                      </p>
-                    ) : (
-                      <AutoInput
-                        type={type}
-                        value={(form as any)[key]}
-                        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                        className={inputCls}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1 font-medium">Notes</label>
-                {locked ? (
-                  <p className="text-sm px-3 py-2 rounded-lg border border-border bg-muted/20 min-h-[60px] whitespace-pre-wrap">
-                    {form.Notes || <span className="text-muted-foreground">—</span>}
-                  </p>
-                ) : (
-                  <textarea
-                    value={form.Notes}
-                    onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                    rows={3}
-                    className={`${inputCls} resize-none`}
-                  />
-                )}
-              </div>
-
-              {/* Metadata */}
-              {editingRow.LoanCreatedAt && (
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <CalendarDays size={10} />
-                    Added {new Date(editingRow.LoanCreatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                  </span>
-                  {editingRow.LoanUpdatedAt && (
-                    <span>Updated {new Date(editingRow.LoanUpdatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
-                  )}
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                {locked ? (
-                  <button onClick={closeDialog} className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
-                    Close
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 space-y-3" style={{ borderBottom: RULE }}>
+              <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
+                {TABS.map((t) => (
+                  <button key={t.key} onClick={() => setActiveTab(t.key)} className={tabClass(activeTab === t.key)} style={{ borderRight: RULE_SOFT }}>
+                    {t.label} <span className="tabular-nums">{t.count}</span>
                   </button>
+                ))}
+              </div>
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
+            </div>
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[980px]">
+                <thead>
+                  <tr style={{ borderBottom: RULE }}>
+                    <th className={th}>Booking</th><th className={th}>Customer</th><th className={`${th} !text-right`}>Booking value</th><th className={th}>Bank</th>
+                    <th className={`${th} !text-right`}>Sanctioned</th><th className={`${th} !text-right`}>Disbursed (actual)</th><th className={th}>Status</th><th className={th}>Bank RM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isError ? (
+                    <tr><td colSpan={8} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                  ) : isLoading ? (
+                    <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
+                  ) : filtered.length === 0 ? (
+                    <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>No booking matches this filter.</td></tr>
+                  ) : filtered.map((r: any) => {
+                    const mismatch = r.SanctionStatus === "Disbursed" && r.LoanAmount > 0 && Math.abs((r.DisbursedAmount || 0) - r.LoanAmount) > 1;
+                    return (
+                      <tr key={r.BookingId} onClick={() => openRow(r)} className="align-top cursor-pointer hover:bg-primary/5 transition-colors" style={{ borderBottom: RULE_SOFT }}>
+                        <td className={`${td} font-heading text-xs font-semibold tabular-nums whitespace-nowrap`}>{r.BookingNo}</td>
+                        <td className={td}>
+                          <div className="font-medium leading-snug"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} applicationId={r.ApplicationId} /></div>
+                          <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{r.UnitNo} · {r.Mobile}</div>
+                        </td>
+                        <td className={`${td} text-right font-heading tabular-nums whitespace-nowrap`}>{fmt(r.TotalValue)}</td>
+                        <td className={td}>
+                          <div>{r.BankName || <span className="text-muted-foreground">—</span>}</div>
+                          {r.BranchName && <div className="mt-1 text-[0.6875rem] text-muted-foreground">{r.BranchName}</div>}
+                        </td>
+                        <td className={`${td} text-right font-heading tabular-nums whitespace-nowrap`}>{fmt(r.LoanAmount)}</td>
+                        <td className={`${td} text-right whitespace-nowrap`} title={mismatch ? "Sanctioned and disbursed amounts don't match — check with Accounts" : undefined}>
+                          <span className={`font-heading font-semibold tabular-nums ${mismatch ? "text-destructive" : r.DisbursedAmount > 0 ? "" : "text-muted-foreground"}`}>{fmt(r.DisbursedAmount)}</span>
+                        </td>
+                        <td className={td}><Mark status={r.SanctionStatus} /></td>
+                        <td className={td}>
+                          {r.RmName ? <><div>{r.RmName}</div><div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{r.RmContact}</div></> : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <Dialog open={!!editingRow} onOpenChange={(o) => { if (!o) closeDialog(); }}>
+          <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+                <span className="flex items-center gap-2"><Landmark size={16} /> Home loan</span>
+                {locked && rights.canEdit && <button onClick={() => setLocked(false)} className={`${KEY_LINE} h-8 px-2.5 shrink-0`}><Pencil size={11} /> Edit</button>}
+              </DialogTitle>
+            </DialogHeader>
+
+            {editingRow && (
+              <div className="space-y-4">
+                <div className="px-4 py-3" style={{ border: RULE }}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className={`block ${LBL}`}>Booking</span>
+                      <div className="font-heading font-bold leading-tight mt-0.5"><ApplicantNames name={editingRow.ApplicantName} bookingId={editingRow.BookingId} applicationId={editingRow.ApplicationId} /></div>
+                    </div>
+                    <Mark status={editingRow.SanctionStatus} />
+                  </div>
+                  <div className="mt-1.5 text-xs text-muted-foreground tabular-nums">
+                    {editingRow.BookingNo} · unit {editingRow.UnitNo} · {editingRow.Mobile} · <span className="font-heading">{fmt(editingRow.TotalValue)}</span> booking value
+                  </div>
+                </div>
+
+                <div className="px-3 pt-3 pb-2.5" style={{ border: RULE_SOFT }}>
+                  <p className={`${LBL} mb-3`}>Loan progress</p>
+                  <LoanStepper status={editingRow.SanctionStatus} />
+                </div>
+
+                {editingRow.LoanId != null && (() => {
+                  const mismatch = editingRow.SanctionStatus === "Disbursed" && editingRow.LoanAmount > 0 && Math.abs((editingRow.DisbursedAmount || 0) - editingRow.LoanAmount) > 1;
+                  return (
+                    <div className="px-4 py-3 text-sm" style={{ border: RULE_SOFT, borderLeft: mismatch ? "3px solid hsl(var(--destructive))" : RULE_SOFT }}>
+                      <div className="flex items-center justify-between gap-4">
+                        <div><p className={LBL}>Sanctioned</p><p className="font-heading font-semibold tabular-nums mt-0.5">{fmt(editingRow.LoanAmount)}</p></div>
+                        <div className="text-right"><p className={LBL}>Disbursed via receipts</p><p className="font-heading font-semibold tabular-nums mt-0.5">{fmt(editingRow.DisbursedAmount)}</p></div>
+                      </div>
+                      {mismatch && <p className="text-xs text-destructive mt-2">Sanctioned and disbursed amounts don't match — check with Accounts.</p>}
+                    </div>
+                  );
+                })()}
+
+                {locked && (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground px-3 py-1.5" style={{ border: RULE_SOFT }}>
+                    <Lock size={11} /> {rights.canEdit ? "Viewing only — Edit to make changes." : "Viewing only."}
+                  </p>
+                )}
+
+                {!locked && (bankPreferences as any[]).length > 0 && (
+                  <div className="px-4 py-3" style={{ border: RULE_SOFT, borderLeft: "3px solid hsl(var(--foreground))" }}>
+                    <div className={`flex items-center gap-1.5 ${LBL} mb-2`}><Sparkles size={11} /> Bank preferences from the welcome call</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(bankPreferences as any[]).map((bp: any) => (
+                        <button key={bp.Id} type="button" onClick={() => setForm((f) => ({ ...f, BankName: bp.BankName }))}
+                          title={bp.Remarks ? `Note: ${bp.Remarks}` : `Use ${bp.BankName}`}
+                          className={`${KEY_LINE} h-7 px-2 normal-case tracking-normal font-sans text-xs`}>
+                          <Landmark size={10} /> {bp.BankName}{bp.Remarks && <span className="text-muted-foreground"> · {bp.Remarks}</span>}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[0.625rem] text-muted-foreground mt-1.5">Pick one to fill in the bank below.</p>
+                  </div>
+                )}
+
+                {!locked && (
+                  <div>
+                    <label className={`block mb-1 ${LBL}`}>Sanction status</label>
+                    <select value={form.SanctionStatus} onChange={(e) => setForm((f) => ({ ...f, SanctionStatus: e.target.value as LoanStatus }))} className={INP}>
+                      {SANCTION_STATUSES.map((s) => <option key={s} value={s}>{statusText(s)}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {field("BankName", "Bank")}
+                  {field("BranchName", "Branch")}
+                  {field("LoanAmount", "Sanctioned amount (₹)", "number")}
+                  {field("SanctionDate", "Sanction date", "date")}
+                  {field("LoanAccountNo", "Loan account no.", "text", true)}
+                  {field("RmName", "Bank RM")}
+                  {field("RmContact", "RM contact")}
+                </div>
+
+                <div>
+                  <label className={`block mb-1 ${LBL}`}>Notes</label>
+                  {locked
+                    ? <p className="text-sm px-2.5 py-2 min-h-[60px] whitespace-pre-wrap" style={{ border: RULE_SOFT }}>{form.Notes || <span className="text-muted-foreground">—</span>}</p>
+                    : <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} rows={3} className={TEXTAREA} />}
+                </div>
+
+                {editingRow.LoanCreatedAt && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[0.6875rem] text-muted-foreground tabular-nums">
+                    <span className="flex items-center gap-1"><CalendarDays size={10} /> Added {new Date(editingRow.LoanCreatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>
+                    {editingRow.LoanUpdatedAt && <span>Updated {new Date(editingRow.LoanUpdatedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</span>}
+                  </div>
+                )}
+
+              </div>
+            )}
+            {/* Its own block: the dialog hides a footer that only says Close (the × does that) — inside the body it
+                took the whole body with it, so a loan opened read-only showed nothing. */}
+            {editingRow && (
+              <DialogFooter className="gap-2">
+                {locked ? (
+                  <button onClick={closeDialog} className={`${KEY_LINE} h-9 px-4`}>Close</button>
                 ) : (
                   <>
-                    <button onClick={closeDialog} className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 transition-colors"
-                    >
-                      {saving ? "Saving…" : editingRow.LoanId != null ? "Update" : "Save"}
-                    </button>
+                    <button onClick={closeDialog} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+                    <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-4`}><Wallet size={13} /> {saving ? "Saving…" : editingRow.LoanId != null ? "Update" : "Save"}</button>
                   </>
                 )}
-              </div>
-
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </CrmShell>
+              </DialogFooter>
+            )}
+          </DialogContent>
+        </Dialog>
+      </SheetShell>
+    </>
   );
 };
 

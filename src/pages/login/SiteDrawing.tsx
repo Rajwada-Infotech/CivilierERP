@@ -1,11 +1,14 @@
 // Right of the sign-in page: a construction drawing on blueprint that draws itself. The ground and the earth hatch go
 // in, the footings, then the columns rise and the floors are cast one above another, each with its level mark; the
-// tower crane goes up beside it and keeps hoisting steel beams from the yard onto the roof, and at the end a few
-// windows light up. The sheet has a drawing border with zone marks and a title block holding the company's figures.
+// tower crane goes up beside it and hoists the three girders waiting in the yard onto the roof one by one, then parks;
+// then the view zooms out to the board the sheet is pinned on (two engineers in front of it), pans to the next sheet —
+// the layout plan of a plotted villa project — and zooms into it while it draws itself (boundary, road, plots, trees,
+// dimensions) and its plots are booked one by one; then it keeps moving between the two. The crane's warning lights blink and the building's windows light up. A gyrocompass
+// gives north. The sheet has a drawing border with zone marks and a title block holding the company's figures.
 // On phones the same drawing fills the screen behind the form (SiteBackdrop). Everything is still under reduced
 // motion (MotionConfig on the page) apart from the line drawing, which just completes.
-import React, { useEffect, useState } from "react";
-import { animate, motion, useMotionValue, useReducedMotion, useSpring, type MotionValue } from "framer-motion";
+import React, { useEffect, useRef, useState } from "react";
+import { animate, motion, useMotionValue, useReducedMotion } from "framer-motion";
 import type { PublicStats } from "./config";
 import { FLOW, cascade, pop } from "./motion";
 
@@ -42,38 +45,79 @@ const appear = (delay: number, duration = 0.35) => ({
   transition: { delay, duration },
 });
 
-/** The crane's lift, on a loop: lower onto the top girder of the pile, take it, hoist, trolley across, lower it onto
- *  the roof, let go, return. One timeline shared by trolley, cable and load so they stay together. The hook carries
- *  the girder only between touching it on the pile (PICKED) and setting it down on the roof (PLACED); the pile is
- *  restocked while the crane is over the roof. */
-const LOOP = 11;
-const TIMES = [0, 0.1, 0.2, 0.32, 0.5, 0.62, 0.7, 0.8, 0.92, 1];
-// The load hangs 26–35 below the hook: so the hook sits 53 above the ground over the pile's top girder (GL-27) and
-// 52 above the roof slab to set it on the parapet (TOP-17).
-const AT_PILE = GL - 53;
-const AT_ROOF = TOP - 52;
-const TROLLEY = [PICK_X, PICK_X, PICK_X, PICK_X, DROP_X, DROP_X, DROP_X, DROP_X, PICK_X, PICK_X];
-const HOOK_Y = [GL - 130, AT_PILE, AT_PILE, 250, 250, AT_ROOF, AT_ROOF, TOP - 90, TOP - 90, GL - 130];
-const PICKED = 0.1;
-const PLACED = 0.66;
-const LOAD = { values: [0, 0, 1, 1, 0, 0], times: [0, PICKED, PICKED + 0.001, PLACED, PLACED + 0.001, 1] };
-const PILE_TOP = { values: [1, 1, 0, 0, 1, 1], times: [0, PICKED, PICKED + 0.001, 0.72, 0.86, 1] };
-const ON_ROOF = { values: [0, 0, 1, 1, 0], times: [0, PLACED, PLACED + 0.001, 0.86, 1] };
-const loop = (delay: number, times: number[] = TIMES) => ({ duration: LOOP, times, repeat: Infinity, ease: "easeInOut" as const, delay });
-const linear = (delay: number, times: number[]) => ({ duration: LOOP, times, repeat: Infinity, ease: "linear" as const, delay });
+/** The crane's three lifts, one after another: lower onto the top girder of the pile, take it (only then does it leave
+ *  the pile), hoist, trolley across, set it on the roof where it stays, return for the next; after the last it parks by
+ *  the mast. One timeline drives trolley, cable and load so they stay together. */
+const LIFT = 9;                                  // seconds per lift
+const GIRDERS = 3;
+const TOTAL = LIFT * GIRDERS;
+const END = LIFT_AT + TOTAL;                     // when the last girder is set and the crane parks
+// Girder i of the pile (0 at the bottom) has its top at GL-9-9i; the load hangs 26 below the hook.
+const pileTop = (i: number) => GL - 9 - 9 * i;
+const atPile = (i: number) => pileTop(i) - 26;
+// Set on the parapet (its top at TOP-17), side by side across the roof.
+const ROOF_X = [DROP_X - 72, DROP_X, DROP_X + 72];
+const AT_ROOF = TOP - 17 - 35;
+const HOIST_Y = 250;
+const PARK_X = MAST - 46;
+const PARK_Y = JIB_Y + 40;
+// Within a lift (0..1): over the pile, down, take it, hoist, across, down, let go, up, back (or park).
+const SEG = [0, 0.12, 0.2, 0.34, 0.52, 0.64, 0.72, 0.8, 0.92, 1];
+const PICK_T = 0.2;
+const DROP_T = 0.72;
+
+function liftTimeline() {
+  const times: number[] = [], trolley: number[] = [], hook: number[] = [];
+  for (let k = 0; k < GIRDERS; k++) {
+    const g = GIRDERS - 1 - k;                   // the top girder goes first
+    const last = k === GIRDERS - 1;
+    const x = ROOF_X[k];
+    const tx = [PICK_X, PICK_X, PICK_X, PICK_X, x, x, x, x, last ? PARK_X : PICK_X, last ? PARK_X : PICK_X];
+    const hy = [GL - 130, atPile(g), atPile(g), HOIST_Y, HOIST_Y, AT_ROOF, AT_ROOF, TOP - 90, last ? PARK_Y : TOP - 90, last ? PARK_Y : GL - 130];
+    SEG.forEach((t, j) => {
+      if (k > 0 && j === 0) return;              // the previous lift ended where this one starts
+      times.push((k + t) / GIRDERS); trolley.push(tx[j]); hook.push(hy[j]);
+    });
+  }
+  return { times, trolley, hook };
+}
+const TL = liftTimeline();
+/** A 0/1 switch at the given fractions of the lifts' timeline (on at `on`, off at `off`). */
+const step = (on: number | null, off: number | null) => {
+  const values: number[] = [], times: number[] = [];
+  const startOn = on == null;
+  values.push(startOn ? 1 : 0); times.push(0);
+  if (on != null) { values.push(0, 1); times.push(on, on + 0.0005); }
+  if (off != null) { values.push(1, 0); times.push(off, off + 0.0005); }
+  values.push(off != null ? 0 : 1); times.push(1);
+  return { values, times };
+};
+const pickAt = (k: number) => (k + PICK_T) / GIRDERS;
+const dropAt = (k: number) => (k + DROP_T) / GIRDERS;
+const once = (times: number[], ease: "linear" | "easeInOut" = "linear") => ({ duration: TOTAL, times, ease, delay: LIFT_AT });
 
 function Crane() {
   const still = useReducedMotion();
-  const hook = useMotionValue(still ? 250 : GL - 130);
+  const hook = useMotionValue(still ? PARK_Y : GL - 130);
   useEffect(() => {
     if (still) return;
-    const c = animate(hook, HOOK_Y, loop(LIFT_AT));
+    const c = animate(hook, TL.hook, once(TL.times, "easeInOut"));
     return () => c.stop();
   }, [still, hook]);
   const lattice: string[] = [];
   for (let y = GL; y > JIB_Y + 14; y -= 22) lattice.push(`M${MAST - 9} ${y} L${MAST + 9} ${y - 22} M${MAST + 9} ${y} L${MAST - 9} ${y - 22}`);
   const jibLattice: string[] = [];
   for (let x = MAST - 12; x > 150; x -= 24) jibLattice.push(`M${x} ${JIB_Y} L${x - 12} ${JIB_Y + 12} L${x - 24} ${JIB_Y}`);
+  // The load on the hook: on between taking each girder and letting it go.
+  const load = (() => {
+    const values: number[] = [0], times: number[] = [0];
+    for (let k = 0; k < GIRDERS; k++) { values.push(0, 1, 1, 0); times.push(pickAt(k), pickAt(k) + 0.0005, dropAt(k), dropAt(k) + 0.0005); }
+    values.push(0); times.push(1);
+    return { values, times };
+  })();
+  const girderRect = (x: number, y: number, strong = false) => (
+    <rect x={x - 36} y={y} width={72} height={9} fill={strong ? "rgba(244,180,0,0.35)" : "rgba(244,180,0,0.18)"} stroke={SAFETY} strokeOpacity={strong ? 1 : 0.7} strokeWidth={strong ? 1.2 : 1} />
+  );
 
   return (
     <g>
@@ -90,40 +134,59 @@ function Crane() {
       <motion.path d={jibLattice.join(" ")} stroke={SAFETY} strokeOpacity={0.5} strokeWidth={1} fill="none" {...draw(CRANE_AT + 1.8, 0.9)} />
       <motion.rect x={712} y={JIB_Y + 12} width={30} height={26} fill="rgba(244,180,0,0.22)" stroke={SAFETY} strokeWidth={1.2} {...appear(CRANE_AT + 2.2)} />
 
-      {/* Trolley, cable, hook and the beam it carries */}
+      {/* The girders: three in the yard, each leaving the pile only when the hook takes it, and staying on the roof
+          where it's set */}
+      <motion.g {...appear(CRANE_AT + 2.4)}>
+        {Array.from({ length: GIRDERS }, (_, g) => {
+          const k = GIRDERS - 1 - g;               // lift that takes it
+          const sw = step(null, pickAt(k));
+          return (
+            <motion.g key={`pile-${g}`} animate={still ? { opacity: 0 } : { opacity: sw.values }} transition={still ? { duration: 0 } : once(sw.times)}>
+              {girderRect(PICK_X, pileTop(g))}
+            </motion.g>
+          );
+        })}
+      </motion.g>
+      {ROOF_X.map((x, k) => {
+        const sw = step(dropAt(k), null);
+        return (
+          <motion.g key={`roof-${k}`} initial={{ opacity: still ? 1 : 0 }} animate={still ? { opacity: 1 } : { opacity: sw.values }} transition={still ? { duration: 0 } : once(sw.times)}>
+            {girderRect(x, TOP - 26, true)}
+          </motion.g>
+        );
+      })}
+
+      {/* Trolley, cable, hook and the girder it carries */}
       <motion.g {...appear(LIFT_AT - 0.3)}>
-        <motion.g initial={{ x: PICK_X }} animate={still ? { x: DROP_X } : { x: TROLLEY }} transition={still ? { duration: 0 } : loop(LIFT_AT)}>
+        <motion.g initial={{ x: still ? PARK_X : PICK_X }} animate={still ? { x: PARK_X } : { x: TL.trolley }} transition={still ? { duration: 0 } : once(TL.times, "easeInOut")}>
           <rect x={-9} y={JIB_Y + 12} width={18} height={7} fill={SAFETY} />
           <motion.line x1={0} y1={JIB_Y + 19} x2={0} y2={hook} stroke={LINE} strokeWidth={1} />
           <motion.g style={{ y: hook }}>
             <path d="M-5 0 H5 L3 7 H-3 Z M0 7 V12 a4 4 0 1 0 4 -2" stroke={LINE} strokeWidth={1.4} fill="none" />
-            <motion.g initial={{ opacity: 0 }} animate={still ? { opacity: 1 } : { opacity: LOAD.values }} transition={still ? { duration: 0 } : linear(LIFT_AT, LOAD.times)}>
-              <path d="M0 14 L-26 26 M0 14 L26 26" stroke={SOFT} strokeWidth={1} />
-              <rect x={-36} y={26} width={72} height={9} fill="rgba(244,180,0,0.35)" stroke={SAFETY} strokeWidth={1.2} />
-              <path d="M-36 30.5 H36" stroke={SAFETY} strokeOpacity={0.6} strokeWidth={0.8} />
-            </motion.g>
+            {!still && (
+              <motion.g initial={{ opacity: 0 }} animate={{ opacity: load.values }} transition={once(load.times)}>
+                <path d="M0 14 L-26 26 M0 14 L26 26" stroke={SOFT} strokeWidth={1} />
+                <rect x={-36} y={26} width={72} height={9} fill="rgba(244,180,0,0.35)" stroke={SAFETY} strokeWidth={1.2} />
+                <path d="M-36 30.5 H36" stroke={SAFETY} strokeOpacity={0.6} strokeWidth={0.8} />
+              </motion.g>
+            )}
           </motion.g>
         </motion.g>
       </motion.g>
 
-      {/* Girders stacked in the yard: the top one goes with the hook and comes back while the crane is away */}
-      <motion.g {...appear(CRANE_AT + 2.4)}>
-        {[0, 1].map((i) => (
-          <rect key={i} x={PICK_X - 36} y={GL - 9 - i * 9} width={72} height={9} fill="rgba(244,180,0,0.18)" stroke={SAFETY} strokeOpacity={0.7} strokeWidth={1} />
-        ))}
-        <motion.rect x={PICK_X - 36} y={GL - 27} width={72} height={9} fill="rgba(244,180,0,0.18)" stroke={SAFETY} strokeOpacity={0.7} strokeWidth={1}
-          animate={still ? { opacity: 0 } : { opacity: PILE_TOP.values }} transition={still ? { duration: 0 } : linear(LIFT_AT, PILE_TOP.times)} />
-      </motion.g>
-      {/* The girder once it's set down on the roof */}
-      {!still && (
-        <motion.rect x={DROP_X - 36} y={TOP - 26} width={72} height={9} fill="rgba(244,180,0,0.35)" stroke={SAFETY} strokeWidth={1.2}
-          initial={{ opacity: 0 }} animate={{ opacity: ON_ROOF.values }} transition={linear(LIFT_AT, ON_ROOF.times)} />
-      )}
+      {/* Once it's parked: the aircraft-warning lights at the apex and the jib tip blink */}
+      {[[MAST, JIB_Y - 57], [160, JIB_Y - 5], [748, JIB_Y - 5]].map(([cx, cy], i) => (
+        <motion.circle key={i} cx={cx} cy={cy} r={3.2} fill="#ff4d4d"
+          initial={{ opacity: 0 }}
+          animate={still ? { opacity: 0.9 } : { opacity: [0, 1, 0.15, 1, 0.15] }}
+          transition={still ? { duration: 0 } : { delay: END + 0.4 + i * 0.35, duration: 2.4, times: [0, 0.1, 0.5, 0.6, 1], repeat: Infinity, ease: "easeInOut" }} />
+      ))}
     </g>
   );
 }
 
 function Building() {
+  const still = useReducedMotion();
   const width = COLS[COLS.length - 1] - COLS[0];
   return (
     <g>
@@ -135,7 +198,8 @@ function Building() {
       {COLS.map((x, i) => (
         <motion.line key={x} x1={x} y1={GL} x2={x} y2={TOP} stroke={LINE} strokeWidth={2} {...draw(T0 + 1.3 + i * 0.06, FLOORS * 0.32 + 0.2)} />
       ))}
-      {/* Floors: slab, then the windows of each bay; a few light up once the frame is complete */}
+      {/* Floors: slab, then the windows of each bay; once the crane has parked they light up in a wave, and some keep
+          going on and off */}
       {Array.from({ length: FLOORS }, (_, f) => {
         const y = GL - (f + 1) * FH;
         const at = FLOOR_AT(f);
@@ -145,12 +209,20 @@ function Building() {
               initial={{ scaleX: 0, opacity: 0 }} animate={{ scaleX: 1, opacity: 1 }} style={{ originX: 0 }}
               transition={{ delay: at, duration: 0.3, ease: "easeOut" }} />
             {COLS.slice(0, -1).map((x, b) => {
-              const lit = (f * 3 + b * 5) % 7 === 2;
+              const seed = (f * 7 + b * 11) % 10;
+              const lit = seed < 4;                     // stay lit
+              const flicker = seed >= 4 && seed < 7;    // go on and off
+              const DARK = "rgba(140,200,255,0.10)", ON = "rgba(255,206,110,0.55)";
+              const fill = still ? (lit || flicker ? ON : DARK) : lit ? [DARK, ON] : flicker ? [DARK, DARK, ON, ON, DARK] : DARK;
+              const fillT = still ? { duration: 0 }
+                : lit ? { delay: END + 0.6 + (FLOORS - f) * 0.18 + b * 0.07, duration: 0.6 }
+                : flicker ? { delay: END + 2 + seed * 0.9 + b * 0.4, duration: 5 + seed, times: [0, 0.3, 0.38, 0.75, 0.82], repeat: Infinity, ease: "linear" as const }
+                : { duration: 0 };
               return (
                 <motion.rect key={b} x={x + 14} y={y + 16} width={37} height={32} stroke={SOFT} strokeWidth={1}
-                  initial={{ opacity: 0, fill: "rgba(140,200,255,0.10)" }}
-                  animate={{ opacity: 1, fill: lit ? ["rgba(140,200,255,0.10)", "rgba(255,206,110,0.55)"] : "rgba(140,200,255,0.10)" }}
-                  transition={{ opacity: { delay: at + 0.15 + b * 0.04, duration: 0.25 }, fill: { delay: BUILT + 1.2 + (f + b) * 0.12, duration: 0.6 } }} />
+                  initial={{ opacity: 0, fill: DARK }}
+                  animate={{ opacity: 1, fill }}
+                  transition={{ opacity: { delay: at + 0.15 + b * 0.04, duration: 0.25 }, fill: fillT }} />
               );
             })}
             {/* Level mark on the right: ▽ +3.30 */}
@@ -184,59 +256,301 @@ function Building() {
   );
 }
 
-function Drawing({ lean }: { lean?: { x: MotionValue<number>; y: MotionValue<number> } }) {
+// ── The camera: after the crane parks it zooms out to the board, pans to the bridge sheet and zooms in, then keeps
+// moving between the two sheets. World: sheet A (the building) at 0..800, sheet B (the layout plan) at 900..1700.
+const ZOOM_AT = END + 0.8;
+const MOVE = 2.6;                       // one zoom or pan
+const HOLD = 1;                         // a beat at the overview
+const B_X = 900;
+const K_OUT = 0.44;                     // the overview scale: both sheets in view
+const OVER = { k: K_OUT, x: (800 - 1700 * K_OUT) / 2, y: (900 - 900 * K_OUT) / 2 };
+const VIEW_A = { k: 1, x: 0, y: 0 };
+const VIEW_B = { k: 1, x: -B_X, y: 0 };
+const B_AT = ZOOM_AT + MOVE * 2 + HOLD; // the camera reaches the layout plan: it starts drawing
+const STAY = 11;                        // seconds on a sheet before moving on
+
+// ── Two engineers in front of the board ──────────────────────────────────────
+/** Two engineers seen from behind, drawn as an architect's scale figures: plain silhouettes in the sheet's pale ink,
+ *  hard hats and a reflective band the only colour. They stand in front of the board below the sheets, so they're in
+ *  view only when the camera pulls back: the one on the right points up at the building sheet and taps now and then,
+ *  the other holds a rolled-up drawing and turns to look. Drawn at 1:1 around a floor at y 884, placed by the caller. */
+function Engineers() {
+  const still = useReducedMotion();
+  const INK = "rgba(214,232,255,0.92)";
+  const SHADOW = "rgba(214,232,255,0.5)";
+  const IN = ZOOM_AT + MOVE - 0.8;              // they rise as the camera first pulls back
+  const arm = (d: string, w = 19) => <path d={d} stroke={INK} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" fill="none" />;
+  const person = (cx: number, pointing: boolean, i: number) => {
+    const F = 884;
+    const sh = F - 254;
+    const torso = `M${cx - 44} ${sh} Q${cx - 47} ${sh - 6} ${cx - 36} ${sh - 10} L${cx - 10} ${sh - 14} L${cx + 10} ${sh - 14} L${cx + 36} ${sh - 10}
+      Q${cx + 47} ${sh - 6} ${cx + 44} ${sh} L${cx + 35} ${F - 150} L${cx - 35} ${F - 150} Z`;
+    return (
+      <motion.g key={i}
+        initial={{ y: still ? 0 : 300, opacity: still ? 1 : 0 }} animate={{ y: 0, opacity: 1 }}
+        transition={still ? { duration: 0 } : { delay: IN + i * 0.35, type: "spring", stiffness: 70, damping: 16 }}>
+        <rect x={cx - 31} y={F - 156} width={27} height={150} rx={11} fill={INK} />
+        <rect x={cx + 4} y={F - 156} width={27} height={150} rx={11} fill={INK} />
+        <ellipse cx={cx - 18} cy={F - 4} rx={17} ry={6} fill={INK} />
+        <ellipse cx={cx + 18} cy={F - 4} rx={17} ry={6} fill={INK} />
+        {!pointing && (
+          <g transform={`rotate(-12 ${cx - 52} ${sh + 60})`}>
+            <rect x={cx - 112} y={sh + 52} width={84} height={15} rx={3} fill={SHADOW} />
+            <ellipse cx={cx - 112} cy={sh + 59.5} rx={4} ry={7.5} fill={INK} />
+          </g>
+        )}
+        {arm(`M${cx - 42} ${sh + 4} Q${cx - 54} ${sh + 56} ${cx - 50} ${sh + 104}`)}
+        {pointing ? (
+          <motion.g style={{ originX: "0%", originY: "100%" }}
+            animate={still ? undefined : { rotate: [0, -5, 0, 0] }}
+            transition={{ delay: IN + 1.5, duration: 2.2, times: [0, 0.25, 0.5, 1], repeat: Infinity, ease: "easeInOut" }}>
+            {arm(`M${cx + 40} ${sh + 4} L${cx + 70} ${sh - 46} L${cx + 84} ${sh - 112}`)}
+            {arm(`M${cx + 85} ${sh - 115} L${cx + 88} ${sh - 134}`, 6)}
+          </motion.g>
+        ) : arm(`M${cx + 42} ${sh + 4} Q${cx + 54} ${sh + 56} ${cx + 50} ${sh + 104}`)}
+        <path d={torso} fill={INK} />
+        <rect x={cx - 39} y={F - 205} width={78} height={7} fill={SAFETY} />
+        <rect x={cx - 41} y={sh + 26} width={82} height={5} fill={SAFETY} opacity={0.85} />
+        <rect x={cx - 8} y={sh - 28} width={16} height={18} fill={INK} />
+        <motion.g style={{ originX: "50%", originY: "100%" }}
+          animate={still || pointing ? undefined : { rotate: [0, 8, 8, 0, 0] }}
+          transition={{ delay: IN + 3, duration: 6, times: [0, 0.15, 0.55, 0.7, 1], repeat: Infinity, ease: "easeInOut" }}>
+          <ellipse cx={cx} cy={sh - 44} rx={16} ry={19} fill={INK} />
+          <path d={`M${cx - 19} ${sh - 50} C${cx - 19} ${sh - 76} ${cx + 19} ${sh - 76} ${cx + 19} ${sh - 50} Z`} fill={SAFETY} />
+          <rect x={cx - 25} y={sh - 52} width={50} height={5} rx={2.5} fill={SAFETY} />
+        </motion.g>
+      </motion.g>
+    );
+  };
+  return <g>{person(132, false, 0)}{person(262, true, 1)}</g>;
+}
+
+// ── Sheet B: the layout plan of a plotted villa project ───────────────────────
+// 24 plots in four rows of six either side of the main road; content kept clear of the note box (top left) and the
+// title block (bottom right).
+const LX = 70, LW = 660;                 // the plots' extent across
+const PW = LW / 6;                       // plot frontage
+const ROAD_Y = 470, ROAD_H = 44;
+const ROWS = [278, 372, ROAD_Y + ROAD_H + 6, ROAD_Y + ROAD_H + 100];
+const PH = 88;                           // plot depth
+// The order they're booked in, and how many: the rest stay available.
+const BOOK_ORDER = [8, 3, 15, 20, 1, 11, 17, 6, 22, 13, 4, 18];
+
+function Layout() {
+  const still = useReducedMotion();
+  const at = (d: number) => (still ? 0 : B_AT + d);
+  const plots = ROWS.flatMap((y, r) => Array.from({ length: 6 }, (_, c) => ({ n: r * 6 + c + 1, x: LX + c * PW, y })));
+  const trees = Array.from({ length: 11 }, (_, i) => LX + 30 + i * 60);
+  return (
+    <g>
+      {/* Site boundary */}
+      <motion.rect x={LX - 20} y={ROWS[0] - 20} width={LW + 40} height={ROWS[3] + PH + 20 - (ROWS[0] - 20)} fill="none"
+        stroke={LINE} strokeWidth={1.6} strokeDasharray="16 5 3 5" {...draw(at(0), 1.4)} />
+      {/* Main road with its centre line, and the gate on the left */}
+      <motion.path d={`M${LX - 20} ${ROAD_Y} H${LX + LW + 20} M${LX - 20} ${ROAD_Y + ROAD_H} H${LX + LW + 20}`} stroke={LINE} strokeWidth={1.4} fill="none" {...draw(at(0.4), 1)} />
+      <motion.line x1={LX - 10} y1={ROAD_Y + ROAD_H / 2} x2={LX + LW + 10} y2={ROAD_Y + ROAD_H / 2} stroke={SOFT} strokeWidth={1.2} strokeDasharray="14 10" {...draw(at(0.9), 1)} />
+      <motion.g {...appear(at(1.2))}>
+        <path d={`M${LX - 26} ${ROAD_Y - 6} V${ROAD_Y + 8} M${LX - 26} ${ROAD_Y + ROAD_H - 8} V${ROAD_Y + ROAD_H + 6}`} stroke={SAFETY} strokeWidth={3} />
+        <text x={LX - 34} y={ROAD_Y + ROAD_H / 2 + 4} fill={SOFT} fontSize={9.5} fontFamily="Sora, sans-serif" textAnchor="end">GATE</text>
+        <text x={LX + LW / 2} y={ROAD_Y + ROAD_H / 2 - 7} fill={SOFT} fontSize={9.5} letterSpacing="0.14em" fontFamily="Sora, sans-serif" textAnchor="middle">12.00 m ROAD</text>
+      </motion.g>
+      {/* Avenue trees along the road */}
+      {trees.map((x, i) => (
+        <motion.g key={x} {...appear(at(1.4 + i * 0.05))}>
+          <circle cx={x} cy={ROAD_Y - 3} r={5} fill="rgba(120,200,150,0.18)" stroke="rgba(150,220,170,0.55)" strokeWidth={1} />
+          <circle cx={x + 30} cy={ROAD_Y + ROAD_H + 3} r={5} fill="rgba(120,200,150,0.18)" stroke="rgba(150,220,170,0.55)" strokeWidth={1} />
+        </motion.g>
+      ))}
+      {/* The plots, each with its number; booked ones fill in one by one and take a tick */}
+      {plots.map((pl, i) => {
+        const k = BOOK_ORDER.indexOf(pl.n);
+        const booked = k >= 0;
+        const bookAt = at(3.2 + k * 0.55);
+        return (
+          <g key={pl.n}>
+            <motion.rect x={pl.x + 3} y={pl.y} width={PW - 6} height={PH} stroke={LINE} strokeWidth={1.2}
+              initial={{ pathLength: 0, opacity: 0, fill: "rgba(220,236,255,0.03)" }}
+              animate={{ pathLength: 1, opacity: 1, fill: booked ? ["rgba(220,236,255,0.03)", "rgba(244,180,0,0.88)"] : "rgba(220,236,255,0.03)" }}
+              transition={{ pathLength: { delay: at(1.6 + i * 0.04), duration: 0.5 }, opacity: { delay: at(1.6 + i * 0.04), duration: 0.01 },
+                fill: still ? { duration: 0 } : { delay: bookAt, duration: 0.4 } }} />
+            <motion.text x={pl.x + PW / 2} y={pl.y + PH / 2 + 4} fontSize={12} fontWeight={600} fontFamily="Sora, sans-serif" textAnchor="middle"
+              initial={{ opacity: 0, fill: LINE }}
+              animate={{ opacity: 1, fill: booked ? [LINE, "#0b2742"] : LINE }}
+              transition={{ opacity: { delay: at(2.2 + i * 0.03), duration: 0.35 }, fill: still ? { duration: 0 } : { delay: bookAt, duration: 0.4 } }}>
+              {`P-${String(pl.n).padStart(2, "0")}`}</motion.text>
+            {booked && (
+              <motion.g initial={{ opacity: 0, scale: still ? 1 : 0 }} animate={{ opacity: 1, scale: 1 }} style={{ originX: "50%", originY: "50%" }}
+                transition={still ? { duration: 0 } : { delay: bookAt + 0.15, type: "spring", stiffness: 420, damping: 14 }}>
+                <circle cx={pl.x + PW - 18} cy={pl.y + 15} r={8} fill="#0b2742" />
+                <path d={`M${pl.x + PW - 22} ${pl.y + 15} l3 3 l6 -6`} stroke={SAFETY} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </motion.g>
+            )}
+          </g>
+        );
+      })}
+      {/* A plot's size, and the legend */}
+      <motion.g {...appear(at(2.8))}>
+        <path d={`M${LX + 3} ${ROWS[0] - 9} H${LX + PW - 3} M${LX + 3} ${ROWS[0] - 13} V${ROWS[0] - 5} M${LX + PW - 3} ${ROWS[0] - 13} V${ROWS[0] - 5}`} stroke={SOFT} strokeWidth={1} />
+        <text x={LX + PW / 2} y={ROWS[0] - 12} fill={SOFT} fontSize={9} fontFamily="Sora, sans-serif" textAnchor="middle">12.00 × 9.60 m</text>
+        <g transform={`translate(${LX - 20} 760)`}>
+          <rect width={14} height={10} fill="rgba(244,180,0,0.88)" stroke={LINE} strokeWidth={1} />
+          <text x={20} y={9} fill={SOFT} fontSize={10} fontFamily="Sora, sans-serif">BOOKED</text>
+          <rect x={90} width={14} height={10} fill="rgba(220,236,255,0.03)" stroke={LINE} strokeWidth={1} />
+          <text x={110} y={9} fill={SOFT} fontSize={10} fontFamily="Sora, sans-serif">AVAILABLE</text>
+        </g>
+        <text x={LX - 20} y={810} fill={LINE} fillOpacity={0.8} fontSize={12} fontWeight={600} letterSpacing="0.16em" fontFamily="Sora, sans-serif">LP-002 · LAYOUT PLAN · PHASE 2 · 24 PLOTS</text>
+      </motion.g>
+    </g>
+  );
+}
+
+function Drawing() {
+  // Ids of its own: the page holds two copies (the panel, and the phone backdrop, hidden on wide screens), and a
+  // shared id resolves to the hidden copy's clip, which clips nothing.
+  const uid = React.useId().replace(/:/g, "");
+  const id = (n: string) => `ls-${uid}-${n}`;
+  const still = useReducedMotion();
+  const worldRef = useRef<SVGGElement>(null);
+  const boardRef = useRef<SVGGElement>(null);
+  const k = useMotionValue(1);
+  const tx = useMotionValue(0);
+  const ty = useMotionValue(0);
+  // The camera writes straight to the world's transform: re-rendering the drawing every frame for it would be wasteful.
+  useEffect(() => {
+    const apply = () => {
+      worldRef.current?.setAttribute("transform", `translate(${tx.get()} ${ty.get()}) scale(${k.get()})`);
+      boardRef.current?.setAttribute("opacity", String(Math.min(1, (1 - k.get()) / (1 - K_OUT))));
+    };
+    apply();
+    const offs = [k.on("change", apply), tx.on("change", apply), ty.on("change", apply)];
+    if (still) return () => offs.forEach((o) => o());
+    let stopped = false;
+    const running: { stop: () => void }[] = [];
+    const ease = [0.65, 0, 0.35, 1] as const;
+    /** Moves the camera through views, a move between each and holds where asked. */
+    const go = (views: { k: number; x: number; y: number }[], holds: number[], delay: number) => {
+      const times: number[] = [0];
+      let t = 0;
+      const steps: number[] = [];
+      views.forEach((_, i) => { if (i === 0) return; t += MOVE; times.push(t); steps.push(t); if (holds[i]) { t += holds[i]; times.push(t); } });
+      const kk: number[] = [], xx: number[] = [], yy: number[] = [];
+      views.forEach((v, i) => {
+        kk.push(v.k); xx.push(v.x); yy.push(v.y);
+        if (i > 0 && holds[i]) { kk.push(v.k); xx.push(v.x); yy.push(v.y); }
+      });
+      const opts = { delay, duration: t, times: times.map((x) => x / t), ease: ease as any };
+      const anims = [animate(k, kk, opts), animate(tx, xx, opts), animate(ty, yy, opts)];
+      running.push(...anims);
+      return Promise.all(anims);
+    };
+    (async () => {
+      // A → overview → B, then back and forth: B → overview → A → overview → B, staying on each sheet a while.
+      await go([VIEW_A, OVER, VIEW_B], [0, HOLD, 0], ZOOM_AT);
+      while (!stopped) {
+        await go([VIEW_B, OVER, VIEW_A], [0, HOLD, 0], STAY);
+        if (stopped) break;
+        await go([VIEW_A, OVER, VIEW_B], [0, HOLD, 0], STAY);
+      }
+    })();
+    return () => { stopped = true; running.forEach((r) => r.stop()); offs.forEach((o) => o()); };
+  }, [still, k, tx, ty]);
+
+  const sheetFrame = (x: number) => (
+    <g key={x}>
+      <rect x={x} y={0} width={800} height={900} fill="#0f3354" />
+      {[[18, 18], [782, 18], [18, 882], [782, 882]].map(([px, py], i) => (
+        <circle key={i} cx={x + px} cy={py} r={9} fill={SAFETY} stroke="#0b2742" strokeWidth={2} />
+      ))}
+    </g>
+  );
+
   return (
     <svg viewBox="0 0 800 900" preserveAspectRatio="xMidYMax slice" className="absolute inset-0 w-full h-full" aria-hidden>
       <defs>
-        <pattern id="ls-grid-s" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="rgba(170,210,255,0.07)" strokeWidth="1" /></pattern>
-        <pattern id="ls-grid-l" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#ls-grid-s)" /><path d="M100 0H0V100" fill="none" stroke="rgba(170,210,255,0.13)" strokeWidth="1" /></pattern>
-        <pattern id="ls-earth" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="12" stroke="rgba(190,220,255,0.18)" strokeWidth="1.2" /></pattern>
+        <pattern id={id("grid-s")} width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="rgba(170,210,255,0.07)" strokeWidth="1" /></pattern>
+        <pattern id={id("grid-l")} width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill={`url(#${id("grid-s")})`} /><path d="M100 0H0V100" fill="none" stroke="rgba(170,210,255,0.13)" strokeWidth="1" /></pattern>
+        <pattern id={id("earth")} width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="12" stroke="rgba(190,220,255,0.18)" strokeWidth="1.2" /></pattern>
+        <clipPath id={id("sheet-a")}><rect x="0" y="0" width="800" height="900" /></clipPath>
+        <clipPath id={id("sheet-b")}><rect x={B_X} y="0" width="800" height="900" /></clipPath>
       </defs>
-      <motion.rect x="-400" y="-200" width="1600" height="1400" fill="url(#ls-grid-l)" {...appear(0.1, 0.8)} />
-      <Layer lean={lean} depth={10}>
-        {/* Ground line and the earth below it */}
-        <motion.line x1={-200} y1={GL} x2={1000} y2={GL} stroke={LINE} strokeWidth={1.6} {...draw(T0, 0.8)} />
-        <motion.rect x={-200} y={GL} width={1200} height={300} fill="url(#ls-earth)" {...appear(T0 + 0.5, 0.6)} />
-        <Building />
-        <Crane />
-      </Layer>
-      {/* North arrow */}
-      <motion.g {...appear(T0 + 0.6)} transform="translate(742 74)">
-        <circle r={20} fill="none" stroke={SOFT} strokeWidth={1} />
-        <path d="M0 -26 L7 6 L0 1 L-7 6 Z" fill={LINE} fillOpacity={0.85} />
-        <text y={-31} fill={SOFT} fontSize={10} fontFamily="Sora, sans-serif" textAnchor="middle">N</text>
-      </motion.g>
+      <motion.rect x="-400" y="-200" width="1600" height="1400" fill={`url(#${id("grid-l")})`} {...appear(0.1, 0.8)} />
+      <g ref={worldRef}>
+        {/* The board both sheets are pinned to: it shows as the camera pulls back */}
+        <g ref={boardRef} opacity={0}>
+          <rect x={-60} y={-60} width={1820} height={1020} fill="rgba(4,18,32,0.8)" stroke={SOFT} strokeWidth={4} />
+          {sheetFrame(0)}
+          {sheetFrame(B_X)}
+        </g>
+        <g clipPath={`url(#${id("sheet-a")})`}>
+          {/* Ground line and the earth below it */}
+          <motion.line x1={-200} y1={GL} x2={1000} y2={GL} stroke={LINE} strokeWidth={1.6} {...draw(T0, 0.8)} />
+          <motion.rect x={-200} y={GL} width={1200} height={300} fill={`url(#${id("earth")})`} {...appear(T0 + 0.5, 0.6)} />
+          <Building />
+          <Crane />
+          {/* Gyrocompass: north */}
+          <motion.g {...appear(T0 + 0.6)} transform="translate(736 84)">
+            <Gyro />
+          </motion.g>
+        </g>
+        {!still && (
+          <g transform="translate(0 -150) scale(1.9)"><Engineers /></g>
+        )}
+        {!still && (
+          <g clipPath={`url(#${id("sheet-b")})`}>
+            <g transform={`translate(${B_X} 0)`}><Layout /></g>
+          </g>
+        )}
+      </g>
     </svg>
   );
 }
 
-/** Moves its contents against the pointer by up to `depth` px (the drawing sits a touch off the sheet). */
-function Layer({ lean, depth, children }: { lean?: { x: MotionValue<number>; y: MotionValue<number> }; depth: number; children: React.ReactNode }) {
-  const tx = useSpring(0, { stiffness: 80, damping: 20 });
-  const ty = useSpring(0, { stiffness: 80, damping: 20 });
-  useEffect(() => {
-    if (!lean) return;
-    const a = lean.x.on("change", (v) => tx.set(-v * depth));
-    const b = lean.y.on("change", (v) => ty.set(-v * depth * 0.6));
-    return () => { a(); b(); };
-  }, [lean, depth, tx, ty]);
-  return <motion.g style={{ x: tx, y: ty }}>{children}</motion.g>;
-}
-
-function usePointerLean() {
+/** A gyrocompass: an eight-point compass rose (north inked, the other cardinals half-shaded, the intercardinals short)
+ *  in a ticked bezel, two gimbal rings turning on their own axes around it (an ellipse that narrows and widens reads as
+ *  a ring turning edge-on), and the rose swinging out and settling on north before it precesses gently. */
+function Gyro() {
   const still = useReducedMotion();
-  const mx = useMotionValue(0);
-  const my = useMotionValue(0);
-  const x = useSpring(mx, { stiffness: 60, damping: 18 });
-  const y = useSpring(my, { stiffness: 60, damping: 18 });
-  const onMouseMove = (e: React.MouseEvent<HTMLElement>) => {
-    if (still) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    mx.set((e.clientX - r.left) / r.width - 0.5);
-    my.set((e.clientY - r.top) / r.height - 0.5);
-  };
-  const onMouseLeave = () => { mx.set(0); my.set(0); };
-  return { x, y, onMouseMove, onMouseLeave };
+  const spin = (dur: number, delay: number) => (still ? { duration: 0 } : { duration: dur, delay, repeat: Infinity, ease: "easeInOut" as const });
+  // One point of the rose: a kite from the centre, its left half filled and right half lighter, like a drafted rose.
+  const point = (len: number, w: number, a: number, dark: string, light: string) => (
+    <g key={a} transform={`rotate(${a})`}>
+      <path d={`M0 0 L0 ${-len} L${-w} ${-w * 1.1} Z`} fill={dark} />
+      <path d={`M0 0 L0 ${-len} L${w} ${-w * 1.1} Z`} fill={light} />
+    </g>
+  );
+  const ticks: React.ReactNode[] = [];
+  for (let i = 0; i < 32; i++) {
+    const long = i % 4 === 0;
+    ticks.push(<line key={i} x1={0} y1={-31} x2={0} y2={long ? -26.5 : -29} stroke={SOFT} strokeWidth={long ? 1.1 : 0.7} transform={`rotate(${i * 11.25})`} />);
+  }
+  return (
+    <g>
+      {/* Bezel */}
+      <circle r={31} fill="none" stroke={SOFT} strokeWidth={1} />
+      {ticks}
+      {/* Outer gimbal: turns about the north–south axis */}
+      <motion.ellipse cx={0} cy={0} ry={24} fill="none" stroke={LINE} strokeOpacity={0.5} strokeWidth={1}
+        initial={{ rx: 24 }} animate={still ? { rx: 24 } : { rx: [24, 2, 24, 2, 24] }} transition={spin(5, 1)} />
+      {/* Inner gimbal: turns about the east–west axis */}
+      <motion.ellipse cx={0} cy={0} rx={20} fill="none" stroke={SAFETY} strokeOpacity={0.65} strokeWidth={1}
+        initial={{ ry: 20 }} animate={still ? { ry: 20 } : { ry: [20, 2, 20, 2, 20] }} transition={spin(3.6, 1.4)} />
+      {/* The rose: swings out, settles on north, then precesses a little. The clear circle centres its box on the pivot. */}
+      <motion.g initial={{ rotate: still ? 0 : -70 }}
+        animate={still ? { rotate: 0 } : { rotate: [-70, 38, -22, 12, -6, 3, 0] }}
+        transition={still ? { duration: 0 } : { delay: T0 + 0.8, duration: 3.2, ease: "easeOut" }}>
+        <circle r={31} fill="none" />
+        <motion.g animate={still ? undefined : { rotate: [0, 2.5, 0, -2.5, 0] }}
+          transition={{ delay: T0 + 4.2, duration: 6, repeat: Infinity, ease: "easeInOut" }}>
+          <circle r={31} fill="none" />
+          {[45, 135, 225, 315].map((a) => point(12, 3.2, a, "rgba(190,220,255,0.55)", "rgba(190,220,255,0.22)"))}
+          {[90, 180, 270].map((a) => point(21, 4.6, a, "rgba(220,236,255,0.75)", "rgba(220,236,255,0.3)"))}
+          {point(24, 5.2, 0, SAFETY, "rgba(244,180,0,0.45)")}
+        </motion.g>
+      </motion.g>
+      <circle r={2.4} fill="#0a2540" stroke={LINE} strokeWidth={1} />
+      <text y={-35} fill={LINE} fontSize={10} fontWeight={600} fontFamily="Sora, sans-serif" textAnchor="middle">N</text>
+    </g>
+  );
 }
 
 const num = (n: number) => Math.round(n).toLocaleString("en-IN");
@@ -263,7 +577,6 @@ export function SiteBackdrop() {
 }
 
 export function SiteDrawing({ stats }: { stats: PublicStats | null }) {
-  const lean = usePointerLean();
   const figures: [number, string, string][] = stats
     ? [
         [stats.projects ?? 0, "", "Projects"],
@@ -279,10 +592,8 @@ export function SiteDrawing({ stats }: { stats: PublicStats | null }) {
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ ...FLOW, delay: 0.1 }}
-      onMouseMove={lean.onMouseMove}
-      onMouseLeave={lean.onMouseLeave}
     >
-      <Drawing lean={lean} />
+      <Drawing />
 
       {/* The drawing border with its zone marks */}
       <div className="ls-border" aria-hidden>
