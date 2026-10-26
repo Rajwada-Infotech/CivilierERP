@@ -36,6 +36,7 @@ export const salesAutomationNavItems: NavItem[] = [
       { label: "Activities",   path: "/sales-automation/lead-activities", pageKey: "sa-lead-activities"   },
       { label: "Tasks",        path: "/sales-automation/lead-tasks",     pageKey: "sa-lead-tasks"         },
       { label: "Distribution", path: "/sales-automation/distribution",   pageKey: "sa-lead-distribution"  },
+      { label: "Distribution Rules", path: "/sales-automation/distribution-rules", pageKey: "sa-distribution-rules" },
       { label: "Transfers",    path: "/sales-automation/lead-transfers",  pageKey: "sa-lead-transfers"    },
       { label: "Channel Partners", path: "/sales-automation/channel-partners", pageKey: "sa-channel-partners" },
     ],
