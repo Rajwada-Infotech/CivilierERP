@@ -22,7 +22,6 @@ export function ExpenseBookingPicker({
   mergedSummary = null,
   onMergeClear,
   onRefreshOptions,
-  sisterCompanies,
 }: {
   options: ExpenseOption[];
   value: string;
@@ -60,10 +59,6 @@ export function ExpenseBookingPicker({
    *  in that tab. This closes that gap without needing to chase the
    *  staleness down further. */
   onRefreshOptions?: () => void;
-  /** True when two invoices of DIFFERENT companies may still merge: the companies share one parent
-   *  enterprise and the project is tagged to both. The server checks the same, and the payment is then
-   *  booked under the parent. */
-  sisterCompanies?: (a: ExpenseOption, b: ExpenseOption) => boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -165,13 +160,15 @@ export function ExpenseBookingPicker({
   const normCompanyId = (v: unknown) => (v == null || v === "" ? null : Number(v));
   const normSupplierId = (v: unknown) => (v == null || v === "" ? null : Number(v));
   const normProjectName = (v: unknown) => String(v ?? "").trim().toLowerCase();
-  const sameCompany = (o: ExpenseOption, a: ExpenseOption) =>
-    normCompanyId(o.companyId) !== null &&
-    (normCompanyId(o.companyId) === normCompanyId(a.companyId) || !!sisterCompanies?.(o, a));
+  // A different project is fine when both are Project Master projects: the invoices are the same company's,
+  // so it is on both (e.g. Delta Realty's Boulevard and Magnus invoices). The server re-checks the tagging.
+  const sameOrTaggedProject = (o: ExpenseOption, a: ExpenseOption) =>
+    normProjectName(o.projectName) === normProjectName(a.projectName) || (o.projectId != null && a.projectId != null);
   const isMergeCompatible = (o: ExpenseOption) =>
     !mergeAnchor ||
-    (sameCompany(o, mergeAnchor) &&
-      normProjectName(o.projectName) === normProjectName(mergeAnchor.projectName) &&
+    (normCompanyId(o.companyId) !== null &&
+      normCompanyId(o.companyId) === normCompanyId(mergeAnchor.companyId) &&
+      sameOrTaggedProject(o, mergeAnchor) &&
       normSupplierId(o.supplierId) !== null &&
       normSupplierId(o.supplierId) === normSupplierId(mergeAnchor.supplierId));
   // Pinpoints exactly which field disagrees — shown in the UI instead of a
@@ -180,10 +177,10 @@ export function ExpenseBookingPicker({
   // round of "what does the DB actually say" diagnosis.
   const mergeIncompatibleReason = (o: ExpenseOption): string | null => {
     if (!mergeAnchor || isMergeCompatible(o)) return null;
-    if (!sameCompany(o, mergeAnchor)) {
-      return `Company differs (${o.companyName ?? o.companyId ?? "—"} vs ${mergeAnchor.companyName ?? mergeAnchor.companyId ?? "—"}) and they aren't sister companies on this project`;
+    if (normCompanyId(o.companyId) !== normCompanyId(mergeAnchor.companyId)) {
+      return `Company differs (${o.companyId ?? "—"} vs ${mergeAnchor.companyId ?? "—"})`;
     }
-    if (normProjectName(o.projectName) !== normProjectName(mergeAnchor.projectName)) {
+    if (!sameOrTaggedProject(o, mergeAnchor)) {
       return `Project differs ("${o.projectName ?? "—"}" vs "${mergeAnchor.projectName ?? "—"}")`;
     }
     if (normSupplierId(o.supplierId) === null) return "Could not resolve this invoice's supplier";
@@ -369,7 +366,7 @@ export function ExpenseBookingPicker({
                           onRefreshOptions?.();
                         }
                       }}
-                      title="Pay off several invoices from the same company (or sister companies of one parent on this project), project &amp; supplier in one payment"
+                      title="Pay off several invoices of the same company &amp; supplier in one payment (across the company's projects too)"
                       className={`ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded-none text-[0.6875rem] font-heading font-semibold transition-all border ${
                         mergeMode
                           ? "bg-primary/10 text-primary border-primary/30"

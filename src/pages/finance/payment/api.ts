@@ -161,7 +161,7 @@ export const deductChequeFromLot = async (
 };
 
 export const fetchCompanyOptions = async (): Promise<
-  { id: number; label: string; enterprise_id?: number | null; belongs_to?: string | null }[]
+  { id: number; label: string }[]
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
   if (!res.ok) return [];

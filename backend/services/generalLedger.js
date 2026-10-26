@@ -275,7 +275,8 @@ async function postVoucher(pool, {
         .input("SourceType", sql.NVarChar(30), sourceType)
         .input("SourceId", sql.Int, sourceId)
         .input("CompanyId", sql.Int, companyId)
-        .input("ProjectId", sql.Int, projectId)
+        // A leg may name its own project (a merged payment spanning projects); otherwise the voucher's.
+        .input("ProjectId", sql.Int, leg.projectId ?? projectId)
         .input("CostCenterId", sql.Int, leg.costCenterId ?? costCenterId)
         .input("CreatedBy", sql.NVarChar(150), createdBy)
         .input("AssetId", sql.Int, assetId)
@@ -1011,6 +1012,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
         ...mergedLinks.map((l) => ({
           lHeadId: mergedSupplierHeadId,
           debit: l.allocatedAmount,
+          projectId: l.projectId ?? undefined,
           narration: `${docNo} — ${l.eDocNo} (merged payment)`,
         })),
         { lHeadId: bankId, credit: amount, narration: `${docNo} — payment made (merged invoices)` },

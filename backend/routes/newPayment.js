@@ -149,7 +149,8 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
     WHERE eb.Eid IN (${placeholders.join(",")})
   `);
 
-  // In the order the ids came — the links, which the GL posting reads first-to-last, keep the picked order.
+  // In the order the ids came — the first picked invoice's project is the payment's own, and the links
+  // (which the GL posting reads first-to-last) keep that order.
   const rows = result.recordset.sort((a, b) => ids.indexOf(a.Eid) - ids.indexOf(b.Eid));
   const bad = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
 
@@ -169,50 +170,23 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   const distinctCompanies = new Set(rows.map((r) => Number(r.ECompanyId)));
   const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
   const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
-  if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
+  if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
   if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
-  // Invoices of different companies merge only when those companies are sisters (one parent enterprise)
-  // and the project is tagged to every one of them (its own company or Project Master's extra companies).
-  // The payment is then the parent's: booked under the company set up with the parent's name.
-  let payingCompanyId = rows[0].ECompanyId;
-  if (distinctCompanies.size > 1) {
-    const projectId = rows[0].ProjectId;
-    if (!projectId) bad("All merged invoices must belong to the same company.");
-    const creq = pool.request().input("pid", sql.Int, projectId);
-    const cph = [...distinctCompanies].map((id, i) => { creq.input(`c${i}`, sql.Int, id); return `@c${i}`; });
-    const cos = (await creq.query(`
-      SELECT co.id, co.name,
-        COALESCE(co.enterprise_id, pe.id) AS ParentId,
-        COALESCE(par.name, co.belongs_to) AS ParentName,
-        CASE WHEN p.company_id = co.id OR EXISTS (
-          SELECT 1 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = @pid AND pc.CompanyId = co.id
-        ) THEN 1 ELSE 0 END AS OnProject
-      FROM dbo.enterprise co
-      LEFT JOIN dbo.enterprise p ON p.id = @pid
-      LEFT JOIN dbo.enterprise par ON par.id = co.enterprise_id
-      OUTER APPLY (
-        SELECT TOP 1 e.id FROM dbo.enterprise e
-        WHERE (e.business_type = 'E' OR e.business_type IS NULL)
-          AND NULLIF(LTRIM(RTRIM(co.belongs_to)), '') IS NOT NULL
-          AND LTRIM(RTRIM(e.name)) = LTRIM(RTRIM(co.belongs_to))
-        ORDER BY e.id
-      ) pe
-      WHERE co.id IN (${cph.join(",")})
+  // Different projects merge when the company is on each of them — its own project or one tagged to it
+  // (Project Master's extra companies), e.g. Delta Realty paying its Boulevard and Magnus invoices together.
+  // Each invoice's ledger line keeps its own project.
+  if (distinctProjects.size > 1) {
+    const projectIds = [...new Set(rows.map((r) => r.ProjectId))];
+    if (projectIds.some((id) => !id)) bad("Invoices of different projects can be merged only when each is on a project from Project Master.");
+    const preq = pool.request().input("co", sql.Int, Number(rows[0].ECompanyId));
+    const pph = projectIds.map((id, i) => { preq.input(`p${i}`, sql.Int, id); return `@p${i}`; });
+    const off = (await preq.query(`
+      SELECT p.name FROM dbo.enterprise p
+      WHERE p.id IN (${pph.join(",")})
+        AND ISNULL(p.company_id, 0) <> @co
+        AND NOT EXISTS (SELECT 1 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id AND pc.CompanyId = @co)
     `)).recordset;
-    const parents = new Set(cos.map((c) => c.ParentId));
-    if (cos.length !== distinctCompanies.size || parents.has(null) || parents.size > 1) {
-      bad("Invoices of different companies can be merged only when the companies share the same parent enterprise.");
-    }
-    const off = cos.filter((c) => !c.OnProject);
-    if (off.length) bad(`${off.map((c) => c.name).join(", ")} is not tagged to this project.`);
-    const parentName = String(cos[0].ParentName ?? "").trim();
-    const payer = (await pool.request().input("pname", sql.NVarChar(255), parentName).query(`
-      SELECT TOP 1 id FROM dbo.enterprise
-      WHERE business_type = 'C' AND ISNULL(discontinue, 0) = 0 AND LTRIM(RTRIM(name)) = @pname
-      ORDER BY id
-    `)).recordset[0];
-    if (!parentName || !payer) bad(`The payment is booked for the parent, ${parentName || "the parent enterprise"} — set it up as a company in Company Master first.`);
-    payingCompanyId = payer.id;
+    if (off.length) bad(`${off.map((p) => p.name).join(", ")} is not tagged to the invoices' company.`);
   }
 
   const links = rows.map((r) => ({
@@ -224,9 +198,7 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
 
   return {
     links,
-    companyId: payingCompanyId,
-    // Sister companies' invoices: the parent pays, and the project needn't be tagged to the parent itself.
-    parentPays: distinctCompanies.size > 1,
+    companyId: rows[0].ECompanyId,
     // Raw EProjectName (not ProjectKey) — PProject stores whatever shape
     // the source invoice itself used (id-as-text or literal name), same
     // convention a normal single-invoice payment already relies on.
@@ -967,12 +939,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     const pool = getPool();
 
     let mergedLinks = null;
-    let parentPays = false;
     if (Array.isArray(ExpenseBookingIds) && ExpenseBookingIds.length > 0) {
       try {
         const resolved = await resolveMergedInvoices(pool, sql, ExpenseBookingIds);
         mergedLinks = resolved.links;
-        parentPays = resolved.parentPays;
         PCompany = String(resolved.companyId);
         PProject = String(resolved.projectRaw ?? "");
         partyId = resolved.supplierId;
@@ -984,7 +954,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     }
 
     try {
-      if (!parentPays) await assertProjectVisibleToCompany(pool, PProject, PCompany);
+      await assertProjectVisibleToCompany(pool, PProject, PCompany);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
     }
@@ -2957,9 +2927,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
              -- A merged payment (migration 501) has no single PExpenseRef to
              -- join ExpenseBooking through — fall back to its first merged
              -- invoice's own Company/Project (every merged invoice shares
-             -- the same one, enforced at merge time).
-             -- A merge's own PCompany comes before its first invoice's: for sister companies it is the parent.
-             COALESCE(eb.ECompanyId, TRY_CAST(np.PCompany AS INT), ebLink.ECompanyId) AS CompanyId,
+             -- the company; a merge may span projects, and then each
+             -- supplier leg carries its own invoice's project).
+             COALESCE(eb.ECompanyId, ebLink.ECompanyId) AS CompanyId,
              COALESCE(TRY_CAST(eb.EProjectName AS INT), TRY_CAST(ebLink.EProjectName AS INT)) AS ProjectId
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
@@ -3051,7 +3021,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const legs = [
       ...(mergedLinks.length > 0
         ? mergedLinks.map((l) => ({
-            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0,
+            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0, projectId: l.projectId ?? undefined,
             narration: `Payment: ${pmt.DocNo} (${l.eDocNo}) — Supplier/Creditor`,
           }))
         : [{ lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` }]),

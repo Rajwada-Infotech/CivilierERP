@@ -593,7 +593,7 @@ const Payment: React.FC = () => {
     return list;
   }, [banks, form.company, form.bankId]);
 
-  const { data: enterprises = [] } = useQuery<{ id: number; label: string; enterprise_id?: number | null; belongs_to?: string | null }[]>({
+  const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["company-options-payment-filter"],
     queryFn: fetchCompanyOptions,
   });
@@ -1645,11 +1645,6 @@ const Payment: React.FC = () => {
       });
       const total = mergedInvoices.reduce((s, m) => s + m.amount, 0);
       const anchor = selected[0];
-      // Sister companies' invoices are paid by their parent — the company set up under the parent's name.
-      const sisters = selected.some((o) => Number(o.companyId) !== Number(anchor?.companyId));
-      const parentName = sisters ? String(companyOptions.find((c) => c.id === Number(anchor?.companyId))?.belongs_to ?? "").trim() : "";
-      const parentCompany = parentName ? companyOptions.find((c) => c.label.trim().toLowerCase() === parentName.toLowerCase()) : undefined;
-      if (sisters && !parentCompany) toast.error(`The payment is booked for the parent${parentName ? `, ${parentName}` : ""} — set it up as a company in Company Master first.`);
       setForm((prev) => ({
         ...prev,
         expenseId: "",
@@ -1663,7 +1658,6 @@ const Payment: React.FC = () => {
         project: anchor?.projectName || prev.project,
         projectSite: anchor?.projectName || prev.projectSite,
         company: (() => {
-          if (parentCompany) return parentCompany.label;
           const name = anchor?.companyName;
           if (name && name.trim()) return name.trim();
           const matched = companyOptions.find((c) => c.id === anchor?.companyId);
@@ -1674,24 +1668,6 @@ const Payment: React.FC = () => {
       }));
     },
     [companyOptions],
-  );
-  // Sister companies — one parent enterprise (its id, or its name where only that was saved) — may merge
-  // their invoices when the project is tagged to both; the server re-checks this against the database.
-  const sisterCompanies = useCallback(
-    (a: ExpenseOption, b: ExpenseOption) => {
-      const ca = companyOptions.find((c) => c.id === Number(a.companyId));
-      const cb = companyOptions.find((c) => c.id === Number(b.companyId));
-      if (!ca || !cb) return false;
-      const name = (v?: string | null) => String(v ?? "").trim().toLowerCase();
-      const sameParent = (ca.enterprise_id != null && ca.enterprise_id === cb.enterprise_id) ||
-        (!!name(ca.belongs_to) && name(ca.belongs_to) === name(cb.belongs_to));
-      if (!sameParent) return false;
-      const proj = projectOptions.find((p) => (a.projectId != null && p.id === Number(a.projectId)) || name(p.label) === name(a.projectName));
-      if (!proj) return false;
-      const onProject = (id: number) => Number(proj.company_id) === id || (proj.tagged_company_ids?.split(",") ?? []).includes(String(id));
-      return onProject(ca.id) && onProject(cb.id);
-    },
-    [companyOptions, projectOptions],
   );
   const handleMergeClear = useCallback(() => {
     setForm((prev) => ({ ...prev, mergedInvoices: [] }));
@@ -2405,7 +2381,6 @@ const Payment: React.FC = () => {
                           onMergeConfirm={handleMergeConfirm}
                           mergedSummary={mergedSummary}
                           onMergeClear={handleMergeClear}
-                          sisterCompanies={sisterCompanies}
                           onRefreshOptions={refetchExpenseOptions}
                         />
                         <div className="flex items-center gap-2 pt-1">
