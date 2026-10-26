@@ -8,6 +8,9 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { printList } from "@/lib/printList";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -20,6 +23,19 @@ import { WorkDoneDetail } from "./workDone/WorkDoneDetail";
 import { printWorkDone } from "./workDone/printWorkDone";
 
 const STATUSES = ["all", "Draft", "Pending", "Approved", "Rejected"];
+
+// What Export and Print put out: the list's own columns, as plain values.
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: (r) => (r.DocNo || `#${r.ID}`) as string },
+  { header: "Date", accessor: (r) => fmtDate(r.DocDate as string) },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Project", accessor: "ProjectName" },
+  { header: "Work Order", accessor: "WorkOrderNo" },
+  { header: "Contractor", accessor: (r) => (r.ContractorName || r.SupplierName || "") as string },
+  { header: "Work", accessor: "DescriptionOfWork" },
+  { header: "Certified", accessor: (r) => Number(r.CertifiedAmount ?? 0) },
+  { header: "Status", accessor: (r) => (r.Status || "Draft") as string },
+];
 
 interface WorkDoneList {
   rows: WorkDoneEntry[];
@@ -186,6 +202,13 @@ export default function WorkDone() {
     },
   ];
 
+  // Export and Print cover what the list shows: the company and status picked.
+  const filterNote = [
+    filterCompanyId ? `Company: ${companies.find((c) => c.id === filterCompanyId)?.name ?? filterCompanyId}` : "",
+    statusFilter !== "all" ? `Status: ${statusFilter}` : "",
+  ].filter(Boolean).join(" · ");
+  const listRows = filtered as unknown as Record<string, unknown>[];
+
   const sum = data?.summary;
   const stats = [
     { label: "Entries", value: String(data?.total ?? 0), note: filterCompanyId ? "for this company" : "every company" },
@@ -217,6 +240,24 @@ export default function WorkDone() {
               <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh">
                 <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
               </button>
+              <ExportMenu
+                data={listRows}
+                columns={EXPORT_COLUMNS}
+                title="Work Done"
+                filename="work-done"
+                subtitle={filterNote || undefined}
+                disabled={isLoading || filtered.length === 0 || !rights.canExport}
+              />
+              {rights.canPrint && (
+                <button
+                  onClick={() => printList({ title: "Work Done", subtitle: filterNote || undefined, columns: EXPORT_COLUMNS, rows: listRows, numeric: ["Certified"] })}
+                  disabled={isLoading || filtered.length === 0}
+                  className={`${KEY_LINE} h-9 px-3`}
+                  title="Print the list"
+                >
+                  <Printer size={13} /> Print
+                </button>
+              )}
               {rights.canCreate && (
                 <button onClick={openNew} className={`${KEY_INK} h-9 px-4`}>
                   <Plus size={13} /> New work done
