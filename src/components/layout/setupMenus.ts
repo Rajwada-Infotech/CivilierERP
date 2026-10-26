@@ -37,6 +37,7 @@ import {
   Target,
   TrendingUp,
   Truck,
+  Upload,
   UserSquare,
   Users,
   UsersRound,
@@ -105,6 +106,13 @@ export const financeSetupItems: SetupItem[] = [
     path: "/masters/financial-year",
     color: "text-purple-400",
     pageKey: "financial-year-master",
+  },
+  {
+    icon: CalendarClock,
+    label: "Year-End Close",
+    path: "/finance/year-end-close",
+    color: "text-purple-500",
+    pageKey: "year-end-close",
   },
   {
     icon: BookOpen,
@@ -327,12 +335,24 @@ export const fixedAssetSetupItems: SetupItem[] = [
     color: "text-yellow-500",
     pageKey: "id-template-master",
   },
+  {
+    icon: Upload,
+    label: "Inventory Import",
+    path: "/fixed-asset/inventory-import",
+    color: "text-amber-500",
+    pageKey: "fixed-asset-inventory-import",
+  },
 ];
 
 export const followupSetupItems: SetupItem[] = [
-  // "Task Master" was moved from here into the Follow-Up module sidebar
-  // (see sidebars/FollowupSidebar.ts) — it's the module's core master list,
-  // not a set-and-forget configuration. Route/pageKey unchanged.
+  // Task Master moved back to Setup — it is a reference/config list, not a daily transaction.
+  {
+    icon: ClipboardList,
+    label: "Task Master",
+    path: "/followup/setup/task-master",
+    color: "text-teal-500",
+    pageKey: "task-master",
+  },
   {
     icon: Users,
     label: "Department Master",
@@ -390,14 +410,14 @@ export const civilWorkDprSetupItems: SetupItem[] = [
   },
   {
     icon: DoorOpen,
-    label: "Room Master",
+    label: "Room Category Master",
     path: "/civilworkdpr/room-category-master",
     color: "text-cyan-500",
     pageKey: "room-category-master",
   },
   {
-    icon: Tag,
-    label: "Flat Master",
+    icon: LayoutGrid,
+    label: "Room Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
     pageKey: "civilworkdpr-room-master",
@@ -439,6 +459,13 @@ export const salesAutomationSetupItems: SetupItem[] = [
     path: "/sales-automation/teams",
     color: "text-purple-500",
     pageKey: "sa-teams",
+  },
+  {
+    icon: Handshake,
+    label: "Channel Partners",
+    path: "/sales-automation/channel-partners",
+    color: "text-emerald-500",
+    pageKey: "sa-channel-partners",
   },
 ];
 

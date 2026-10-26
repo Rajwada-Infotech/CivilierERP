@@ -13,7 +13,7 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { PlugZap } from "lucide-react";
+import { PlugZap, Megaphone } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const API = "/api/sa/social-media";
@@ -184,7 +184,7 @@ const SaSocialMediaMaster: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load platforms.</div>;
 
   return (
-    <SalesAutoShell title="Social Media Master" subtitle="Manage social media platforms and their campaign connections">
+    <SalesAutoShell title="Social Media Master" subtitle="Step 1 of the lead workflow: platforms → campaigns → ads → leads" icon={Megaphone}>
       <Breadcrumbs items={["Sales Automation", "Social Media"]} />
       <div className="space-y-8">
         <MasterPage
@@ -204,6 +204,11 @@ const SaSocialMediaMaster: React.FC = () => {
             campaignCount: (value, row) => (
               <Link to={`/sales-automation/campaigns?platformId=${row._id}`} className="text-primary hover:underline">
                 {String(value)} campaign{value === 1 ? "" : "s"} →
+              </Link>
+            ),
+            activeAdCount: (value, row) => (
+              <Link to={`/sales-automation/ads?platformId=${row._id}`} className="text-primary hover:underline">
+                {String(value)} ad{value === 1 ? "" : "s"} →
               </Link>
             ),
           }}

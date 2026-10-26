@@ -5,6 +5,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, PhoneCall, Flame, MapPin, Award, Percent, Megaphone, TrendingUp, IndianRupee, Target, GitBranch, Clock, LayoutDashboard } from "lucide-react";
 import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
 import { SaTabs } from "@/components/sa/SaTabs";
+import { SaWorkflowFunnel } from "@/components/sa/SaWorkflowFunnel";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
@@ -159,11 +160,14 @@ const SUBTITLES: Record<string, string> = {
 const SaDashboard: React.FC = () => {
   usePageRights("sa-leads");
   const [view, setView] = useState<"sales" | "marketing" | "team-lead">("sales");
+  // Same query key as SalesView, so the workflow strip shares its cached fetch.
+  const { data: salesData } = useQuery({ queryKey: ["sa-dashboard-sales"], queryFn: fetchSalesDashboard, staleTime: 60_000 });
 
   return (
     <SalesAutoShell title="Dashboard" subtitle={SUBTITLES[view]} icon={LayoutDashboard}>
       <Breadcrumbs items={["Sales Automation", "Dashboard"]} />
       <div className="space-y-6">
+        <SaWorkflowFunnel data={salesData} />
         <SaTabs
           tabs={[
             { key: "sales", label: "Sales", icon: Users },

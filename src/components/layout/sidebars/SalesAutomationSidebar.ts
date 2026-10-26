@@ -1,19 +1,25 @@
-import { VideoPlay, Profile2User, Receipt21, Category2, Chart2 } from "iconsax-react";
+import { VideoPlay, Profile2User, Message2, Routing, Receipt21, Category2, Chart2 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
-// Masters/config pages (Social Media, Distribution Rules, Teams) live only
-// in the per-module Setup dropdown (src/components/layout/setupMenus.ts ->
-// salesAutomationSetupItems) — same convention every other module follows
-// (operational workflow screens in the sidebar, masters/config in Setup).
-// This file used to also list "Distribution Rules" in the Leads group,
-// duplicating its Setup entry - removed.
+// ── Sales Automation Workflow Lifecycle ──────────────────────────────────────
+// The sidebar strictly follows the natural sales funnel from inception to close:
+//
+//   1. Dashboard     → Operational overview (Sales, Marketing, Team Lead tabs)
+//   2. Campaigns     → Lead Generation / Sourcing (Campaigns & Ads)
+//   3. Leads         → Inflow & Allocation (Inquiries → Distribution → All Leads)
+//   4. Engagement    → Daily Sales Work (Follow-Up calls → Site Visits → Activities → Tasks)
+//   5. Pipeline      → Deal Closing (Stage Kanban → Transfers / Reassignment)
+//   6. Finance       → Commercials (Marketing Invoices, Sales & Partner Commissions)
+//   7. Reports       → Analytics & Performance Metrics
+//
+// Masters & Config (Social Media, Distribution Rules, Teams, Channel Partners)
+// live exclusively in the Setup dropdown (setupMenus.ts → salesAutomationSetupItems).
+
 export const salesAutomationNavItems: NavItem[] = [
-  // ── Dashboard ──────────────────────────────────────────────────────────────
-  // Was 3 separate entries (Marketing/Sales/Team Lead) pointing at 3
-  // separate pages - now one page with the 3 scopes as tabs inside it.
+  // ── 01. Single Unified Dashboard ───────────────────────────────────────────
   { label: "Dashboard", icon: Category2, path: "/sales-automation/dashboard", pageKey: "sa-leads", isDashboard: true },
 
-  // ── Campaigns ──────────────────────────────────────────────────────────────
+  // ── 02. Acquisition (Sourcing Leads) ───────────────────────────────────────
   {
     label: "Campaigns",
     icon: VideoPlay,
@@ -23,42 +29,49 @@ export const salesAutomationNavItems: NavItem[] = [
     ],
   },
 
-  // ── Leads ──────────────────────────────────────────────────────────────────
-  // Split from one 11-item flat list into two groups by what staff actually
-  // do: find/track a lead vs. act on one.
+  // ── 03. Inflow & Allocation (Raw Inflow to Assigned Leads) ─────────────────
   {
     label: "Leads",
     icon: Profile2User,
     children: [
-      { label: "All Leads",    path: "/sales-automation/leads",          pageKey: "sa-leads"              },
-      { label: "Pipeline",     path: "/sales-automation/pipeline",       pageKey: "sa-leads"              },
-      { label: "Inquiry",      path: "/sales-automation/inquiry",        pageKey: "sa-inquiry"            },
-      { label: "Transfers",    path: "/sales-automation/lead-transfers",  pageKey: "sa-lead-transfers"    },
-      { label: "Channel Partners", path: "/sales-automation/channel-partners", pageKey: "sa-channel-partners" },
-    ],
-  },
-  {
-    label: "Engagement",
-    icon: Profile2User,
-    children: [
-      { label: "Follow-Up",    path: "/sales-automation/followups",      pageKey: "sa-followups"          },
-      { label: "Site Visits",  path: "/sales-automation/site-visits",    pageKey: "sa-site-visits"        },
-      { label: "Activities",   path: "/sales-automation/lead-activities", pageKey: "sa-lead-activities"   },
-      { label: "Tasks",        path: "/sales-automation/lead-tasks",     pageKey: "sa-lead-tasks"         },
-      { label: "Distribution", path: "/sales-automation/distribution",   pageKey: "sa-lead-distribution"  },
+      { label: "Inquiries",    path: "/sales-automation/inquiry",        pageKey: "sa-inquiry"           },
+      { label: "Distribution", path: "/sales-automation/distribution",   pageKey: "sa-lead-distribution" },
+      { label: "All Leads",    path: "/sales-automation/leads",          pageKey: "sa-leads"             },
     ],
   },
 
-  // ── Finance ────────────────────────────────────────────────────────────────
+  // ── 04. Engagement (Daily Sales Rep Workbench) ─────────────────────────────
+  {
+    label: "Engagement",
+    icon: Message2,
+    children: [
+      { label: "Follow-Up",   path: "/sales-automation/followups",       pageKey: "sa-followups"         },
+      { label: "Site Visits", path: "/sales-automation/site-visits",     pageKey: "sa-site-visits"       },
+      { label: "Activities",  path: "/sales-automation/lead-activities", pageKey: "sa-lead-activities"   },
+      { label: "Tasks",       path: "/sales-automation/lead-tasks",      pageKey: "sa-lead-tasks"        },
+    ],
+  },
+
+  // ── 05. Pipeline & Closing (Stage Progression & Transfers) ─────────────────
+  {
+    label: "Pipeline",
+    icon: Routing,
+    children: [
+      { label: "Stage Board", path: "/sales-automation/pipeline",        pageKey: "sa-leads"             },
+      { label: "Transfers",   path: "/sales-automation/lead-transfers",  pageKey: "sa-lead-transfers"    },
+    ],
+  },
+
+  // ── 06. Commercials (Expenditure & Payouts) ────────────────────────────────
   {
     label: "Finance",
     icon: Receipt21,
     children: [
-      { label: "Invoices", path: "/sales-automation/invoices", pageKey: "sa-marketing-invoices" },
-      { label: "Commissions", path: "/sales-automation/commissions", pageKey: "sa-commissions" },
+      { label: "Invoices",    path: "/sales-automation/invoices",        pageKey: "sa-marketing-invoices" },
+      { label: "Commissions", path: "/sales-automation/commissions",     pageKey: "sa-commissions"        },
     ],
   },
 
-  // ── Reports ────────────────────────────────────────────────────────────────
+  // ── 07. Reporting ──────────────────────────────────────────────────────────
   { label: "Reports", icon: Chart2, path: "/sales-automation/reports", pageKey: "sa-reports" },
 ];

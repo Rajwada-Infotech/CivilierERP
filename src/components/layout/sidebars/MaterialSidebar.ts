@@ -2,7 +2,7 @@ import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, TrendUp,
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [
-  { label: "Proceeding", icon: Chart2, path: "/material", pageKey: "material-dashboard", isDashboard: true },
+  { label: "Dashboard", icon: Chart2, path: "/material", pageKey: "material-dashboard", isDashboard: true },
   {
     label: "Transaction",
     icon: Receipt21,

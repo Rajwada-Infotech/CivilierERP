@@ -240,6 +240,8 @@ const SaAdMaster: React.FC = () => {
   // Pre-filter when arriving from Campaign Master's "N ads" link.
   const [searchParams] = useSearchParams();
   const campaignFilter = searchParams.get("campaignId");
+  // ...or from Social Media Master's "N active ads" link.
+  const platformFilter = searchParams.get("platformId");
 
   const { data: ads, isLoading, error } = useQuery({
     queryKey: ["sa-ads"],
@@ -254,6 +256,7 @@ const SaAdMaster: React.FC = () => {
       adCode: item.AdCode ?? "",
       campaignId: String(item.CampaignId ?? ""),
       campaignName: item.CampaignName ?? "",
+      platformId: String(item.PlatformId ?? ""),
       name: item.Name ?? "",
       adType: item.AdType ?? "",
       creativeRef: item.CreativeRef ?? "",
@@ -302,8 +305,10 @@ const SaAdMaster: React.FC = () => {
   }, [ads]);
 
   const mappedData = React.useMemo(
-    () => campaignFilter ? allMappedData.filter((a) => a.campaignId === campaignFilter) : allMappedData,
-    [allMappedData, campaignFilter],
+    () => allMappedData.filter((a) =>
+      (!campaignFilter || a.campaignId === campaignFilter) &&
+      (!platformFilter || a.platformId === platformFilter)),
+    [allMappedData, campaignFilter, platformFilter],
   );
 
   const toPayload = (r: Record<string, any>) => ({
@@ -404,12 +409,12 @@ const SaAdMaster: React.FC = () => {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
-    <SalesAutoShell title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : "Manage advertisements running under each campaign"}>
+    <SalesAutoShell title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : platformFilter ? "Showing ads for the selected platform" : "Manage advertisements running under each campaign"}>
       <Breadcrumbs items={["Sales Automation", "Ad Master"]} />
       <div className="space-y-6">
-        {campaignFilter && (
+        {(campaignFilter || platformFilter) && (
           <Link to="/sales-automation/ads" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
-            ← Clear campaign filter, show all ads
+            ← Clear {campaignFilter ? "campaign" : "platform"} filter, show all ads
           </Link>
         )}
         <div className="flex items-start justify-between gap-4 flex-wrap">
