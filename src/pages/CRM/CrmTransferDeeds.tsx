@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CrmShell } from "@/components/crm/CrmShell";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { RefreshButton } from "@/components/ui/RefreshButton";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Search } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { KEY_LINE, RULE, RULE_SOFT } from "./customers/config";
 import { TransferDeedDetail } from "./CrmTransferDeed";
 
 // Transfer Deeds — the legal chain of every resale (deed of assignment) and
@@ -16,25 +16,21 @@ import { TransferDeedDetail } from "./CrmTransferDeed";
 // Stamp duty and registry are stages of the deed — tabs here, not pages of
 // their own. A case opens its deed at its deed step; ?id= opens one directly.
 
-const STATUS: Record<string, [string, string]> = {
-  Draft: ["Papers", "bg-muted text-muted-foreground border-border"],
-  UnderReview: ["Legal Head", "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900"],
-  LegalApproved: ["To the parties", "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-900"],
-  WithParties: ["With the parties", "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-900"],
-  PartiesApproved: ["Signing date", "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-900"],
-  DateApproved: ["Stamp duty", "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 dark:border-sky-900"],
-  Executed: ["Registry", "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300 dark:border-blue-900"],
-  Registered: ["Registered", "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300 dark:border-green-900"],
-  Cancelled: ["Cancelled", "bg-red-50 text-red-600 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900"],
+const STATUS: Record<string, string> = {
+  Draft: "Papers", UnderReview: "Legal Head", LegalApproved: "To the parties", WithParties: "With the parties",
+  PartiesApproved: "Signing date", DateApproved: "Stamp duty", Executed: "Registry", Registered: "Registered", Cancelled: "Cancelled",
 };
+const tone = (s: string): "done" | "waiting" | "stopped" => (s === "Registered" ? "done" : s === "Cancelled" ? "stopped" : "waiting");
+
+type Filter = "all" | "open" | "registered" | "cancelled";
 
 const CrmTransferDeeds: React.FC = () => {
-  const qc = useQueryClient();
   const rights = usePageRights("crm-transfer-deeds");
   const [sp, setSp] = useSearchParams();
   const selected = sp.get("id") ? Number(sp.get("id")) : null;
   const [search, setSearch] = useState("");
-  const { data = [], isLoading, dataUpdatedAt, isFetching } = useQuery<any[]>({
+  const [filter, setFilter] = useState<Filter>("all");
+  const { data = [], isLoading, isError, error, isFetching, refetch } = useQuery<any[]>({
     queryKey: ["crm-transfer-deeds"],
     queryFn: async () => {
       const r = await fetchWithAuth("/api/crm/transfer-deeds");
@@ -42,53 +38,94 @@ const CrmTransferDeeds: React.FC = () => {
       return r.json();
     },
   });
+  const groups = useMemo(() => ({
+    all: data,
+    open: data.filter((d) => !["Registered", "Cancelled"].includes(d.Status)),
+    registered: data.filter((d) => d.Status === "Registered"),
+    cancelled: data.filter((d) => d.Status === "Cancelled"),
+  }), [data]);
   const list = useMemo(() => {
     const t = search.trim().toLowerCase();
-    return t ? data.filter((d) => [d.DeedNo, d.Property, d.BookingNo, d.SellerName, d.BuyerName].some((v) => String(v || "").toLowerCase().includes(t))) : data;
-  }, [data, search]);
+    const rows = groups[filter];
+    return t ? rows.filter((d) => [d.DeedNo, d.Property, d.BookingNo, d.SellerName, d.BuyerName].some((v) => String(v || "").toLowerCase().includes(t))) : rows;
+  }, [groups, filter, search]);
   const pick = (id: number) => setSp((p) => { p.set("id", String(id)); p.delete("tab"); return p; }, { replace: true });
 
+  const figures: { label: string; value: number; note: string; f: Filter }[] = [
+    { label: "Transfer deeds", value: groups.all.length, note: "Assignment and cancellation", f: "all" },
+    { label: "In progress", value: groups.open.length, note: "Papers to registry", f: "open" },
+    { label: "Registered", value: groups.registered.length, note: "At the Sub-Registrar", f: "registered" },
+    { label: "Cancelled", value: groups.cancelled.length, note: "Stopped with their case", f: "cancelled" },
+  ];
+
   return (
-    <CrmShell title="Transfer Deeds" subtitle="Deeds of assignment (resale) and cancellation deeds (buy-back)">
+    <>
       <Breadcrumbs items={["CRM", "Resale", "Transfer Deeds"]} />
-      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Deed, property, party…"
-                className="w-full h-9 pl-8 pr-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" />
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Resale"
+        title="Transfer Deeds"
+        subtitle="Deeds of assignment (resale: seller, buyer and us) and cancellation deeds (buy-back: seller and us), from the papers through legal approval, the parties, signing date and stamp duty to registration."
+        action={<button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>}
+      >
+        <div className="space-y-4">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={() => setFilter(x.f)} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
             </div>
-            <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={() => qc.invalidateQueries({ queryKey: ["crm-transfer-deeds"] })} />
           </div>
-          {isLoading ? <p className="text-xs text-muted-foreground p-3">Loading…</p>
-            : !list.length ? <p className="text-xs text-muted-foreground p-3 rounded-lg border border-dashed border-border">No transfer deeds yet — a resale or buy-back case opens one at its deed step.</p>
-            : (
-              <ul className="space-y-2">
-                {list.map((d) => {
-                  const s = STATUS[d.Status] || [d.Status, ""];
-                  return (
-                    <li key={d.Id}>
-                      <button onClick={() => pick(d.Id)} className={`w-full text-left rounded-xl border p-3 transition-colors ${selected === d.Id ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm font-semibold truncate">{d.SellerName}<span className="font-normal opacity-60"> → {d.DeedType === "Assignment" ? d.BuyerName : "us"}</span></span>
-                          <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${s[1]}`}>{s[0]}</span>
-                        </div>
-                        <div className="text-[0.6875rem] font-mono text-muted-foreground mt-1">{d.DeedNo} · {d.Property}</div>
-                        <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{d.DeedType === "Assignment" ? "Deed of assignment" : "Cancellation deed"} · papers {d.DocsVerified}/{d.DocsRequired}{d.LegalExecutiveName ? ` · ${d.LegalExecutiveName}` : " · no legal executive"}</div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-        </aside>
-        <main className="min-w-0">
-          {selected ? <TransferDeedDetail key={selected} id={selected} canEdit={rights.canEdit} initialTab={(sp.get("tab") as any) || undefined} />
-            : <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">Choose a deed to work on it.</div>}
-        </main>
-      </div>
-    </CrmShell>
+
+          <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)] items-start">
+            <aside className="bg-card flex flex-col min-h-0" style={{ border: RULE }}>
+              <div className="p-3 space-y-2" style={{ borderBottom: RULE }}>
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Deed, property, party…"
+                  className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+                <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)}
+                  className="h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-2.5 text-xs text-foreground outline-none">
+                  <option value="all">All deeds ({groups.all.length})</option>
+                  <option value="open">In progress ({groups.open.length})</option>
+                  <option value="registered">Registered ({groups.registered.length})</option>
+                  <option value="cancelled">Cancelled ({groups.cancelled.length})</option>
+                </select>
+              </div>
+              {isError ? <p className="p-4 text-center text-sm text-destructive">{(error as Error)?.message}</p>
+                : isLoading ? <p className="p-4 text-center text-sm text-muted-foreground">Loading…</p>
+                : !list.length ? <p className="p-4 text-center text-sm text-muted-foreground">{data.length ? "No deed matches." : "No transfer deeds yet — a resale or buy-back case opens one at its deed step."}</p>
+                : (
+                  <ul className="max-h-[70vh] overflow-y-auto thin-scroll">
+                    {list.map((d) => {
+                      const on = selected === d.Id;
+                      return (
+                        <li key={d.Id}>
+                          <button onClick={() => pick(d.Id)} className={`w-full text-left px-3 py-2.5 transition-colors ${on ? "bg-foreground text-card" : "hover:bg-primary/5"}`} style={{ borderBottom: RULE_SOFT }}>
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-sm font-semibold leading-tight truncate">{d.SellerName}<span className="font-normal opacity-70"> → {d.DeedType === "Assignment" ? d.BuyerName : "us"}</span></span>
+                              <span className={on ? "[&_*]:!text-card" : ""}><SheetMark text={STATUS[d.Status] || d.Status} tone={tone(d.Status)} /></span>
+                            </div>
+                            <div className={`mt-1 text-[0.6875rem] tabular-nums truncate ${on ? "opacity-80" : "text-muted-foreground"}`}>{d.DeedNo} · {d.Property}</div>
+                            <div className={`mt-0.5 text-[0.6875rem] truncate ${on ? "opacity-80" : "text-muted-foreground"}`}>
+                              {d.DeedType === "Assignment" ? "Deed of assignment" : "Cancellation deed"} · papers <span className="tabular-nums">{d.DocsVerified}/{d.DocsRequired}</span>{d.LegalExecutiveName ? ` · ${d.LegalExecutiveName}` : " · no legal executive"}
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+            </aside>
+            <main className="min-w-0">
+              {selected ? <TransferDeedDetail key={selected} id={selected} canEdit={rights.canEdit} initialTab={(sp.get("tab") as any) || undefined} />
+                : <div className="bg-card p-10 text-center text-sm text-muted-foreground" style={{ border: RULE }}>Choose a deed to work on it.</div>}
+            </main>
+          </div>
+        </div>
+      </SheetShell>
+    </>
   );
 };
 
