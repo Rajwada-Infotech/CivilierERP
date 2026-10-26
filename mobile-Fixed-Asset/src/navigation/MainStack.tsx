@@ -5,6 +5,7 @@ import AssetRegisterScreen from "@/screens/assets/AssetRegisterScreen";
 import AssetDetailScreen from "@/screens/assets/AssetDetailScreen";
 import AssetFormScreen from "@/screens/assets/AssetFormScreen";
 import MaintenanceScreen from "@/screens/maintenance/MaintenanceScreen";
+import DepreciationRunScreen from "@/screens/depreciation/DepreciationRunScreen";
 import MaintenanceDetailScreen from "@/screens/maintenance/MaintenanceDetailScreen";
 import MaintenanceFormScreen from "@/screens/maintenance/MaintenanceFormScreen";
 import NotificationsScreen from "@/screens/notifications/NotificationsScreen";
@@ -32,6 +33,7 @@ export type MainStackParamList = {
   Menu: undefined;
   AssetRegister: undefined;
   Maintenance: undefined;
+  DepreciationRun: undefined;
   Tagging: undefined;
   Stickers: undefined;
   Assignment: undefined;
@@ -69,6 +71,7 @@ export default function MainStack() {
       <Stack.Screen name="AssetDetail" component={AssetDetailScreen} options={{ title: "Asset" }} />
       <Stack.Screen name="AssetForm" component={AssetFormScreen} options={{ title: "Fixed Asset" }} />
       <Stack.Screen name="Maintenance" component={MaintenanceScreen} options={{ title: "Maintenance & Repair" }} />
+      <Stack.Screen name="DepreciationRun" component={DepreciationRunScreen} options={{ title: "Depreciation Run" }} />
       <Stack.Screen name="MaintenanceDetail" component={MaintenanceDetailScreen} options={{ title: "Maintenance" }} />
       <Stack.Screen name="MaintenanceForm" component={MaintenanceFormScreen} options={{ title: "Maintenance & Repair" }} />
       <Stack.Screen name="Tagging" component={TaggingScreen} options={{ title: "FA Inventory" }} />
