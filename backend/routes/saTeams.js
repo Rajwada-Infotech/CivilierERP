@@ -183,6 +183,16 @@ router.put("/:memberId/transfer", requirePageRight("sa-teams", "edit"), async (r
     const memberId = parseId(req.params.memberId);
     if (memberId === null) return res.status(400).json({ error: "Invalid memberId" });
 
+    // Same "you can only manage your own team" rule as add/remove member
+    // above — this route had no such check, letting any non-admin team
+    // lead holding the edit page right move ANY salesperson (not just
+    // their own) to any other team lead.
+    if (!isSaAdmin(req)) {
+      const owns = await pool.request().input("mid", sql.Int, memberId).input("actorId", sql.Int, actorId(req))
+        .query("SELECT 1 AS ok FROM dbo.SaSalesTeam WHERE MemberUserId = @mid AND TeamLeadUserId = @actorId AND IsActive = 1");
+      if (!owns.recordset.length) return res.status(403).json({ error: "You can only manage your own team" });
+    }
+
     // Deactivate current assignment
     await pool.request()
       .input("mid", sql.Int, memberId)
@@ -212,6 +222,12 @@ router.post("/:userId/promote", requirePageRight("sa-teams", "edit"), async (req
     const pool = getPool();
     const userId = parseId(req.params.userId);
     if (userId === null) return res.status(400).json({ error: "Invalid userId" });
+
+    // Unlike add/remove/transfer member (scoped to "your own team"), a
+    // promotion changes someone's role company-wide and isn't scoped to any
+    // one team lead's roster — this had no check at all, letting any
+    // non-admin team lead holding the edit page right promote ANY user.
+    if (!isSaAdmin(req)) return res.status(403).json({ error: "Only an SA admin can promote a user" });
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)
@@ -257,6 +273,11 @@ router.post("/:userId/demote", requirePageRight("sa-teams", "edit"), async (req,
     const pool = getPool();
     const userId = parseId(req.params.userId);
     if (userId === null) return res.status(400).json({ error: "Invalid userId" });
+
+    // Same reasoning as promote above — demoting a team lead disbands their
+    // whole team company-wide, not an action any non-admin team lead
+    // (including the one being demoted) should be able to trigger.
+    if (!isSaAdmin(req)) return res.status(403).json({ error: "Only an SA admin can demote a team lead" });
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)
