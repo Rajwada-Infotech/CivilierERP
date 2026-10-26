@@ -9,8 +9,8 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { getDocumentChain } from "@/api/materialChainApi";
-import { useWOChainStatus, Activity, WorkOrderDetail, WorkOrderActivityDetail, fmt, getStatusConfig } from "./config";
 import { printWorkOrder } from "./printWorkOrder";
+import { useWOChainStatus, Activity, WorkOrderDetail, WorkOrderActivityDetail, fmt, getStatusConfig } from "./config";
 
 // ─── VIEW: Work Order Detail Panel ────────────────────────────────────────────
 

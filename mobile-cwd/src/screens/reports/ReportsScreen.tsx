@@ -137,7 +137,7 @@ export default function ReportsScreen() {
       ) : (
         <>
           <Text style={{ fontSize: 11, color: colors.mutedForeground, fontFamily: fonts.body.regular, marginBottom: 8 }}>{total} record{total === 1 ? "" : "s"} on {fmtDate(date)}</Text>
-          {rows.map((r) => <RowCard key={`${r.logId}-${r.userId}`} r={r} kind={kind} onOpen={() => navigation.navigate("ActivityDetail", { rungId: r.rungId })} />)}
+          {rows.map((r) => <RowCard key={`${r.logId}-${r.userId ?? r.userName}`} r={r} kind={kind} onOpen={() => navigation.navigate("ActivityDetail", { rungId: r.rungId })} />)}
           {reportQ.hasNextPage && (
             <TouchableOpacity onPress={() => reportQ.fetchNextPage()} disabled={reportQ.isFetchingNextPage} style={{ alignItems: "center", paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: ACCENT }}>
               <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: ACCENT }}>{reportQ.isFetchingNextPage ? "Loading…" : "Load more"}</Text>

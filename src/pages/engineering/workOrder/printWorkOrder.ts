@@ -1,5 +1,6 @@
 // Prints one work order — its details, every activity group and activity, each activity's material breakdown,
-// and the totals — as a plain, light A4 document in its own window (same look as the list's Print).
+// and the totals — as an A4 document in the orange invoice-style format (header band with the company and the WORK ORDER
+// title, "to" / "from" blocks, orange table header, totals box, terms, sign-off, footer band). The default Work Order print.
 import { escapeHtml } from "@/utils/escapeHtml";
 import { openPrintWindow } from "@/lib/printList";
 import { fmt, fmtQ, type WorkOrderActivityDetail, type WorkOrderDetail } from "./config";
@@ -55,79 +56,99 @@ export function printWorkOrder(d: WorkOrderDetail) {
     const gLabour = list.reduce((s, a) => s + (a.LabourAmount || 0), 0);
     const gMats = list.reduce((s, a) => s + (a.MaterialAmount || 0), 0);
     return `<tbody class="group">
-      <tr class="grp"><td class="n">${gi + 1}</td><td colspan="8">${e(name)} <span class="muted">· ${list.length} ${list.length === 1 ? "activity" : "activities"}</span></td></tr>
+      <tr class="grp"><td class="n">${String(gi + 1).padStart(2, "0")}</td><td colspan="8">${e(name)} <span class="muted">· ${list.length} ${list.length === 1 ? "activity" : "activities"}</span></td></tr>
       ${list.map((a, ai) => activityRows(a, `${gi + 1}.${ai + 1}`, d.SupplierName)).join("")}
       <tr class="gtot"><td></td><td colspan="5">${e(name)} total</td><td class="r">${fmt(gLabour)}</td><td class="r">${fmt(gMats)}</td><td class="r">${fmt(gLabour + gMats)}</td></tr>
     </tbody>`;
   }).join("");
 
-  const details: [string, string][] = [
-    ["Company", d.CompanyName], ["Project", d.ProjectName], ["Contractor", d.ContractorName], ["Supplier", d.SupplierName],
-    ["Document date", day(d.DocumentDate)], ["Created", `${day(d.CreatedAt)}${d.CreatedBy ? ` · ${d.CreatedBy}` : ""}`],
-  ];
   const printed = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const title = `Work Order ${d.DocumentNumber || ""}`.trim();
+  const mark = escapeHtml((d.CompanyName || "C").trim().charAt(0).toUpperCase());
 
   openPrintWindow(`<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #111827; background: #fff; padding: 24px; }
-  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px; }
-  h1 { font-size: 18px; font-weight: 800; }
-  h2 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #374151; margin: 16px 0 6px; }
-  .status { display: inline-block; margin-top: 5px; border: 1px solid #111827; padding: 2px 7px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-  .meta { text-align: right; color: #6b7280; font-size: 10px; line-height: 1.5; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #d1d5db; }
-  .grid div { padding: 7px 9px; border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; }
-  .grid div:nth-child(3n) { border-right: 0; }
-  .lbl { display: block; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; margin-bottom: 2px; }
-  .note { border: 1px solid #d1d5db; padding: 8px 10px; white-space: pre-line; margin-top: 6px; }
+  body { font-family: 'Lato', 'Segoe UI', Arial, sans-serif; font-size: 10.5px; color: #2b2b2b; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .band { background: #f28c1a; color: #fff; padding: 22px 28px; display: flex; justify-content: space-between; align-items: center; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .mark { width: 34px; height: 34px; border: 3px solid #fff; border-radius: 8px; transform: skew(-8deg); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 18px; }
+  .brand .name { font-size: 19px; font-weight: 900; letter-spacing: .5px; text-transform: uppercase; }
+  .brand .tag { font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; opacity: .9; }
+  .title { text-align: right; }
+  .title h1 { font-size: 32px; letter-spacing: 1px; font-weight: 900; }
+  .title .meta { font-size: 9px; margin-top: 4px; display: grid; grid-template-columns: auto auto; gap: 1px 14px; justify-content: end; }
+  .status { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid #fff; border-radius: 10px; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }
+  .wrap { padding: 0 28px 24px; }
+  .parties { display: flex; justify-content: space-between; padding: 18px 0 12px; }
+  .party h4 { font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+  .party h3 { font-size: 15px; font-weight: 900; text-transform: uppercase; margin-bottom: 3px; }
+  .party p { color: #666; font-size: 10px; margin: 1px 0; }
+  .party.right { min-width: 230px; }
+  h2 { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #9a5300; margin: 14px 0 5px; }
+  .note { background: #f6f6f8; padding: 8px 10px; white-space: pre-line; border-left: 3px solid #f28c1a; }
   table { width: 100%; border-collapse: collapse; }
-  thead th { background: #f3f4f6; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #374151; text-align: left; padding: 6px 7px; border-bottom: 1px solid #9ca3af; }
+  thead th { background: #f28c1a; color: #fff; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; text-align: left; padding: 7px 7px; }
   td { padding: 5px 7px; vertical-align: top; }
   .r { text-align: right; white-space: nowrap; }
-  .n { color: #6b7280; width: 34px; white-space: nowrap; }
-  .muted { color: #6b7280; font-weight: 400; }
-  tr.grp td { background: #e5e7eb; font-weight: 700; border-top: 1px solid #9ca3af; }
-  tr.act td { border-top: 1px solid #e5e7eb; }
-  tr.gtot td { font-weight: 700; border-top: 1px solid #9ca3af; border-bottom: 1px solid #9ca3af; background: #f9fafb; }
-  tr.rem td { color: #4b5563; font-style: italic; padding-top: 0; }
+  .n { color: #8a8a8a; width: 34px; white-space: nowrap; }
+  thead th.n { color: #fff; }
+  .muted { color: #8a8a8a; font-weight: 400; }
+  tr.grp td { background: #fdf0e0; color: #9a5300; font-weight: 800; border-top: 1px solid #f2d2a8; }
+  tr.act td { border-top: 1px solid #e6e6ea; }
+  tr.gtot td { font-weight: 700; background: #f6f6f8; border-top: 1px solid #d9d9de; }
+  tr.rem td { color: #5a5a5a; font-style: italic; padding-top: 0; }
   tr.mats > td { padding-top: 0; padding-bottom: 8px; }
-  table.sub { border: 1px solid #e5e7eb; }
-  table.sub thead th { background: #fafafa; font-size: 8px; padding: 4px 6px; }
-  table.sub td { padding: 3px 6px; border-bottom: 1px solid #f3f4f6; font-size: 9.5px; }
-  table.sub tfoot td { font-weight: 700; border-top: 1px solid #d1d5db; }
-  .totals { margin-top: 14px; margin-left: auto; width: 300px; border: 1px solid #111827; }
-  .totals div { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid #e5e7eb; }
-  .totals div:last-child { border-bottom: 0; background: #111827; color: #fff; font-size: 12px; font-weight: 800; }
+  table.sub { border: 1px solid #e6e6ea; }
+  table.sub thead th { background: #fafafa; color: #555; font-size: 8px; padding: 4px 6px; border-bottom: 1px solid #e6e6ea; }
+  table.sub td { padding: 3px 6px; border-bottom: 1px solid #f1f1f4; font-size: 9.5px; }
+  table.sub tfoot td { font-weight: 700; border-top: 1px solid #d9d9de; }
+  .lower { display: flex; justify-content: space-between; gap: 24px; margin-top: 14px; }
+  .terms { flex: 1; }
+  .thanks { font-size: 13px; font-weight: 900; margin-top: 18px; }
+  .totals { width: 260px; flex-shrink: 0; }
+  .totals .line { display: flex; justify-content: space-between; padding: 4px 0; }
+  .totals .total { background: #f28c1a; color: #fff; font-weight: 900; display: flex; justify-content: space-between; padding: 8px 10px; margin-top: 6px; font-size: 13px; }
+  .sign { width: 190px; margin: 34px 0 0 auto; text-align: center; border-top: 1px solid #bbb; padding-top: 4px; font-weight: 800; }
   tbody.group, tr { page-break-inside: avoid; }
   thead { display: table-header-group; }
-  footer { margin-top: 16px; color: #9ca3af; font-size: 9px; display: flex; justify-content: space-between; }
-  @page { size: A4 portrait; margin: 12mm; }
-  @media print { body { padding: 0; } }
+  footer { background: #f28c1a; color: #fff; font-size: 9px; display: flex; justify-content: space-between; padding: 9px 28px; margin-top: 18px; }
+  @page { size: A4 portrait; margin: 0; }
 </style></head>
 <body>
-  <header>
-    <div><h1>${escapeHtml(title)}</h1><span class="status">${e(d.Status || "Draft")}</span></div>
-    <div class="meta">${acts.length} activit${acts.length === 1 ? "y" : "ies"}<br />Printed ${escapeHtml(printed)}</div>
-  </header>
-  <div class="grid">${details.map(([l, v]) => `<div><span class="lbl">${l}</span>${e(v)}</div>`).join("")}</div>
-  ${d.Remarks ? `<h2>Remarks</h2><div class="note">${e(d.Remarks)}</div>` : ""}
-
-  <h2>Activities</h2>
-  <table>
-    <thead><tr><th class="n">#</th><th>Activity</th><th>HSN / GST</th><th>Unit</th><th class="r">Rate / unit</th><th class="r">Area</th><th class="r">Labour</th><th class="r">Materials</th><th class="r">Total</th></tr></thead>
-    ${body || `<tbody><tr><td colspan="9" class="muted">No activities.</td></tr></tbody>`}
-  </table>
-
-  <div class="totals">
-    <div><span>Raw materials</span><span>${fmt(materials)}</span></div>
-    <div><span>Labour</span><span>${fmt(labour)}</span></div>
-    <div><span>Grand total</span><span>${fmt(d.TotalAmount || 0)}</span></div>
+  <div class="band">
+    <div class="brand"><div class="mark">${mark}</div><div><div class="name">${e(d.CompanyName)}</div><div class="tag">${escapeHtml(d.ProjectName || "")}</div></div></div>
+    <div class="title"><h1>WORK ORDER</h1>
+      <div class="meta"><span>Work Order Number</span><span>${e(d.DocumentNumber)}</span><span>Work Order Date</span><span>${day(d.DocumentDate)}</span></div>
+      <span class="status">${e(d.Status || "Draft")}</span></div>
   </div>
+  <div class="wrap">
+    <div class="parties">
+      <div class="party"><h4>Work Order To:</h4><h3>${e(d.ContractorName)}</h3><p>Contractor</p>${d.SupplierName ? `<p>Supplier: ${e(d.SupplierName)}</p>` : ""}</div>
+      <div class="party right"><h4>Work Order From:</h4><h3>${e(d.CompanyName)}</h3><p>Project: ${e(d.ProjectName)}</p><p>Created: ${day(d.CreatedAt)}${d.CreatedBy ? ` · ${escapeHtml(d.CreatedBy)}` : ""}</p></div>
+    </div>
+    ${d.Remarks ? `<h2>Remarks</h2><div class="note">${e(d.Remarks)}</div>` : ""}
 
-  ${d.TermsAndConditions ? `<h2>Terms &amp; conditions</h2><div class="note">${e(d.TermsAndConditions)}</div>` : ""}
-  <footer><span>CivilierERP</span><span>${escapeHtml(title)}</span></footer>
+    <h2>Activities · ${acts.length} activit${acts.length === 1 ? "y" : "ies"}</h2>
+    <table>
+      <thead><tr><th class="n">No.</th><th>Activity</th><th>HSN / GST</th><th>Unit</th><th class="r">Rate / unit</th><th class="r">Area</th><th class="r">Labour</th><th class="r">Materials</th><th class="r">Total</th></tr></thead>
+      ${body || `<tbody><tr><td colspan="9" class="muted">No activities.</td></tr></tbody>`}
+    </table>
+
+    <div class="lower">
+      <div class="terms">
+        ${d.TermsAndConditions ? `<h2>Terms &amp; conditions</h2><div class="note">${e(d.TermsAndConditions)}</div>` : ""}
+        <div class="thanks">Thank You For Your Business</div>
+      </div>
+      <div class="totals">
+        <div class="line"><span>Raw materials</span><span>${fmt(materials)}</span></div>
+        <div class="line"><span>Labour</span><span>${fmt(labour)}</span></div>
+        <div class="total"><span>Grand total</span><span>${fmt(d.TotalAmount || 0)}</span></div>
+      </div>
+    </div>
+    <div class="sign">Authorised sign</div>
+  </div>
+  <footer><span>CivilierERP</span><span>${escapeHtml(title)}</span><span>Printed ${escapeHtml(printed)}</span></footer>
 </body></html>`);
 }

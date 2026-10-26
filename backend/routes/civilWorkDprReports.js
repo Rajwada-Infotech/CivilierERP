@@ -9,7 +9,7 @@
  *   GET /api/civilworkdpr-reports/quality-checks      every QC inspection (approved / rework) with its check results
  *   GET /api/civilworkdpr-reports/daily-updates       daily checkpoint photo updates (date, time logged in IST, who)
  *   GET /api/civilworkdpr-reports/daily-reports       the daily logbook: which work was done where on which day, and how much progress that day
- *   GET /api/civilworkdpr-reports/user-daily-work     the same logbook, one row per reported entry: who reported which work on a chosen date
+ *   GET /api/civilworkdpr-reports/user-daily-work     the same logbook, one row per person who reported an activity on a day (their own progress made)
  *   GET /api/civilworkdpr-reports/tag-wise            the user-wise logbook limited to tagged activities, filterable by tag (DprTagMaster)
  *
  * Every route answers { data, total, page, totalPages } so the Reports page can page through it (it asks for
@@ -389,9 +389,32 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       ) dl
       JOIN dbo.DependencyMasterActivity dma ON dma.Id = dl.DependencyMasterActivityId
       JOIN dbo.DependencyActivityAssignment daa ON daa.DependencyMasterActivityId = dma.Id AND daa.IsCurrent = 1
-      -- The user is whoever REPORTED the entry (the log's CreatedBy is their email) — one row per entry, not one per
-      -- engineer the activity is allocated to.
-      OUTER APPLY (SELECT TOP 1 uu.id, uu.name FROM dbo.users uu WHERE uu.email = dl.CreatedBy ORDER BY uu.id) u
+      -- A day's log entry is ONE shared row per activity, so two people reporting the same activity the same day would
+      -- be credited to whoever saved first. Who actually reported is in the progress log (one row per save, with the
+      -- person): one report row per (entry, person who reported it that day), each with THEIR own progress made. An
+      -- entry with no progress-log rows (older data) falls back to the person who created it.
+      CROSS APPLY (
+        SELECT x.LoggedBy, x.Made
+        FROM (
+          SELECT pl.LoggedBy,
+                 -- the person's net move that day (highest reached - lowest start), not the sum of every save
+                 CASE WHEN MIN(pl.FromProgressPercent) IS NULL OR MAX(pl.ToProgressPercent) IS NULL THEN 0
+                      WHEN MAX(pl.ToProgressPercent) < MIN(pl.FromProgressPercent) THEN 0
+                      ELSE MAX(pl.ToProgressPercent) - MIN(pl.FromProgressPercent) END AS Made
+          FROM dbo.DependencyActivityAssignment a2
+          JOIN dbo.DependencyActivityProgressLog pl ON pl.AssignmentId = a2.Id
+          WHERE a2.DependencyMasterActivityId = dl.DependencyMasterActivityId AND CAST(pl.LoggedAt AS DATE) = dl.LogDate
+          GROUP BY pl.LoggedBy
+        ) x
+        UNION ALL
+        SELECT dl.CreatedBy, NULL
+        WHERE NOT EXISTS (
+          SELECT 1 FROM dbo.DependencyActivityAssignment a3
+          JOIN dbo.DependencyActivityProgressLog pl3 ON pl3.AssignmentId = a3.Id
+          WHERE a3.DependencyMasterActivityId = dl.DependencyMasterActivityId AND CAST(pl3.LoggedAt AS DATE) = dl.LogDate
+        )
+      ) rep
+      OUTER APPLY (SELECT TOP 1 uu.id, uu.name FROM dbo.users uu WHERE uu.email = rep.LoggedBy ORDER BY uu.id) u
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
       LEFT JOIN dbo.DprTagMaster tg ON tg.Id = COALESCE(dma.TagId, am.TagId)
@@ -400,17 +423,17 @@ const dailyWorkHandler = (byTag) => async (req, res) => {
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId`;
     await sendPage(res, await getPool(), p, {
-      core: `SELECT dl.Id AS logId, tg.TagName AS tagName, u.id AS userId, ISNULL(u.name, dl.CreatedBy) AS userName, dl.LogDate AS logDate,
+      core: `SELECT dl.Id AS logId, tg.TagName AS tagName, u.id AS userId, ISNULL(u.name, rep.LoggedBy) AS userName, dl.LogDate AS logDate,
         dma.Id AS rungId, dm.Id AS chainId, dm.Alias AS chain, ep.name AS projectName, ${SCOPE_PATH} AS location,
         um.UnitName AS flatName, rm.RoomName AS roomName, rm.Storey AS storey, am.activity_name AS activityName,
-        daa.Status AS status, dl.ProgressPercent AS progressPercent, dl.ProgressMade AS progressMade,
+        daa.Status AS status, dl.ProgressPercent AS progressPercent, COALESCE(rep.Made, dl.ProgressMade) AS progressMade,
         daa.StartDate AS startDate, daa.EndDate AS endDate, daa.AttemptNo AS attemptNo,
         (SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC) AS qcStatus
         ${from} ${where}`,
       countSql: `SELECT COUNT(*) AS total ${from} ${where}`,
       orderBy: byTag
-        ? "tg.TagName, ISNULL(u.name, dl.CreatedBy), dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC"
-        : "ISNULL(u.name, dl.CreatedBy), dl.LogDate DESC, ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
+        ? "tg.TagName, dl.LogDate DESC, ISNULL(u.name, rep.LoggedBy), ep.name, dm.Id, dma.SequenceNo, dl.Id DESC"
+        : "dl.LogDate DESC, ISNULL(u.name, rep.LoggedBy), ep.name, dm.Id, dma.SequenceNo, dl.Id DESC",
       bind: bindFilters(p, (r) => {
         if (single) r.input("date", sql.Date, single);
         tokens.forEach((t, i) => r.input(`st${i}`, sql.NVarChar(200), `%${t.replace(/[[\]%_]/g, (c) => `[${c}]`)}%`));
