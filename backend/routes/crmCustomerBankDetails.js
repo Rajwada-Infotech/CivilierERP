@@ -7,7 +7,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
 const { isMilestoneOneCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
@@ -96,7 +96,8 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
   }
 });
 
-router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
+// Payment Milestones shows the bank on file as reference when recording a payment.
+router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-details", "crm-payments"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);

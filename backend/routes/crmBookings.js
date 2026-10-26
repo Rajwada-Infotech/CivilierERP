@@ -11,7 +11,7 @@ const { getPool, sql } = require("../db");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
 const { applyPagination } = require("../services/crmListPagination");
@@ -262,7 +262,11 @@ const BOOKING_SELECT = `
 // still live. The main Bookings management page (which needs to show and
 // filter to Cancelled/Rejected for record-keeping) passes
 // ?includeCancelled=1 to opt back in; an explicit ?status=X always wins.
-router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
+// The booking pickers on the finance and legal pages read this list, so their rights read it too (it used to need the
+// Bookings page's own right, and those pickers came up empty without it).
+const BOOKING_PICKER_RIGHTS = ["crm-bookings", "crm-payments", "crm-money-receipts", "crm-invoices", "crm-refunds",
+  "crm-loan-details", "crm-brokerage", "crm-parking-booking", "crm-customer-bank-details", "crm-afs-query-payment", "crm-afs-registry"];
+router.get("/", requireAnyPageRight(BOOKING_PICKER_RIGHTS, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { status, applicationId, includeCancelled, deleted, search } = req.query;

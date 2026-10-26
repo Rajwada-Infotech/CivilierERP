@@ -20,7 +20,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getMoneyReceiptPdfBuffer, deriveStatus } = require("../services/moneyReceiptPdf");
 const {
@@ -161,7 +161,8 @@ async function withConcurrency(items, limit, worker) {
 
 // ── List / read ─────────────────────────────────────────────────────────────
 
-router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res) => {
+// Payment Milestones shows a booking's token receipt from this list, so its right reads it too.
+router.get("/", requireAnyPageRight(["crm-money-receipts", "crm-payments"], "view"), async (req, res) => {
   try {
     const pool = getPool();
 
