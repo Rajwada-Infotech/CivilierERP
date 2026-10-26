@@ -400,6 +400,10 @@ const CrmDemands: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // The page's company / project / block filter narrows it too.
+          companyId: cpb.companyId || undefined,
+          projectId: cpb.projectId || undefined,
+          blockId: cpb.blockId || undefined,
           projectName: bulkProject.trim() || undefined,
           milestoneName: bulkMilestone.trim() || undefined,
         }),

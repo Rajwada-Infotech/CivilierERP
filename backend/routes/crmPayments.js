@@ -596,14 +596,24 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
   try {
     const pool = getPool();
     const { projectName, milestoneName } = req.body || {};
+    const int = (v) => (v != null && v !== "" && Number.isInteger(Number(v)) ? Number(v) : null);
+    const companyId = int(req.body?.companyId), projectId = int(req.body?.projectId), blockId = int(req.body?.blockId);
 
     const req0 = pool.request();
+    // The same milestones the Demands list shows as "ready to raise": live bookings, not waived, a balance left — and
+    // only in the user's projects (it used to raise across every project, and on dead bookings the list leaves out).
     const conds = [
       "m.DemandStatus = 'Pending'",
+      "m.Status NOT IN ('Waived')",
       "b.IsActive = 1",
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
       "a.Status NOT IN ('Cancelled','Rejected','Expired')",
       "(m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0",
     ];
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (projectName) {
       req0.input("pname", sql.NVarChar(200), projectName);
       // Filter by ProjectId via enterprise master so a renamed project still matches.
