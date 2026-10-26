@@ -40,6 +40,10 @@ router.use(apiRateLimit);
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
 const RECEIPT_STATUSES = [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"];
+// The status a receipt shows (deriveStatus in SQL): Finance's Received Payment decides it once the receipt is
+// still Pending here. Filtering and counting on mr.Status alone put a Finance-approved receipt under "Pending".
+const STATUS_SQL = `CASE WHEN mr.Status = 'Approved' THEN 'Approved' WHEN mr.Status = 'Bounced' THEN 'Bounced'
+  WHEN rp.RPStatus = 'Approved' THEN 'Approved' WHEN rp.RPStatus = 'Rejected' THEN 'Bounced' ELSE 'Pending' END`;
 
 function actorEmail(req) {
   return req.user?.email || req.user?.name || null;
@@ -76,7 +80,7 @@ function applyReceiptFilters(request, query, projectScope = null) {
   }
   if (status && RECEIPT_STATUSES.includes(status)) {
     request.input("st", sql.NVarChar(20), status);
-    conds.push("mr.Status = @st");
+    conds.push(`${STATUS_SQL} = @st`);
   }
   if (fromDate) {
     request.input("fromDate", sql.Date, fromDate);
@@ -132,6 +136,7 @@ const COUNT_SELECT = `
   JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+  LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = mr.ReceivedPaymentId
 `;
 
 function shapeReceipts(rows) {
@@ -189,13 +194,19 @@ router.get("/", requireAnyPageRight(["crm-money-receipts", "crm-payments"], "vie
 
     const countReq = pool.request();
     applyReceiptFilters(countReq, req.query, req.projectScope); // same filter logic, fresh param bindings
+    // Per-status counts for the same filters, status aside — the page's figures and tabs.
+    const statusReq = pool.request();
+    const statusWhere = applyReceiptFilters(statusReq, { ...req.query, status: undefined }, req.projectScope);
 
-    const [result, countResult] = await Promise.all([
+    const [result, countResult, statusResult] = await Promise.all([
       dataReq.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       countReq.query(`${COUNT_SELECT} ${where}`),
+      statusReq.query(`SELECT ${STATUS_SQL} AS S, COUNT(*) AS n, SUM(mr.Amount) AS amt ${COUNT_SELECT.replace(/^\s*SELECT COUNT\(\*\) AS total/, "")} ${statusWhere} GROUP BY ${STATUS_SQL}`),
     ]);
+    const statusCounts = Object.fromEntries(RECEIPT_STATUSES.map((st) => [st, { count: 0, amount: 0 }]));
+    for (const r of statusResult.recordset) statusCounts[r.S] = { count: r.n, amount: Number(r.amt) || 0 };
 
-    res.json({ rows: shapeReceipts(result.recordset), total: countResult.recordset[0].total, page, pageSize });
+    res.json({ rows: shapeReceipts(result.recordset), total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     handleError(res, e, "GET /");
   }
@@ -257,6 +268,8 @@ router.post("/", requirePageRight("crm-money-receipts", "create"), async (req, r
       : req.body?.bookingId;
     const bookingId = parseInt(rawBookingId, 10);
     if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "BookingId is required" });
+    // The booking's project must be one the user may work in.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
     const row = await createMoneyReceiptForBooking(pool, bookingId, req.body || {}, actorId(req), { skipIfExists: true });
     res.status(row.existing ? 200 : 201).json({ success: true, ...row });
   } catch (e) {
@@ -353,12 +366,16 @@ router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), as
     const pool = getPool();
     // Same check as approve (req.user has role, never roleName - this always refused).
     if (!requireMoneyReceiptApprover(req, res)) return;
+    // Only the projects the user may work in — the sweep approved receipts across every project.
+    const scopeSql = req.projectScope
+      ? ` AND ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}`
+      : "";
     const stuckMrs = await pool.request().query(`
       SELECT mr.Id
       FROM dbo.CrmMoneyReceipt mr
       JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
       WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
-        AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1
+        AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1${scopeSql}
     `);
 
     const outcomes = await withConcurrency(stuckMrs.recordset, SWEEP_CONCURRENCY, async (row) => {
