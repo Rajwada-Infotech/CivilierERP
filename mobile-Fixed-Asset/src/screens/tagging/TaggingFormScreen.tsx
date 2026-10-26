@@ -11,6 +11,7 @@ import { fonts } from "@/theme/fonts";
 import { toast } from "@/components/Toast";
 import { FormScaffold, FormSection, NumberField, RemarksField, PickerField, DateField } from "@/components/form";
 import { getCompanies, getProjects, getGodowns } from "@/api/mastersApi";
+import { projectBelongsToCompany } from "@/utils/projectBelongsTo";
 import {
   getEligibleAssetItems, createFixedAssetTagging, getFixedAssetTagging, updateFixedAssetTagging,
 } from "@/api/fixedAssetApi";
@@ -56,7 +57,7 @@ export default function TaggingFormScreen() {
 
   const companyOpts = useMemo(() => (companiesQ.data ?? []).map((c) => ({ key: String(c.id), label: c.label })), [companiesQ.data]);
   const projectOpts = useMemo(
-    () => (projectsQ.data ?? []).filter((p) => !companyId || String(p.company_id) === companyId).map((p) => ({ key: String(p.id), label: p.label })),
+    () => (projectsQ.data ?? []).filter((p) => projectBelongsToCompany(p, companyId)).map((p) => ({ key: String(p.id), label: p.label })),
     [projectsQ.data, companyId],
   );
   const godownOpts = useMemo(() => (godownsQ.data ?? []).map((g) => ({ key: String(g.GodownID), label: g.GodownName, sublabel: g.GodownCode })), [godownsQ.data]);

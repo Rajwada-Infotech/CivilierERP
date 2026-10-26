@@ -15,6 +15,7 @@ import { Avatar } from "@/components/Avatar";
 import { FormScaffold, FormSection, RemarksField, PickerField, DateField, ImageCaptureField, FieldLabel } from "@/components/form";
 import { useActiveFinYear } from "@/hooks/useActiveFinYear";
 import { getCompanies, getProjects, getUsers, getDepartments } from "@/api/mastersApi";
+import { projectBelongsToCompany } from "@/utils/projectBelongsTo";
 import {
   getTransferableAssets, getAssetTransfer, getFixedAsset, createAssetTransfer, updateAssetTransfer, setAssetPicture,
 } from "@/api/fixedAssetApi";
@@ -81,7 +82,7 @@ export default function AssetTransferFormScreen() {
 
   const companyOpts = useMemo(() => (companiesQ.data ?? []).map((c) => ({ key: String(c.id), label: c.label })), [companiesQ.data]);
   const projectOpts = useMemo(
-    () => (projectsQ.data ?? []).filter((p) => !companyId || String(p.company_id) === companyId).map((p) => ({ key: String(p.id), label: p.label })),
+    () => (projectsQ.data ?? []).filter((p) => projectBelongsToCompany(p, companyId)).map((p) => ({ key: String(p.id), label: p.label })),
     [projectsQ.data, companyId],
   );
   const finYearOpts = useMemo(() => finYearOptions.map((y) => ({ key: y, label: y })), [finYearOptions]);

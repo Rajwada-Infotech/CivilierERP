@@ -10,7 +10,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { projectPredicate } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
-const { runDepreciationForPeriod, previewDepreciationForPeriod, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
+const { runDepreciationForPeriod, previewDepreciationForPeriod, backfillDepreciationForAsset, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
 const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
 const {
   buildPostingPlan: buildDepreciationPlan,
@@ -464,7 +464,10 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
       await backPatchRecordId(pool, sql, docNo, "FixedAssetRecord", newId);
       await bumpCacheVersion("fixed-assets");
       await bumpCacheVersion("fixed-asset-tagging");
-      res.json({ assetId: newId, docNo, assetCode });
+      // Tagged under a Fixed Asset Depreciation Tag: post its depreciation from the Purchase / Activation Date up to the
+      // last closed month right away, instead of waiting for the monthly run. Never blocks the save.
+      const depreciationBackfill = sourceTagIdVal ? await backfillDepreciationForAsset(pool, newId, { runBy: email }) : null;
+      res.json({ assetId: newId, docNo, assetCode, depreciationBackfill });
     } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
     console.error("[fixedAssets] POST /:", err.message);
