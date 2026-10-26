@@ -11,6 +11,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { Link } from "react-router-dom";
 import { Settings2 } from "lucide-react";
+import { SaTabs } from "@/components/sa/SaTabs";
 
 const API = "/api/sa/lead-distribution";
 const RULES_API = "/api/sa/distribution-rules";
@@ -201,14 +202,14 @@ const SaLeadDistribution: React.FC = () => {
             this page keeps only what's genuinely distinct: manual ad-hoc
             distribution of leads pending right now, and the resulting
             history. */}
-        <div className="flex gap-2 border-b border-border">
-          {(["distribute", "history"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${tab === t ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-              {t === "distribute" ? "Distribute Leads" : "Distribution History"}
-            </button>
-          ))}
-        </div>
+        <SaTabs
+          tabs={[
+            { key: "distribute", label: "Distribute Leads" },
+            { key: "history", label: "Distribution History" },
+          ]}
+          active={tab}
+          onChange={(key) => setTab(key)}
+        />
 
         {tab === "distribute" && (
           <div className="space-y-4">

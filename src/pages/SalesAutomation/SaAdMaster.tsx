@@ -17,6 +17,7 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { LayoutList, BarChart2, RefreshCw, Image as ImageIcon, Upload, Download, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SaTabs } from "@/components/sa/SaTabs";
 
 const API = "/api/sa/ads";
 
@@ -412,17 +413,14 @@ const SaAdMaster: React.FC = () => {
           </Link>
         )}
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
-            {([
+          <SaTabs
+            tabs={[
               { key: "list", icon: LayoutList, label: "List" },
               { key: "performance", icon: BarChart2, label: "Performance" },
-            ] as const).map(({ key, icon: Icon, label }) => (
-              <button key={key} onClick={() => setActiveTab(key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
+            ]}
+            active={activeTab}
+            onChange={(key) => setActiveTab(key)}
+          />
         </div>
 
         {/* PERFORMANCE TAB */}
