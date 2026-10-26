@@ -1,7 +1,7 @@
 // One work order opened: details, activities, linked documents, approval, print.
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart } from "lucide-react";
+import { Printer, Trash2, ChevronDown, ChevronRight, Building2, Calculator, IndianRupee, FileText, Calendar, User, Layers, Package, Hammer, Receipt, AlertCircle, PenSquare, ChevronUp, ClipboardList, ArrowLeft, BadgeCheck, Clock, ShoppingCart } from "lucide-react";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getWorkOrder, deleteWorkOrder, getMaterialRequestPrefillFromWO, MaterialRequestExistsError } from "@/api/workOrderApi";
@@ -9,6 +9,7 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { getDocumentChain } from "@/api/materialChainApi";
+import { printWorkOrder } from "./printWorkOrder";
 import { useWOChainStatus, Activity, WorkOrderDetail, WorkOrderActivityDetail, fmt, getStatusConfig } from "./config";
 
 // ─── VIEW: Work Order Detail Panel ────────────────────────────────────────────
@@ -260,6 +261,14 @@ export const WorkOrderDetailPanel: React.FC<{
                   );
                 }}
               />
+              <button
+                onClick={() => { if (!printWorkOrder(detail)) toast.error("Allow pop-ups to print the Work Order."); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-foreground/40 text-foreground text-xs font-medium hover:bg-primary/5 transition-colors"
+                title="Print the Work Order"
+              >
+                <Printer size={12} />
+                Print
+              </button>
               {rights.canEdit && (
                 <button
                   onClick={() => onEdit(workOrderId)}
