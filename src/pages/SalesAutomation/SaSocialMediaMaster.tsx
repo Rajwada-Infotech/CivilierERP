@@ -211,10 +211,10 @@ const SaSocialMediaMaster: React.FC = () => {
             <button
               type="button"
               onClick={() => testConnection(row)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               title="Test API connection"
             >
-              <PlugZap size={13} />
+              <PlugZap size={13} /> Test
             </button>
           )}
           exportConfig={{

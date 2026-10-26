@@ -501,18 +501,18 @@ const SaAdMaster: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setCreativesFor({ id: String(row._id), name: String(row.name) })}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Manage creatives (image/video upload)"
               >
-                <ImageIcon size={13} />
+                <ImageIcon size={13} /> Creatives
               </button>
               <button
                 type="button"
                 onClick={() => syncAd(row)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Prepare external ad sync"
               >
-                <RefreshCw size={13} />
+                <RefreshCw size={13} /> Sync
               </button>
             </>
           )}

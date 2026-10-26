@@ -12,6 +12,7 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { StatusBadge } from "@/components/StatusBadge";
 
 const API = "/api/sa/marketing-invoices";
 
@@ -185,35 +186,35 @@ const SaMarketingInvoices: React.FC = () => {
           canDelete={canDoAction("sa-marketing-invoices", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          columnRenderers={{
+            PaymentStatus: (value) => <StatusBadge status={String(value)} />,
+          }}
           exportConfig={{ title: "Marketing Invoices", filename: "marketing-invoices", columns: exportColumns }}
           rowActions={(row) => {
             const status = String(row.ApprovalStatus ?? "Pending");
-            if (status === "Approved") {
-              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">Approved</span>;
-            }
-            if (status === "Rejected") {
-              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-red-500/10 text-red-500">Rejected</span>;
+            if (status === "Approved" || status === "Rejected") {
+              return <StatusBadge status={status} />;
             }
             if (!canDoAction("sa-marketing-invoices", "edit")) {
-              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-yellow-500/10 text-yellow-600">Pending</span>;
+              return <StatusBadge status="Pending" />;
             }
             return (
               <>
                 <button
                   type="button"
                   onClick={() => setApprovalDialog({ id: row._id, action: "approve", invoiceNumber: String(row.InvoiceNumber) })}
-                  className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-emerald-500 hover:bg-emerald-500/10 transition-colors"
                   title="Approve invoice"
                 >
-                  <CheckCircle2 size={13} />
+                  <CheckCircle2 size={13} /> Approve
                 </button>
                 <button
                   type="button"
                   onClick={() => setApprovalDialog({ id: row._id, action: "reject", invoiceNumber: String(row.InvoiceNumber) })}
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-red-500 hover:bg-red-500/10 transition-colors"
                   title="Reject invoice"
                 >
-                  <XCircle size={13} />
+                  <XCircle size={13} /> Reject
                 </button>
               </>
             );

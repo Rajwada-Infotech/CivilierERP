@@ -8,20 +8,39 @@ import { exportToXlsx, exportToPdf, type ExportColumn } from "@/lib/export";
 import { Download, FileSpreadsheet } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
 
-const REPORTS = [
-  { key: "lead-source", label: "Lead Source Report", cols: ["Platform", "TotalLeads", "Bookings", "Lost"] },
-  { key: "campaign-performance", label: "Campaign Performance Report", cols: ["CampaignCode", "Name", "Budget", "Status", "TotalAds", "TotalLeads", "CostSpent", "Bookings", "ConversionPct"] },
-  { key: "ad-performance", label: "Advertisement Performance Report", cols: ["Name", "CampaignName", "Status", "Budget", "Spent", "LeadsGenerated", "Bookings", "CostPerLead", "ConversionRate", "RoiPercent"] },
-  { key: "daily-ad-performance", label: "Daily Reach & Cost Report", cols: ["ReportDate", "AdName", "CampaignName", "DailyReach", "DailyCost", "CostPerLead"] },
-  { key: "cost-per-lead", label: "Cost Per Lead Report", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalLeads", "CostPerLead"] },
-  { key: "sales-performance", label: "Sales Performance Report", cols: ["SalespersonName", "LeadsHandled", "CallsMade", "SiteVisits", "Bookings"] },
-  { key: "team-leader-performance", label: "Team Leader Performance Report", cols: ["TeamLeadName", "LeadsReceived", "LeadsDistributed", "PendingDistribution", "TeamBookings"] },
-  { key: "executive-performance", label: "Executive Performance Report", cols: ["ExecutiveName", "VisitsAssigned", "VisitsCompleted", "VisitsCancelled"] },
-  { key: "inquiry-status", label: "Inquiry Status Report", cols: ["Status", "Cnt"] },
-  { key: "site-visit", label: "Site Visit Report", cols: ["CustomerName", "Mobile", "ProjectName", "ExecutiveName", "PreferredDate", "Status"] },
-  { key: "booking-conversion", label: "Booking Conversion Report", cols: ["CampaignName", "CampaignCode", "TotalLeads", "Visited", "Booked", "ConversionRate"] },
-  { key: "marketing-roi", label: "Marketing ROI Report", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalRevenue", "ROI"] },
+// Was one flat, unthemed row of 12 identically-styled buttons — finding the
+// right one meant reading every label. Grouped by what the report is about;
+// each report keeps its own key/cols unchanged.
+const REPORT_GROUPS = [
+  {
+    group: "Marketing & Campaigns",
+    reports: [
+      { key: "lead-source", label: "Lead Source", desc: "Leads, bookings, and losses by source platform", cols: ["Platform", "TotalLeads", "Bookings", "Lost"] },
+      { key: "campaign-performance", label: "Campaign Performance", desc: "Spend, leads, and conversion per campaign", cols: ["CampaignCode", "Name", "Budget", "Status", "TotalAds", "TotalLeads", "CostSpent", "Bookings", "ConversionPct"] },
+      { key: "ad-performance", label: "Advertisement Performance", desc: "Spend, leads, and ROI per ad", cols: ["Name", "CampaignName", "Status", "Budget", "Spent", "LeadsGenerated", "Bookings", "CostPerLead", "ConversionRate", "RoiPercent"] },
+      { key: "daily-ad-performance", label: "Daily Reach & Cost", desc: "Day-by-day reach and cost per ad", cols: ["ReportDate", "AdName", "CampaignName", "DailyReach", "DailyCost", "CostPerLead"] },
+      { key: "cost-per-lead", label: "Cost Per Lead", desc: "Spend-to-lead efficiency per campaign", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalLeads", "CostPerLead"] },
+      { key: "marketing-roi", label: "Marketing ROI", desc: "Spend vs. revenue per campaign", cols: ["CampaignName", "CampaignCode", "TotalSpent", "TotalRevenue", "ROI"] },
+    ],
+  },
+  {
+    group: "Sales & Team Performance",
+    reports: [
+      { key: "sales-performance", label: "Sales Performance", desc: "Leads, calls, visits, and bookings per salesperson", cols: ["SalespersonName", "LeadsHandled", "CallsMade", "SiteVisits", "Bookings"] },
+      { key: "team-leader-performance", label: "Team Leader Performance", desc: "Distribution and bookings per team lead", cols: ["TeamLeadName", "LeadsReceived", "LeadsDistributed", "PendingDistribution", "TeamBookings"] },
+      { key: "executive-performance", label: "Executive Performance", desc: "Site visits assigned vs. completed per executive", cols: ["ExecutiveName", "VisitsAssigned", "VisitsCompleted", "VisitsCancelled"] },
+      { key: "booking-conversion", label: "Booking Conversion", desc: "Lead-to-booking conversion per campaign", cols: ["CampaignName", "CampaignCode", "TotalLeads", "Visited", "Booked", "ConversionRate"] },
+    ],
+  },
+  {
+    group: "Operations",
+    reports: [
+      { key: "inquiry-status", label: "Inquiry Status", desc: "Count of inquiries by current status", cols: ["Status", "Cnt"] },
+      { key: "site-visit", label: "Site Visit", desc: "Scheduled and completed site visits", cols: ["CustomerName", "Mobile", "ProjectName", "ExecutiveName", "PreferredDate", "Status"] },
+    ],
+  },
 ];
+const REPORTS = REPORT_GROUPS.flatMap((g) => g.reports);
 
 async function fetchReport(key: string, from?: string, to?: string): Promise<any[]> {
   const params = new URLSearchParams();
@@ -107,15 +126,23 @@ const SaReports: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {REPORTS.map((r) => (
-            <button
-              key={r.key}
-              onClick={() => setSelected(r.key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${selected === r.key ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
-            >
-              {r.label}
-            </button>
+        <div className="space-y-3">
+          {REPORT_GROUPS.map((g) => (
+            <div key={g.group}>
+              <h3 className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">{g.group}</h3>
+              <div className="flex flex-wrap gap-2">
+                {g.reports.map((r) => (
+                  <button
+                    key={r.key}
+                    onClick={() => setSelected(r.key)}
+                    title={r.desc}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${selected === r.key ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
 
