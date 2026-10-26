@@ -4,7 +4,6 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { MessageCircle, Phone, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -59,9 +58,8 @@ const SaLeadActivities: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Activities"]} title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Lead Activities"]} />
       <div className="space-y-5">
         {canDoAction("sa-lead-activities", "create") && (
           <div className="space-y-3 rounded-lg border border-border p-4 bg-background">

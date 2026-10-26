@@ -5,7 +5,6 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CheckCircle2, IndianRupee } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
@@ -142,9 +141,8 @@ const SaCommissions: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load commissions.</div>;
 
   return (
-    <SalesAutoShell title="Commission Tracking" subtitle="Track internal sales and team-lead commissions from bookings"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Commissions"]} title="Commission Tracking" subtitle="Track internal sales and team-lead commissions from bookings"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Commissions"]} />
       <div className="space-y-8">
         <MasterPage
           title="Commission"

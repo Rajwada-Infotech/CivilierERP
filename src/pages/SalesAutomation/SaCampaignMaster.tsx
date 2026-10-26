@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -186,8 +185,7 @@ const SaCampaignMaster: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load campaigns.</div>;
 
   return (
-    <SalesAutoShell title="Campaign Master" subtitle={platformFilter ? `Showing campaigns for the selected platform — ${mappedData[0]?.platformName || ""}` : "Manage marketing campaigns across all social media platforms"}>
-      <Breadcrumbs items={["Sales Automation", "Campaign Master"]} />
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Campaign Master"]} title="Campaign Master" subtitle={platformFilter ? `Showing campaigns for the selected platform — ${mappedData[0]?.platformName || ""}` : "Manage marketing campaigns across all social media platforms"}>
       <div className="space-y-8">
         {platformFilter && (
           <Link to="/sales-automation/campaigns" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">

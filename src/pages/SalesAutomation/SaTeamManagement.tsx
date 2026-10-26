@@ -7,7 +7,6 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { RoleBadge } from "@/components/RoleBadge";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserPlus, UserMinus, ArrowRightLeft, TrendingUp, TrendingDown, Users, ChevronDown, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -139,9 +138,8 @@ const SaTeamManagement: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading teams...</div>;
 
   return (
-    <SalesAutoShell title="Sales Team Management" subtitle="Manage team leads and their salespersons — add, remove, transfer, promote or demote"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Team Management"]} title="Sales Team Management" subtitle="Manage team leads and their salespersons — add, remove, transfer, promote or demote"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Team Management"]} />
       <div className="space-y-6">
 
         {/* Teams */}

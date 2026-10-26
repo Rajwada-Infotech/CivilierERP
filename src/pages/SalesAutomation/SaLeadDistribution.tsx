@@ -5,7 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -186,14 +185,13 @@ const SaLeadDistribution: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Distribution" subtitle="Manually distribute pending leads right now, or see what's already been distributed"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Distribution"]} title="Lead Distribution" subtitle="Manually distribute pending leads right now, or see what's already been distributed"
       action={
         <Link to="/sales-automation/distribution-rules"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors">
           <Settings2 size={13} /> Manage standing rules
         </Link>
       }>
-      <Breadcrumbs items={["Sales Automation", "Lead Distribution"]} />
       <div className="space-y-6">
 
         {/* Tabs — "Auto-Distribution Rules" used to be a 3rd tab here,

@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -409,8 +408,7 @@ const SaAdMaster: React.FC = () => {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
-    <SalesAutoShell title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : platformFilter ? "Showing ads for the selected platform" : "Manage advertisements running under each campaign"}>
-      <Breadcrumbs items={["Sales Automation", "Ad Master"]} />
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Ad Master"]} title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : platformFilter ? "Showing ads for the selected platform" : "Manage advertisements running under each campaign"}>
       <div className="space-y-6">
         {(campaignFilter || platformFilter) && (
           <Link to="/sales-automation/ads" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">

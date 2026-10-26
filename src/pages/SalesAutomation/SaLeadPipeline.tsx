@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { LEAD_STAGES } from "@/components/sa/leadStages";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -38,9 +37,8 @@ const SaLeadPipeline: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load pipeline.</div>;
 
   return (
-    <SalesAutoShell title="Lead Pipeline" subtitle="Where every lead sits right now, stage by stage"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Management", "Pipeline"]} title="Lead Pipeline" subtitle="Where every lead sits right now, stage by stage"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Lead Management", "Pipeline"]} />
       <div className="overflow-x-auto pb-4">
         <div className="flex gap-3 min-w-max">
           {LEAD_STAGES.map((stage) => {

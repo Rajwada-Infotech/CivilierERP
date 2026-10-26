@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -184,8 +183,7 @@ const SaSocialMediaMaster: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load platforms.</div>;
 
   return (
-    <SalesAutoShell title="Social Media Master" subtitle="Step 1 of the lead workflow: platforms → campaigns → ads → leads" icon={Megaphone}>
-      <Breadcrumbs items={["Sales Automation", "Social Media"]} />
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Social Media"]} title="Social Media Master" subtitle="Step 1 of the lead workflow: platforms → campaigns → ads → leads">
       <div className="space-y-8">
         <MasterPage
           title="Social Media Platform"

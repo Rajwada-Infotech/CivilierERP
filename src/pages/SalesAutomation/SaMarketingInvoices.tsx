@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -173,9 +172,8 @@ const SaMarketingInvoices: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load invoices.</div>;
 
   return (
-    <SalesAutoShell title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Marketing Invoices"]} title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Marketing Invoices"]} />
       <div className="space-y-8">
         <MasterPage
           title="Invoice"

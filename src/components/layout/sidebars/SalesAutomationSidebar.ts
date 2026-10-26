@@ -17,7 +17,7 @@ import { NavItem } from "./SidebarPrimitives";
 
 export const salesAutomationNavItems: NavItem[] = [
   // ── 01. Single Unified Dashboard ───────────────────────────────────────────
-  { label: "Dashboard", icon: Category2, path: "/sales-automation/dashboard", pageKey: "sa-leads", isDashboard: true },
+  { label: "Dashboard", icon: Category2, path: "/sales-automation", pageKey: "sa-leads", isDashboard: true },
 
   // ── 02. Acquisition (Sourcing Leads) ───────────────────────────────────────
   {

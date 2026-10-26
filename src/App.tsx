@@ -2586,11 +2586,9 @@ function AppRoutes() {
       <Route path="/sales-automation/site-visits" element={<ProtectedRoute pageKey="sa-site-visits"><SaSiteVisits /></ProtectedRoute>} />
       <Route path="/sales-automation/invoices" element={<ProtectedRoute pageKey="sa-marketing-invoices"><SaMarketingInvoices /></ProtectedRoute>} />
       <Route path="/sales-automation/commissions" element={<ProtectedRoute pageKey="sa-commissions"><SaCommissions /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard" element={<ProtectedRoute pageKey="sa-leads"><SaDashboard /></ProtectedRoute>} />
-      {/* Old 3-dashboard routes -> one unified dashboard (user: "THERE SHOULD ONLY ONE DASHBOARD") */}
-      <Route path="/sales-automation/dashboard/marketing" element={<Navigate to="/sales-automation/dashboard" replace />} />
-      <Route path="/sales-automation/dashboard/sales" element={<Navigate to="/sales-automation/dashboard" replace />} />
-      <Route path="/sales-automation/dashboard/team-lead" element={<Navigate to="/sales-automation/dashboard" replace />} />
+      <Route path="/sales-automation" element={<ProtectedRoute pageKey="sa-leads"><SaDashboard /></ProtectedRoute>} />
+      {/* Old dashboard URLs (incl. the former 3 separate dashboards) -> the module root */}
+      <Route path="/sales-automation/dashboard/*" element={<Navigate to="/sales-automation" replace />} />
       <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-reports"><SaReports /></ProtectedRoute>} />
       <Route path="/sales-automation/teams" element={<ProtectedRoute pageKey="sa-teams"><SaTeamManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />

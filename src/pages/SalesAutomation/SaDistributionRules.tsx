@@ -6,7 +6,6 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, ChevronDown, ChevronRight, Play, ToggleLeft, ToggleRight, Shuffle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -223,7 +222,7 @@ const SaDistributionRules: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading distribution rules...</div>;
 
   return (
-    <SalesAutoShell title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Distribution Rules"]} title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons"
       action={
         <div className="flex items-center gap-2">
           <Link to="/sales-automation/distribution"
@@ -233,7 +232,6 @@ const SaDistributionRules: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
         </div>
       }>
-      <Breadcrumbs items={["Sales Automation", "Distribution Rules"]} />
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
           {canManage && (
