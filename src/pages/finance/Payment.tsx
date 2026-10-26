@@ -593,7 +593,7 @@ const Payment: React.FC = () => {
     return list;
   }, [banks, form.company, form.bankId]);
 
-  const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
+  const { data: enterprises = [] } = useQuery<{ id: number; label: string; enterprise_id?: number | null; belongs_to?: string | null }[]>({
     queryKey: ["company-options-payment-filter"],
     queryFn: fetchCompanyOptions,
   });
@@ -1669,6 +1669,24 @@ const Payment: React.FC = () => {
     },
     [companyOptions],
   );
+  // Sister companies — one parent enterprise (its id, or its name where only that was saved) — may merge
+  // their invoices when the project is tagged to both; the server re-checks this against the database.
+  const sisterCompanies = useCallback(
+    (a: ExpenseOption, b: ExpenseOption) => {
+      const ca = companyOptions.find((c) => c.id === Number(a.companyId));
+      const cb = companyOptions.find((c) => c.id === Number(b.companyId));
+      if (!ca || !cb) return false;
+      const name = (v?: string | null) => String(v ?? "").trim().toLowerCase();
+      const sameParent = (ca.enterprise_id != null && ca.enterprise_id === cb.enterprise_id) ||
+        (!!name(ca.belongs_to) && name(ca.belongs_to) === name(cb.belongs_to));
+      if (!sameParent) return false;
+      const proj = projectOptions.find((p) => (a.projectId != null && p.id === Number(a.projectId)) || name(p.label) === name(a.projectName));
+      if (!proj) return false;
+      const onProject = (id: number) => Number(proj.company_id) === id || (proj.tagged_company_ids?.split(",") ?? []).includes(String(id));
+      return onProject(ca.id) && onProject(cb.id);
+    },
+    [companyOptions, projectOptions],
+  );
   const handleMergeClear = useCallback(() => {
     setForm((prev) => ({ ...prev, mergedInvoices: [] }));
   }, []);
@@ -2381,6 +2399,7 @@ const Payment: React.FC = () => {
                           onMergeConfirm={handleMergeConfirm}
                           mergedSummary={mergedSummary}
                           onMergeClear={handleMergeClear}
+                          sisterCompanies={sisterCompanies}
                           onRefreshOptions={refetchExpenseOptions}
                         />
                         <div className="flex items-center gap-2 pt-1">

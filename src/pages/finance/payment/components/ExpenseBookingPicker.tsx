@@ -22,6 +22,7 @@ export function ExpenseBookingPicker({
   mergedSummary = null,
   onMergeClear,
   onRefreshOptions,
+  sisterCompanies,
 }: {
   options: ExpenseOption[];
   value: string;
@@ -59,6 +60,9 @@ export function ExpenseBookingPicker({
    *  in that tab. This closes that gap without needing to chase the
    *  staleness down further. */
   onRefreshOptions?: () => void;
+  /** True when two invoices of DIFFERENT companies may still merge: the companies share one parent
+   *  enterprise and the project is tagged to both. The server checks the same. */
+  sisterCompanies?: (a: ExpenseOption, b: ExpenseOption) => boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -160,10 +164,12 @@ export function ExpenseBookingPicker({
   const normCompanyId = (v: unknown) => (v == null || v === "" ? null : Number(v));
   const normSupplierId = (v: unknown) => (v == null || v === "" ? null : Number(v));
   const normProjectName = (v: unknown) => String(v ?? "").trim().toLowerCase();
+  const sameCompany = (o: ExpenseOption, a: ExpenseOption) =>
+    normCompanyId(o.companyId) !== null &&
+    (normCompanyId(o.companyId) === normCompanyId(a.companyId) || !!sisterCompanies?.(o, a));
   const isMergeCompatible = (o: ExpenseOption) =>
     !mergeAnchor ||
-    (normCompanyId(o.companyId) !== null &&
-      normCompanyId(o.companyId) === normCompanyId(mergeAnchor.companyId) &&
+    (sameCompany(o, mergeAnchor) &&
       normProjectName(o.projectName) === normProjectName(mergeAnchor.projectName) &&
       normSupplierId(o.supplierId) !== null &&
       normSupplierId(o.supplierId) === normSupplierId(mergeAnchor.supplierId));
@@ -173,8 +179,8 @@ export function ExpenseBookingPicker({
   // round of "what does the DB actually say" diagnosis.
   const mergeIncompatibleReason = (o: ExpenseOption): string | null => {
     if (!mergeAnchor || isMergeCompatible(o)) return null;
-    if (normCompanyId(o.companyId) !== normCompanyId(mergeAnchor.companyId)) {
-      return `Company differs (${o.companyId ?? "—"} vs ${mergeAnchor.companyId ?? "—"})`;
+    if (!sameCompany(o, mergeAnchor)) {
+      return `Company differs (${o.companyName ?? o.companyId ?? "—"} vs ${mergeAnchor.companyName ?? mergeAnchor.companyId ?? "—"}) and they aren't sister companies on this project`;
     }
     if (normProjectName(o.projectName) !== normProjectName(mergeAnchor.projectName)) {
       return `Project differs ("${o.projectName ?? "—"}" vs "${mergeAnchor.projectName ?? "—"}")`;
@@ -362,7 +368,7 @@ export function ExpenseBookingPicker({
                           onRefreshOptions?.();
                         }
                       }}
-                      title="Pay off several invoices from the same company, project &amp; supplier in one payment"
+                      title="Pay off several invoices from the same company (or sister companies of one parent on this project), project &amp; supplier in one payment"
                       className={`ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded-none text-[0.6875rem] font-heading font-semibold transition-all border ${
                         mergeMode
                           ? "bg-primary/10 text-primary border-primary/30"

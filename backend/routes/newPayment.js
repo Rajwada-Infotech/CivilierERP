@@ -118,6 +118,7 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
       -- project" here means exactly what the picker already showed the
       -- user as matching.
       COALESCE(proj.name, eb.EProjectName) AS ProjectKey,
+      proj.id AS ProjectId,
       ISNULL(eb.TDSAmount, 0) AS TDSAmount,
       ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS RemainingAmount,
       CASE
@@ -148,7 +149,9 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
     WHERE eb.Eid IN (${placeholders.join(",")})
   `);
 
-  const rows = result.recordset;
+  // In the order the ids came: the first invoice's company is the one that pays (it matters once sister
+  // companies can merge), and the links — which the GL posting reads first-to-last — keep that order too.
+  const rows = result.recordset.sort((a, b) => ids.indexOf(a.Eid) - ids.indexOf(b.Eid));
   const bad = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
 
   if (rows.length !== ids.length) bad("One or more invoices in this merge could not be found.");
@@ -167,9 +170,39 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   const distinctCompanies = new Set(rows.map((r) => Number(r.ECompanyId)));
   const distinctProjects = new Set(rows.map((r) => String(r.ProjectKey ?? "").trim().toLowerCase()));
   const distinctSuppliers = new Set(rows.map((r) => Number(r.SupplierId)));
-  if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
   if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
   if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
+  // Invoices of different companies merge only when those companies are sisters (one parent enterprise)
+  // and the project is tagged to every one of them (its own company or Project Master's extra companies).
+  if (distinctCompanies.size > 1) {
+    const projectId = rows[0].ProjectId;
+    if (!projectId) bad("All merged invoices must belong to the same company.");
+    const creq = pool.request().input("pid", sql.Int, projectId);
+    const cph = [...distinctCompanies].map((id, i) => { creq.input(`c${i}`, sql.Int, id); return `@c${i}`; });
+    const cos = (await creq.query(`
+      SELECT co.id, co.name,
+        COALESCE(co.enterprise_id, pe.id) AS ParentId,
+        CASE WHEN p.company_id = co.id OR EXISTS (
+          SELECT 1 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = @pid AND pc.CompanyId = co.id
+        ) THEN 1 ELSE 0 END AS OnProject
+      FROM dbo.enterprise co
+      LEFT JOIN dbo.enterprise p ON p.id = @pid
+      OUTER APPLY (
+        SELECT TOP 1 e.id FROM dbo.enterprise e
+        WHERE (e.business_type = 'E' OR e.business_type IS NULL)
+          AND NULLIF(LTRIM(RTRIM(co.belongs_to)), '') IS NOT NULL
+          AND LTRIM(RTRIM(e.name)) = LTRIM(RTRIM(co.belongs_to))
+        ORDER BY e.id
+      ) pe
+      WHERE co.id IN (${cph.join(",")})
+    `)).recordset;
+    const parents = new Set(cos.map((c) => c.ParentId));
+    if (cos.length !== distinctCompanies.size || parents.has(null) || parents.size > 1) {
+      bad("Invoices of different companies can be merged only when the companies share the same parent enterprise.");
+    }
+    const off = cos.filter((c) => !c.OnProject);
+    if (off.length) bad(`${off.map((c) => c.name).join(", ")} is not tagged to this project.`);
+  }
 
   const links = rows.map((r) => ({
     expenseBookingId: r.Eid,
