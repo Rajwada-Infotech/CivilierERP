@@ -1,9 +1,9 @@
 import { cn } from "../lib/utils";
 
 // Single shared source for SA role name -> label/color, so a role renders
-// the same way everywhere it appears (SaRoleMaster's role-rights overview,
-// SaTeamManagement's team accordion, etc.) instead of each page hand-rolling
-// its own color map / label map for the same three role names.
+// the same way everywhere it appears (SaTeamManagement's team accordion,
+// etc.) instead of each page hand-rolling its own color map / label map
+// for the same three role names.
 const ROLE_CONFIG: Record<string, { label: string; classes: string }> = {
   marketing_head: {
     label: "Marketing Head",

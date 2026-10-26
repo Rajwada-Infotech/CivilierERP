@@ -172,8 +172,13 @@ const MARKETING_HEAD_KNOWN_PAGES = [
   // Sales Automation
   "sa-leads", "sa-inquiry", "sa-campaigns", "sa-ads", "sa-marketing-invoices",
   "sa-site-visits", "sa-social-media", "sa-teams", "sa-lead-distribution",
-  "sa-distribution-rules", "sa-lead-transfers", "sa-role-master",
+  "sa-distribution-rules", "sa-lead-transfers",
   "sa-channel-partners", "sa-lead-activities", "sa-lead-tasks", "sa-commissions",
+  // SA Role Master was retired (it duplicated the generic Menu Rights page) —
+  // marketing_head now manages SA role-level permissions through menu-rights
+  // instead; see the explicit canAccessPage/canDoAction carve-out below,
+  // since menu-rights is otherwise an ADMIN_ONLY_PAGES entry.
+  "menu-rights",
   // CRM module
   "crm-dashboard", "crm-applications", "crm-bookings", "crm-welcome-calls",
   "crm-communication", "crm-customer-bank-details", "crm-agreements", "crm-documents",
@@ -233,8 +238,14 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canAccessPage = (page: PageKey): boolean => {
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
-    // marketing_head: full access within their scope, no access outside it
+    // marketing_head: full access within their scope, no access outside it.
+    // menu-rights is the one ADMIN_ONLY_PAGES entry marketing_head can reach
+    // — it's where they now manage SA role-level permissions (the page
+    // itself further restricts them to the Role-wise tab; the per-user
+    // override endpoints stay admin/super_admin/dba-only on the backend
+    // regardless of this check — see MenuRights.tsx).
     if (currentUser.role === "marketing_head") {
+      if (page === "menu-rights") return true;
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
       return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
     }
@@ -247,8 +258,10 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canDoAction = (page: PageKey, action: PageAction): boolean => {
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
-    // marketing_head: all actions on their scoped pages
+    // marketing_head: all actions on their scoped pages — menu-rights is
+    // limited to view/edit (the Role-wise tab), same reasoning as above.
     if (currentUser.role === "marketing_head") {
+      if (page === "menu-rights") return action === "view" || action === "edit";
       if (ADMIN_ONLY_PAGES.includes(page)) return false;
       return isMarketingHeadPage(page) || page === "dashboard" || page === "reports" || page === "widgets";
     }

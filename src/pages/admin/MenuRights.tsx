@@ -17,6 +17,8 @@ import {
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { useAuth } from "@/contexts/AuthContext";
+import { PRIVILEGED_ROLES } from "@/contexts/auth.utils";
 import { toast } from "sonner";
 import {
   getUsersForRights,
@@ -182,8 +184,16 @@ export default function MenuRights() {
   }, []);
 
   // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
+  // The per-user override endpoints (backend/routes/userRights.js) are
+  // hard-restricted to admin/super_admin/dba — no page-scoping exists there,
+  // so a non-admin-tier page right (e.g. marketing_head's menu-rights grant,
+  // added so SA permissions have one real editor instead of the retired
+  // SA Role Master page) can only ever cover the Role-wise baseline, which
+  // IS safely page-scoped (backend/routes/roles.js uses checkPermission).
   type Subject = "user" | "role";
-  const [subject, setSubject] = useState<Subject>("user");
+  const { currentUser } = useAuth();
+  const isAdminTier = currentUser ? PRIVILEGED_ROLES.includes(currentUser.role) : false;
+  const [subject, setSubject] = useState<Subject>(isAdminTier ? "user" : "role");
 
   const [users, setUsers] = useState<
     { id: number; name: string; role: string }[]
@@ -206,13 +216,16 @@ export default function MenuRights() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  // Load users
+  // Load users — skipped for non-admin-tier users, since the endpoint this
+  // calls (GET /api/user-rights/users) 403s for anyone but admin/super_admin/
+  // dba regardless of page rights (see the Subject-mode comment above).
   useEffect(() => {
+    if (!isAdminTier) { setLoadingUsers(false); return; }
     getUsersForRights()
       .then(setUsers)
       .catch(() => toast.error("Failed to load users"))
       .finally(() => setLoadingUsers(false));
-  }, []);
+  }, [isAdminTier]);
 
   // Load roles
   useEffect(() => {
@@ -537,16 +550,18 @@ export default function MenuRights() {
               >
                 Role-wise
               </button>
-              <button
-                onClick={() => switchSubject("user")}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  subject === "user"
-                    ? "bg-card shadow text-foreground border border-border"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Custom User-wise
-              </button>
+              {isAdminTier && (
+                <button
+                  onClick={() => switchSubject("user")}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    subject === "user"
+                      ? "bg-card shadow text-foreground border border-border"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Custom User-wise
+                </button>
+              )}
             </div>
           </div>
           {subject === "role" && (

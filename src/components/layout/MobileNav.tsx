@@ -40,7 +40,6 @@ import {
   Megaphone,
   SlidersHorizontal,
   UsersRound,
-  ShieldCheck,
   CalendarClock,
   Wand2,
   GitBranch,
@@ -394,13 +393,6 @@ const salesAutomationSetupItems: SetupItem[] = [
     path: "/sales-automation/teams",
     color: "text-purple-500",
     pageKey: "sa-teams",
-  },
-  {
-    icon: ShieldCheck,
-    label: "Role Master",
-    path: "/sales-automation/role-master",
-    color: "text-orange-500",
-    pageKey: "sa-role-master",
   },
 ];
 

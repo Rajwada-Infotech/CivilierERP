@@ -449,7 +449,6 @@ const SaTeamManagement = lazy(() => import("./pages/SalesAutomation/SaTeamManage
 const SaLeadTransfers = lazy(() => import("./pages/SalesAutomation/SaLeadTransfers"));
 const SaCommissions = lazy(() => import("./pages/SalesAutomation/SaCommissions"));
 const SaDistributionRules = lazy(() => import("./pages/SalesAutomation/SaDistributionRules"));
-const SaRoleMaster = lazy(() => import("./pages/SalesAutomation/SaRoleMaster"));
 // ── CRM Module ────────────────────────────────────────────────────────────────
 const CrmCustomers         = lazy(() => import("./pages/CRM/CrmCustomers"));
 const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
@@ -2594,7 +2593,11 @@ function AppRoutes() {
       <Route path="/sales-automation/teams" element={<ProtectedRoute pageKey="sa-teams"><SaTeamManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
-      <Route path="/sales-automation/role-master" element={<ProtectedRoute pageKey="sa-role-master"><SaRoleMaster /></ProtectedRoute>} />
+      {/* SA Role Master retired - it duplicated the generic Admin > Menu Rights
+          page (role-level + per-user permissions for every sa-* page already
+          lived there too, via dbo.PageDefinitions' Module='Sales Automation').
+          Redirect any old link/bookmark to the one real permission editor. */}
+      <Route path="/sales-automation/role-master" element={<Navigate to="/admin/rights/menu" replace />} />
       {/* ── CRM Module ─────────────────────────────────────────────────────────── */}
       <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />
