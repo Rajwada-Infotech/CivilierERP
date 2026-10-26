@@ -97,7 +97,8 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
 });
 
 // Payment Milestones shows the bank on file as reference when recording a payment.
-router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-details", "crm-payments"], "view"), async (req, res) => {
+// Payment Milestones and Refunds (a refund's payout account) read it too.
+router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-details", "crm-payments", "crm-refunds"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);

@@ -2,7 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 // Project access: a refund's own project, else its booking's.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT COALESCE(r.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmRefund r LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id"));
 // A refund's GST document (credit note / refund voucher, migration 565): its own project.
 router.param("noteId", projectParamGuard("SELECT n.ProjectId FROM dbo.CrmGstNote n WHERE n.Id = @id"));
@@ -208,18 +208,23 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // One filter definition for the rows, the count and the status counts — the count used to skip the
+    // project scope, so a restricted user's page totals counted other projects' refunds.
+    const buildWhere = (rq, withStatus) => {
+      const conds = [];
+      if (req.projectScope) conds.push(projectPredicate(req.projectScope, "COALESCE(r.ProjectId, b.ProjectId)", "").trim());
+      if (withStatus && status) { rq.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
+      if (companyId) { rq.input("companyId", sql.Int, companyId); conds.push("r.CompanyId = @companyId"); }
+      if (projectId) { rq.input("projectId", sql.Int, projectId); conds.push("r.ProjectId = @projectId"); }
+      if (blockId) { rq.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+      if (search) {
+        rq.input("search", sql.NVarChar(200), `%${search}%`);
+        conds.push("(cu.CustomerName LIKE @search OR r.RefundNo LIKE @search OR b.BookingNo LIKE @search OR cxl.CancellationNo LIKE @search)");
+      }
+      return conds.length ? "WHERE " + conds.join(" AND ") : "";
+    };
     const req0 = pool.request();
-    const conds = [];
-    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "COALESCE(r.ProjectId, b.ProjectId)", "").trim());
-    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("r.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("r.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(cu.CustomerName LIKE @search OR r.RefundNo LIKE @search OR b.BookingNo LIKE @search OR cxl.CancellationNo LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const where = buildWhere(req0, true);
     const SELECT_WITH_BLOCK = `${REFUND_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
     if (!req.query.page) {
@@ -229,29 +234,25 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
+    const FROM = `
+      FROM dbo.CrmRefund r
+      JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+      LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+      LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = r.SourceCancellationId`;
+    const countReq = pool.request();
+    const countWhere = buildWhere(countReq, true);
+    const statusReq = pool.request();
+    const statusWhere = buildWhere(statusReq, false);
+    const [result, countResult, statusResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmRefund r
-          JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
-          LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId
-          LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = r.SourceCancellationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR r.Status = @st2)
-            AND (@companyId2 IS NULL OR r.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR r.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (cu.CustomerName LIKE @search2 OR r.RefundNo LIKE @search2 OR b.BookingNo LIKE @search2 OR cxl.CancellationNo LIKE @search2))
-        `),
+      countReq.query(`SELECT COUNT(*) AS total ${FROM} ${countWhere}`),
+      statusReq.query(`SELECT r.Status, COUNT(*) AS n, SUM(r.NetAmount) AS net,
+        SUM(CASE WHEN r.RefundDueDate IS NOT NULL AND r.Status <> 'Paid' AND CAST(SYSDATETIME() AS DATE) > r.RefundDueDate THEN 1 ELSE 0 END) AS overdue
+        ${FROM} ${statusWhere} GROUP BY r.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = {};
+    for (const s of statusResult.recordset) statusCounts[s.Status] = { count: s.n, net: Number(s.net) || 0, overdue: s.overdue };
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-refunds] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -277,7 +278,9 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
     const customerId = req.query.customerId ? parseInt(req.query.customerId, 10) : null;
     const req0 = pool.request();
     if (customerId) req0.input("cust", sql.Int, customerId);
-    const custFilter = customerId ? "AND a.CustomerId = @cust" : "";
+    // Only the user's projects (a restricted user was offered every project's held credit).
+    const custFilter = (customerId ? "AND a.CustomerId = @cust" : "")
+      + (req.projectScope ? ` AND ${projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : "");
     const result = await req0.query(`
       SELECT
         'CancellationHeldCredit' AS SourceType,
@@ -513,6 +516,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
       if (gross > unclaimed + 0.01) {
         return res.status(400).json({ error: `Amount exceeds the source's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by another pending refund or re-booking transfer` });
       }
+      if (!projectAllowed(req.projectScope, oa.ProjectId)) return res.status(403).json({ error: "You don't have access to this project" });
       customerId = oa.CustomerId; companyId = oa.CompanyId; projectId = oa.ProjectId; bookingId = oa.BookingId;
 
       if (sourceType === "CancellationHeldCredit") {
@@ -1192,6 +1196,11 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     }
     if (Number(to.ToCustomerId) !== Number(held.FromCustomerId)) {
       return res.status(400).json({ error: "Held credit and the target booking belong to different customers" });
+    }
+
+    // Both bookings must be in projects the user may work in.
+    if (!projectAllowed(req.projectScope, held.FromProjectId) || !projectAllowed(req.projectScope, to.ToProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project" });
     }
 
     const isCross = Number(held.FromCompanyId) !== Number(to.ToCompanyId);
