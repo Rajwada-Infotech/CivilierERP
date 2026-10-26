@@ -14,6 +14,9 @@ let workerRetentionInterval = null;
 let crmRefundSettlementInterval = null;
 let workerRunning = false;
 let crmRefundSettlementRunning = false;
+// Logged once per process lifetime (not every 5-minute tick) - see
+// settleApprovedCrmReceivedPayments's "orphaned" count in crmPayments.js.
+let loggedOrphanedReceivedPayments = false;
 
 const RECORDS_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day is plenty for a 7-day grace window
 const WORKER_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day is plenty for a 4-month window
@@ -31,6 +34,13 @@ async function settlePaidCrmRefunds() {
     const result = await settleApprovedCrmReceivedPayments(getPool(), "CRM system");
     if (result.failed) {
       logger.warn({ event: "WORKER_CRM_RECEIVED_PAYMENT_RETRY", ...result }, "Some approved CRM payment follow-ups still need recovery");
+    }
+    if (result.orphaned && !loggedOrphanedReceivedPayments) {
+      loggedOrphanedReceivedPayments = true;
+      logger.warn(
+        { event: "WORKER_CRM_RECEIVED_PAYMENT_ORPHANED", orphaned: result.orphaned },
+        "Some approved CRM received payments reference a deleted Booking/Milestone and can never be recovered - excluded from retry (logged once per server start, not every cycle)",
+      );
     }
     const { retryConfirmedPendingMoneyReceipts } = require("./services/crmMoneyReceiptWorkflow");
     const mrResult = await retryConfirmedPendingMoneyReceipts(getPool(), "CRM system");

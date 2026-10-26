@@ -1843,11 +1843,21 @@ router.get("/on-account/summary", requirePageRight("crm-payments", "view"), asyn
 // reuse the source-RP idempotency constraints, so revisiting approved rows is
 // safe and also retries GL, auto-application, and money-receipt work.
 async function settleApprovedCrmReceivedPayments(pool, actorEmail = "CRM recovery") {
+  // Rows whose CrmBookingId/CrmMilestoneId points at a since-deleted Booking
+  // or Milestone can never be recovered - normal app flow never hard-deletes
+  // a booking or milestone, so this only happens from a direct DB edit (a
+  // dev reset/reseed, manual cleanup, etc). Without this exclusion the
+  // recovery job retried and re-logged the same unfixable rows every 5
+  // minutes forever. Counted separately as "orphaned" so a caller can
+  // surface it once (e.g. at server start) instead of as a recurring
+  // "failed" count.
   const rows = (await pool.request().query(`
     SELECT rp.RPPaymentID, rp.RPAmount, rp.RPDocDate, rp.RPMode, rp.RPTransactionID, rp.RPRemarks,
            rp.RPDepositBankId, rp.RPDepositBankName, rp.CrmMilestoneId, rp.CrmBookingId
     FROM dbo.ReceivedPayment rp
     WHERE rp.RPStatus = 'Approved' AND rp.CrmBookingId IS NOT NULL
+      AND EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.Id = rp.CrmBookingId)
+      AND (rp.CrmMilestoneId IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.Id = rp.CrmMilestoneId))
       AND (
         NOT EXISTS (SELECT 1 FROM dbo.CrmOnAccountPayment oa WHERE oa.SourceReceivedPaymentId = rp.RPPaymentID)
         OR NOT EXISTS (SELECT 1 FROM dbo.CrmMoneyReceipt mr WHERE mr.ReceivedPaymentId = rp.RPPaymentID)
@@ -1863,6 +1873,16 @@ async function settleApprovedCrmReceivedPayments(pool, actorEmail = "CRM recover
       )
     ORDER BY RPPaymentID
   `)).recordset;
+  const orphanedRes = await pool.request().query(`
+    SELECT COUNT(*) AS c
+    FROM dbo.ReceivedPayment rp
+    WHERE rp.RPStatus = 'Approved' AND rp.CrmBookingId IS NOT NULL
+      AND (
+        NOT EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.Id = rp.CrmBookingId)
+        OR (rp.CrmMilestoneId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.Id = rp.CrmMilestoneId))
+      )
+  `);
+  const orphaned = Number(orphanedRes.recordset[0]?.c) || 0;
   let settled = 0, failed = 0;
   for (const rp of rows) {
     try {
@@ -1880,7 +1900,7 @@ async function settleApprovedCrmReceivedPayments(pool, actorEmail = "CRM recover
   if (rows.length) {
     try { await require("./receivedPayment").invalidateReceivedPaymentWorkflowCaches(); } catch {}
   }
-  return { scanned: rows.length, settled, failed };
+  return { scanned: rows.length, settled, failed, orphaned };
 }
 
 module.exports = router;
