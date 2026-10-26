@@ -7,6 +7,21 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { promoteLeadToFollowup } = require("../services/saHandoff");
+const { statusesThatCanMoveTo } = require("../constants/saStatuses");
+
+// Move a lead to `to` only if STATUS_TRANSITIONS allows it from its current
+// status. The check is in the UPDATE's WHERE, so it's atomic. Returns true
+// when the lead actually moved.
+async function advanceLead(pool, leadId, to) {
+  const from = statusesThatCanMoveTo(to);
+  const r = pool.request().input("lid", sql.Int, leadId).input("to", sql.NVarChar(30), to);
+  from.forEach((f, i) => r.input(`f${i}`, sql.NVarChar(30), f));
+  const result = await r.query(`
+    UPDATE dbo.SaLead SET Status = @to, UpdatedAt = SYSDATETIME()
+    WHERE Id = @lid AND Status IN (${from.map((_, i) => `@f${i}`).join(", ")})
+  `);
+  return result.rowsAffected[0] > 0;
+}
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -79,11 +94,8 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
            PickupRequired, CustomerNotes, Status, IsActive, CreatedBy, CreatedAt)
         VALUES
           (@lid, @pn, @pd, @pt, @eid, @pu, @cn, @st, 1, @cb, SYSDATETIME());
-
-        UPDATE dbo.SaLead
-        SET Status = 'VisitScheduled', UpdatedAt = SYSDATETIME()
-        WHERE Id = @lid AND Status NOT IN ('VisitScheduled','Visited','Booking');
       `);
+    await advanceLead(pool, parseInt(b.LeadId), "VisitScheduled");
 
     res.status(201).json({ success: true });
   } catch (e) {
@@ -111,6 +123,12 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
       .query(`SELECT 1 AS ok FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId WHERE v.Id = @id AND ${scope}`);
     if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
 
+    // Read the visit before saving so a re-save of an already-Completed
+    // visit (e.g. fixing a note) doesn't re-run the lead move / promotion.
+    const before = await pool.request().input("id", sql.Int, id)
+      .query("SELECT LeadId, Status FROM dbo.SaSiteVisit WHERE Id = @id");
+    const prev = before.recordset[0];
+
     await pool.request()
       .input("id", sql.Int, id)
       .input("pn", sql.NVarChar(200), b.ProjectName || null)
@@ -129,21 +147,13 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
         WHERE Id = @id
       `);
 
-    if (b.Status === "Completed") {
-      // Mark lead as Visited
-      const leadRow = await pool.request()
-        .input("id", sql.Int, id)
-        .query("SELECT LeadId FROM dbo.SaSiteVisit WHERE Id = @id");
-
-      if (leadRow.recordset.length) {
-        const leadId = leadRow.recordset[0].LeadId;
-        await pool.request()
-          .input("lid", sql.Int, leadId)
-          .query("UPDATE dbo.SaLead SET Status = 'Visited', UpdatedAt = SYSDATETIME() WHERE Id = @lid");
-
+    if (b.Status === "Completed" && prev && prev.Status !== "Completed") {
+      // Forward only: a Booking or Lost lead is left as it is.
+      const moved = await advanceLead(pool, prev.LeadId, "Visited");
+      if (moved) {
         // Auto-promote to follow-up module
         try {
-          await promoteLeadToFollowup(pool, leadId, actorId(req));
+          await promoteLeadToFollowup(pool, prev.LeadId, actorId(req));
         } catch (handoffErr) {
           // Log but don't fail the request — visit update succeeded
           console.warn("[sa-site-visits] followup promotion failed:", handoffErr.message);

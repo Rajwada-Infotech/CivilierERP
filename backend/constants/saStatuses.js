@@ -26,4 +26,10 @@ const SA_LEAD_BOOKED = "Booking";
 // SA -> CRM handoff (used by saHandoff.js's convertLead).
 const QUALIFIED_FOR_CONVERSION = ["Visited", "Booking"];
 
-module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED };
+// Statuses that may move forward to `to` (excluding `to` itself). Used by
+// side-effect status changes (e.g. site visits) so they follow the same
+// rules as a manual edit — never pulling a lead back or reviving a Lost one.
+const statusesThatCanMoveTo = (to) =>
+  Object.keys(STATUS_TRANSITIONS).filter((from) => from !== to && STATUS_TRANSITIONS[from].includes(to));
+
+module.exports = { STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, statusesThatCanMoveTo };
