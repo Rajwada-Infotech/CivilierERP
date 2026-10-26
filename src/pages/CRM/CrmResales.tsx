@@ -2,17 +2,18 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { ArrowRightLeft, Building2, CheckCircle2, Info, Plus, Undo2 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ArrowRightLeft, Building2, Plus, RefreshCw, Undo2 } from "lucide-react";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
 import { SearchableSelect } from "@/components/SearchableSelect";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { fmtRupees } from "@/components/crm/FinancialStatusBar";
+import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
+import { localDay } from "./salesDeed/config";
 
 const API = "/api/crm/resales";
 
@@ -28,18 +29,8 @@ const API = "/api/crm/resales";
 // and the property returns to stock to be sold again at a new price.
 // Both start as a draft and go to the Approval Inbox through "Send for approval"
 // on the case, once the steps before it are done.
-const statusColor: Record<string, string> = {
-  Draft: "text-muted-foreground bg-muted/60 border-border",
-  Pending: "text-orange-600 bg-orange-50 border-orange-200 dark:bg-orange-950/30 dark:border-orange-900",
-  Approved: "text-blue-600 bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-900",
-  Completed: "text-emerald-600 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900",
-  Cancelled: "text-muted-foreground bg-muted border-border",
-  Rejected: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900",
-};
 
-const fmt = (n: any) => (n == null || n === "" ? "—" : `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
-const label = "text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground block mb-1.5";
-const input = "w-full h-9 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/30";
+const fmt = (n: any) => (n == null || n === "" ? "—" : fmtRupees(Number(n)));
 
 interface Deal {
   Id: number; Kind: "Resale" | "BuyBack" | null; BookingIds: string | null;
@@ -63,8 +54,20 @@ const getJson = async (url: string) => {
   return r.json();
 };
 
-const EMPTY = { Kind: "Resale" as "Resale" | "BuyBack", FromBookingId: "", ToCustomerId: "", AgreedValue: "", DeveloperFeeAmount: "",
-  TdsAmount: "", BuyBackGstAmount: "", StampDutyAmount: "", ResaleDate: new Date().toISOString().slice(0, 10), Notes: "" };
+const emptyForm = () => ({ Kind: "Resale" as "Resale" | "BuyBack", FromBookingId: "", ToCustomerId: "", AgreedValue: "", DeveloperFeeAmount: "",
+  TdsAmount: "", BuyBackGstAmount: "", StampDutyAmount: "", ResaleDate: localDay(), Notes: "" });
+
+/** What a case's status reads as on the list. */
+const statusText = (d: Deal) =>
+  d.Status === "Draft" ? "Being prepared"
+  : d.Status === "Rejected" ? "Sent back"
+  : d.Status === "Pending" ? "Awaiting approval"
+  : d.Status === "Approved" && d.Kind === "BuyBack" && d.PayoutNewPaymentId ? "With Finance"
+  : d.Status;
+const statusTone = (s: string): "done" | "waiting" | "stopped" | "none" =>
+  s === "Completed" ? "done" : s === "Rejected" ? "stopped" : s === "Cancelled" ? "none" : "waiting";
+
+type ResaleTab = "all" | "progress" | "resale" | "buyback" | "completed" | "cancelled";
 
 const CrmResales: React.FC = () => {
   const rights = usePageRights("crm-resales");
@@ -75,36 +78,23 @@ const CrmResales: React.FC = () => {
   // Cancelling a case is confirmed, with a reason (kept on the case).
   const [cancelFor, setCancelFor] = useState<Deal | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const [form, setForm] = useState({ ...EMPTY });
-  const [paying, setPaying] = useState<Deal | null>(null);
-  const [pay, setPay] = useState({ BankLHeadId: "", PaymentMode: "" });
-  const { data: banks = [] } = useQuery<any[]>({
-    queryKey: ["crm-project-banks", paying?.ProjectId],
-    queryFn: () => getJson(`/api/crm/project-banks/for-project/${paying!.ProjectId}?excludeCash=1`),
-    enabled: !!paying?.ProjectId,
-  });
-
-  type ResaleTab = "all" | "progress" | "resale" | "buyback" | "completed" | "cancelled";
+  const [cancelling, setCancelling] = useState(false);
+  const [form, setForm] = useState(emptyForm);
   const [tab, setTab] = useState<ResaleTab>("all");
 
-  const { data: deals = [], isLoading, dataUpdatedAt, isFetching } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
+  const { data: deals = [], isLoading, isError, error, isFetching, refetch } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });
   const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => getJson("/api/crm/customers"), enabled: open, staleTime: 60_000 });
 
-  const activeCases = useMemo(() => deals.filter((d) => !["Completed", "Cancelled"].includes(d.Status)), [deals]);
-  const completedCases = useMemo(() => deals.filter((d) => d.Status === "Completed"), [deals]);
-  const buybackCases = useMemo(() => deals.filter((d) => d.Kind === "BuyBack"), [deals]);
-  const resaleCases = useMemo(() => deals.filter((d) => d.Kind === "Resale"), [deals]);
-  const cancelledCases = useMemo(() => deals.filter((d) => d.Status === "Cancelled"), [deals]);
-
-  const filteredDeals = useMemo(() => {
-    if (tab === "progress") return activeCases;
-    if (tab === "resale") return resaleCases;
-    if (tab === "buyback") return buybackCases;
-    if (tab === "completed") return completedCases;
-    if (tab === "cancelled") return cancelledCases;
-    return deals;
-  }, [deals, tab, activeCases, resaleCases, buybackCases, completedCases, cancelledCases]);
+  const groups = useMemo(() => ({
+    all: deals,
+    progress: deals.filter((d) => !["Completed", "Cancelled"].includes(d.Status)),
+    resale: deals.filter((d) => d.Kind === "Resale"),
+    buyback: deals.filter((d) => d.Kind === "BuyBack"),
+    completed: deals.filter((d) => d.Status === "Completed"),
+    cancelled: deals.filter((d) => d.Status === "Cancelled"),
+  }), [deals]);
+  const rows = groups[tab];
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["crm-resales"] });
@@ -119,21 +109,26 @@ const CrmResales: React.FC = () => {
   const premium = form.Kind === "BuyBack" && holding && Number(form.AgreedValue) > 0 ? Number(form.AgreedValue) - Number(holding.Paid || 0) : null;
   const tdsHint = form.Kind === "BuyBack" && Number(form.AgreedValue) >= 5000000;
 
-  const act = async (d: Deal, path: string, body?: object, done?: string) => {
+  const cancelCase = async () => {
+    if (!cancelFor || !cancelReason.trim()) return;
+    setCancelling(true);
     try {
-      const r = await fetchWithAuth(`${API}/${d.Id}/${path}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+      const r = await fetchWithAuth(`${API}/${cancelFor.Id}/cancel`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: cancelReason.trim() }) });
       const out = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(out.error || "Could not do that");
-      toast.success(out.message || done || "Done");
+      if (!r.ok) throw new Error(out.error || "Could not cancel it");
+      toast.success(out.message || "Cancelled");
       if (out.ledgerWarning) toast.warning(out.ledgerWarning);
+      setCancelFor(null);
       refresh();
     } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setCancelling(false); }
   };
 
   const save = async () => {
     if (!form.FromBookingId) return toast.error("Choose the property that is changing hands");
     if (form.Kind === "Resale" && !form.ToCustomerId) return toast.error("Choose the new buyer");
-    if (form.Kind === "BuyBack" && !(Number(form.AgreedValue) > 0)) return toast.error("Enter the agreed buy-back price");
+    // The server needs the price for both kinds (it goes on the transfer); the form used to let a resale go without it.
+    if (!(Number(form.AgreedValue) > 0)) return toast.error(form.Kind === "BuyBack" ? "Enter the agreed buy-back price" : "Enter the price the buyers agreed");
     setSaving(true);
     try {
       const r = await fetchWithAuth(`${API}/deal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
@@ -141,343 +136,258 @@ const CrmResales: React.FC = () => {
       if (!r.ok) throw new Error(out.error || "Could not record it");
       toast.success(out.message || "Recorded");
       setOpen(false);
-      setForm({ ...EMPTY });
+      setForm(emptyForm());
       refresh();
       if (out.id) nav(`/crm/resales/${out.id}`); // straight into its case
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSaving(false); }
   };
 
-  const columns: ColumnDef<Deal>[] = [
-    {
-      header: "Type", id: "kind",
-      cell: ({ row }) => row.original.Kind === "BuyBack"
-        ? <span className="inline-flex items-center gap-1 text-xs font-medium text-teal-700 dark:text-teal-300"><Undo2 size={11} /> Buy-back</span>
-        : <span className="inline-flex items-center gap-1 text-xs font-medium text-primary"><ArrowRightLeft size={11} /> Resale</span>,
-    },
-    { header: "Property", id: "prop", cell: ({ row }) => <span className="font-medium text-foreground">{row.original.UnitName || row.original.PlotName || row.original.PlotNo || "—"}<span className="block text-[0.6875rem] font-normal text-muted-foreground">{row.original.FromBookingNo}</span></span> },
-    { header: "From → To", id: "parties", cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.FromCustomerName || "—"}<ArrowRightLeft size={10} className="inline mx-1" />{row.original.Kind === "BuyBack" ? "Us (buy-back)" : row.original.ToCustomerName || "—"}</span> },
-    {
-      header: "Money", id: "money",
-      cell: ({ row }) => {
-        const d = row.original;
-        return (
-          <div className="text-xs tabular-nums leading-relaxed">
-            <div><span className="text-muted-foreground">Paid so far </span>{fmt(d.PaidAtTransfer ?? d.OriginalValue)}</div>
-            <div><span className="text-muted-foreground">{d.Kind === "BuyBack" ? "Buy-back " : "Agreed "}</span>{fmt(d.AgreedValue)}</div>
-            {d.Kind !== "BuyBack" && Number(d.DeveloperFeeAmount) > 0 && <div><span className="text-muted-foreground">Our fee </span>{fmt(d.DeveloperFeeAmount)}</div>}
-          </div>
-        );
-      },
-    },
-    {
-      header: "Where it stands", id: "stage",
-      cell: ({ row }) => {
-        const d = row.original;
-        if (!d.StageLabel || !d.StageCount) return <span className="text-xs text-muted-foreground">—</span>;
-        return (
-          <div className="min-w-[150px]">
-            <div className="text-xs font-medium">Step {d.StageNo} of {d.StageCount}: {d.StageLabel}</div>
-            <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary" style={{ width: `${Math.round(((d.StageNo! - 1) / d.StageCount) * 100)}%` }} /></div>
-            {!!d.StageTodo && <div className="text-[0.625rem] text-muted-foreground mt-0.5">{d.StageTodo} thing{d.StageTodo === 1 ? "" : "s"} left</div>}
-          </div>
-        );
-      },
-    },
-    {
-      header: "Status", accessorKey: "Status",
-      cell: ({ row }) => (
-        <span title={row.original.RejectionNote || undefined} className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[row.original.Status] || ""}`}>
-          {row.original.Status === "Draft" ? "Being prepared"
-            : row.original.Status === "Rejected" ? "Sent back"
-            : row.original.Status === "Pending" ? "Awaiting approval"
-            : row.original.Status === "Approved" && row.original.Kind === "BuyBack" && row.original.PayoutNewPaymentId ? "With Finance"
-            : row.original.Status}
-        </span>
-      ),
-    },
-    {
-      header: "", id: "actions",
-      cell: ({ row }) => {
-        const d = row.original;
-        const open = !!d.BookingIds && !["Completed", "Cancelled"].includes(d.Status);
-        return (
-          <div className="flex gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
-            {d.BookingIds && (
-              <button onClick={() => nav(`/crm/resales/${d.Id}`)}
-                className="px-2 h-7 text-[0.6875rem] rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90">
-                {open ? "Open case" : "View case"}
-              </button>
-            )}
-            {open && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && <button onClick={() => { setCancelFor(d); setCancelReason(""); }}
-              className="px-2 h-7 text-[0.6875rem] rounded-lg border border-border text-muted-foreground hover:bg-muted">
-              Cancel
-            </button>}
-          </div>
-        );
-      },
-    },
+  const figures: { label: string; value: number; note: string; tab: ResaleTab }[] = [
+    { label: "In progress", value: groups.progress.length, note: "Open cases", tab: "progress" },
+    { label: "Resales", value: groups.resale.length, note: "To another buyer", tab: "resale" },
+    { label: "Buy-backs", value: groups.buyback.length, note: "Bought back by us", tab: "buyback" },
+    { label: "Completed", value: groups.completed.length, note: `${groups.cancelled.length} cancelled`, tab: "completed" },
   ];
+  const TABS: { id: ResaleTab; label: string }[] = [
+    { id: "all", label: "All" }, { id: "progress", label: "In progress" }, { id: "resale", label: "Resales" },
+    { id: "buyback", label: "Buy-backs" }, { id: "completed", label: "Completed" }, { id: "cancelled", label: "Cancelled" },
+  ];
+  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
+  const th = `!px-4 !py-2.5 text-left ${LBL}`;
 
   return (
-    <CrmShell title="Resale Cases" subtitle="A sold property passing to a new buyer, or bought back by us">
+    <>
       <Breadcrumbs items={["CRM", "Resale", "Resale Cases"]} />
-
-      <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2 mb-3">
-        <Info size={13} className="text-muted-foreground mt-0.5 shrink-0" />
-        <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground">Resale</span> — the booking passes to a new buyer, with everything paid, once the seller is clear, the buyer is set up, the fee is paid and the deed of assignment is registered.{" "}
-          <span className="font-medium text-foreground">Buy-back</span> — we pay the agreed price and the property returns to stock. Open a case to see its steps.
-        </p>
-      </div>
-
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <button
-          onClick={() => setTab("progress")}
-          className={`text-left rounded-xl border p-3 transition-colors ${tab === "progress" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
-        >
-          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><ArrowRightLeft size={13} className="text-primary" /> Active Cases</div>
-          <div className="text-xl font-bold tabular-nums mt-1">{activeCases.length}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">In progress</div>
-        </button>
-        <button
-          onClick={() => setTab("resale")}
-          className={`text-left rounded-xl border p-3 transition-colors ${tab === "resale" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
-        >
-          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><ArrowRightLeft size={13} className="text-sky-600" /> Resale to Buyer</div>
-          <div className="text-xl font-bold tabular-nums mt-1">{resaleCases.length}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">Tripartite transfer</div>
-        </button>
-        <button
-          onClick={() => setTab("buyback")}
-          className={`text-left rounded-xl border p-3 transition-colors ${tab === "buyback" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
-        >
-          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Undo2 size={13} className="text-violet-600" /> Buy-Back</div>
-          <div className="text-xl font-bold tabular-nums mt-1">{buybackCases.length}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">Developer repurchase</div>
-        </button>
-        <button
-          onClick={() => setTab("completed")}
-          className={`text-left rounded-xl border p-3 transition-colors ${tab === "completed" ? "border-primary bg-primary/5" : "border-border bg-card hover:bg-muted/40"}`}
-        >
-          <div className="text-xs text-muted-foreground flex items-center gap-1.5"><CheckCircle2 size={13} className="text-emerald-600" /> Completed</div>
-          <div className="text-xl font-bold tabular-nums mt-1">{completedCases.length}</div>
-          <div className="text-[0.6875rem] text-muted-foreground">Transferred / settled</div>
-        </button>
-      </div>
-
-      {/* Filter Tabs & Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="flex flex-wrap gap-1.5">
-          {([
-            { id: "all", label: "All Cases", count: deals.length },
-            { id: "progress", label: "In Progress", count: activeCases.length },
-            { id: "resale", label: "Resales", count: resaleCases.length },
-            { id: "buyback", label: "Buy-Backs", count: buybackCases.length },
-            { id: "completed", label: "Completed", count: completedCases.length },
-            { id: "cancelled", label: "Cancelled", count: cancelledCases.length },
-          ] as const).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-                tab === t.id
-                  ? "bg-primary text-primary-foreground border-transparent shadow-xs"
-                  : "bg-background border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              {t.label} <span className="opacity-70 tabular-nums">({t.count})</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refresh} />
-          {rights.canCreate && (
-            <button onClick={() => { setForm({ ...EMPTY }); setOpen(true); }}
-              className="inline-flex items-center gap-1.5 px-3 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
-              <Plus size={14} /> New resale or buy-back
-            </button>
-          )}
-        </div>
-      </div>
-
-      <DataTable columns={columns} data={filteredDeals} loading={isLoading}
-        emptyMessage="No resale or buy-back cases match the selected filter."
-        onRowClick={(r) => { if (r.original.BookingIds) nav(`/crm/resales/${r.original.Id}`); }}
-        rowClassName={(r) => (r.original.BookingIds ? "cursor-pointer" : "")} />
-
-      <Dialog open={open} onOpenChange={(o) => { if (!o) setOpen(false); }}>
-        <DialogContent accent="crm" className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="font-heading">{form.Kind === "BuyBack" ? "Buy back a property" : "Resell a property"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/30" role="tablist">
-              {(["Resale", "BuyBack"] as const).map((k) => (
-                <button key={k} type="button" role="tab" aria-selected={form.Kind === k} onClick={() => setForm((f) => ({ ...f, Kind: k }))}
-                  className={`px-3 h-8 text-xs font-semibold rounded-md ${form.Kind === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                  {k === "Resale" ? "Resale to another buyer" : "Buy-back by us"}
-                </button>
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Resale"
+        title="Resale Cases"
+        subtitle="A sold property passing to a new buyer (once the seller is clear, the buyer is set up, the fee is paid and the deed of assignment is registered), or bought back by us at an agreed price and returned to stock."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {rights.canCreate && <button onClick={() => { setForm(emptyForm()); setOpen(true); }} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New resale or buy-back</button>}
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={() => setTab(x.tab)} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
               ))}
             </div>
+          </div>
 
-            <div>
-              <label className={label}>Property</label>
-              <SearchableSelect
-                value={form.FromBookingId}
-                onChange={(v) => setForm((f) => ({ ...f, FromBookingId: v }))}
-                placeholder="Choose a sold property"
-                searchPlaceholder="Search unit, booking or owner…"
-                options={holdings.filter((h) => !h.OpenDeal && !h.Conveyed).map((h) => ({
-                  value: String(h.BookingId),
-                  label: [h.UnitNo, h.Kind, h.CustomerName, h.BookingNos, h.ProjectName].filter(Boolean).join(" · "),
-                }))}
-              />
-              {holding && (
-                <div className="mt-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs grid grid-cols-2 gap-x-3 gap-y-0.5">
-                  <span className="col-span-2 flex items-center gap-1.5 font-medium text-foreground"><Building2 size={12} /> {holding.UnitNo} · {holding.Kind}</span>
-                  <span className="text-muted-foreground">Owner</span><span className="text-foreground">{holding.CustomerName}</span>
-                  <span className="text-muted-foreground">Price</span><span className="tabular-nums">{fmt(holding.TotalValue)}</span>
-                  <span className="text-muted-foreground">Paid so far</span><span className="tabular-nums">{fmt(holding.Paid)}</span>
-                  <span className="text-muted-foreground">Still due</span><span className="tabular-nums">{fmt(Math.max(0, holding.TotalValue - holding.Paid))}</span>
-                </div>
-              )}
-              {!holding && <p className="mt-1 text-[0.6875rem] text-muted-foreground">Not listed? It has an open case, or its sale deed is registered — use Ownership Changes.</p>}
-            </div>
-
-            {form.Kind === "Resale" ? (
-              <>
-                <div>
-                  <label className={label}>New buyer</label>
-                  <SearchableSelect
-                    value={form.ToCustomerId}
-                    onChange={(v) => setForm((f) => ({ ...f, ToCustomerId: v }))}
-                    placeholder="Choose the new buyer"
-                    searchPlaceholder="Search name, mobile or customer no…"
-                    options={customers.filter((c: any) => !holding || c.Id !== holding.CustomerId).map((c: any) => ({
-                      value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
-                    }))}
-                  />
-                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">Not listed? Add them in <a href="/crm/customers" target="_blank" rel="noreferrer" className="text-primary hover:underline">Customers</a> first.</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={label}>Price agreed between buyers</label>
-                    <input type="number" min={0} value={form.AgreedValue} onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))} className={input} placeholder="For the record" />
-                  </div>
-                  <div>
-                    <label className={label}>Our transfer fee</label>
-                    <input type="number" min={0} value={form.DeveloperFeeAmount} onChange={(e) => setForm((f) => ({ ...f, DeveloperFeeAmount: e.target.value }))} className={input} placeholder="Paid by the new buyer" />
-                    {feeGstQ.data && <p className="mt-1 text-[0.6875rem] text-muted-foreground">+ GST {fmt(feeGstQ.data.gstAmount)} ({feeGstQ.data.rate}%)</p>}
-                    {feeGstQ.error && <p className="mt-1 text-[0.6875rem] text-red-600">{(feeGstQ.error as Error).message}</p>}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={label}>Agreed buy-back price</label>
-                    <input type="number" min={0} value={form.AgreedValue} onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))} className={input} />
-                    {premium != null && <p className="mt-1 text-[0.6875rem] text-muted-foreground">{premium >= 0 ? `${fmt(premium)} above what was paid` : `${fmt(-premium)} below what was paid`}</p>}
-                  </div>
-                  <div>
-                    <label className={label}>TDS</label>
-                    <input type="number" min={0} value={form.TdsAmount} onChange={(e) => setForm((f) => ({ ...f, TdsAmount: e.target.value }))} className={input} />
-                    {tdsHint && <p className="mt-1 text-[0.6875rem] text-muted-foreground">₹50 lakh or more: 1% TDS (sec. 194-IA) — confirm with your CA</p>}
-                  </div>
-                  <div>
-                    <label className={label}>GST (as advised)</label>
-                    <input type="number" min={0} value={form.BuyBackGstAmount} onChange={(e) => setForm((f) => ({ ...f, BuyBackGstAmount: e.target.value }))} className={input} />
-                  </div>
-                  <div>
-                    <label className={label}>Stamp duty (as advised)</label>
-                    <input type="number" min={0} value={form.StampDutyAmount} onChange={(e) => setForm((f) => ({ ...f, StampDutyAmount: e.target.value }))} className={input} />
-                  </div>
-                </div>
-                <p className="text-[0.6875rem] text-muted-foreground">Any unpaid milestones are cancelled; we pay only the agreed price. Earlier invoices stay as they are.</p>
-              </>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={label}>Date</label>
-                <DateInput value={form.ResaleDate} onChange={(e) => setForm((f) => ({ ...f, ResaleDate: e.target.value }))} className={input} />
-              </div>
-              <div>
-                <label className={label}>Notes</label>
-                <input value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} className={input} />
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4" style={{ borderBottom: RULE }}>
+              <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
+                {TABS.map((t) => (
+                  <button key={t.id} onClick={() => setTab(t.id)} className={tabClass(tab === t.id)} style={{ borderRight: RULE_SOFT }}>
+                    {t.label} <span className="tabular-nums">{groups[t.id].length}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setOpen(false)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
-              <button onClick={save} disabled={saving} className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
-                {saving ? "Saving…" : "Open case"}
-              </button>
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[860px]">
+                <thead>
+                  <tr style={{ borderBottom: RULE }}>
+                    <th className={th}>Type</th><th className={th}>Property</th><th className={th}>From → to</th>
+                    <th className={th}>Money</th><th className={th}>Where it stands</th><th className={th}>Status</th><th className={th} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {isError ? (
+                    <tr><td colSpan={7} className="px-3 py-8 text-center text-destructive">{(error as Error)?.message}</td></tr>
+                  ) : isLoading ? (
+                    <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                  ) : rows.length === 0 ? (
+                    <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">{deals.length ? "No case matches this filter." : "No resale or buy-back cases yet."}</td></tr>
+                  ) : rows.map((d) => {
+                    const live = !!d.BookingIds && !["Completed", "Cancelled"].includes(d.Status);
+                    return (
+                      <tr key={d.Id} onClick={() => { if (d.BookingIds) nav(`/crm/resales/${d.Id}`); }}
+                        className={`align-top transition-colors ${d.BookingIds ? "cursor-pointer hover:bg-primary/5" : ""}`} style={{ borderBottom: RULE_SOFT }}>
+                        <td className="!px-4 !py-3.5">
+                          <span className="inline-flex items-center gap-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]">
+                            {d.Kind === "BuyBack" ? <><Undo2 size={11} /> Buy-back</> : <><ArrowRightLeft size={11} /> Resale</>}
+                          </span>
+                        </td>
+                        <td className="!px-4 !py-3.5">
+                          <div className="font-medium leading-snug">{d.UnitName || d.PlotName || d.PlotNo || "—"}</div>
+                          <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{d.FromBookingNo}</div>
+                        </td>
+                        <td className="!px-4 !py-3.5 text-xs leading-relaxed">
+                          {d.FromCustomerName || "—"}<ArrowRightLeft size={10} className="inline mx-1 text-muted-foreground" />{d.Kind === "BuyBack" ? "Us (buy-back)" : d.ToCustomerName || "—"}
+                        </td>
+                        <td className="!px-4 !py-3.5 text-xs space-y-1">
+                          <div><span className="text-muted-foreground">Paid so far </span><span className="font-heading tabular-nums">{fmt(d.PaidAtTransfer ?? d.OriginalValue)}</span></div>
+                          <div><span className="text-muted-foreground">{d.Kind === "BuyBack" ? "Buy-back " : "Agreed "}</span><span className="font-heading tabular-nums">{fmt(d.AgreedValue)}</span></div>
+                          {d.Kind !== "BuyBack" && Number(d.DeveloperFeeAmount) > 0 && <div><span className="text-muted-foreground">Our fee </span><span className="font-heading tabular-nums">{fmt(d.DeveloperFeeAmount)}</span></div>}
+                        </td>
+                        <td className="!px-4 !py-3.5">
+                          {!d.StageLabel || !d.StageCount ? <span className="text-xs text-muted-foreground">—</span> : (
+                            <div className="min-w-[170px] space-y-1.5">
+                              <div className="text-xs font-medium leading-snug"><span className="font-heading tabular-nums">Step {d.StageNo} of {d.StageCount}</span>: {d.StageLabel}</div>
+                              <div className="h-1.5" style={{ border: RULE_SOFT }}>
+                                <div className="h-full bg-foreground" style={{ width: `${Math.round(((d.StageNo! - 1) / d.StageCount) * 100)}%` }} />
+                              </div>
+                              {!!d.StageTodo && <div className="text-[0.625rem] text-muted-foreground">{d.StageTodo} thing{d.StageTodo === 1 ? "" : "s"} left</div>}
+                            </div>
+                          )}
+                        </td>
+                        <td className="!px-4 !py-3.5" title={d.RejectionNote || undefined}><SheetMark text={statusText(d)} tone={statusTone(d.Status)} /></td>
+                        <td className="!px-4 !py-3.5">
+                          <div className="flex gap-1.5 justify-end" onClick={(e) => e.stopPropagation()}>
+                            {d.BookingIds && <button onClick={() => nav(`/crm/resales/${d.Id}`)} className={`${live ? KEY_INK : KEY_LINE} h-7 px-2`}>{live ? "Open case" : "View case"}</button>}
+                            {live && rights.canEdit && !(d.Kind === "BuyBack" && d.PayoutNewPaymentId) && (
+                              <button onClick={() => { setCancelFor(d); setCancelReason(""); }} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Cancel</button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={!!paying} onOpenChange={(o) => { if (!o) setPaying(null); }}>
-        <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Send buy-back to Finance</DialogTitle>
-          </DialogHeader>
-          {paying && (
+        </div>
+
+        <Dialog open={open} onOpenChange={(o) => { if (!o) setOpen(false); }}>
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader>
+              <DialogTitle className="font-heading">{form.Kind === "BuyBack" ? "Buy back a property" : "Resell a property"}</DialogTitle>
+            </DialogHeader>
             <div className="space-y-3">
-              <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs grid grid-cols-2 gap-x-3 gap-y-0.5">
-                <span className="text-muted-foreground">Property</span><span className="text-foreground">{paying.UnitName || paying.PlotName}</span>
-                <span className="text-muted-foreground">Seller</span><span className="text-foreground">{paying.FromCustomerName}</span>
-                <span className="text-muted-foreground">Agreed price</span><span className="tabular-nums">{fmt(paying.AgreedValue)}</span>
-                <span className="text-muted-foreground">TDS</span><span className="tabular-nums">{fmt(paying.TdsAmount || 0)}</span>
-                <span className="text-muted-foreground">Seller receives</span><span className="tabular-nums font-medium">{fmt(Number(paying.AgreedValue || 0) - Number(paying.TdsAmount || 0))}</span>
+              <div className="inline-flex items-stretch" style={{ border: RULE }} role="tablist">
+                {(["Resale", "BuyBack"] as const).map((k) => (
+                  <button key={k} type="button" role="tab" aria-selected={form.Kind === k} onClick={() => setForm((f) => ({ ...f, Kind: k }))}
+                    className={tabClass(form.Kind === k)} style={{ borderRight: RULE_SOFT }}>
+                    {k === "Resale" ? "Resale to another buyer" : "Buy-back by us"}
+                  </button>
+                ))}
               </div>
-              <div>
-                <label className={label}>Pay from (optional — Finance can choose it)</label>
-                <select value={pay.BankLHeadId} onChange={(e) => setPay((p) => ({ ...p, BankLHeadId: e.target.value }))} className={input}>
-                  <option value="">Let Finance choose</option>
-                  {banks.map((b: any) => (
-                    <option key={b.BId} value={b.BId}>{[b.BName, b.BBranch, b.BAccountLast4 ? `····${b.BAccountLast4}` : null].filter(Boolean).join(" · ")}</option>
-                  ))}
-                </select>
+
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Property</label>
+                <SearchableSelect sheet
+                  value={form.FromBookingId}
+                  onChange={(v) => setForm((f) => ({ ...f, FromBookingId: v }))}
+                  placeholder="Choose a sold property"
+                  searchPlaceholder="Search unit, booking or owner…"
+                  options={holdings.filter((h) => !h.OpenDeal && !h.Conveyed).map((h) => ({
+                    value: String(h.BookingId),
+                    label: [h.UnitNo, h.Kind, h.CustomerName, h.BookingNos, h.ProjectName].filter(Boolean).join(" · "),
+                  }))}
+                />
+                {holding ? (
+                  <div className="mt-2 px-3 py-2 text-xs grid grid-cols-2 gap-x-3 gap-y-1" style={{ border: RULE_SOFT }}>
+                    <span className="col-span-2 flex items-center gap-1.5 font-medium"><Building2 size={12} /> {holding.UnitNo} · {holding.Kind}</span>
+                    <span className="text-muted-foreground">Owner</span><span>{holding.CustomerName}</span>
+                    <span className="text-muted-foreground">Price</span><span className="font-heading tabular-nums">{fmt(holding.TotalValue)}</span>
+                    <span className="text-muted-foreground">Paid so far</span><span className="font-heading tabular-nums">{fmt(holding.Paid)}</span>
+                    <span className="text-muted-foreground">Still due</span><span className="font-heading tabular-nums">{fmt(Math.max(0, holding.TotalValue - holding.Paid))}</span>
+                  </div>
+                ) : <p className="text-[0.6875rem] text-muted-foreground">Not listed? It has an open case, or its sale deed is registered — use Ownership Changes.</p>}
               </div>
-              <div>
-                <label className={label}>Payment mode (optional)</label>
-                <select value={pay.PaymentMode} onChange={(e) => setPay((p) => ({ ...p, PaymentMode: e.target.value }))} className={input}>
-                  <option value="">Finance will set it</option>
-                  {["NEFT", "RTGS", "IMPS", "UPI", "Cheque"].map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <p className="text-[0.6875rem] text-muted-foreground">When Finance approves the voucher in Payments, the booking closes and the property returns to stock.</p>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setPaying(null)} className="px-3 h-9 text-sm rounded-lg border border-border hover:bg-muted">Close</button>
-                <button onClick={async () => { await act(paying, "send-to-finance", pay, "Sent to Finance"); setPaying(null); }}
-                  className="px-4 h-9 text-sm rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-60">
-                  Send to Finance
-                </button>
+
+              {form.Kind === "Resale" ? (
+                <>
+                  <div className="space-y-1">
+                    <label className={`block ${LBL}`}>New buyer</label>
+                    <SearchableSelect sheet
+                      value={form.ToCustomerId}
+                      onChange={(v) => setForm((f) => ({ ...f, ToCustomerId: v }))}
+                      placeholder="Choose the new buyer"
+                      searchPlaceholder="Search name, mobile or customer no…"
+                      options={customers.filter((c: any) => !holding || c.Id !== holding.CustomerId).map((c: any) => ({
+                        value: String(c.Id), label: [c.CustomerName, c.Mobile, c.CustomerNo].filter(Boolean).join(" · "),
+                      }))}
+                    />
+                    <p className="text-[0.6875rem] text-muted-foreground">Not listed? Add them in <a href="/crm/customers" target="_blank" rel="noreferrer" className="underline underline-offset-2">Customers</a> first.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className={`block ${LBL}`}>Price agreed between buyers *</label>
+                      <input type="number" min={0} value={form.AgreedValue} onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))} className={`${INP} tabular-nums`} placeholder="Goes on the transfer" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className={`block ${LBL}`}>Our transfer fee</label>
+                      <input type="number" min={0} value={form.DeveloperFeeAmount} onChange={(e) => setForm((f) => ({ ...f, DeveloperFeeAmount: e.target.value }))} className={`${INP} tabular-nums`} placeholder="Paid by the new buyer" />
+                      {feeGstQ.data && <p className="text-[0.6875rem] text-muted-foreground tabular-nums">+ GST {fmt(feeGstQ.data.gstAmount)} ({feeGstQ.data.rate}%)</p>}
+                      {feeGstQ.error && <p className="text-[0.6875rem] text-destructive">{(feeGstQ.error as Error).message}</p>}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className={`block ${LBL}`}>Agreed buy-back price *</label>
+                      <input type="number" min={0} value={form.AgreedValue} onChange={(e) => setForm((f) => ({ ...f, AgreedValue: e.target.value }))} className={`${INP} tabular-nums`} />
+                      {premium != null && <p className="text-[0.6875rem] text-muted-foreground tabular-nums">{premium >= 0 ? `${fmt(premium)} above what was paid` : `${fmt(-premium)} below what was paid`}</p>}
+                    </div>
+                    <div className="space-y-1">
+                      <label className={`block ${LBL}`}>TDS</label>
+                      <input type="number" min={0} value={form.TdsAmount} onChange={(e) => setForm((f) => ({ ...f, TdsAmount: e.target.value }))} className={`${INP} tabular-nums`} />
+                      {tdsHint && <p className="text-[0.6875rem] text-muted-foreground">₹50 lakh or more: 1% TDS (sec. 194-IA) — confirm with your CA</p>}
+                    </div>
+                    <div className="space-y-1">
+                      <label className={`block ${LBL}`}>GST (as advised)</label>
+                      <input type="number" min={0} value={form.BuyBackGstAmount} onChange={(e) => setForm((f) => ({ ...f, BuyBackGstAmount: e.target.value }))} className={`${INP} tabular-nums`} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className={`block ${LBL}`}>Stamp duty (as advised)</label>
+                      <input type="number" min={0} value={form.StampDutyAmount} onChange={(e) => setForm((f) => ({ ...f, StampDutyAmount: e.target.value }))} className={`${INP} tabular-nums`} />
+                    </div>
+                  </div>
+                  <p className="text-[0.6875rem] text-muted-foreground">Any unpaid milestones are cancelled; we pay only the agreed price. Earlier invoices stay as they are.</p>
+                </>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Date</label>
+                  <DateInput value={form.ResaleDate} onChange={(e) => setForm((f) => ({ ...f, ResaleDate: e.target.value }))} className={INP} />
+                </div>
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Notes</label>
+                  <input value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} className={INP} />
+                </div>
               </div>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={!!cancelFor} onOpenChange={(o) => !o && setCancelFor(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Cancel {cancelFor?.Kind === "BuyBack" ? "buy-back" : "resale"} case #{cancelFor?.Id}?</DialogTitle></DialogHeader>
-          <div className="space-y-3 text-sm">
-            <p className="text-muted-foreground">The property stays with its current owner and the case stops. Its unsigned transfer deed is cancelled with it, and the buyer's draft application is closed. A signed or registered deed, a fee invoice or payment, or a payout with Finance has to be settled first — you'll be told which.</p>
-            <textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} rows={3} placeholder="Why is it being cancelled?"
-              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background" />
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setCancelFor(null)} className="h-9 px-4 rounded-lg border border-border hover:bg-muted">Keep it</button>
-              <button disabled={!cancelReason.trim()} onClick={async () => { const d = cancelFor!; setCancelFor(null); await act(d, "cancel", { reason: cancelReason.trim() }, "Cancelled"); }}
-                className="h-9 px-4 rounded-lg bg-red-600 text-white disabled:opacity-40">Cancel the case</button>
+            <DialogFooter className="gap-2">
+              <button onClick={() => setOpen(false)} className={`${KEY_LINE} h-9 px-4`}>Close</button>
+              <button onClick={save} disabled={saving} className={`${KEY_INK} h-9 px-4`}>{saving ? "Saving…" : "Open case"}</button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!cancelFor} onOpenChange={(o) => !o && setCancelFor(null)}>
+          <DialogContent className="max-w-md rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="font-heading">Cancel {cancelFor?.Kind === "BuyBack" ? "buy-back" : "resale"} case #{cancelFor?.Id}?</DialogTitle></DialogHeader>
+            <div className="space-y-3 text-sm">
+              <p className="text-muted-foreground">The property stays with its current owner and the case stops. Its unsigned transfer deed is cancelled with it, and the buyer's draft application is closed. A signed or registered deed, a fee invoice or payment, or a payout with Finance has to be settled first — you'll be told which.</p>
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Reason *</label>
+                <textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} rows={3} placeholder="Why is it being cancelled?" className={TEXTAREA} />
+              </div>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </CrmShell>
+            <DialogFooter className="gap-2">
+              <button onClick={() => setCancelFor(null)} className={`${KEY_LINE} h-9 px-4`}>Keep it</button>
+              <button disabled={!cancelReason.trim() || cancelling} onClick={cancelCase} className={`${KEY_RED} h-9 px-4`}>{cancelling ? "Cancelling…" : "Cancel the case"}</button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </SheetShell>
+    </>
   );
 };
 

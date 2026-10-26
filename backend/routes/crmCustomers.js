@@ -7,7 +7,7 @@ router.param("id", require("../services/projectScope").crmCustomerGuard);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
@@ -82,7 +82,8 @@ async function assertUniqueCustomerEmail(pool, email, excludeId = null) {
 }
 
 // GET / — all customers
-router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
+// Resale and Ownership Changes pick the new buyer from this list, so their rights read it too.
+router.get("/", requireAnyPageRight(["crm-customers", "crm-resales", "crm-ownership-changes"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { search } = req.query;
