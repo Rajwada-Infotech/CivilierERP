@@ -667,6 +667,13 @@ interface StatusBadgeProps {
   className?: string;
 }
 
+// For the rare case where a caller needs the color classes without the full
+// badge markup — e.g. an interactive selectable-pill control (not a static
+// display badge), which still shouldn't invent its own color-per-status map.
+export function getStatusClasses(status: string | null | undefined): string {
+  return ((status && ALL_STATUS_CONFIG[status]) || FALLBACK).classes;
+}
+
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const config = (status && ALL_STATUS_CONFIG[status]) || FALLBACK;
   const Icon = config.icon;

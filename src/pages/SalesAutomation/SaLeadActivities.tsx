@@ -1,19 +1,17 @@
 import React, { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { RefreshButton } from "@/components/ui/RefreshButton";
-import { MessageCircle, Phone, Plus, Search } from "lucide-react";
+import { MessageCircle, Phone, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
 
 const API = "/api/sa/lead-activities";
-const ACTIVITY_TYPES = ["Call", "WhatsApp", "Email", "Meeting", "Note", "SMS", "SiteVisit"];
 
 async function fetchActivities(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -30,16 +28,8 @@ async function fetchLeads(): Promise<any[]> {
 const SaLeadActivities: React.FC = () => {
   usePageRights("sa-lead-activities");
   const { canDoAction } = useAuth();
-  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [form, setForm] = useState({
-    LeadId: "",
-    ActivityType: "Call",
-    Direction: "Outbound",
-    Outcome: "",
-    Summary: "",
-    NextFollowupDate: "",
-  });
+  const [selectedLeadId, setSelectedLeadId] = useState("");
   const { data: activities = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-lead-activities"], queryFn: fetchActivities, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
 
@@ -49,33 +39,6 @@ const SaLeadActivities: React.FC = () => {
     return activities.filter((a) => [a.LeadUid, a.CustomerName, a.Mobile, a.ActivityType, a.Outcome, a.Summary]
       .some((v) => String(v ?? "").toLowerCase().includes(q)));
   }, [activities, query]);
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!form.LeadId) return toast.error("Select a lead");
-    if (!form.Summary.trim()) return toast.error("Add an activity summary");
-    try {
-      const res = await fetchWithAuth(`${API}/lead/${form.LeadId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ActivityType: form.ActivityType,
-          Direction: form.Direction || null,
-          Outcome: form.Outcome || null,
-          Summary: form.Summary,
-          NextFollowupDate: form.NextFollowupDate || null,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Failed to log activity");
-      toast.success("Activity logged");
-      setForm((current) => ({ ...current, Outcome: "", Summary: "", NextFollowupDate: "" }));
-      await queryClient.invalidateQueries({ queryKey: ["sa-lead-activities"] });
-      await queryClient.invalidateQueries({ queryKey: ["sa-leads"] });
-    } catch (err: any) {
-      toast.error(err.message || "Failed to log activity");
-    }
-  };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading activities...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load activities.</div>;
@@ -101,25 +64,13 @@ const SaLeadActivities: React.FC = () => {
       <Breadcrumbs items={["Sales Automation", "Lead Activities"]} />
       <div className="space-y-5">
         {canDoAction("sa-lead-activities", "create") && (
-          <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">
-            <SearchableNativeSelect value={form.LeadId} onChange={(e) => setForm({ ...form, LeadId: e.target.value })} className="md:col-span-2 border border-border rounded-md bg-background px-3 py-2 text-sm">
+          <div className="space-y-3 rounded-lg border border-border p-4 bg-background">
+            <SearchableNativeSelect value={selectedLeadId} onChange={(e) => setSelectedLeadId(e.target.value)} className="max-w-sm border border-border rounded-md bg-background px-3 py-2 text-sm">
               <option value="">Select lead</option>
               {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
             </SearchableNativeSelect>
-            <select value={form.ActivityType} onChange={(e) => setForm({ ...form, ActivityType: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
-              {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <select value={form.Direction} onChange={(e) => setForm({ ...form, Direction: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
-              <option value="Outbound">Outbound</option>
-              <option value="Inbound">Inbound</option>
-            </select>
-            <input value={form.Outcome} onChange={(e) => setForm({ ...form, Outcome: e.target.value })} placeholder="Outcome" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <DateInput value={form.NextFollowupDate} onChange={(e) => setForm({ ...form, NextFollowupDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <textarea value={form.Summary} onChange={(e) => setForm({ ...form, Summary: e.target.value })} placeholder="Conversation summary" className="md:col-span-5 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="inline-flex items-center justify-center gap-2 self-center h-10 rounded-md btn-module text-white px-4 text-sm font-medium shadow-sm">
-              <Plus size={15} /> Log
-            </button>
-          </form>
+            <LeadInteractionForm leadId={selectedLeadId ? parseInt(selectedLeadId) : null} />
+          </div>
         )}
 
         <div className="flex items-center gap-2 max-w-md">
