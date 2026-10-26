@@ -107,6 +107,37 @@ export const generateDepreciation = async (projectId: number, year: number, mont
     "Failed to generate depreciation",
   );
 
+export interface GenerateRangeMonth {
+  year: number;
+  month: number;
+  counts?: { generated: number; alreadyPosted: number; skipped: number; failed: number };
+  totalAmount?: number;
+  failures?: { faItemCode?: string; message?: string }[];
+  error?: string;
+}
+export interface GenerateRangeResult {
+  projectId: number;
+  months: GenerateRangeMonth[];
+  counts: { generated: number; alreadyPosted: number; skipped: number; failed: number };
+  totalAmount: number;
+  stoppedAt: { year: number; month: number; message: string } | null;
+}
+
+/** Bulk run over a custom month range (inclusive), oldest month first. */
+export const generateDepreciationRange = async (
+  projectId: number,
+  from: { year: number; month: number },
+  to: { year: number; month: number },
+) =>
+  parse<GenerateRangeResult>(
+    await fetchWithAuth(`${BASE}/generate-range`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, fromYear: from.year, fromMonth: from.month, toYear: to.year, toMonth: to.month }),
+    }),
+    "Failed to run depreciation for the range",
+  );
+
 export const getPostingHistory = async (projectId: number, year?: number, month?: number) => {
   const qs = new URLSearchParams({ projectId: String(projectId) });
   if (year) qs.set("year", String(year));

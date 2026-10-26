@@ -171,6 +171,48 @@ async function generateProjectMonth(pool, { projectId, year, month, email, today
   }
 }
 
+const MAX_RANGE_MONTHS = 36;
+
+/**
+ * Bulk run over a custom month range (inclusive): generates every month from `from` to `to` for the project, OLDEST
+ * FIRST — a WDV asset's opening book value is the previous months' closing, so order matters. It is just
+ * generateProjectMonth per month, so it shares its safety: months/assets already posted are skipped, never doubled,
+ * and each month is logged as its own run. Stops at the first month that fails outright so nothing later is built on a gap.
+ */
+async function generateProjectRange(pool, { projectId, from, to, email, today }) {
+  const fromIdx = from.year * 12 + (from.month - 1);
+  const toIdx = to.year * 12 + (to.month - 1);
+  if (toIdx < fromIdx) {
+    const e = new Error("The 'to' month can't be before the 'from' month.");
+    e.code = "BAD_PERIOD";
+    throw e;
+  }
+  if (toIdx - fromIdx + 1 > MAX_RANGE_MONTHS) {
+    const e = new Error(`A range can cover at most ${MAX_RANGE_MONTHS} months at a time.`);
+    e.code = "BAD_PERIOD";
+    throw e;
+  }
+  assertPeriod(to.year, to.month, today);
+
+  const months = [];
+  let stoppedAt = null;
+  for (let i = fromIdx; i <= toIdx; i++) {
+    const year = Math.floor(i / 12), month = (i % 12) + 1;
+    try {
+      const r = await generateProjectMonth(pool, { projectId, year, month, email, today });
+      months.push({ year, month, counts: r.counts, totalAmount: r.totalAmount, failures: r.results.filter((x) => x.outcome === "failed").map((x) => ({ faItemCode: x.faItemCode, message: x.message })) });
+    } catch (e) {
+      months.push({ year, month, error: e.message });
+      stoppedAt = { year, month, message: e.message };
+      break;
+    }
+  }
+  const sum = (k) => months.reduce((t, m) => t + (m.counts?.[k] || 0), 0);
+  const counts = { generated: sum("generated"), alreadyPosted: sum("alreadyPosted"), skipped: sum("skipped"), failed: sum("failed") };
+  const totalAmount = Math.round(months.reduce((t, m) => t + (m.totalAmount || 0), 0) * 100) / 100;
+  return { projectId, from, to, months, counts, totalAmount, stoppedAt };
+}
+
 /** Posting history: one row per posted (or reversed) monthly entry. Filters are all optional. */
 async function postingHistory(pool, { projectId, year, month }) {
   const request = pool.request();
@@ -205,4 +247,4 @@ async function generateRuns(pool, projectId) {
   return r.recordset;
 }
 
-module.exports = { previewProjectMonth, generateProjectMonth, postingHistory, generateRuns };
+module.exports = { previewProjectMonth, generateProjectMonth, generateProjectRange, postingHistory, generateRuns };
