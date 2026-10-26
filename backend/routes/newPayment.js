@@ -563,9 +563,12 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const allocMap = await getAllocationsForMany(
       pool, sql, "NewPayment", result.recordset.map((r) => r.PPaymentID),
     );
+    // A merged payment's invoices (migration 501), for the list's "Against" column.
+    const linkMap = await getLinksForMany(pool, sql, result.recordset.map((r) => r.PPaymentID));
     const dataWithAllocations = result.recordset.map((r) => ({
       ...r,
       EExpenseHeadAllocations: allocMap.get(r.PPaymentID) ?? [],
+      MergedInvoiceDocNos: (linkMap.get(r.PPaymentID) ?? []).map((l) => l.eDocNo),
     }));
 
     res.json({
@@ -3005,6 +3008,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // ExpenseBooking's supplier → PPartyId) — not a system-generated
     // "supplier"/"creditor" placeholder, which doesn't exist.
     const supplierId = await resolvePaymentSupplierHeadId(pool, pmt);
+    // Paid straight to expense ledger(s) (Direct Expense Payment, migration 303): those ledgers are the
+    // debit, as postPaymentApproval does; no party to resolve.
+    const { getAllocations } = require("../services/expenseHeadAllocation");
+    const allocations = await getAllocations(pool, sql, "NewPayment", pmtId);
     const isCash = pmt.PMode === "Cash";
     let bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
@@ -3018,7 +3025,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       bankId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
     }
 
-    if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
+    if (!supplierId && allocations.length === 0) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
     if (!bankId) {
       return res.status(422).json({
         error: isCash ? "Cash-in-Hand system ledger not configured." : "No bank account linked to this payment.",
@@ -3041,7 +3048,12 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // uses when this payment auto-posts on approval instead of through this
     // manual route.
     const legs = [
-      ...(mergedLinks.length > 0
+      ...(allocations.length > 0
+        ? allocations.map((a) => ({
+            lHeadId: a.lHeadId, debit: a.amount, credit: 0,
+            narration: `Payment: ${pmt.DocNo} — ${a.lHeadName}`,
+          }))
+        : mergedLinks.length > 0
         ? mergedLinks.map((l) => ({
             lHeadId: supplierId, debit: l.allocatedAmount, credit: 0, projectId: l.projectId ?? undefined,
             narration: `Payment: ${pmt.DocNo} (${l.eDocNo}) — Supplier/Creditor`,

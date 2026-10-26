@@ -4709,6 +4709,13 @@ const Payment: React.FC = () => {
                             <td className="px-3 py-3">
                               {rec.expenseRef || rec.jvNo ? (
                                 <p className="font-heading text-[0.6875rem] font-semibold tabular-nums text-primary truncate">{rec.expenseRef || rec.jvNo}</p>
+                              ) : rec.mergedDocNos && rec.mergedDocNos.length > 0 ? (
+                                // A merged payment settles several invoices — each one listed.
+                                <div className="space-y-0.5">
+                                  {rec.mergedDocNos.map((d) => (
+                                    <p key={d} className="font-heading text-[0.6875rem] font-semibold tabular-nums text-primary truncate">{d}</p>
+                                  ))}
+                                </div>
                               ) : (
                                 <span className="text-muted-foreground text-xs">—</span>
                               )}

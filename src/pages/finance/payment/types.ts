@@ -16,6 +16,8 @@ export interface DbPayment {
   PProjectName?: string | null;
   /** A merged payment's projects, comma-joined (its invoices can span the company's projects). */
   PMergedProjectNames?: string | null;
+  /** A merged payment's invoice numbers (list endpoint only). */
+  MergedInvoiceDocNos?: string[];
   PCompany: string | null;
   // Resolved company name (see newPayment.js: ISNULL(ec.name, np.PCompany)) —
   // PCompany itself is often just the raw enterprise id as text (set that
@@ -188,6 +190,8 @@ export interface PaymentRecord {
   projectSite: string;
   /** Every project of a merged payment ("Boulevard, Magnus") — shown instead of project when set. */
   mergedProjects?: string;
+  /** A merged payment's invoice numbers — shown under "Against" in the list. */
+  mergedDocNos?: string[];
   expenseRef: string;
   expenseId: string;
   // Journal Voucher doc number this payment settles, if any (see JVNo on
