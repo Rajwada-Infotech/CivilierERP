@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { RoleBadge } from "@/components/RoleBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -29,11 +30,6 @@ async function fetchUnassigned() {
   if (!r.ok) throw new Error("Failed to fetch unassigned users");
   return r.json().catch(() => ({}));
 }
-
-const roleBadge = (role: string) => {
-  if (role === "sales_team_lead") return <span className="px-1.5 py-0.5 text-[0.625rem] font-semibold rounded-full bg-purple-500/10 text-purple-600">Team Lead</span>;
-  return <span className="px-1.5 py-0.5 text-[0.625rem] font-semibold rounded-full bg-blue-500/10 text-blue-600">Sales Person</span>;
-};
 
 const SaTeamManagement: React.FC = () => {
   usePageRights("sa-teams");
@@ -172,7 +168,7 @@ const SaTeamManagement: React.FC = () => {
                       <p className="text-sm font-semibold text-foreground">{team.Name}</p>
                       <p className="text-xs text-muted-foreground">{team.Email}</p>
                     </div>
-                    {roleBadge(team.Role)}
+                    <RoleBadge role={team.Role} className="text-[0.625rem] px-1.5 py-0.5" />
                     <span className="text-xs text-muted-foreground">
                       {team.members.length} member{team.members.length !== 1 ? "s" : ""}
                     </span>
@@ -216,7 +212,7 @@ const SaTeamManagement: React.FC = () => {
                             <tr key={m.MemberUserId} className="border-t border-border hover:bg-muted/10 transition-colors">
                               <td className="px-4 py-2.5 font-medium text-foreground">{m.MemberName}</td>
                               <td className="px-4 py-2.5 text-muted-foreground text-xs">{m.MemberEmail}</td>
-                              <td className="px-4 py-2.5">{roleBadge(m.MemberRole)}</td>
+                              <td className="px-4 py-2.5"><RoleBadge role={m.MemberRole} className="text-[0.625rem] px-1.5 py-0.5" /></td>
                               <td className="px-4 py-2.5">
                                 {canManageTeam ? (
                                 <div className="flex justify-end gap-1.5">

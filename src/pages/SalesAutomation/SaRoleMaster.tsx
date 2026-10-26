@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { RoleBadge } from "@/components/RoleBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -36,18 +37,6 @@ const ACTION_LABELS: Record<Action, string> = {
 // CSV column header → action key
 const CSV_COL_TO_ACTION: Record<string, Action> = {
   View: "view", Add: "create", Edit: "edit", Delete: "delete", Print: "print",
-};
-
-// ── Role styling ──────────────────────────────────────────────────────────────
-const ROLE_COLORS: Record<string, string> = {
-  marketing_head:  "text-orange-400 bg-orange-500/10 border-orange-500/30",
-  sales_team_lead: "text-purple-400 bg-purple-500/10 border-purple-500/30",
-  sales_person:    "text-indigo-400 bg-indigo-500/10 border-indigo-500/30",
-};
-const ROLE_LABELS: Record<string, string> = {
-  marketing_head:  "Marketing Head",
-  sales_team_lead: "Sales Team Lead",
-  sales_person:    "Sales Person",
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -268,9 +257,7 @@ function RoleRightsTab({ roles }: { roles: any[] }) {
           <div key={role.RId} className="rounded-xl border border-border overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 bg-muted/10 border-b border-border">
               <div className="flex items-center gap-3">
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${ROLE_COLORS[role.RName] ?? "text-muted-foreground bg-muted/20 border-border"}`}>
-                  {ROLE_LABELS[role.RName] ?? role.RName}
-                </span>
+                <RoleBadge role={role.RName} />
                 <span className="text-xs text-muted-foreground">{role.RDesc}</span>
               </div>
               <button
@@ -452,10 +439,7 @@ function UserPermissionsTab({ users }: { users: any[] }) {
             >
               <p className="text-sm font-medium text-foreground truncate">{u.name}</p>
               <p className="text-[0.625rem] text-muted-foreground truncate mt-0.5">{u.email}</p>
-              <span className={`mt-1.5 inline-block text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border
-                ${ROLE_COLORS[u.RoleName] ?? ROLE_COLORS[u.role] ?? "text-muted-foreground bg-muted/20 border-border"}`}>
-                {ROLE_LABELS[u.RoleName] ?? ROLE_LABELS[u.role] ?? u.RoleName ?? u.role}
-              </span>
+              <RoleBadge role={u.RoleName ?? u.role} className="mt-1.5 inline-block text-[0.625rem] px-2 py-0.5" />
             </button>
           ))}
         </div>

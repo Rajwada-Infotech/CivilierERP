@@ -328,6 +328,145 @@ const STATUS_CONFIG: Record<
     classes:
       "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
   },
+
+  // ── Sales Automation (SA) domain statuses — added for the same reason as
+  // the CRM block above: every SA page (lead management, inquiry dashboard,
+  // follow-ups, site visits, lead transfers, ad/campaign masters) had
+  // independently hand-rolled its own color map for these same words. See
+  // backend/constants/saStatuses.js for the authoritative lead-status
+  // transition table this mirrors.
+  New: {
+    label: "New",
+    icon: FileEdit,
+    classes:
+      "bg-slate-500/10 text-slate-400 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  Assigned: {
+    label: "Assigned",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  Contacted: {
+    label: "Contacted",
+    icon: SendHorizonal,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  FollowUp: {
+    label: "Follow-Up",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  VisitScheduled: {
+    label: "Visit Scheduled",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Visited: {
+    label: "Visited",
+    icon: PackageCheck,
+    classes:
+      "bg-teal-500/10 text-teal-600 border-teal-500/25 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/25",
+  },
+  Booking: {
+    label: "Booking",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Lost: {
+    label: "Lost",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  Converted: {
+    label: "Converted",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  // Lead classification (Hot/Warm/Cold/NotInterested/CallBackLater) — same
+  // "color by word" idea as a status, just a different field on the lead.
+  Hot: {
+    label: "Hot",
+    icon: CheckCircle2,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  Warm: {
+    label: "Warm",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Cold: {
+    label: "Cold",
+    icon: Clock,
+    classes:
+      "bg-blue-500/10 text-blue-500 border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/25",
+  },
+  NotInterested: {
+    label: "Not Interested",
+    icon: XCircle,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  CallBackLater: {
+    label: "Call Back Later",
+    icon: Clock,
+    classes:
+      "bg-violet-500/10 text-violet-600 border-violet-500/25 dark:bg-violet-500/10 dark:text-violet-400 dark:border-violet-500/25",
+  },
+  // Ad/Campaign lifecycle — Active/Completed/Cancelled already exist above.
+  Paused: {
+    label: "Paused",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  // Social-media integration sync status — Pending already exists above.
+  Synced: {
+    label: "Synced",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Failed: {
+    label: "Failed",
+    icon: XCircle,
+    classes:
+      "bg-red-500/10 text-red-500 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
+  },
+  // Site-visit status — Completed/Cancelled already exist above.
+  Scheduled: {
+    label: "Scheduled",
+    icon: Clock,
+    classes:
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/25 dark:bg-[#ffe2021a] dark:text-amber-400 dark:border-amber-500/25",
+  },
+  Confirmed: {
+    label: "Confirmed",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
+  Rescheduled: {
+    label: "Rescheduled",
+    icon: PackageSearch,
+    classes:
+      "bg-orange-500/10 text-orange-500 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  // Lead-task status — Open already exists above.
+  Done: {
+    label: "Done",
+    icon: CheckCircle2,
+    classes:
+      "bg-emerald-500/10 text-emerald-600 border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/25",
+  },
 };
 
 // Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
