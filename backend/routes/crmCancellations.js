@@ -4,7 +4,7 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { reversePostingBySource } = require("../services/generalLedger");
 // Project access: a cancellation belongs to its booking's project.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, projectAllowed, assertBookingAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -137,6 +137,8 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
       .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')");
     if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found or not eligible for cancellation" });
+    // The booking comes in the query string, which the path guards don't see.
+    if (!projectAllowed(req.projectScope, bkgRow.recordset[0].ProjectId)) return res.status(403).json({ error: "You don't have access to this project." });
 
     const { ProjectId, BookingDate } = bkgRow.recordset[0];
     const daysSince = BookingDate
@@ -183,17 +185,21 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    // One set of conditions for the rows, the total and the counts by status (the total ignored the user's projects).
+    const reqs = [pool.request(), pool.request(), pool.request()];
+    const req0 = reqs[0];
+    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
     const conds = [];
     if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR c.CancellationNo LIKE @search)");
     }
+    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    if (status) { bind("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${CANCEL_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
@@ -205,30 +211,38 @@ router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) 
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(30), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmCancellation c
+    const FROM = `FROM dbo.CrmCancellation c
           JOIN dbo.CrmBooking b ON b.Id = c.BookingId
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          WHERE (@st2 IS NULL OR c.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR c.CancellationNo LIKE @search2))
-        `),
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, statusResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+      reqs[2].query(`SELECT c.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY c.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = Object.fromEntries(statusResult.recordset.map((r) => [r.Status, r.n]));
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-cancellations] GET error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /bookings — live bookings in the user's projects with no cancellation open, for the request form (it used to
+// read the Bookings page's own list: its right, and every project).
+router.get("/bookings", requirePageRight("crm-cancellations", "create"), async (req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmCancellation c WHERE c.BookingId = b.Id AND c.Status IN ('Pending', 'FinancePending', 'Approved'))${projectPredicate(req.projectScope, "b.ProjectId")}
+      ORDER BY b.CreatedAt DESC`);
+    res.json(r.recordset);
+  } catch (e) {
+    console.error("[crm-cancellations] GET /bookings error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
@@ -246,6 +260,8 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking is named in the body: the path guards don't see it.
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

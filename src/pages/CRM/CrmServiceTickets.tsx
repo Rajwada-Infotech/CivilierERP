@@ -3,70 +3,50 @@ import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Search, Star, UserCheck } from "lucide-react";
+import { Plus, RefreshCw, Star } from "lucide-react";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
+import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
-const API         = "/api/crm/service-tickets";
-const BKG_API     = "/api/crm/bookings";
+const API          = "/api/crm/service-tickets";
 const SA_LEADS_API = "/api/sa/leads";
 
 const CATEGORIES = ["Warranty", "Complaint", "ServiceRequest", "SocietyIssue", "Legal", "Modification", "Other"];
 const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
 const STATUSES   = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reopened"];
 
-const priorityColor: Record<string, string> = {
-  Urgent: "text-red-600 bg-red-50 border-red-200",
-  High:   "text-sky-600 bg-sky-50 border-sky-200",
-  Normal: "text-blue-600 bg-blue-50 border-blue-200",
-  Low:    "text-muted-foreground bg-muted/50 border-border",
-};
-const statusColor: Record<string, string> = {
-  Open:       "text-sky-600 bg-sky-50 border-sky-200",
-  Assigned:   "text-blue-600 bg-blue-50 border-blue-200",
-  InProgress: "text-purple-600 bg-purple-50 border-purple-200",
-  Resolved:   "text-green-600 bg-green-50 border-green-200",
-  Closed:     "text-muted-foreground bg-muted/50 border-border",
-  Reopened:   "text-red-600 bg-red-50 border-red-200",
-};
+const words = (s: string) => s.replace(/([A-Z])/g, " $1").trim();
+const statusTone = (s: string): "done" | "waiting" | "stopped" | "none" =>
+  s === "Resolved" ? "done" : s === "Reopened" ? "stopped" : s === "Closed" ? "none" : "waiting";
 
 const EMPTY_FORM = { BookingId: "", Category: "Complaint", Priority: "Normal", Subject: "", Description: "", AssignedTo: "" };
 
 const PAGE_SIZE = 20;
-interface TicketListFilters {
-  search: string;
-  status: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchTicketsList(filters: TicketListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+interface TicketListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
+async function fetchTicketsList(filters: TicketListFilters, page: number): Promise<{ rows: any[]; total: number; statusCounts: Record<string, number> }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
   if (filters.search) params.set("search", filters.search);
-  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.status) params.set("status", filters.status);
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+  // A failed load used to read as "No service tickets found".
+  const r = await fetchWithAuth(`${API}?${params}`);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Could not load the tickets (${r.status}).`);
+  return { rows: data.rows || [], total: data.total || 0, statusCounts: data.statusCounts || {} };
 }
 async function fetchBookings(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
+  try { const r = await fetchWithAuth(`${API}/bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
@@ -78,28 +58,24 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 }
 
 const CrmServiceTickets: React.FC = () => {
+  const rights = usePageRights("crm-service-tickets");
   const qc = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
-  const [search, setSearch]           = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [search, setSearch]             = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  const [dialogOpen, setDialogOpen]   = useState(false);
-  const [form, setForm]               = useState({ ...EMPTY_FORM });
-  const [saving, setSaving]           = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [form, setForm]             = useState({ ...EMPTY_FORM });
+  const [saving, setSaving]         = useState(false);
 
-  // Resolve dialog state
-  const [resolveDialog, setResolveDialog]   = useState(false);
-  const [resolveTicketId, setResolveTicketId] = useState<number | null>(null);
-  const [resolveNotes, setResolveNotes]     = useState("");
-
-  // Reopen dialog state
-  const [reopenDialog, setReopenDialog]   = useState(false);
-  const [reopenTicketId, setReopenTicketId] = useState<number | null>(null);
-  const [reopenReason, setReopenReason]   = useState("");
+  // Resolve / reopen: notes or a reason are required, so each has its own dialog.
+  const [resolveFor, setResolveFor]   = useState<any | null>(null);
+  const [resolveNotes, setResolveNotes] = useState("");
+  const [reopenFor, setReopenFor]     = useState<any | null>(null);
+  const [reopenReason, setReopenReason] = useState("");
 
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
@@ -108,17 +84,22 @@ const CrmServiceTickets: React.FC = () => {
     () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
     [search, statusFilter, cpb]
   );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-service-tickets", listFilters, page, pageSize],
-    queryFn: () => fetchTicketsList(listFilters, page, pageSize),
+  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ["crm-service-tickets", listFilters, page],
+    queryFn: () => fetchTicketsList(listFilters, page),
     staleTime: 30_000,
   });
   const tickets = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
-  const { data: bookings = [] }           = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: users = [] }             = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
+  const counts = listResult?.statusCounts ?? {};
+  const allCount = STATUSES.reduce((s, k) => s + (counts[k] ?? 0), 0);
+  const { data: bookings = [] } = useQuery({ queryKey: ["crm-service-ticket-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000, enabled: dialogOpen });
+  const { data: users = [] }    = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000, enabled: rights.canEdit || rights.canCreate });
 
-  const filtered = tickets;
+  const changed = () => {
+    qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
+    qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
+  };
 
   const handleCreate = async () => {
     if (!form.BookingId || !form.Subject.trim()) { toast.error("Booking and Subject are required"); return; }
@@ -129,12 +110,12 @@ const CrmServiceTickets: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, BookingId: parseInt(form.BookingId), AssignedTo: form.AssignedTo || null }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error);
       toast.success(`Ticket ${data.TicketNo} raised`);
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
-      qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
+      changed();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -142,19 +123,21 @@ const CrmServiceTickets: React.FC = () => {
     }
   };
 
-  const runAction = async (id: number, action: string, body?: object) => {
+  const runAction = async (id: number, action: string, body?: object): Promise<boolean> => {
     try {
       const res = await fetchWithAuth(`${API}/${id}/${action}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body || {}),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error);
       toast.success(`Ticket ${data.status ?? "updated"}`);
-      qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
+      changed();
+      return true;
     } catch (e: any) {
       toast.error(translateError(e.message));
+      return false;
     }
   };
 
@@ -167,321 +150,254 @@ const CrmServiceTickets: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ AssignedTo: parseInt(userId) }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error);
       toast.success("Ticket assigned");
-      qc.invalidateQueries({ queryKey: ["crm-service-tickets"] });
-      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
+      changed();
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
   };
 
-  const handleMarkInProgress = (id: number) => runAction(id, "mark-in-progress");
-  const handleClose          = (id: number) => runAction(id, "close");
-
-  // Open resolve dialog (replaces window.prompt)
-  const openResolveDialog = (id: number) => {
-    setResolveTicketId(id);
-    setResolveNotes("");
-    setResolveDialog(true);
-  };
   const handleResolveConfirm = async () => {
     if (!resolveNotes.trim()) { toast.error("Resolution notes are required"); return; }
     setSaving(true);
-    try {
-      await runAction(resolveTicketId!, "resolve", { ResolutionNotes: resolveNotes.trim() });
-      setResolveDialog(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Open reopen dialog (replaces window.prompt)
-  const openReopenDialog = (id: number) => {
-    setReopenTicketId(id);
-    setReopenReason("");
-    setReopenDialog(true);
+    try { if (await runAction(resolveFor.Id, "resolve", { ResolutionNotes: resolveNotes.trim() })) setResolveFor(null); }
+    finally { setSaving(false); }
   };
   const handleReopenConfirm = async () => {
     if (!reopenReason.trim()) { toast.error("Reason for reopening is required"); return; }
     setSaving(true);
-    try {
-      await runAction(reopenTicketId!, "reopen", { Reason: reopenReason.trim() });
-      setReopenDialog(false);
-    } finally {
-      setSaving(false);
-    }
+    try { if (await runAction(reopenFor.Id, "reopen", { Reason: reopenReason.trim() })) setReopenFor(null); }
+    finally { setSaving(false); }
   };
 
   const isOverdue = (t: any) => t.SlaDueDate && new Date(t.SlaDueDate) < new Date() && !["Resolved", "Closed"].includes(t.Status);
 
-  const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "TicketNo", header: "Ticket No", size: 110,
-      cell: (i) => <span className="font-mono text-xs font-semibold text-primary">{i.getValue() as string}</span> },
-    { accessorKey: "ApplicantName", header: "Customer", size: 150,
-      cell: (i) => (
-        <div>
-          <div className="font-medium"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BookingNo} · {i.row.original.UnitNo}</div>
-        </div>
-      ) },
-    { accessorKey: "Category", header: "Category", size: 100,
-      cell: (i) => <span className="text-xs">{(i.getValue() as string).replace(/([A-Z])/g, " $1").trim()}</span> },
-    { accessorKey: "Subject", header: "Subject", size: 180,
-      cell: (i) => (
-        <div className="max-w-xs truncate">
-          {i.row.original.Subject}
-          {i.row.original.RaisedByCustomer && (
-            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
-          )}
-        </div>
-      ) },
-    { accessorKey: "Priority", header: "Priority", size: 90,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${priorityColor[i.row.original.Priority] || ""}`}>{i.row.original.Priority}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 110,
-      cell: (i) => <span className="text-sm">{(i.getValue() as string) || "—"}</span> },
-    { id: "slaDue", header: "SLA Due", size: 140, enableSorting: false,
-      cell: (i) => {
-        const t = i.row.original;
-        const overdue = isOverdue(t);
-        return (
-          <span className={`text-xs ${overdue ? "text-red-600 font-semibold" : "text-muted-foreground"}`}>
-            {t.SlaDueDate ? fmtIstIso(t.SlaDueDate) : "—"}
-            {overdue && " (OVERDUE)"}
-          </span>
-        );
-      } },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { id: "rating", header: "Rating", size: 80, enableSorting: false,
-      cell: (i) => i.row.original.CustomerRating ? (
-        <span className="flex items-center gap-0.5 text-yellow-500 text-xs">
-          <Star size={12} fill="currentColor" /> {i.row.original.CustomerRating}/5
-        </span>
-      ) : <span>—</span> },
-    { id: "actions", header: "Actions", size: 240, enableSorting: false,
-      cell: (i) => {
-        const t = i.row.original;
-        return (
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Open: Assign dropdown */}
-            {t.Status === CrmStatus.OPEN && (
-              <SearchableNativeSelect
-                defaultValue=""
-                onChange={(e) => handleAssign(t.Id, e.target.value)}
-                className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="" disabled>Assign to…</option>
-                {(users as any[]).map((u: any) => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
-                ))}
-              </SearchableNativeSelect>
-            )}
-            {/* Assigned: Start work + Reassign */}
-            {t.Status === "Assigned" && (
-              <>
-                <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-primary hover:underline">Start</button>
-                <SearchableNativeSelect
-                  defaultValue=""
-                  onChange={(e) => handleAssign(t.Id, e.target.value)}
-                  className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="" disabled>Reassign…</option>
-                  {(users as any[]).map((u: any) => (
-                    <option key={u.value} value={u.value}>{u.label}</option>
-                  ))}
-                </SearchableNativeSelect>
-              </>
-            )}
-            {/* InProgress: Reassign available */}
-            {t.Status === CrmStatus.IN_PROGRESS && (
-              <SearchableNativeSelect
-                defaultValue=""
-                onChange={(e) => handleAssign(t.Id, e.target.value)}
-                className="text-xs border border-border rounded px-1.5 py-0.5 bg-background text-muted-foreground hover:border-primary focus:outline-none"
-              >
-                <option value="" disabled>Reassign…</option>
-                {(users as any[]).map((u: any) => (
-                  <option key={u.value} value={u.value}>{u.label}</option>
-                ))}
-              </SearchableNativeSelect>
-            )}
-            {/* Assigned/InProgress/Reopened: Resolve */}
-            {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
-              <button onClick={() => openResolveDialog(t.Id)} className="text-xs text-primary hover:underline">Resolve</button>
-            )}
-            {/* Reopened: also allow restarting to InProgress */}
-            {t.Status === "Reopened" && (
-              <button onClick={() => handleMarkInProgress(t.Id)} className="text-xs text-purple-600 hover:underline">Start Work</button>
-            )}
-            {/* Resolved: Close or Reopen */}
-            {t.Status === CrmStatus.RESOLVED && (
-              <>
-                <button onClick={() => handleClose(t.Id)} className="text-xs text-primary hover:underline">Close</button>
-                <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
-              </>
-            )}
-            {/* Closed: Reopen only */}
-            {t.Status === CrmStatus.CLOSED && (
-              <button onClick={() => openReopenDialog(t.Id)} className="text-xs text-red-600 hover:underline">Reopen</button>
-            )}
-          </div>
-        );
-      } },
-  ];
+  const assignSelect = (t: any, placeholder: string) => (
+    <SearchableNativeSelect defaultValue="" onChange={(e) => handleAssign(t.Id, e.target.value)}
+      className="h-7 max-w-[9.5rem] text-[0.6875rem] border border-foreground/40 hover:border-foreground bg-card px-1.5 text-foreground outline-none">
+      <option value="" disabled>{placeholder}</option>
+      {(users as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
+    </SearchableNativeSelect>
+  );
 
-  usePageRights("crm-service-tickets");
+  const figures = [
+    { label: "Open", value: (counts.Open ?? 0) + (counts.Reopened ?? 0), note: `${counts.Reopened ?? 0} reopened`, go: () => updateFilter(setStatusFilter)("Open") },
+    { label: "Being worked", value: (counts.Assigned ?? 0) + (counts.InProgress ?? 0), note: `${counts.InProgress ?? 0} in progress`, go: () => updateFilter(setStatusFilter)("InProgress") },
+    { label: "Past SLA", value: counts.Overdue ?? 0, note: "Not resolved in time", go: () => updateFilter(setStatusFilter)("Overdue"), red: (counts.Overdue ?? 0) > 0 },
+    { label: "Resolved", value: counts.Resolved ?? 0, note: `${counts.Closed ?? 0} closed`, go: () => updateFilter(setStatusFilter)("Resolved") },
+  ];
+  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
+  const th = `!px-4 !py-2.5 text-left ${LBL}`;
+  const td = "!px-4 !py-3.5";
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Service Tickets"]} />
-      <CrmShell
-        title="CRM — Service Tickets"
-      subtitle="After-sales warranty, complaints & service requests"
-      action={
-          <div className="flex items-center gap-3">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
-          <Plus size={14} /> Raise Ticket
-        </button>
-        </div>
-      }
-    >
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search ticket, customer, subject..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
-          className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
-          <option value="All">All Statuses</option>
-          {STATUSES.map((s) => <option key={s}>{s}</option>)}
-        </select>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
-
-      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-        data={filtered}
-        columns={columns}
-        searchable={false}
-        loading={isLoading}
-        emptyMessage="No service tickets found"
-        rowClassName={(row) => isOverdue(row.original) ? "bg-red-50/30" : ""}
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-
-      {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent accent="crm" className="max-w-lg">
-          <DialogHeader><DialogTitle className="font-heading">Raise Service Ticket</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select booking</option>
-                {(bookings as any[]).map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} ({b.UnitNo})</option>
-                ))}
-              </SearchableNativeSelect>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Category</label>
-                <select value={form.Category} onChange={(e) => setForm((f) => ({ ...f, Category: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Priority</label>
-                <select value={form.Priority} onChange={(e) => setForm((f) => ({ ...f, Priority: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Subject *</label>
-              <input type="text" value={form.Subject} onChange={(e) => setForm((f) => ({ ...f, Subject: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Description</label>
-              <Textarea value={form.Description} onChange={(e) => setForm((f) => ({ ...f, Description: e.target.value }))}
-                rows={3} className="w-full text-sm resize-none" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Assign To</label>
-              <SearchableNativeSelect value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">— Unassigned —</option>
-                {(users as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
-              </SearchableNativeSelect>
+      <SheetShell
+        eyebrow="CivilierERP · CRM · After-sales"
+        title="Service Tickets"
+        subtitle="Warranty claims, complaints and service requests from owners: assigned, worked, resolved against their SLA, and closed or reopened."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {/* The server raises under the create right; the button was offered to everyone. */}
+            {rights.canCreate && <button onClick={() => setDialogOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Raise ticket</button>}
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={x.go} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color: x.red ? "var(--red)" : undefined }}>{isLoading ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
             </div>
           </div>
-          <DialogFooter>
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Raising..." : "Raise Ticket"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* ── Resolve dialog (replaces window.prompt) ───────────────────────── */}
-      <Dialog open={resolveDialog} onOpenChange={(o) => { if (!o) setResolveDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading">Resolve Ticket</DialogTitle></DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-1">Describe what was done to resolve the issue. This is stored permanently on the ticket.</p>
-          <Textarea
-            value={resolveNotes}
-            onChange={(e) => setResolveNotes(e.target.value)}
-            placeholder="Resolution notes..."
-            rows={4}
-            className="resize-none mt-1"
-          />
-          <DialogFooter>
-            <button onClick={() => setResolveDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleResolveConfirm} disabled={saving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Resolving..." : "Mark Resolved"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 space-y-3" style={{ borderBottom: RULE }}>
+              <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
+                {(["", ...STATUSES, "Overdue"] as const).map((s) => (
+                  <button key={s || "all"} onClick={() => updateFilter(setStatusFilter)(s)} className={tabClass(statusFilter === s)} style={{ borderRight: RULE_SOFT }}>
+                    {s === "" ? "All" : s === "Overdue" ? "Past SLA" : words(s)} <span className="tabular-nums">{s === "" ? allCount : counts[s] ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-3 flex-wrap items-center">
+                <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                  placeholder="Search ticket, customer, subject…"
+                  className="h-9 flex-1 min-w-48 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+                <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+              </div>
+            </div>
 
-      {/* ── Reopen dialog (replaces window.prompt) ────────────────────────── */}
-      <Dialog open={reopenDialog} onOpenChange={(o) => { if (!o) setReopenDialog(false); }}>
-        <DialogContent accent="crm" className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading">Reopen Ticket</DialogTitle></DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-1">Explain why this ticket needs to be reopened. Required for audit trail.</p>
-          <Textarea
-            value={reopenReason}
-            onChange={(e) => setReopenReason(e.target.value)}
-            placeholder="Reason for reopening..."
-            rows={3}
-            className="resize-none mt-1"
-          />
-          <DialogFooter>
-            <button onClick={() => setReopenDialog(false)}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleReopenConfirm} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">
-              {saving ? "Reopening..." : "Reopen"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </CrmShell>
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[1100px]">
+                <thead>
+                  <tr style={{ borderBottom: RULE }}>
+                    <th className={th}>Ticket</th><th className={th}>Customer</th><th className={th}>Category</th><th className={th}>Subject</th>
+                    <th className={th}>Priority</th><th className={th}>Assigned to</th><th className={th}>SLA due</th><th className={th}>Status</th>
+                    <th className={th}>Rating</th><th className={th}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isError ? (
+                    <tr><td colSpan={10} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                  ) : isLoading ? (
+                    <tr><td colSpan={10} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
+                  ) : tickets.length === 0 ? (
+                    <tr><td colSpan={10} className={`${td} text-center text-muted-foreground`}>{search || statusFilter || cpb.projectId ? "No ticket matches." : "No service tickets yet."}</td></tr>
+                  ) : tickets.map((t: any) => {
+                    const overdue = isOverdue(t);
+                    return (
+                      <tr key={t.Id} className="align-top" style={{ borderBottom: RULE_SOFT, borderLeft: overdue ? "3px solid hsl(var(--destructive))" : undefined }}>
+                        <td className={td}><span className="font-heading text-xs font-semibold tabular-nums whitespace-nowrap">{t.TicketNo}</span></td>
+                        <td className={td}>
+                          <div className="font-medium leading-snug"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} applicationId={t.ApplicationId} /></div>
+                          <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{t.BookingNo} · {t.UnitNo}</div>
+                        </td>
+                        <td className={`${td} text-xs`}>{words(t.Category || "")}</td>
+                        <td className={td}>
+                          <div className="max-w-xs leading-snug">{t.Subject}</div>
+                          {t.RaisedByCustomer && <div className="mt-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">From the customer</div>}
+                        </td>
+                        <td className={td}>
+                          <span className={`font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border ${
+                            t.Priority === "Urgent" ? "bg-destructive text-white border-destructive" : t.Priority === "High" ? "bg-foreground text-card border-foreground" : t.Priority === "Normal" ? "border-foreground/50" : "border-foreground/20 text-muted-foreground"}`}>{t.Priority}</span>
+                        </td>
+                        <td className={`${td} text-sm`}>{t.AssigneeName || "—"}</td>
+                        <td className={td}>
+                          <div className={`text-xs tabular-nums whitespace-nowrap ${overdue ? "text-destructive font-semibold" : "text-muted-foreground"}`}>{t.SlaDueDate ? fmtIstIso(t.SlaDueDate) : "—"}</div>
+                          {overdue && <div className="mt-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-destructive">Past SLA</div>}
+                        </td>
+                        <td className={td}>
+                          {statusTone(t.Status) === "none"
+                            ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{words(t.Status)}</span>
+                            : <SheetMark text={words(t.Status)} tone={statusTone(t.Status) as "done" | "waiting" | "stopped"} />}
+                        </td>
+                        <td className={td}>
+                          {t.CustomerRating
+                            ? <span className="inline-flex items-center gap-0.5 text-xs font-heading tabular-nums"><Star size={12} fill="currentColor" /> {t.CustomerRating}/5</span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className={td}>
+                          {rights.canEdit ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {t.Status === CrmStatus.OPEN && assignSelect(t, "Assign to…")}
+                              {t.Status === "Assigned" && <>
+                                <button onClick={() => runAction(t.Id, "mark-in-progress")} className={`${KEY_INK} h-7 px-2`}>Start</button>
+                                {assignSelect(t, "Reassign…")}
+                              </>}
+                              {t.Status === CrmStatus.IN_PROGRESS && assignSelect(t, "Reassign…")}
+                              {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
+                                <button onClick={() => { setResolveFor(t); setResolveNotes(""); }} className={`${KEY_INK} h-7 px-2`}>Resolve</button>
+                              )}
+                              {t.Status === "Reopened" && <button onClick={() => runAction(t.Id, "mark-in-progress")} className={`${KEY_LINE} h-7 px-2`}>Start work</button>}
+                              {t.Status === CrmStatus.RESOLVED && <button onClick={() => runAction(t.Id, "close")} className={`${KEY_LINE} h-7 px-2`}>Close</button>}
+                              {(t.Status === CrmStatus.RESOLVED || t.Status === CrmStatus.CLOSED) && (
+                                <button onClick={() => { setReopenFor(t); setReopenReason(""); }} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Reopen</button>
+                              )}
+                            </div>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
+          </div>
+        </div>
+
+        {/* ── Raise ticket ── */}
+        <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
+          <DialogContent className="max-w-lg rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="font-heading">Raise service ticket</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Booking *</label>
+                <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))} className={INP}>
+                  <option value="">Select booking</option>
+                  {(bookings as any[]).map((b: any) => (
+                    <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName} (${b.UnitNo})`}</option>
+                  ))}
+                </SearchableNativeSelect>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Category</label>
+                  <select value={form.Category} onChange={(e) => setForm((f) => ({ ...f, Category: e.target.value }))} className={INP}>
+                    {CATEGORIES.map((c) => <option key={c} value={c}>{words(c)}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className={`block ${LBL}`}>Priority</label>
+                  <select value={form.Priority} onChange={(e) => setForm((f) => ({ ...f, Priority: e.target.value }))} className={INP}>
+                    {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Subject *</label>
+                <input type="text" value={form.Subject} onChange={(e) => setForm((f) => ({ ...f, Subject: e.target.value }))} className={INP} />
+              </div>
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Description</label>
+                <textarea value={form.Description} onChange={(e) => setForm((f) => ({ ...f, Description: e.target.value }))} rows={3} className={TEXTAREA} />
+              </div>
+              <div className="space-y-1">
+                <label className={`block ${LBL}`}>Assign to</label>
+                <SearchableNativeSelect value={form.AssignedTo} onChange={(e) => setForm((f) => ({ ...f, AssignedTo: e.target.value }))} className={INP}>
+                  <option value="">— Unassigned —</option>
+                  {(users as any[]).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                </SearchableNativeSelect>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleCreate} disabled={saving} className={`${KEY_INK} h-9 px-4`}>{saving ? "Raising…" : "Raise ticket"}</button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Resolve ── */}
+        <Dialog open={!!resolveFor} onOpenChange={(o) => { if (!o) setResolveFor(null); }}>
+          <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader>
+              <DialogTitle className="font-heading">Resolve {resolveFor?.TicketNo}</DialogTitle>
+              <DialogDescription className="text-xs">Describe what was done to resolve the issue. It stays on the ticket.</DialogDescription>
+            </DialogHeader>
+            <textarea value={resolveNotes} onChange={(e) => setResolveNotes(e.target.value)} placeholder="Resolution notes…" rows={4} className={TEXTAREA} />
+            <DialogFooter className="gap-2">
+              <button onClick={() => setResolveFor(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleResolveConfirm} disabled={saving || !resolveNotes.trim()} className={`${KEY_INK} h-9 px-4`}>{saving ? "Resolving…" : "Mark resolved"}</button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Reopen ── */}
+        <Dialog open={!!reopenFor} onOpenChange={(o) => { if (!o) setReopenFor(null); }}>
+          <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
+            <DialogHeader>
+              <DialogTitle className="font-heading">Reopen {reopenFor?.TicketNo}</DialogTitle>
+              <DialogDescription className="text-xs">Explain why it needs reopening. It's kept for the audit trail.</DialogDescription>
+            </DialogHeader>
+            <textarea value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} placeholder="Reason for reopening…" rows={3} className={TEXTAREA} />
+            <DialogFooter className="gap-2">
+              <button onClick={() => setReopenFor(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleReopenConfirm} disabled={saving || !reopenReason.trim()} className={`${KEY_RED} h-9 px-4`}>{saving ? "Reopening…" : "Reopen"}</button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </SheetShell>
     </>
   );
 };

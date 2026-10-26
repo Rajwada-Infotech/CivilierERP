@@ -4,6 +4,7 @@ const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on tickets outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmServiceTicket")); }
+const { projectPredicate, assertBookingAllowed } = require("../services/projectScope");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -49,21 +50,25 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const req0 = pool.request();
+    // One set of conditions for the rows, the total and the counts by status (the list and its total ignored the
+    // user's projects).
+    const reqs = [pool.request(), pool.request(), pool.request()];
+    const req0 = reqs[0];
+    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
     const conds = [];
     const isAdmin = isSaAdmin(req);
     if (!isAdmin) {
-      req0.input("actorId", sql.Int, actorId(req));
+      bind("actorId", sql.Int, actorId(req));
       conds.push("t.AssignedTo = @actorId");
     }
-    if (status)   { req0.input("st", sql.NVarChar(30), status);   conds.push("t.Status = @st"); }
-    if (priority) { req0.input("pr", sql.NVarChar(20), priority); conds.push("t.Priority = @pr"); }
-    if (category) { req0.input("ct", sql.NVarChar(50), category); conds.push("t.Category = @ct"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+    if (priority) { bind("pr", sql.NVarChar(20), priority); conds.push("t.Priority = @pr"); }
+    if (category) { bind("ct", sql.NVarChar(50), category); conds.push("t.Category = @ct"); }
+    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      bind("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
     }
     // handedOverOnly=true — used by the Maintenance module's "Service Requests" view
@@ -72,6 +77,10 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
     if (req.query.handedOverOnly === "true") {
       conds.push("EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')");
     }
+    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    // status=Overdue: past its SLA and not resolved / closed.
+    if (status === "Overdue") conds.push("t.SlaDueDate < SYSDATETIME() AND t.Status NOT IN ('Resolved', 'Closed')");
+    else if (status) { bind("st", sql.NVarChar(30), status); conds.push("t.Status = @st"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${TICKET_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
     const ORDER = `ORDER BY
@@ -86,41 +95,41 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const countReq = pool.request()
-      .input("companyId2", sql.Int, companyId)
-      .input("projectId2", sql.Int, projectId)
-      .input("blockId2", sql.Int, blockId)
-      .input("st2", sql.NVarChar(30), status || null)
-      .input("pr2", sql.NVarChar(20), priority || null)
-      .input("ct2", sql.NVarChar(50), category || null)
-      .input("search2", sql.NVarChar(200), search ? `%${search}%` : null);
-    if (!isAdmin) countReq.input("actorId2", sql.Int, actorId(req));
-    const handedOverOnlyClause = req.query.handedOverOnly === "true"
-      ? "AND EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')"
-      : "";
-    const [result, countResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      countReq.query(`
-        SELECT COUNT(*) AS total
-        FROM dbo.CrmServiceTicket t
+    const FROM = `FROM dbo.CrmServiceTicket t
         JOIN dbo.CrmBooking b ON b.Id = t.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-        WHERE ${isAdmin ? "1=1" : "t.AssignedTo = @actorId2"}
-          AND (@st2 IS NULL OR t.Status = @st2)
-          AND (@pr2 IS NULL OR t.Priority = @pr2)
-          AND (@ct2 IS NULL OR t.Category = @ct2)
-          AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-          AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-          AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-          AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR t.TicketNo LIKE @search2 OR t.Subject LIKE @search2))
-          ${handedOverOnlyClause}
-      `),
+        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const [result, countResult, statusResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
+      reqs[2].query(`SELECT t.Status, COUNT(*) AS n,
+          SUM(CASE WHEN t.SlaDueDate < SYSDATETIME() AND t.Status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) AS overdue
+        ${FROM} ${countsWhere} GROUP BY t.Status`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = { Overdue: 0 };
+    for (const r of statusResult.recordset) { statusCounts[r.Status] = r.n; statusCounts.Overdue += r.overdue; }
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-service-tickets] GET error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /bookings — live bookings a ticket can be raised against, in the user's projects. The form used to read the
+// Bookings page's own list (its right, and every project).
+router.get("/bookings", requirePageRight("crm-service-tickets", "create"), async (req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')${projectPredicate(req.projectScope, "b.ProjectId")}
+      ORDER BY b.CreatedAt DESC`);
+    res.json(r.recordset);
+  } catch (e) {
+    console.error("[crm-service-tickets] GET /bookings error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -150,6 +159,8 @@ router.post("/", requirePageRight("crm-service-tickets", "create"), async (req, 
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
+    // The booking is named in the body: the path guards don't see it.
+    if (!(await assertBookingAllowed(req, res, bookingId))) return;
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
     if (!CATEGORIES.includes(b.Category))

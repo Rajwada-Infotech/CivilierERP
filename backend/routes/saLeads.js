@@ -115,7 +115,7 @@ router.get("/", requirePageRight("sa-leads", "view"), async (req, res) => {
 
 // GET /users — dropdown for assigning leads (SA roles only). CRM Bookings' "Assigned To", Welcome Calls' "Called by"
 // and Handover's "Key handed by" read it too, so a CRM user without Sales Automation's right still gets the list.
-router.get("/users", requireAnyPageRight(["sa-leads", "crm-bookings", "crm-welcome-calls", "crm-handover"], "view"), async (req, res) => {
+router.get("/users", requireAnyPageRight(["sa-leads", "crm-bookings", "crm-welcome-calls", "crm-handover", "crm-service-tickets"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const r = await pool.request().query(`
