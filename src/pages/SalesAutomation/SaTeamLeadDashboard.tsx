@@ -1,8 +1,10 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Users, GitBranch, Clock } from "lucide-react";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
+import { SaDashboardNav } from "@/components/sa/SaDashboardNav";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
@@ -14,20 +16,9 @@ async function fetchTeamLeadDashboard(): Promise<any> {
   return res.json().catch(() => ({}));
 }
 
-const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string | number }> = ({ icon: Icon, label, value }) => (
-  <div className="rounded-lg border border-border p-4 flex items-start gap-3">
-    <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
-      <Icon size={18} />
-    </div>
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-xl font-bold text-foreground mt-0.5">{value}</p>
-    </div>
-  </div>
-);
-
 const SaTeamLeadDashboard: React.FC = () => {
   usePageRights("sa-lead-distribution");
+  const navigate = useNavigate();
   const { data, isLoading, error } = useQuery({ queryKey: ["sa-dashboard-team-lead"], queryFn: fetchTeamLeadDashboard, staleTime: 60_000 });
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading dashboard...</div>;
@@ -49,14 +40,15 @@ const SaTeamLeadDashboard: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Team Leader Dashboard" subtitle="Lead distribution and salesperson performance overview" icon={GitBranch}>
+    <SalesAutoShell title="Team Leader Dashboard" subtitle="Scope: this team's own lead distribution and salesperson performance — the overall pipeline lives on Sales, campaign spend on Marketing" icon={GitBranch}>
       <Breadcrumbs items={["Sales Automation", "Team Leader Dashboard"]} />
       <div className="space-y-6">
+        <SaDashboardNav active="team-lead" />
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-          <StatCard icon={Users} label="Leads Received" value={data?.leadsReceived ?? 0} />
-          <StatCard icon={GitBranch} label="Leads Distributed" value={data?.leadsAssigned ?? 0} />
-          <StatCard icon={Clock} label="Pending Distribution" value={data?.pendingDistribution ?? 0} />
+          <SalesAutoGlassCard icon={Users} label="Leads Received" value={data?.leadsReceived ?? 0} onClick={() => navigate("/sales-automation/leads")} />
+          <SalesAutoGlassCard icon={GitBranch} label="Leads Distributed" value={data?.leadsAssigned ?? 0} onClick={() => navigate("/sales-automation/distribution")} />
+          <SalesAutoGlassCard icon={Clock} label="Pending Distribution" value={data?.pendingDistribution ?? 0} onClick={() => navigate("/sales-automation/distribution")} />
         </div>
 
         <MonthlyLeadTrend />

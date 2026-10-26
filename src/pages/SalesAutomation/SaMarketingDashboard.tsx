@@ -1,8 +1,10 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Megaphone, TrendingUp, IndianRupee, Target, Award } from "lucide-react";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
+import { SaDashboardNav } from "@/components/sa/SaDashboardNav";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MonthlyLeadTrend } from "@/components/sa/MonthlyLeadTrend";
@@ -13,41 +15,30 @@ async function fetchMarketingDashboard(): Promise<any> {
   return res.json().catch(() => ({}));
 }
 
-const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string | number; sub?: string }> = ({ icon: Icon, label, value, sub }) => (
-  <div className="rounded-lg border border-border p-4 flex items-start gap-3">
-    <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
-      <Icon size={18} />
-    </div>
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-xl font-bold text-foreground mt-0.5">{value}</p>
-      {sub && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{sub}</p>}
-    </div>
-  </div>
-);
-
 const SaMarketingDashboard: React.FC = () => {
   usePageRights("sa-campaigns");
+  const navigate = useNavigate();
   const { data, isLoading, error } = useQuery({ queryKey: ["sa-dashboard-marketing"], queryFn: fetchMarketingDashboard, staleTime: 60_000 });
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading dashboard...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load dashboard.</div>;
 
   return (
-    <SalesAutoShell title="Marketing Dashboard" subtitle="Campaign performance, spend, and lead generation overview" icon={Megaphone}>
+    <SalesAutoShell title="Marketing Dashboard" subtitle="Scope: campaign spend, ROI, and lead generation across channels — lead pipeline/conversion lives on Sales, distribution fairness on Team Lead" icon={Megaphone}>
       <Breadcrumbs items={["Sales Automation", "Marketing Dashboard"]} />
       <div className="space-y-6">
+        <SaDashboardNav active="marketing" />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard icon={Megaphone} label="Total Campaigns" value={data?.totalCampaigns ?? 0} />
-          <StatCard icon={TrendingUp} label="Active Ads" value={data?.activeAds ?? 0} />
-          <StatCard icon={Target} label="Total Leads" value={data?.totalLeads ?? 0} />
-          <StatCard icon={IndianRupee} label="Marketing Spend" value={`₹${(data?.marketingSpend ?? 0).toLocaleString()}`} />
-          <StatCard icon={IndianRupee} label="Cost Per Lead" value={`₹${data?.costPerLead ?? 0}`} />
-          <StatCard icon={IndianRupee} label="Invoices Paid" value={`₹${(data?.invoicedPaid ?? 0).toLocaleString()}`} />
-          <StatCard icon={IndianRupee} label="Revenue Generated" value={`₹${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
-          <StatCard icon={TrendingUp} label="ROI" value={`${data?.roi ?? 0}%`} />
-          <StatCard icon={Award} label="Bookings Generated" value={data?.bookingsGenerated ?? 0} />
+          <SalesAutoGlassCard icon={Megaphone} label="Total Campaigns" value={data?.totalCampaigns ?? 0} onClick={() => navigate("/sales-automation/campaigns")} />
+          <SalesAutoGlassCard icon={TrendingUp} label="Active Ads" value={data?.activeAds ?? 0} onClick={() => navigate("/sales-automation/ads")} />
+          <SalesAutoGlassCard icon={Target} label="Total Leads" value={data?.totalLeads ?? 0} onClick={() => navigate("/sales-automation/leads")} />
+          <SalesAutoGlassCard icon={IndianRupee} label="Marketing Spend" value={`₹${(data?.marketingSpend ?? 0).toLocaleString()}`} onClick={() => navigate("/sales-automation/invoices")} />
+          <SalesAutoGlassCard icon={IndianRupee} label="Cost Per Lead" value={`₹${data?.costPerLead ?? 0}`} />
+          <SalesAutoGlassCard icon={IndianRupee} label="Invoices Paid" value={`₹${(data?.invoicedPaid ?? 0).toLocaleString()}`} onClick={() => navigate("/sales-automation/invoices")} />
+          <SalesAutoGlassCard icon={IndianRupee} label="Revenue Generated" value={`₹${(data?.revenueGenerated ?? 0).toLocaleString()}`} />
+          <SalesAutoGlassCard icon={TrendingUp} label="ROI" value={`${data?.roi ?? 0}%`} />
+          <SalesAutoGlassCard icon={Award} label="Bookings Generated" value={data?.bookingsGenerated ?? 0} onClick={() => navigate("/sales-automation/pipeline")} />
         </div>
 
         <MonthlyLeadTrend />
