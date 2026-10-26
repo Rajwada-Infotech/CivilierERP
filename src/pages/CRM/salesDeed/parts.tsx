@@ -223,8 +223,10 @@ export function DocTag({ status }: { status: string }) {
 }
 
 /** One document: its name, status, what to do next, and the keys for it. */
-export function DocRow({ doc, previewing, onPreview, onDownload, attach, review, extraTag }: {
+export function DocRow({ doc, previewing, onPreview, onDownload, attach, review, extraTag, nextStep }: {
   doc: any; previewing: boolean;
+  /** What to do next, when the usual wording doesn't fit. */
+  nextStep?: string;
   onPreview: () => void; onDownload: () => void;
   /** Attach / re-attach a file (shown while Requested or Rejected). */
   attach?: { onFile: (f: File) => void; disabled?: boolean; title?: string };
@@ -243,7 +245,7 @@ export function DocRow({ doc, previewing, onPreview, onDownload, attach, review,
             <DocTag status={doc.Status} />
             {extraTag}
           </div>
-          <p className="text-xs text-muted-foreground">{docNextStep(doc)}</p>
+          <p className="text-xs text-muted-foreground">{nextStep ?? docNextStep(doc)}</p>
           {doc.HasFile && <p className="text-xs text-muted-foreground/80 truncate mt-0.5 tabular-nums">{doc.FileName} · {fmtBytes(doc.FileSize)}</p>}
           {doc.Status === "Rejected" && doc.Remarks && (
             <p className="text-xs text-destructive mt-1 px-2 py-1" style={{ border: "1px solid hsl(var(--destructive) / 0.4)" }}>"{doc.Remarks}"</p>

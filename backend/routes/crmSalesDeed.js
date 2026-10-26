@@ -15,6 +15,12 @@ router.param("id", (req, res, next, value) => {
   if (req.path.startsWith("/registry/")) return guardRegistry(req, res, next, value);
   return guardDeed(req, res, next, value);
 });
+// A document or attachment id in the path (the file downloads take nothing else) is traced the same way.
+const guardDeedDoc = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmSalesDeedDocument x JOIN dbo.CrmSalesDeed d ON d.Id = x.SalesDeedId JOIN dbo.CrmBooking b ON b.Id = d.BookingId WHERE x.Id = @id");
+const guardRegistryDoc = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmRegistryDocument x JOIN dbo.CrmRegistry r ON r.Id = x.RegistryId JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE x.Id = @id");
+router.param("docId", (req, res, next, value) =>
+  (req.path.startsWith("/registry/") ? guardRegistryDoc : guardDeedDoc)(req, res, next, value));
+router.param("attachId", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmQueryPaymentAttachments x JOIN dbo.CrmQueryPayment qp ON qp.Id = x.QueryPaymentId JOIN dbo.CrmBooking b ON b.Id = qp.BookingId WHERE x.AttachmentId = @id"));
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
