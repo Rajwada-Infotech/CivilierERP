@@ -15,7 +15,8 @@ import {
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { LayoutList, BarChart2, RefreshCw, Image as ImageIcon, Upload, Download, Trash2, Wallet, Receipt, Users, CheckCircle2, IndianRupee, TrendingUp } from "lucide-react";
-import { StatusBadge } from "@/components/StatusBadge";
+import { formatINR } from "@/utils/formatCurrency";
+import { CodeCell, CountCell, fmtPct, MoneyCell, MoneyView, PctView, RoiCell, StatusCell, TitleCell } from "@/components/sa/saCells";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SaTabs } from "@/components/sa/SaTabs";
 
@@ -118,34 +119,19 @@ const columns = [
   { key: "status", label: "Status" },
 ];
 
-const fmtRs = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-const fmtPct = (n: number) => `${n.toFixed(1)}%`;
-const money = (v: unknown) => (Number(v) > 0 ? fmtRs(Number(v)) : "—");
-const roiText = (v: unknown) => {
-  const n = Number(v ?? 0);
-  return <span className={`font-semibold tabular-nums ${n > 0 ? "text-emerald-600" : n < 0 ? "text-red-500" : "text-muted-foreground"}`}>{n ? fmtPct(n) : "—"}</span>;
-};
-const viewMoney = (v: unknown) => <p className="text-sm tabular-nums">{money(v)}</p>;
+const fmtRs = (n: number) => formatINR(n);
+const roiText = RoiCell;
+const viewMoney = MoneyView;
 
 const columnRenderers: Record<string, (v: unknown, row: RecordWithId) => React.ReactNode> = {
-  adCode: (v) => <span className="font-mono text-xs text-muted-foreground">{String(v || "—")}</span>,
-  name: (v, row) => (
-    <div className="min-w-0">
-      <div className="font-medium text-foreground truncate">{String(v)}</div>
-      {row.headline ? <div className="text-xs text-muted-foreground truncate max-w-[16rem]">{String(row.headline)}</div> : null}
-    </div>
-  ),
-  budget: (v) => <span className="tabular-nums">{money(v)}</span>,
-  costSpent: (v) => <span className="tabular-nums">{money(v)}</span>,
-  costPerLead: (v) => <span className="tabular-nums">{money(v)}</span>,
-  totalLeadsGenerated: (v) => <span className="font-semibold tabular-nums">{Number(v ?? 0)}</span>,
-  roi: roiText,
-  status: (v, row) => (
-    <span className="inline-flex items-center gap-1.5">
-      <StatusBadge status={String(v || "Active")} />
-      {row.isActive === false && <span className="text-[0.6875rem] text-muted-foreground">Inactive</span>}
-    </span>
-  ),
+  adCode: CodeCell,
+  name: (v, row) => TitleCell(v, row.headline),
+  budget: MoneyCell,
+  costSpent: MoneyCell,
+  costPerLead: MoneyCell,
+  totalLeadsGenerated: CountCell,
+  roi: RoiCell,
+  status: StatusCell,
 };
 
 const exportColumns: ExportColumn[] = [
@@ -621,12 +607,12 @@ const SaAdMaster: React.FC = () => {
               { key: "invoiceCount", label: "Linked Invoices" },
               { key: "totalLeadsGenerated", label: "Leads" },
               { key: "costPerLead", label: "Cost / Lead", render: viewMoney },
-              { key: "conversionRate", label: "Conversion", render: (v) => <p className="text-sm tabular-nums">{fmtPct(Number(v ?? 0))}</p> },
+              { key: "conversionRate", label: "Conversion", render: PctView },
               { key: "bookingCount", label: "Bookings" },
               { key: "revenueGenerated", label: "Revenue", render: viewMoney },
               { key: "roi", label: "ROI", render: (v) => roiText(v) },
               { key: "runningSince", label: "Running Since" },
-              { key: "status", label: "Status", render: (v) => <StatusBadge status={String(v || "Active")} /> },
+              { key: "status", label: "Status", render: (v) => StatusCell(v) },
               { key: "isActive", label: "Active" },
             ],
           }}
