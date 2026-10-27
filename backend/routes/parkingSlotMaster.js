@@ -5,6 +5,9 @@ const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+// A slot (by id) and any project / block given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/", "slot"]] });
+const { requireAnyPageRight } = require("../middleware/requirePageRight");
 const { getPool, sql } = require("../db");
 const { getParkingSlotLockReason, getParkingSlotHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
@@ -120,7 +123,8 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update a parking slot
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+// Admins, or anyone who may edit in Auto Project Setup (its parking lists edit slots here).
+router.put("/:id", requireAnyPageRight(["crm-auto-project-setup"], "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, SlotNo, ParkingType, IsActive } = req.body;
   if (!SlotNo?.trim()) return res.status(400).json({ error: "SlotNo is required" });
@@ -193,7 +197,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 // confirmed via sys.foreign_keys), so even a historical/inactive allotment
 // still physically blocks a hard DELETE. Only once both are clear does the
 // row actually get removed.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["crm-auto-project-setup"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
