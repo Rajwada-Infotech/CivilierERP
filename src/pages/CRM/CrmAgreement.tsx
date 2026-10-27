@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useRef, useEffect } from "react";
@@ -27,13 +28,14 @@ import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { API, DOC_TYPES, agrStatusColor, isBookingCancelled, unverifiedMandatoryDocs, followupProgress, AGR_TABS, AgrTab, TAB_SLUGS, SLUG_FOR_TAB, agreementStepStates } from "./agreement/config";
 import { AgreementStepper, docStatusColor, AgreementTimeline } from "./agreement/Timeline";
 import { EMPTY_AGR_FORM, fetchUsers, EMPTY_DOC_FORM, EMPTY_DOC_REQUEST_FORM, mimeIcon, fmtBytes } from "./agreement/forms";
-import { DocumentReviewDialog } from "./agreement/DocumentReviewDialog";
+import { DocumentReviewCard } from "./agreement/DocumentReviewCard";
 import { PAGE_SIZE, AgreementListFilters, fetchAgreementsList, fetchAgreementDetail, fetchAgreementIdByBooking, fetchDateHistory, fetchRevisions, fetchBookings, fetchWelcomeCallsForBooking } from "./agreement/api";
 
 // Registered is done; Executed is settled for now; Cancelled has stopped; Draft is in hand.
 const agrTone = (s: string): "done" | "waiting" | "stopped" => (s === "Registered" || s === "Executed" ? "done" : statusTone(s));
 
 const CrmAgreement: React.FC = () => {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -69,6 +71,8 @@ const CrmAgreement: React.FC = () => {
   const [showUrlField, setShowUrlField] = useState(false);
   const [uploadingDocs, setUploadingDocs] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  // A paper under review belongs to the agreement it was opened on.
+  useEffect(() => { setPreviewDoc(null); }, [selectedId]);
   const docFileInputRef = useRef<HTMLInputElement>(null);
   const [editDialog, setEditDialog] = useState(false);
   const [editForm, setEditForm] = useState({ LegalName: "", LegalAddress: "", PanNo: "", AadhaarNo: "", RevisionReason: "", LegalExecutiveId: "" });
@@ -594,6 +598,7 @@ const CrmAgreement: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Agreements"]} />
+      {ask.node}
       <SheetShell
         eyebrow="CivilierERP · CRM · Pre-sale"
         title="Agreements"
@@ -858,7 +863,7 @@ const CrmAgreement: React.FC = () => {
                       )
                     )}
                     {canWork && (detail.agreement?.Status === CrmStatus.DRAFT || detail.agreement?.Status === CrmStatus.EXECUTED) && (
-                      <button onClick={() => { if (window.confirm(`Cancel agreement ${detail.agreement?.AgreementNo}?`)) handleAgreementAction("cancel"); }}
+                      <button onClick={async () => { if (await ask.confirm(`Cancel agreement ${detail.agreement?.AgreementNo}?`, { okLabel: "Cancel agreement", cancelLabel: "Keep it", danger: true })) handleAgreementAction("cancel"); }}
                         className={`${KEY_LINE} h-8 px-2.5 !text-destructive !border-destructive`}>
                         Cancel agreement
                       </button>
@@ -1469,6 +1474,16 @@ const CrmAgreement: React.FC = () => {
                     </div>
                   );
                 })}
+                {previewDoc && (
+                  <div className="p-3" style={{ borderTop: RULE }}>
+                    <DocumentReviewCard key={previewDoc.Id}
+                      agreementId={previewDoc.AgreementId || selectedId!}
+                      doc={previewDoc}
+                      onClose={() => setPreviewDoc(null)}
+                      onReviewed={() => { setPreviewDoc(null); qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); }}
+                    />
+                  </div>
+                )}
               </div>
                 );
               })()}
@@ -1870,15 +1885,6 @@ const CrmAgreement: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-
-      {previewDoc && (
-        <DocumentReviewDialog
-          agreementId={previewDoc.AgreementId || selectedId!}
-          doc={previewDoc}
-          onClose={() => setPreviewDoc(null)}
-          onReviewed={() => { setPreviewDoc(null); qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] }); }}
-        />
-      )}
 
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
         <DialogContent className="max-w-lg rounded-none" style={{ border: RULE }}>

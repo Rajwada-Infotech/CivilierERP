@@ -1,5 +1,6 @@
 // CRM Bookings: every booking with what it is waiting on next. Bookings mostly create themselves when an Application
 // is approved; New Booking is the manual fallback. The booking itself opens in CrmBookingDetail (?view=<id>).
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,6 +34,7 @@ import { NewBookingDialog } from "./bookings/NewBookingDialog";
 import { ChangeUnitDialog } from "./bookings/ChangeUnitDialog";
 
 const CrmBooking: React.FC = () => {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const { canDoAction, currentUser } = useAuth();
   // The server creates a booking under the create right; it was offered under edit, so a user with one but not the
@@ -121,7 +123,7 @@ const CrmBooking: React.FC = () => {
     && Number(b.ApprovedOnAccount || 0) <= 0;
 
   const handleDeleteBooking = async (b: any) => {
-    if (!window.confirm(`Delete booking ${b.BookingNo}? Only allowed before approval or any progress; the application returns to the pre-booking list.`)) return;
+    if (!(await ask.confirm(`Delete booking ${b.BookingNo}? Only allowed before approval or any progress; the application returns to the pre-booking list.`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`${API}/${b.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
@@ -291,6 +293,7 @@ const CrmBooking: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Bookings"]} />
+      {ask.node}
       <SheetShell
         eyebrow="CivilierERP · CRM"
         title="Bookings"

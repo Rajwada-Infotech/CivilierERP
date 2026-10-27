@@ -7,7 +7,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, Percent, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -35,9 +35,9 @@ const CrmBrokerageRateTiers: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [locked, setLocked] = useState(false);
-  // Replaces window.confirm
-  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
-  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Asked on the sheet (components/sheet/SheetAsk), in place of window.confirm.
+  const ask = useSheetAsk();
+  const requestConfirm = (msg: string, onOk: () => void) => { void ask.confirm(msg, { title: "Confirm Delete", okLabel: "Delete", danger: true }).then((yes) => { if (yes) onOk(); }); };
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
 
   const { data: tiers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage-rate-tiers-master"], queryFn: fetchAll, staleTime: 30_000 });
@@ -217,19 +217,7 @@ const CrmBrokerageRateTiers: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
-      {/* Shared AlertDialog — replaces window.confirm */}
-      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
-            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {ask.node}
       </CrmShell>
     </>
   );

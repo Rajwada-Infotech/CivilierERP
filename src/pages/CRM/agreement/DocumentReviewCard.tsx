@@ -1,4 +1,5 @@
-// One agreement document opened for review: preview, its audit trail, and verify / reject.
+// One agreement document opened for review: preview, its audit trail, and verify / reject — a card on the Documents
+// tab (it was a pop-up over the page), so the agreement stays in view while the paper is checked.
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useRef, useEffect } from "react";
@@ -7,14 +8,15 @@ import { translateError } from "@/lib/translateError";
 import { KEY_INK, RULE } from "../customers/config";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Upload, File as FileIcon, Clock, UserCircle2, X, FolderClock, Download } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PROXY_METHODS, type ProxyMethod, PROXY_METHOD_LABELS } from "@/components/crm/ProxyActionDialog";
 import { API } from "./config";
 import { docStatusColor } from "./Timeline";
 import { mimeIcon, fmtBytes, fetchDocAudit } from "./forms";
 
-export const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
+export const DocumentReviewCard: React.FC<{ agreementId: number; doc: any; onClose: () => void; onReviewed: () => void }> =
   ({ agreementId, doc, onClose, onReviewed }) => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [doc.Id]);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [tab, setTab] = useState<"preview" | "history">("preview");
   const [audit, setAudit] = useState<any[] | null>(null);
@@ -107,14 +109,14 @@ export const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onC
   };
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl rounded-none" style={{ border: RULE }}>
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
-            <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
-          </DialogTitle>
-        </DialogHeader>
+    <div ref={cardRef} className="bg-card p-4 space-y-3 scroll-mt-4" style={{ border: RULE }}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="font-heading text-sm font-bold flex items-center gap-2 min-w-0">
+            {mimeIcon(doc.MimeType)} <span className="truncate">{doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}</span>
+            <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium shrink-0 ${docStatusColor[doc.Status] || ""}`}>{doc.Status}</span>
+          </h3>
+          <button onClick={onClose} aria-label="Close" className="h-7 w-7 inline-flex items-center justify-center border border-foreground hover:bg-primary/10 shrink-0"><X size={13} /></button>
+        </div>
 
         <div className="flex items-center gap-1 border-b border-border -mt-1">
           <button onClick={() => setTab("preview")}
@@ -154,9 +156,9 @@ export const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onC
               ) : !blobUrl ? (
                 <span className="text-sm text-muted-foreground">Loading preview…</span>
               ) : doc.MimeType?.startsWith("image/") ? (
-                <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[50vh] object-contain" />
+                <img src={blobUrl} alt={doc.FileName} className="max-w-full max-h-[60vh] object-contain" />
               ) : doc.MimeType === "application/pdf" ? (
-                <iframe src={blobUrl} title={doc.FileName} className="w-full h-[50vh] border-0" />
+                <iframe src={blobUrl} title={doc.FileName} className="w-full h-[60vh] border-0" />
               ) : (
                 <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground text-sm">{mimeIcon(doc.MimeType)} Preview not available.</div>
               )}
@@ -275,7 +277,6 @@ export const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onC
           )}
           <button onClick={onClose} className="px-3 py-1.5 text-xs border border-border text-muted-foreground hover:bg-muted">Close</button>
         </div>
-      </DialogContent>
-    </Dialog>
+    </div>
   );
 };

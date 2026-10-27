@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useEffect, useRef, useState, useMemo } from "react";
@@ -36,6 +37,7 @@ import { QueryPaymentTab, useDeedQueryPayment } from "./salesDeed/QueryPaymentTa
 import { RegistryTab, useDeedRegistry } from "./salesDeed/RegistryTab";
 
 const CrmSalesDeed: React.FC = () => {
+  const ask = useSheetAsk();
   const rights = usePageRights("crm-sales-deed");
   // Query Payment and Registry were their own pages; either their own right or the deed's works their tabs.
   const qpRights = usePageRights("crm-query-payment");
@@ -345,7 +347,7 @@ const CrmSalesDeed: React.FC = () => {
   const handleReviewDoc = async (docId: number, verify: boolean) => {
     let remarks: string | undefined;
     if (!verify) {
-      remarks = window.prompt("Describe what's wrong with this document (required):")?.trim();
+      remarks = (await ask.prompt("Describe what's wrong with this document. The uploader sees this.", { title: "Reject document", okLabel: "Reject", danger: true })) ?? undefined;
       if (!remarks) return;
     }
     try {
@@ -355,7 +357,7 @@ const CrmSalesDeed: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
   const handleCancelDeed = async () => {
-    if (!window.confirm(`Cancel sale deed ${detail?.DeedNo}?`)) return;
+    if (!(await ask.confirm(`Cancel sale deed ${detail?.DeedNo}?`, { okLabel: "Cancel deed", cancelLabel: "Keep it", danger: true }))) return;
     try { await send(`${API}/${detailId}/cancel`, "PUT"); toast.success("Sale deed cancelled"); invalidate(); }
     catch (e: any) { toast.error(translateError(e.message)); }
   };
@@ -370,6 +372,7 @@ const CrmSalesDeed: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Sale Deeds"]} />
+      {ask.node}
       <SheetShell
         eyebrow="CivilierERP · CRM · Sale deed"
         title="Sale Deeds"

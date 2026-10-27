@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,6 +51,7 @@ const Tick = ({ ok }: { ok: boolean }) => ok
   : <span className="mt-0.5 w-5 h-5 shrink-0 border-2 border-foreground/50 bg-card" aria-label="still needed" />;
 
 const CrmResaleCase: React.FC = () => {
+  const ask = useSheetAsk();
   const { id } = useParams();
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -122,9 +124,9 @@ const CrmResaleCase: React.FC = () => {
     window.open(url, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
-  const review = (d: CaseDoc, decision: "Verified" | "Rejected") => {
+  const review = async (d: CaseDoc, decision: "Verified" | "Rejected") => {
     let remarks = "";
-    if (decision === "Rejected") { remarks = window.prompt("Why is it rejected? The uploader sees this.") || ""; if (!remarks.trim()) return; }
+    if (decision === "Rejected") { remarks = (await ask.prompt("Why is it rejected? The uploader sees this.", { title: "Reject document", okLabel: "Reject", danger: true })) || ""; if (!remarks.trim()) return; }
     call(`doc-${d.Id}`, `documents/${d.Id}/review`, { decision, remarks }, decision);
   };
 
@@ -266,6 +268,7 @@ const CrmResaleCase: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["CRM", "Resale", `Case #${c.Id}`]} />
+      {ask.node}
       <SheetShell
         eyebrow="CivilierERP · CRM · Resale"
         title={`${isResale ? "Resale" : "Buy-back"} · ${c.Property}`}
@@ -342,7 +345,7 @@ const CrmResaleCase: React.FC = () => {
                           {isResale
                             ? <button className={primary} disabled={!readyToFinish || busy === "finish" || (!!c.FromCustomerId && c.FromCustomerId === c.ToCustomerId)}
                                 title={c.FromCustomerId && c.FromCustomerId === c.ToCustomerId ? "The seller and the buyer are the same customer" : undefined}
-                                onClick={() => { if (window.confirm(`Pass ${c.Property} to ${c.ToName}?`)) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
+                                onClick={async () => { if (await ask.confirm(`Pass ${c.Property} to ${c.ToName}?`, { okLabel: "Transfer" })) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
                             : <button className={primary} disabled={!readyToFinish || busy === "finish" || !!c.PayoutNewPaymentId} onClick={() => call("finish", "send-to-finance", {}, "Sent to Finance")}>Send payout to Finance</button>}
                         </div>
                       )}

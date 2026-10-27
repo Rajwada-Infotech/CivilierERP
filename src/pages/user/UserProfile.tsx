@@ -245,7 +245,7 @@ export default function UserProfile() {
         heroMesh="radial-gradient(ellipse at 20% 50%, #1f2937 0%, transparent 55%), radial-gradient(ellipse at 80% 20%, #111827 0%, transparent 50%), radial-gradient(ellipse at 55% 80%, #0f172a 0%, transparent 50%), linear-gradient(135deg, #0a0e16 0%, #111827 50%, #0a0e16 100%)"
         accentColor="slate"
         roleBadge={
-          <span className="inline-flex items-center gap-1 text-[0.625rem] font-heading font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+          <span className="inline-flex items-center font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-2 py-0.5 border border-foreground text-foreground whitespace-nowrap">
             {profile?.roleName ?? currentUser?.role ?? "user"}
           </span>
         }

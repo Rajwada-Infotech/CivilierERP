@@ -4,7 +4,7 @@ import { Plus, Trash2, Copy, Layers, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { VILLA_TYPE_API, type VillaType } from "./VillaTypesDialog";
 import { storeyDisplay, storeyRank } from "@/lib/floorLabel";
 
@@ -69,9 +69,9 @@ export function VillaRoomPlanEditor({
   const [behind, setBehind] = useState<{ villas: number; rooms: number } | null>(null);
   const [updatingVillas, setUpdatingVillas] = useState(false);
   const villasUrl = `/api/crm/project-auto-setup/projects/${type.ProjectId}/villas/add-missing-rooms?villaTypeId=${type.Id}`;
-  // Replaces window.confirm
-  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
-  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Asked on the sheet (components/sheet/SheetAsk), in place of window.confirm.
+  const ask = useSheetAsk();
+  const requestConfirm = (msg: string, onOk: () => void) => { void ask.confirm(msg, { title: "Confirm Action", okLabel: "Confirm" }).then((yes) => { if (yes) onOk(); }); };
   const checkBuiltVillas = async () => {
     if (!type.VillaCount) { setBehind(null); return; }
     const r = await fetchWithAuth(`${villasUrl}&dryRun=1`, { method: "POST" });
@@ -80,7 +80,7 @@ export function VillaRoomPlanEditor({
   };
   const updateBuiltVillas = async () => {
     if (!behind) return;
-    // Replaces window.confirm — uses Radix AlertDialog instead
+    // Asked on the sheet (useSheetAsk).
     requestConfirm(
       `Add ${behind.rooms} room(s) to ${behind.villas} built ${type.Code} villa(s)? Only missing rooms are added — existing rooms, their names and their DPR work stay exactly as they are.`,
       async () => {
@@ -517,19 +517,7 @@ export function VillaRoomPlanEditor({
         </div>
       )}
     </div>
-    {/* Shared AlertDialog — replaces window.confirm */}
-    <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Confirm Action</AlertDialogTitle>
-          <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    {ask.node}
     </>
   );
 }

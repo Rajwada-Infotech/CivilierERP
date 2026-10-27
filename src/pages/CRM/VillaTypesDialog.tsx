@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Home, Pencil, Trash2, LayoutGrid, RotateCcw, CheckCircle2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type { LayoutType } from "@/api/unitBhkConfigApi";
@@ -65,9 +65,9 @@ export function VillaTypesDialog({
   const [showRemoved, setShowRemoved] = useState(false);
   // Ref to the add/edit form so we can scroll to it when the pencil is clicked.
   const formRef = useRef<HTMLDivElement>(null);
-  // Replaces window.confirm
-  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
-  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Asked on the sheet (components/sheet/SheetAsk), in place of window.confirm.
+  const ask = useSheetAsk();
+  const requestConfirm = (msg: string, onOk: () => void) => { void ask.confirm(msg, { title: "Confirm Remove", okLabel: "Remove", danger: true }).then((yes) => { if (yes) onOk(); }); };
 
   // Pick the starting project once, when the dialog opens. The parent rebuilds
   // `projects` on every render (and refetches in the background), so reacting
@@ -551,19 +551,7 @@ export function VillaTypesDialog({
           )}
         </div>
       </DialogContent>
-      {/* Shared AlertDialog — replaces window.confirm */}
-      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Remove</AlertDialogTitle>
-            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Remove</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {ask.node}
     </Dialog>
   );
 }

@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useEffect, useMemo, useState } from "react";
 import { ParkingNamingPanel } from "./autoSetup/NamingPanel";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -5,7 +6,6 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Car, CheckCircle2, Lock, ExternalLink, Pencil, X, ChevronDown, ChevronRight } from "lucide-react";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 
 // Deliberately its own component/file, rendered as a separate toggle inside
@@ -48,6 +48,7 @@ const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-m
 const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
 const CrmProjectAutoSetupParking: React.FC = () => {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const rights = usePageRights("crm-auto-project-setup");
   // Strict Company -> Project gate — matches the cascade now enforced in
@@ -202,7 +203,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
   // already enforces the shared booking/hold lock check, nothing duplicated
   // here.
   const handleDeleteSlot = async (blockId: number, slot: any) => {
-    if (!window.confirm(`Delete parking slot "${slot.SlotNo}"?`)) return;
+    if (!(await ask.confirm(`Delete parking slot "${slot.SlotNo}"?`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`/api/parking-slot-master/${slot.Id}`, { method: "DELETE" });
       const data = await res.json();
@@ -259,6 +260,7 @@ const CrmProjectAutoSetupParking: React.FC = () => {
   return (
     <div className="space-y-4">
       <div className={cardCls}>
+      {ask.node}
         <label className={labelCls}>Company</label>
         <select
           value={companyId}

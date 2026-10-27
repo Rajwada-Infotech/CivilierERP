@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Minus, Move, Network, Plus, RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const PLOT_API = "/api/plot-master";
@@ -72,9 +72,9 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const initialised = useRef<number | null>(null);
-  // Replaces window.confirm
-  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
-  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Asked on the sheet (components/sheet/SheetAsk), in place of window.confirm.
+  const ask = useSheetAsk();
+  const requestConfirm = (msg: string, onOk: () => void) => { void ask.confirm(msg, { title: "Discard changes?", okLabel: "Discard", cancelLabel: "Keep editing", danger: true }).then((yes) => { if (yes) onOk(); }); };
 
   const byId = useMemo(() => new Map(plots.map((plot) => [plot.Id, plot])), [plots]);
   const sorted = useMemo(() => [...plots].sort(plotOrder), [plots]);
@@ -196,7 +196,7 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
 
   const close = (next: boolean) => {
     if (!next && dirty) {
-      // Replaces window.confirm — uses Radix AlertDialog instead
+      // Asked on the sheet (useSheetAsk).
       requestConfirm("Discard the unsaved layout changes?", () => onOpenChange(next));
       return;
     }
@@ -369,19 +369,7 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
           </div>
         )}
       </DialogContent>
-      {/* Shared AlertDialog — replaces window.confirm */}
-      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard Changes?</AlertDialogTitle>
-            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Discard</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {ask.node}
     </Dialog>
   );
 }

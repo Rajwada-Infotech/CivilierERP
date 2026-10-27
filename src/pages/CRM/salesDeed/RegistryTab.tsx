@@ -1,5 +1,6 @@
 // The deed's Registry tab: the Sub-Registrar appointment (start → schedule → reschedule → complete / cancel), its
 // documents, then the deed's registration and Index II. Formerly its own page; now scoped to the deed's booking.
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -50,6 +51,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
   onSaveIndex2: (date: string) => void; savingIndex2: boolean;
   onChanged: () => void;
 }) {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const { registryId, registry, documents, refetch } = useDeedRegistry(detail.BookingId);
   const { data: eligible = [] } = useQuery({
@@ -173,7 +175,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
     if (registryId == null) return;
     let remarks: string | undefined;
     if (!verify) {
-      remarks = window.prompt("Describe what's wrong with this document (required):")?.trim();
+      remarks = (await ask.prompt("Describe what's wrong with this document. The uploader sees this.", { title: "Reject document", okLabel: "Reject", danger: true })) ?? undefined;
       if (!remarks) return;
     }
     try {
@@ -189,6 +191,7 @@ export function RegistryTab({ detail, qpConfirmed, canCreate, canEdit, canComple
 
   return (
     <div className="space-y-4">
+      {ask.node}
       <Panel title="Sub-Registrar office registration" right={status ? <SheetMark text={status} tone={deedTone(status)} /> : undefined}>
         <div className="p-4 space-y-3">
           <p className="text-xs text-muted-foreground">Both parties appear at the Sub-Registrar Office to register the Sale Deed — this legally transfers ownership to the buyer.</p>
