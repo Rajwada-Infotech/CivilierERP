@@ -43,7 +43,7 @@ const { connectDB, getPool, closeDB } = require("../db");
 
   show("Submitted applications with no live booking (should be 0)",
     await q(`SELECT COUNT(*) AS Cnt FROM dbo.CrmApplication a
-             WHERE a.Status = 'Pending' AND a.PreferredUnitId IS NOT NULL
+             WHERE a.IsActive = 1 AND a.Status = 'Pending' AND a.PreferredUnitId IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.ApplicationId = a.Id AND b.IsActive = 1
                                AND b.Status NOT IN ('Cancelled','Rejected','Expired','Transferred'))`));
 
