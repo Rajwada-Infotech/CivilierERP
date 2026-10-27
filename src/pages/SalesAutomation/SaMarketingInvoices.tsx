@@ -6,12 +6,12 @@ import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { StatusBadge } from "@/components/StatusBadge";
 
 const API = "/api/sa/marketing-invoices";
 
@@ -172,9 +172,8 @@ const SaMarketingInvoices: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load invoices.</div>;
 
   return (
-    <SalesAutoShell title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Marketing Invoices"]} title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Marketing Invoices"]} />
       <div className="space-y-8">
         <MasterPage
           title="Invoice"
@@ -185,35 +184,35 @@ const SaMarketingInvoices: React.FC = () => {
           canDelete={canDoAction("sa-marketing-invoices", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          columnRenderers={{
+            PaymentStatus: (value) => <StatusBadge status={String(value)} />,
+          }}
           exportConfig={{ title: "Marketing Invoices", filename: "marketing-invoices", columns: exportColumns }}
           rowActions={(row) => {
             const status = String(row.ApprovalStatus ?? "Pending");
-            if (status === "Approved") {
-              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">Approved</span>;
-            }
-            if (status === "Rejected") {
-              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-red-500/10 text-red-500">Rejected</span>;
+            if (status === "Approved" || status === "Rejected") {
+              return <StatusBadge status={status} />;
             }
             if (!canDoAction("sa-marketing-invoices", "edit")) {
-              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-yellow-500/10 text-yellow-600">Pending</span>;
+              return <StatusBadge status="Pending" />;
             }
             return (
               <>
                 <button
                   type="button"
                   onClick={() => setApprovalDialog({ id: row._id, action: "approve", invoiceNumber: String(row.InvoiceNumber) })}
-                  className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-emerald-500 hover:bg-emerald-500/10 transition-colors"
                   title="Approve invoice"
                 >
-                  <CheckCircle2 size={13} />
+                  <CheckCircle2 size={13} /> Approve
                 </button>
                 <button
                   type="button"
                   onClick={() => setApprovalDialog({ id: row._id, action: "reject", invoiceNumber: String(row.InvoiceNumber) })}
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-red-500 hover:bg-red-500/10 transition-colors"
                   title="Reject invoice"
                 >
-                  <XCircle size={13} />
+                  <XCircle size={13} /> Reject
                 </button>
               </>
             );

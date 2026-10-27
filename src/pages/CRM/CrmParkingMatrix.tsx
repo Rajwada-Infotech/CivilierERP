@@ -14,8 +14,8 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  ExtendRow, Facts, Field, HOLDS_API, INP, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
-  customerOptions, fetchOptions, fmtMoney, holdCall, holdLeft, useMatrixCustomers, type Option, type TileStatus,
+  Facts, Field, HOLDS_API, INP, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
+  customerOptions, fetchOptions, fmtMoney, holdCall, useMatrixCustomers, type Option, type TileStatus,
 } from "./matrix/shared";
 
 const API = "/api/parking-matrix";
@@ -127,14 +127,13 @@ function SellDialog({ slot, projectId, onClose }: { slot: MatrixSlot; projectId:
 }
 
 // A held or sold slot, opened. A sale can be standalone (no booking). "Held" also covers a sale whose own charge isn't
-// paid yet: Extend is offered there, while releasing the sale itself belongs to the booking's Charges (it follows the
-// same legal-work and amendment rules as any other post-booking change), so this links out.
+// paid yet: releasing that sale belongs to the booking's Charges (it follows the same legal-work and amendment rules
+// as any other post-booking change), so this links out.
 function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
   const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [showExtend, setShowExtend] = useState(false);
   const isHold = slot.Status === "OnHold";
   const hasUnpaidAllotment = isHold && slot.AllotmentId != null;
   const refresh = () => qc.invalidateQueries({ queryKey: ["parking-matrix"] });
@@ -150,7 +149,6 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
   };
 
   const pick = <T,>(hold: T, own: T) => (isHold && hold) || own;
-  const left = isHold ? holdLeft(slot.HoldUntil) : null;
   const state = isHold ? (hasUnpaidAllotment ? "Sold, payment pending" : "On hold") : "Sold";
   // The booking's own card when there is one; a standalone sale has only its application.
   const openRecord = () => navigate(slot.BookingId != null ? `/crm/bookings?view=${slot.BookingId}` : `/crm/applications?id=${slot.ApplicationId}`);
@@ -188,17 +186,11 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
         {isHold && (
           <p className="text-xs px-3 py-2" style={{ border: RULE_SOFT }}>
             {hasUnpaidAllotment ? "The parking charge isn't paid yet; the tile turns Sold once it is." : "Held for the customer while they decide."}
-            {left && <span className="font-semibold"> Hold: {left}.</span>}
           </p>
         )}
 
-        {showExtend && slot.HoldId != null && <ExtendRow holdId={slot.HoldId} onDone={() => { refresh(); onClose(); }} />}
-
         <div className="flex flex-wrap justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
           <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Close</button>
-          {isHold && rights.canEdit && slot.HoldId != null && hasUnpaidAllotment && (
-            <button onClick={() => setShowExtend((s) => !s)} className={`${KEY_LINE} h-9 px-3`}>Extend hold</button>
-          )}
           {isHold && !hasUnpaidAllotment ? (
             rights.canEdit && slot.HoldId != null && (
               <button onClick={release} disabled={busy} className={`${KEY_RED} h-9 px-4`}>{busy ? "Releasing…" : "Release hold"}</button>
@@ -233,9 +225,6 @@ export function ParkingMatrixPage() {
     sock.on("matrix:update", onUpdate);
     return () => { sock.off("matrix:update", onUpdate); };
   }, [projectId, qc]);
-  // Re-render every minute so the hold countdowns tick.
-  const [, setTick] = useState(0);
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 60_000); return () => clearInterval(t); }, []);
 
   const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["parking-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
   useEffect(() => { if (!projectId && projects.length === 1) setProjectId(String(projects[0].Id)); }, [projects, projectId]);
@@ -355,7 +344,6 @@ export function ParkingMatrixPage() {
                           {list.map((s) => (
                             <Tile key={s.Id} name={s.SlotNo} status={s.Status}
                               line={s.Status === "Booked" ? (s.ApplicantName || s.BookingNo || "—") : s.Status === "OnHold" ? (s.HoldApplicantName || s.ApplicantName || "—") : s.Status === "Blocked" ? "Not for sale" : "Free"}
-                              holdUntil={s.HoldUntil}
                               title={s.Status === "Available" && !canSell && !canHold ? "You don't have the right to sell or hold slots." : undefined}
                               disabled={s.Status === "Blocked" || (s.Status === "Available" && !canSell && !canHold)}
                               onClick={() => onTile(s)} />

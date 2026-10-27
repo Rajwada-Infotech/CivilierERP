@@ -55,11 +55,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
   },
-  {
-    label: "Tickets",
-    icon: Ticket,
-    children: [{ label: "Resolution", path: "/admin/tickets/resolution" }],
-  },
+  { label: "Ticket Resolution", icon: Ticket, path: "/admin/tickets/resolution" },
 
   // ── 4. Rights, Integrations & Misc ────────────────────────────────────────
   {

@@ -578,6 +578,32 @@ router.put("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-projec
           UPDATE dbo.RoomMaster SET ProjectId = @ProjectId, BlockId = @BlockId, Floor = @Floor
           WHERE UnitId = @Id AND (ProjectId <> @ProjectId OR BlockId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
         `);
+      // DependencyMaster (DPR work chains) carries its own copy of
+      // ProjectId/TowerId(=BlockId)/Floor, stamped once at chain creation
+      // (autoDprChains.js) and never re-joined through UnitMaster/RoomMaster
+      // afterward — DPR filtering, dashboards and attendance screens all key
+      // off these columns directly. Without this, moving a unit to a
+      // different block/project left its DPR chains permanently showing
+      // under the OLD block/floor, even though Room Master and Unit Master
+      // itself correctly show the new one. Only attempted when chains
+      // actually exist — chainFloorLabel can throw for a plot-built unit
+      // that isn't converted yet, which must not block an otherwise-normal
+      // edit of a unit that has no DPR work started at all.
+      const hasChains = (await tx.request().input("Id", sql.Int, parseInt(id))
+        .query("SELECT TOP 1 1 AS x FROM dbo.DependencyMaster WHERE FlatId = @Id")).recordset.length > 0;
+      if (hasChains) {
+        const { chainFloorLabel } = require("../services/unitLayout");
+        const newFloorLabel = await chainFloorLabel(tx, { UnitId: parseInt(id), UnitName, ProjectId: parseInt(ProjectId), BlockId: parseInt(BlockId), FloorNo: FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null });
+        await tx.request()
+          .input("Id",        sql.Int, parseInt(id))
+          .input("ProjectId", sql.Int, parseInt(ProjectId))
+          .input("BlockId",   sql.Int, parseInt(BlockId))
+          .input("Floor",     sql.NVarChar(50), newFloorLabel)
+          .query(`
+            UPDATE dbo.DependencyMaster SET ProjectId = @ProjectId, TowerId = @BlockId, Floor = @Floor
+            WHERE FlatId = @Id AND (ProjectId <> @ProjectId OR TowerId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
+          `);
+      }
       await moveUnitOverrides(tx, parseInt(id), parseInt(ProjectId), parseInt(BlockId));
       // Type changed: add the new layout's rooms, soft-deactivate rooms it
       // doesn't have — only those with no DPR work (kept ones are reported).

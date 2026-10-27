@@ -91,6 +91,7 @@ router.get(
           a.AdCode,
           a.CampaignId,
           c.Name AS CampaignName,
+          c.PlatformId,
           a.Name,
           a.CreativeRef,
           a.AdType,

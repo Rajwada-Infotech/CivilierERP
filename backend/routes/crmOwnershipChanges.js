@@ -74,8 +74,8 @@ router.get("/:id/deed", requirePageRight("crm-ownership-changes", "view"), async
 router.get("/:id/history", requirePageRight("crm-ownership-changes", "view"), withId((db, id) => svc.history(db, id), "GET history"));
 router.put("/:id/owner-application", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.openOwnerApplication(db, id, actorId(req)), "open application"));
 router.put("/:id/submit", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.submit(db, id, user(req)), "submit"));
-router.put("/:id/approve", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.decide(db, id, true, rmk(req), user(req)), "approve"));
-router.put("/:id/reject", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.decide(db, id, false, rmk(req), user(req)), "reject"));
+router.put("/:id/approve", requirePageRight("crm-ownership-changes", "approve"), withId((db, id, req) => svc.decide(db, id, true, rmk(req), user(req)), "approve"));
+router.put("/:id/reject", requirePageRight("crm-ownership-changes", "approve"), withId((db, id, req) => svc.decide(db, id, false, rmk(req), user(req)), "reject"));
 router.put("/:id/cancel", requirePageRight("crm-ownership-changes", "edit"), withId((db, id, req) => svc.cancel(db, id, rmk(req), actorId(req)), "cancel"));
 
 module.exports = router;

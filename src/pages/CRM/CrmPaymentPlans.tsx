@@ -7,6 +7,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Percent } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
@@ -144,6 +145,9 @@ const CrmPaymentPlans: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [isActive, setIsActive] = useState(true);
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
 
   // Read-only preview, opened by tapping a card. Built straight from the
   // list row's own MilestonesJson — no extra fetch, no loading flicker.
@@ -343,20 +347,21 @@ const CrmPaymentPlans: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("Delete this payment plan? This cannot be undone.")) return;
-    setDeletingId(id);
-    try {
-      const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      toast.success("Payment plan deleted");
-      setPreviewPlan(null);
-      qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setDeletingId(null);
-    }
+    requestConfirm("Delete this payment plan? This cannot be undone.", async () => {
+      setDeletingId(id);
+      try {
+        const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        toast.success("Payment plan deleted");
+        setPreviewPlan(null);
+        qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
+      } catch (e: any) {
+        toast.error(translateError(e.message));
+      } finally {
+        setDeletingId(null);
+      }
+    });
   };
 
   const previewMilestones = useMemo(() => parseMilestones(previewPlan?.MilestonesJson), [previewPlan]);
@@ -867,6 +872,19 @@ const CrmPaymentPlans: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Delete</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       </CrmShell>
     </>
   );

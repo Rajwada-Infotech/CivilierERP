@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
+import { SHEET_CSS, Detail, Dimension, Skel, n0, fmtInt, fmtMoney, money, share } from "@/components/sheet/Sheet";
 
 // CRM Dashboard, drawn as an architect's sheet.
 //
@@ -17,20 +17,6 @@ import { SHEET_CSS, Detail, Dimension, Skel } from "@/components/sheet/Sheet";
 const API = "/api/crm/dashboard";
 
 // ── Number formatting ───────────────────────────────────────────────────────
-const n0 = (v: unknown) => Number(v) || 0;
-const fmtInt = (v: unknown) => n0(v).toLocaleString("en-IN");
-const fmtMoney = (v: unknown) => {
-  const n = n0(v);
-  if (n >= 1_00_00_000) return { num: (n / 1_00_00_000).toFixed(2), unit: "Cr" };
-  if (n >= 1_00_000) return { num: (n / 1_00_000).toFixed(1), unit: "L" };
-  if (n >= 1_000) return { num: (n / 1_000).toFixed(0), unit: "K" };
-  return { num: n.toFixed(0), unit: "" };
-};
-const money = (v: unknown) => {
-  const m = fmtMoney(v);
-  return `₹${m.num}${m.unit ? ` ${m.unit}` : ""}`;
-};
-const share = (part: unknown, whole: unknown) => (n0(whole) > 0 ? Math.min(100, Math.max(0, (n0(part) / n0(whole)) * 100)) : 0);
 const sumCount = (rows: any[] = []) => rows.reduce((s, r) => s + n0(r.Count), 0);
 
 // ── C: the pipeline, drawn as a section through four stages ─────────────────

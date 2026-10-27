@@ -103,6 +103,25 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "
   try {
     if (!(await assertAllocationAllowed(req, res, allocationId))) return;
     const pool = getPool();
+
+    // No DB-level uniqueness exists on (AllocationId, EntryDate, RoomId) —
+    // a double-click or retry on the same day's labour form silently
+    // inserted a second row, double-counting skilled/unskilled headcount
+    // for that allocation/date in every downstream report. RoomId is
+    // nullable, so matched NULL-safely rather than with a plain =.
+    const dupe = await pool.request()
+      .input("allocationId", sql.Int, allocationId)
+      .input("entryDate", sql.Date, entryDate)
+      .input("roomId", sql.Int, roomId != null && roomId !== "" ? roomId : null)
+      .query(`
+        SELECT TOP 1 EntryId FROM dbo.DailyLabourEntry
+        WHERE AllocationId = @allocationId AND EntryDate = @entryDate
+          AND ((RoomId IS NULL AND @roomId IS NULL) OR RoomId = @roomId)
+      `);
+    if (dupe.recordset.length) {
+      return res.status(409).json({ error: "An entry for this allocation, date and room already exists — edit it instead of creating a new one.", existingId: dupe.recordset[0].EntryId });
+    }
+
     const result = await pool.request()
       .input("allocationId", sql.Int, allocationId)
       .input("entryDate", sql.Date, entryDate)

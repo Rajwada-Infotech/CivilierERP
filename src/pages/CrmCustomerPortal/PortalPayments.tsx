@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download } from "lucide-react";
+import { CheckCircle2, Circle, Clock, CreditCard, FileText, Eye, Download, Receipt } from "lucide-react";
 import { Dialog, DialogHeader } from "@/components/ui/dialog";
-import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen } from "./portalApi";
+import { API, authHeaders, fmtMoney, fmtDate, fetchInvoices, fetchCreditNotes, creditNotesSeenKey, writeSeen, fetchReceipts, downloadReceiptPdf } from "./portalApi";
 import {
   PageHeader, Card, CardHeader, StatusPill, GOLD, HAIRLINE, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, serif,
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
@@ -58,7 +58,22 @@ const PortalPayments: React.FC = () => {
   const { timeline, applicationId, me } = useOutletContext<Ctx>();
   const milestones = timeline.paymentMilestones || [];
   const { data: invoices = [] } = useQuery({ queryKey: ["portal-invoices", applicationId], queryFn: () => fetchInvoices(applicationId), staleTime: 30_000 });
+  const { data: receipts = [] } = useQuery({ queryKey: ["portal-receipts", applicationId], queryFn: () => fetchReceipts(applicationId), staleTime: 30_000 });
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
+  const [downloadingReceiptId, setDownloadingReceiptId] = useState<number | null>(null);
+
+  const handleDownloadReceipt = async (receiptId: number) => {
+    try {
+      setDownloadingReceiptId(receiptId);
+      const blob = await downloadReceiptPdf(receiptId, applicationId);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch (err) {
+      console.error("Failed to download receipt:", err);
+    } finally {
+      setDownloadingReceiptId(null);
+    }
+  };
 
   if (!milestones.length) {
     return (
@@ -147,6 +162,34 @@ const PortalPayments: React.FC = () => {
                 <button data-row-view onClick={() => setPreviewInvoice(inv)}
                   className="flex items-center gap-1 text-xs font-medium hover:underline" style={{ color: GOLD }}>
                   <Eye size={13} /> View
+                </button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {receipts.length > 0 && (
+        <Card className="overflow-hidden">
+          <CardHeader icon={Receipt} title="Payment Receipts" />
+          {receipts.map((rcpt: any) => (
+            <div key={rcpt.Id} className="flex items-center justify-between gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: TEXT }}>{rcpt.ReceiptNo}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
+                  {fmtDate(rcpt.ReceivedDate || rcpt.CreatedAt)}{rcpt.PaymentMode ? ` · ${rcpt.PaymentMode}` : ""}{rcpt.TransactionRef ? ` · Ref: ${rcpt.TransactionRef}` : rcpt.ChequeNo ? ` · Chq: ${rcpt.ChequeNo}` : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(rcpt.Amount)}</p>
+                <button
+                  type="button"
+                  disabled={downloadingReceiptId === rcpt.Id}
+                  onClick={() => handleDownloadReceipt(rcpt.Id)}
+                  className="flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-50"
+                  style={{ color: GOLD }}
+                >
+                  <Download size={13} /> {downloadingReceiptId === rcpt.Id ? "Opening…" : "Download"}
                 </button>
               </div>
             </div>

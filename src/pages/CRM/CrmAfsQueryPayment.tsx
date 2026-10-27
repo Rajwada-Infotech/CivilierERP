@@ -96,19 +96,24 @@ const STEPS = [
   { id: 2, label: "Confirm Payment" },
 ];
 
-function StepTabs({ step, onChange, confirmed }: { step: number; onChange: (s: number) => void; confirmed: boolean }) {
+// infoSent: the server has the fee breakdown as sent (InfoSent / Confirmed) — what Step 2 waits on, not the tab in view.
+function StepTabs({ step, onChange, confirmed, infoSent }: { step: number; onChange: (s: number) => void; confirmed: boolean; infoSent: boolean }) {
   return (
     <div className="flex items-center gap-1 px-6 pt-3">
       {STEPS.map((s) => {
         const active = step === s.id;
-        const done = confirmed || (s.id === 1 && step > 1);
+        const done = confirmed || (s.id === 1 && infoSent);
+        const locked = s.id === 2 && !infoSent && !confirmed;
         return (
           <button
             key={s.id}
-            onClick={() => onChange(s.id)}
+            onClick={() => { if (!locked) onChange(s.id); }}
+            disabled={locked}
+            title={locked ? "Send the fee breakdown to the customer first" : undefined}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-t-lg border-b-2 transition-colors",
-              active ? "border-foreground/30 text-foreground bg-card" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40",
+              locked ? "opacity-40 cursor-not-allowed border-transparent text-muted-foreground"
+                : active ? "border-foreground/30 text-foreground bg-card" : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40",
             )}
           >
             <span className={cn(
@@ -279,7 +284,7 @@ function AmountEditor({
         </div>
       ) : (
         <div className="flex items-center gap-1.5 text-[0.6875rem] text-foreground bg-card border border-foreground/30 px-3 py-2">
-          <AlertTriangle size={11} /> Amounts not set — fill before sending to customer.
+          <AlertTriangle size={11} /> No amount set yet — optional; the paperwork can still be sent.
           {canEditNow && (
             <button onClick={startEdit} className="ml-auto text-foreground font-semibold hover:underline shrink-0">Set amounts</button>
           )}
@@ -482,6 +487,8 @@ const CrmAfsQueryPayment: React.FC<{
     if (detail) setStep(detail.Status === CrmStatus.PENDING ? 1 : 2);
     setPendingInfoFiles([]);
     setProofFile(null);
+    setConfirmAmount("");
+    setConfirmRemarks("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail?.Id]);
 
@@ -801,8 +808,8 @@ const CrmAfsQueryPayment: React.FC<{
             {/* Step 1: Send paperwork */}
             <div className={`px-5 py-4 space-y-3 ${step === 1 ? "" : "opacity-60 pointer-events-none"}`}>
               <div className="flex items-center gap-2">
-                <span className={`w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step > 1 ? "bg-foreground text-card" : "bg-foreground text-card"}`}>
-                  {step > 1 ? <Check size={10} /> : "1"}
+                <span className="w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 bg-foreground text-card">
+                  {detail.Status !== CrmStatus.PENDING ? <Check size={10} /> : "1"}
                 </span>
                 <p className="text-sm font-semibold">Send Fee Breakdown to Customer</p>
               </div>
@@ -838,7 +845,7 @@ const CrmAfsQueryPayment: React.FC<{
                   </button>
                   {awaitingSendConfirm ? (
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""}?</span>
+                      <span className="text-xs text-muted-foreground">Send {pendingInfoFiles.length} file{pendingInfoFiles.length !== 1 ? "s" : ""}{detail.Status === CrmStatus.PENDING && !(Number(detail.StampDuty) > 0) && !(Number(detail.RegistrationFee) > 0) ? " without an amount" : ""}?</span>
                       <button onClick={() => setAwaitingSendConfirm(false)} disabled={sendingInfo} className="px-2.5 py-1 text-xs border border-border hover:bg-muted transition-colors">Cancel</button>
                       <button onClick={handleSendInfo} disabled={sendingInfo} className={`${KEY_INK} h-8 px-3`}>
                         <Send size={10} /> {sendingInfo ? "Sending…" : "Confirm Send"}
@@ -867,11 +874,15 @@ const CrmAfsQueryPayment: React.FC<{
                   <span className={`w-5 h-5 text-[0.625rem] font-bold flex items-center justify-center shrink-0 ${step === 2 ? "bg-foreground text-card" : "bg-muted text-muted-foreground"}`}>2</span>
                   <p className="text-sm font-semibold">Confirm Customer Paid the Government</p>
                 </div>
-                {step !== 2 && (
+                {step !== 2 && detail.Status !== CrmStatus.PENDING && (
                   <button onClick={() => setStep(2)}
                     className="text-xs px-3 py-1.5 border border-foreground/30 text-foreground font-semibold hover:bg-primary/10 transition-colors shrink-0">
                     Open →
                   </button>
+                )}
+                {step !== 2 && detail.Status === CrmStatus.PENDING && (
+                  <span title="Send the fee breakdown to the customer first"
+                    className="text-xs px-3 py-1.5 border border-dashed border-foreground/30 text-muted-foreground shrink-0 cursor-not-allowed">Locked</span>
                 )}
               </div>
               {step === 2 && (
@@ -1300,7 +1311,7 @@ const CrmAfsQueryPayment: React.FC<{
                       </div>
                     ) : (
                       <>
-                        <StepTabs step={step} onChange={setStep} confirmed={false} />
+                        <StepTabs step={step} onChange={setStep} confirmed={false} infoSent={detail.Status !== CrmStatus.PENDING} />
                         <div className="px-5 py-4 max-h-[45vh] overflow-y-auto thin-scroll space-y-3">
                           {step === 1 ? (
                             <>

@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -13,7 +12,8 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { PlugZap } from "lucide-react";
+import { PlugZap, Megaphone } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const API = "/api/sa/social-media";
 
@@ -183,8 +183,7 @@ const SaSocialMediaMaster: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load platforms.</div>;
 
   return (
-    <SalesAutoShell title="Social Media Master" subtitle="Manage social media platforms and their campaign connections">
-      <Breadcrumbs items={["Sales Automation", "Social Media"]} />
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Social Media"]} title="Social Media Master" subtitle="Step 1 of the lead workflow: platforms → campaigns → ads → leads">
       <div className="space-y-8">
         <MasterPage
           title="Social Media Platform"
@@ -195,14 +194,30 @@ const SaSocialMediaMaster: React.FC = () => {
           canDelete={canDoAction("sa-social-media", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          columnRenderers={{
+            // Platform -> Campaign -> Ad is a real hierarchy that was never
+            // discoverable in the UI — these counts now link straight into
+            // the filtered next level instead of requiring a user to
+            // already know the relationship exists.
+            campaignCount: (value, row) => (
+              <Link to={`/sales-automation/campaigns?platformId=${row._id}`} className="text-primary hover:underline">
+                {String(value)} campaign{value === 1 ? "" : "s"} →
+              </Link>
+            ),
+            activeAdCount: (value, row) => (
+              <Link to={`/sales-automation/ads?platformId=${row._id}`} className="text-primary hover:underline">
+                {String(value)} ad{value === 1 ? "" : "s"} →
+              </Link>
+            ),
+          }}
           rowActions={(row) => (
             <button
               type="button"
               onClick={() => testConnection(row)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
               title="Test API connection"
             >
-              <PlugZap size={13} />
+              <PlugZap size={13} /> Test
             </button>
           )}
           exportConfig={{

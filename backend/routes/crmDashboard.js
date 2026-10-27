@@ -191,9 +191,10 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const collectionPerProjectQ = addPid(pool.request()).query(`
       ;WITH BookingTotals AS (
         SELECT b.Id AS BookingId, COALESCE(proj.name, b.ProjectName) AS ProjectName,
-          ISNULL((SELECT SUM(AmountDue) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS TotalDue,
+          ISNULL((SELECT SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS TotalDue,
           ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
-            + ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS TotalPaid,
+            + ISNULL((SELECT SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount,0)
+                THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS TotalPaid,
           (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND Status = '${CrmStatus.PENDING}' AND DueDate < CAST(SYSDATETIME() AS DATE)) AS OverdueCount
         FROM dbo.CrmBooking b
         LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
@@ -265,9 +266,10 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     // fan out against.
     const paymentsQ = addPid(pool.request()).query(`
       SELECT
-        ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
+        ISNULL(SUM(CASE WHEN m.Status <> 'Waived' THEN m.AmountDue ELSE 0 END), 0) AS TotalDue,
         ISNULL(SUM(m.AmountPaid), 0) + ISNULL((
-          SELECT SUM(oa.Amount - ISNULL(oa.AppliedAmount,0))
+          SELECT SUM(CASE WHEN ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND oa.Amount > ISNULL(oa.AppliedAmount,0)
+            THEN oa.Amount - ISNULL(oa.AppliedAmount,0) ELSE 0 END)
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b2 ON b2.Id = oa.BookingId
           WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""} ${scopeCond.replace(/b\.ProjectId/g, "b2.ProjectId")}
@@ -333,7 +335,8 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         (SELECT ISNULL(SUM(oa.Amount),0)
           FROM dbo.CrmOnAccountPayment oa
           JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
-          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart) ${scopeCond}
+          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart)
+            AND ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') ${scopeCond}
         ) AS Collected
       FROM Months mo ORDER BY mo.MonthStart
     `);

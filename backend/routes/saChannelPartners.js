@@ -24,7 +24,11 @@ router.get("/", requirePageRight("sa-channel-partners", "view"), async (req, res
         cp.Notes, cp.IsActive,
         cp.CreatedAt, cp.UpdatedAt,
         COUNT(l.Id) AS TotalLeads,
-        SUM(CASE WHEN l.Status = 'Booked' THEN 1 ELSE 0 END) AS TotalBookings
+        -- "Booked" is not a real SaLead.Status value (the terminal status is
+        -- 'Booking' — see STATUS_TRANSITIONS in saLeads.js), so this always
+        -- read 0 regardless of actual bookings. CrmBookingId being set is
+        -- the same "booked" definition every other SA report/dashboard uses.
+        SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS TotalBookings
       FROM dbo.SaChannelPartner cp
       LEFT JOIN dbo.AccountHeadMaster br ON br.LHeadId = cp.CrmBrokerLHeadId
       LEFT JOIN dbo.SaLead l ON l.ChannelPartnerId = cp.Id AND l.IsActive = 1

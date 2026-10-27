@@ -432,6 +432,7 @@ const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialM
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
 const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
 const SaLeadManagement = lazy(() => import("./pages/SalesAutomation/SaLeadManagement"));
+const SaLeadPipeline = lazy(() => import("./pages/SalesAutomation/SaLeadPipeline"));
 const SaChannelPartners = lazy(() => import("./pages/SalesAutomation/SaChannelPartners"));
 const SaLeadActivities = lazy(() => import("./pages/SalesAutomation/SaLeadActivities"));
 const SaFollowups = lazy(() => import("./pages/SalesAutomation/SaFollowups"));
@@ -440,15 +441,12 @@ const SaLeadDistribution = lazy(() => import("./pages/SalesAutomation/SaLeadDist
 const SaInquiryDashboard = lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard"));
 const SaSiteVisits = lazy(() => import("./pages/SalesAutomation/SaSiteVisits"));
 const SaMarketingInvoices = lazy(() => import("./pages/SalesAutomation/SaMarketingInvoices"));
-const SaMarketingDashboard = lazy(() => import("./pages/SalesAutomation/SaMarketingDashboard"));
-const SaSalesDashboard = lazy(() => import("./pages/SalesAutomation/SaSalesDashboard"));
-const SaTeamLeadDashboard = lazy(() => import("./pages/SalesAutomation/SaTeamLeadDashboard"));
+const SaDashboard = lazy(() => import("./pages/SalesAutomation/SaDashboard"));
 const SaReports = lazy(() => import("./pages/SalesAutomation/SaReports"));
 const SaTeamManagement = lazy(() => import("./pages/SalesAutomation/SaTeamManagement"));
 const SaLeadTransfers = lazy(() => import("./pages/SalesAutomation/SaLeadTransfers"));
 const SaCommissions = lazy(() => import("./pages/SalesAutomation/SaCommissions"));
 const SaDistributionRules = lazy(() => import("./pages/SalesAutomation/SaDistributionRules"));
-const SaRoleMaster = lazy(() => import("./pages/SalesAutomation/SaRoleMaster"));
 // ── CRM Module ────────────────────────────────────────────────────────────────
 const CrmCustomers         = lazy(() => import("./pages/CRM/CrmCustomers"));
 const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
@@ -2402,6 +2400,10 @@ function AppRoutes() {
         }
       />
 
+      {/* Retire legacy /customer-portal — redirect to CRM client portal */}
+      <Route path="/customer-portal" element={<Navigate to="/crm-client-portal" replace />} />
+      <Route path="/customer-portal/*" element={<Navigate to="/crm-client-portal" replace />} />
+
       {/* CUSTOMER PORTAL */}
       <Route
         path="/customer-portal/:userId?"
@@ -2571,6 +2573,7 @@ function AppRoutes() {
       <Route path="/sales-automation/campaigns" element={<ProtectedRoute pageKey="sa-campaigns"><SaCampaignMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/ads" element={<ProtectedRoute pageKey="sa-ads"><SaAdMaster /></ProtectedRoute>} />
       <Route path="/sales-automation/leads" element={<ProtectedRoute pageKey="sa-leads"><SaLeadManagement /></ProtectedRoute>} />
+      <Route path="/sales-automation/pipeline" element={<ProtectedRoute pageKey="sa-leads"><SaLeadPipeline /></ProtectedRoute>} />
       <Route path="/sales-automation/channel-partners" element={<ProtectedRoute pageKey="sa-channel-partners"><SaChannelPartners /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-activities" element={<ProtectedRoute pageKey="sa-lead-activities"><SaLeadActivities /></ProtectedRoute>} />
       <Route path="/sales-automation/followups" element={<ProtectedRoute pageKey="sa-followups"><SaFollowups /></ProtectedRoute>} />
@@ -2580,14 +2583,18 @@ function AppRoutes() {
       <Route path="/sales-automation/site-visits" element={<ProtectedRoute pageKey="sa-site-visits"><SaSiteVisits /></ProtectedRoute>} />
       <Route path="/sales-automation/invoices" element={<ProtectedRoute pageKey="sa-marketing-invoices"><SaMarketingInvoices /></ProtectedRoute>} />
       <Route path="/sales-automation/commissions" element={<ProtectedRoute pageKey="sa-commissions"><SaCommissions /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard/marketing" element={<ProtectedRoute pageKey="sa-campaigns"><SaMarketingDashboard /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard/sales" element={<ProtectedRoute pageKey="sa-leads"><SaSalesDashboard /></ProtectedRoute>} />
-      <Route path="/sales-automation/dashboard/team-lead" element={<ProtectedRoute pageKey="sa-lead-distribution"><SaTeamLeadDashboard /></ProtectedRoute>} />
+      <Route path="/sales-automation" element={<ProtectedRoute pageKey="sa-leads"><SaDashboard /></ProtectedRoute>} />
+      {/* Old dashboard URLs (incl. the former 3 separate dashboards) -> the module root */}
+      <Route path="/sales-automation/dashboard/*" element={<Navigate to="/sales-automation" replace />} />
       <Route path="/sales-automation/reports" element={<ProtectedRoute pageKey="sa-reports"><SaReports /></ProtectedRoute>} />
       <Route path="/sales-automation/teams" element={<ProtectedRoute pageKey="sa-teams"><SaTeamManagement /></ProtectedRoute>} />
       <Route path="/sales-automation/lead-transfers" element={<ProtectedRoute pageKey="sa-lead-transfers"><SaLeadTransfers /></ProtectedRoute>} />
       <Route path="/sales-automation/distribution-rules" element={<ProtectedRoute pageKey="sa-distribution-rules"><SaDistributionRules /></ProtectedRoute>} />
-      <Route path="/sales-automation/role-master" element={<ProtectedRoute pageKey="sa-role-master"><SaRoleMaster /></ProtectedRoute>} />
+      {/* SA Role Master retired - it duplicated the generic Admin > Menu Rights
+          page (role-level + per-user permissions for every sa-* page already
+          lived there too, via dbo.PageDefinitions' Module='Sales Automation').
+          Redirect any old link/bookmark to the one real permission editor. */}
+      <Route path="/sales-automation/role-master" element={<Navigate to="/admin/rights/menu" replace />} />
       {/* ── CRM Module ─────────────────────────────────────────────────────────── */}
       <Route path="/crm/customers"       element={<ProtectedRoute pageKey="crm-customers"><CrmCustomers /></ProtectedRoute>} />
       <Route path="/crm/applications"    element={<ProtectedRoute pageKey="crm-applications"><CrmApplication /></ProtectedRoute>} />

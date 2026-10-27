@@ -5,7 +5,6 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CheckCircle2, Clock, Plus, Search } from "lucide-react";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -117,9 +116,8 @@ const SaLeadTasks: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Tasks" subtitle="Schedule follow-ups, reminders and sales actions for active leads"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Tasks"]} title="Lead Tasks" subtitle="Schedule follow-ups, reminders and sales actions for active leads"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Lead Tasks"]} />
       <div className="space-y-5">
         {canDoAction("sa-lead-tasks", "create") && (
           <form onSubmit={createTask} className="grid grid-cols-1 md:grid-cols-6 gap-3 rounded-lg border border-border p-4 bg-background">

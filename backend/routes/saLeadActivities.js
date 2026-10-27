@@ -138,8 +138,18 @@ router.put("/:id", requirePageRight("sa-lead-activities", "edit"), async (req, r
   try {
     const pool = getPool();
     const b = req.body;
+    const id = parseInt(req.params.id);
+    // GET / scopes by applyLeadScope so a sales_person/team_lead only ever
+    // sees their own leads' activities — PUT/DELETE never checked that,
+    // letting anyone with the edit/delete page right act on any other
+    // salesperson's activity log by id alone.
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("id", sql.Int, id)
+      .query(`SELECT 1 AS ok FROM dbo.SaLeadActivity a JOIN dbo.SaLead l ON l.Id = a.LeadId WHERE a.Id = @id AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
     await pool.request()
-      .input("id",      sql.Int,           parseInt(req.params.id))
+      .input("id",      sql.Int,           id)
       .input("summary", sql.NVarChar(sql.MAX), b.Summary?.trim() || null)
       .input("followup",sql.Date,          b.NextFollowupDate || null)
       .input("outcome", sql.NVarChar(50),  b.Outcome || null)
@@ -161,8 +171,14 @@ router.put("/:id", requirePageRight("sa-lead-activities", "edit"), async (req, r
 router.delete("/:id", requirePageRight("sa-lead-activities", "delete"), async (req, res) => {
   try {
     const pool = getPool();
+    const id = parseInt(req.params.id);
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("id", sql.Int, id)
+      .query(`SELECT 1 AS ok FROM dbo.SaLeadActivity a JOIN dbo.SaLead l ON l.Id = a.LeadId WHERE a.Id = @id AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
     await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, id)
       .query("DELETE FROM dbo.SaLeadActivity WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

@@ -92,7 +92,8 @@ router.get("/plots", requirePageRight("crm-unit-matrix", "view"), async (req, re
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate,
         bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
         CASE WHEN EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1
+            AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL AND m.Status = 'Paid'
         ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
@@ -209,7 +210,8 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.BookingDate, bk.ConfirmDeadline,
         bk.TotalValue, bk.GrandTotal, bk.BookingAmount,
         CASE WHEN EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = bk.Id AND m.MilestoneNo = 1
+            AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL AND m.Status = 'Paid'
         ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,

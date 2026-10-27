@@ -340,7 +340,9 @@ const CrmResaleCase: React.FC = () => {
                               : "Finance pays the agreed price; when they approve it the property returns to stock."}
                           </p>
                           {isResale
-                            ? <button className={primary} disabled={!readyToFinish || busy === "finish"} onClick={() => { if (window.confirm(`Pass ${c.Property} to ${c.ToName}?`)) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
+                            ? <button className={primary} disabled={!readyToFinish || busy === "finish" || (!!c.FromCustomerId && c.FromCustomerId === c.ToCustomerId)}
+                                title={c.FromCustomerId && c.FromCustomerId === c.ToCustomerId ? "The seller and the buyer are the same customer" : undefined}
+                                onClick={() => { if (window.confirm(`Pass ${c.Property} to ${c.ToName}?`)) call("finish", "transfer", {}, "Transferred to the buyer"); }}>Transfer to buyer</button>
                             : <button className={primary} disabled={!readyToFinish || busy === "finish" || !!c.PayoutNewPaymentId} onClick={() => call("finish", "send-to-finance", {}, "Sent to Finance")}>Send payout to Finance</button>}
                         </div>
                       )}

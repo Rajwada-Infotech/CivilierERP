@@ -184,9 +184,13 @@ async function createMoneyReceiptAfterDataReview(pool, bookingId, actorUserId) {
 // ── Edit / resubmit / bounce (Pending <-> Bounced, pre-approval only) ──────
 
 async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
-  const cur = await pool.request().input("id", sql.Int, receiptId).query(`
+  const tx = new sql.Transaction(pool);
+  try {
+  await tx.begin();
+  const cur = await tx.request().input("id", sql.Int, receiptId).query(`
     SELECT Id, Status, BookingId, ReceivedPaymentId
     FROM dbo.CrmMoneyReceipt
+    WITH (UPDLOCK, HOLDLOCK)
     WHERE Id = @id
   `);
   const row = cur.recordset[0];
@@ -202,7 +206,7 @@ async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
   if (amount != null && amount <= 0) throw new MoneyReceiptError("Amount must be greater than 0");
   const paymentMode = cleanString(data.PaymentMode);
 
-  await pool.request()
+  await tx.request()
     .input("id", sql.Int, receiptId)
     .input("amt", sql.Decimal(18, 2), amount)
     .input("mode", sql.NVarChar(30), paymentMode)
@@ -224,8 +228,13 @@ async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
         Remarks = ISNULL(@rem, Remarks),
         BouncedReason = CASE WHEN Status = 'Bounced' THEN BouncedReason ELSE NULL END,
         UpdatedAt = SYSDATETIME()
-      WHERE Id = @id
+      WHERE Id = @id AND Status IN ('Pending', 'Bounced') AND ReceivedPaymentId IS NULL
     `);
+  await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back or already committed */ }
+    throw e;
+  }
 
   await generateMoneyReceiptPdf(pool, receiptId);
   return { success: true };
@@ -460,6 +469,29 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
   return { existing: false, id };
 }
 
+async function retryConfirmedPendingMoneyReceipts(pool, actorEmail = "CRM system") {
+  const pending = await pool.request().query(`
+    SELECT TOP (50) mr.Id
+    FROM dbo.CrmMoneyReceipt mr
+    JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+    WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL
+      AND b.WorkflowStage = 'Confirmed' AND b.Status = 'Approved'
+    ORDER BY mr.CreatedAt, mr.Id
+  `);
+  let processed = 0;
+  let failed = 0;
+  for (const row of pending.recordset) {
+    try {
+      await approveMoneyReceipt(pool, row.Id, null, actorEmail);
+      processed++;
+    } catch (err) {
+      failed++;
+      console.warn(`[crm-money-receipt] confirmed receipt ${row.Id} retry failed:`, err.message);
+    }
+  }
+  return { scanned: pending.recordset.length, processed, failed };
+}
+
 module.exports = {
   MoneyReceiptError,
   isMoneyReceiptApprover,
@@ -470,4 +502,5 @@ module.exports = {
   bounceMoneyReceipt,
   approveMoneyReceipt,
   ensureMoneyReceiptForApprovedPayment,
+  retryConfirmedPendingMoneyReceipts,
 };

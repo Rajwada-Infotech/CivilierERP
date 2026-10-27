@@ -10,6 +10,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCurrentStep } = require("../services/crmWorkflowGuards");
 const { applyPagination } = require("../services/crmListPagination");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -60,15 +61,9 @@ const LM_SELECT = `
     -- CrmLegalMilestones.tsx and getProjectSaleGate in crmWorkflowGuards.js.
     -- Never waives Agreement/AFS — that stays mandatory for every booking.
     proj.entity_type AS ProjectType, proj.status AS ProjectStatus,
-    -- Mirrors crmHandover.js POST /'s exact dues gate (same columns, same
-    -- condition) so the Handover stage here can't show "unlocked" for a
-    -- booking the real Handover page would reject for an outstanding balance.
-    CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmPaymentMilestone pm
-      WHERE pm.BookingId = m.BookingId
-        AND pm.Status NOT IN ('Paid', 'Waived')
-        AND pm.AmountDue > ISNULL(pm.AmountPaid, 0)
-    ) THEN 1 ELSE 0 END AS HasOutstandingDues,
+    -- Mirror the Handover net-funding gate so the legal workflow indicator
+    -- cannot disagree with the action page about on-account funds.
+    CASE WHEN ${bookingFullyFundedSql("m.BookingId")} THEN 0 ELSE 1 END AS HasOutstandingDues,
     -- No Objection Certificate is a SINGLE step per booking, not two — the
     -- bank's NOC and the developer's NOC serve the same purpose (clearing
     -- the booking for Possession/Handover); a booking only ever needs one,
@@ -128,18 +123,10 @@ const LM_SELECT = `
     SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) mut
-  -- Block-level OC/CC (migration 447) is authoritative when this booking's
-  -- own block has a Received cert of its own; falls back to the project's
-  -- blanket (BlockId IS NULL) cert otherwise — same fallback resolveOcCcGate
-  -- (crmWorkflowGuards.js) implements for single-booking JS lookups.
+  -- OC/CC for this booking - its own block(s), or the project when it has
+  -- no block; one rule for every screen (migration 577, vw_CrmBookingOcCc).
   OUTER APPLY (
-    SELECT CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-      WHERE oc.Status = 'Received' AND (
-        (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
-        OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
-      )
-    ) THEN 1 ELSE 0 END AS HasReceived
+    SELECT ISNULL((SELECT v.Received FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id), 0) AS HasReceived
   ) occc
   OUTER APPLY (
     SELECT TOP 1 Status FROM dbo.CrmPrePossession

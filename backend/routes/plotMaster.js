@@ -501,6 +501,9 @@ router.post("/", requirePageRight("crm-auto-project-setup", "create"), async (re
     value.facing = facingCheck.value;
     const villaTypeError = await resolveVillaType(pool, value.villaTypeId, projectId);
     if (villaTypeError) return res.status(400).json({ error: villaTypeError });
+    const dupName = await pool.request().input("blockId", sql.Int, blockId).input("plotName", sql.NVarChar(100), value.plotName)
+      .query("SELECT TOP 1 Id FROM dbo.PlotMaster WHERE BlockId = @blockId AND PlotName = @plotName AND IsActive = 1");
+    if (dupName.recordset.length) return res.status(409).json({ error: "Another active plot in this block already uses this plot name" });
     const result = await pool.request()
       .input("villaType", sql.Int, value.villaTypeId)
       .input("projectId", sql.Int, projectId).input("blockId", sql.Int, blockId).input("plotNo", sql.NVarChar(50), value.plotNo).input("plotName", sql.NVarChar(100), value.plotName)
@@ -552,6 +555,9 @@ router.put("/:id", requirePageRight("crm-auto-project-setup", "edit"), async (re
     const duplicate = await pool.request().input("id", sql.Int, id).input("blockId", sql.Int, editable.recordset[0].BlockId).input("plotNo", sql.NVarChar(50), value.plotNo)
       .query("SELECT TOP 1 Id FROM dbo.PlotMaster WHERE BlockId = @blockId AND PlotNo = @plotNo AND IsActive = 1 AND Id <> @id");
     if (duplicate.recordset.length) return res.status(409).json({ error: "Another active plot in this block already uses this plot number" });
+    const dupName = await pool.request().input("id", sql.Int, id).input("blockId", sql.Int, editable.recordset[0].BlockId).input("plotName", sql.NVarChar(100), value.plotName)
+      .query("SELECT TOP 1 Id FROM dbo.PlotMaster WHERE BlockId = @blockId AND PlotName = @plotName AND IsActive = 1 AND Id <> @id");
+    if (dupName.recordset.length) return res.status(409).json({ error: "Another active plot in this block already uses this plot name" });
     const facingCheck = await resolveFacing(pool, value.facing, editable.recordset[0].Facing);
     if (facingCheck.error) return res.status(400).json({ error: facingCheck.error });
     value.facing = facingCheck.value;

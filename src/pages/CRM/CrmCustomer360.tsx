@@ -271,7 +271,7 @@ const CrmCustomer360: React.FC = () => {
                             Manage payments <ExternalLink size={11} />
                           </button>
                           {/* Invoices are made on the booking's own Payment & Invoice tab: this links there. */}
-                          <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/crm/bookings?applicationId=${b.ApplicationId}`); }} className={`${KEY_LINE} h-7 px-2`}>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); navigate(b.Id || b.BookingId ? `/crm/bookings?view=${b.Id || b.BookingId}` : `/crm/bookings?applicationId=${b.ApplicationId}`); }} className={`${KEY_LINE} h-7 px-2`}>
                             Invoices <ExternalLink size={11} />
                           </button>
                           {expanded ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}

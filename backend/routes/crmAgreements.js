@@ -6,6 +6,7 @@ const router = express.Router();
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: an agreement belongs to its booking's project.
 const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -54,7 +55,10 @@ const upload = multer({
 const AGR_SELECT = `
   SELECT
     ag.Id, ag.AgreementNo, ag.BookingId, ag.AgreementDate,
-    ag.LegalName, ag.LegalAddress, ag.PanNo, ag.AadhaarNo, ag.VersionNo,
+    ag.LegalName, ag.LegalAddress,
+    CASE WHEN LEN(ag.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.PanNo) - 4), RIGHT(ag.PanNo, 4)) ELSE ag.PanNo END AS PanNo,
+    CASE WHEN LEN(ag.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(ag.AadhaarNo) - 4), RIGHT(ag.AadhaarNo, 4)) ELSE ag.AadhaarNo END AS AadhaarNo,
+    ag.VersionNo,
     ag.Status, ag.Notes, ag.CreatedAt, ag.UpdatedAt,
     ag.SeniorApprovalStatus, ag.SeniorApprovedAt, ag.SeniorApprovalRemarks,
     ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
@@ -93,7 +97,13 @@ const AGR_SELECT = `
     -- These are surfaced as live fallbacks (not written into the agreement's
     -- own, deliberately version-stamped fields) so the Overview never shows
     -- an outright "—" for data the customer's already on file with.
-    bd.PanNo AS CustomerPanNo, bd.AadhaarNo AS CustomerAadhaarNo
+    CASE WHEN LEN(bd.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(bd.PanNo) - 4), RIGHT(bd.PanNo, 4)) ELSE bd.PanNo END AS CustomerPanNo,
+    CASE WHEN LEN(bd.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(bd.AadhaarNo) - 4), RIGHT(bd.AadhaarNo, 4)) ELSE bd.AadhaarNo END AS CustomerAadhaarNo,
+    -- Paper counts for the list (it showed "0 docs" on every row: nothing
+    -- sent a count) and for each row's stage: mandatory papers / uploaded.
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id) AS DocumentCount,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1) AS MandatoryDocCount,
+    (SELECT COUNT(*) FROM dbo.CrmAgreementDocument dc WHERE dc.AgreementId = ag.Id AND dc.IsMandatory = 1 AND dc.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -234,6 +244,7 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
 router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const candidates = await pool.request().query(`
       SELECT b.Id, b.BookingNo, a.ApplicantName,
              cust.CustomerName AS LegalName,
@@ -248,6 +259,7 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
       WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status <> 'Cancelled')
       ORDER BY b.BookingNo
     `);
@@ -288,10 +300,11 @@ async function buildAgreementDetail(pool, agreementId) {
               cu.name AS CreatedByName
        FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
     pool.request().input("id", sql.Int, id).query(
-      `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
+      `SELECT ISNULL(SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
        FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
     pool.request().input("id", sql.Int, id).query(
-      `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
+      `SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+         THEN CASE WHEN Amount > ISNULL(AppliedAmount,0) THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END ELSE 0 END),0) AS AvailableBalance
        FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
     pool.request().input("id", sql.Int, id).query(
       `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
@@ -375,6 +388,9 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
     const b = req.body;
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");

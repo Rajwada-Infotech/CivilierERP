@@ -20,6 +20,9 @@ const {
   ensureCrmCustomerLedgerHead, postCrmRefundPaid,
   postCrmHeldCreditReallocateLedgerOnly, postCrmHeldCreditCrossCompanyMirror,
 } = require("../services/crmLedger");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { refundCreateSchema } = require("../validation/crmBookingSchemas");
+const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -119,6 +122,72 @@ async function getUnclaimedRemaining(pool, onAccountId, { excludeRefundId = null
   return { found: true, remaining, reserved, unclaimed: Math.round((remaining - reserved) * 100) / 100 };
 }
 
+// Once a buy-back payout is approved for processing, its source credit is
+// committed to the buy-back. Do not let a new refund or transfer claim it.
+async function assertNoActiveBuyBack(pool, bookingId) {
+  const row = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Id FROM dbo.CrmUnitResale
+    WHERE IsActive = 1 AND Kind = 'BuyBack' AND Status IN ('Approved', 'Completed')
+      AND (FromBookingId = @bid OR CHARINDEX(',' + CAST(@bid AS VARCHAR(20)) + ',', ',' + ISNULL(BookingIds, '') + ',') > 0)
+  `)).recordset[0];
+  if (row) throw Object.assign(new Error(`This booking's credit is committed to buy-back #${row.Id}`), { status: 409 });
+}
+
+// Claim creation and the availability read must share the source-row lock.
+// Refunds and transfers otherwise can both observe the same unclaimed balance
+// and reserve it concurrently.
+async function reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId, toBookingId, toCompanyId, actorUserId, isCrossCompany }) {
+  // Read the source booking id without taking its deposit lock. Target
+  // cancellation and transfer claims both lock the target booking first.
+  const sourceSnapshot = (await pool.request().input("id", sql.Int, heldId)
+    .query("SELECT BookingId FROM dbo.CrmOnAccountPayment WHERE Id = @id")).recordset[0];
+  if (!sourceSnapshot) throw Object.assign(new Error("Held credit not found"), { status: 404 });
+
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const target = (await tx.request().input("bid", sql.Int, toBookingId).query(`
+      SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+    `)).recordset[0];
+    if (!target) throw Object.assign(new Error("Target booking not found"), { status: 404 });
+    if (!target.IsActive || DEAD_BOOKING_STATUSES.includes(target.Status)) {
+      throw Object.assign(new Error("Target booking is not active"), { status: 409 });
+    }
+    const openCancellation = (await tx.request().input("bid", sql.Int, toBookingId).query(`
+      SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WITH (UPDLOCK, HOLDLOCK)
+      WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+    `)).recordset[0];
+    if (openCancellation) {
+      throw Object.assign(new Error(`Target booking has open cancellation ${openCancellation.CancellationNo}`), { status: 409 });
+    }
+
+    const source = await tx.request().input("id", sql.Int, heldId)
+      .query("SELECT Id, BookingId FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id");
+    if (!source.recordset.length) throw Object.assign(new Error("Held credit not found"), { status: 404 });
+    await assertNoActiveBuyBack(tx, source.recordset[0].BookingId);
+    const { unclaimed } = await getUnclaimedRemaining(tx, heldId);
+    if (amount > unclaimed + 0.01) {
+      throw Object.assign(new Error(`Amount exceeds the held credit's available balance (₹${unclaimed.toLocaleString("en-IN")}) — another refund or re-booking transfer may have claimed it`), { status: 409 });
+    }
+    const result = await tx.request()
+      .input("hid", sql.Int, heldId).input("fc", sql.Int, fromCompanyId)
+      .input("tb", sql.Int, toBookingId).input("tc", sql.Int, toCompanyId)
+      .input("amt", sql.Decimal(18, 2), amount).input("cb", sql.Int, actorUserId)
+      .input("cross", sql.Bit, isCrossCompany ? 1 : 0)
+      .query(`
+        INSERT INTO dbo.CrmRebookingTransfer
+          (HeldOnAccountId, FromCompanyId, ToBookingId, ToCompanyId, Amount, IsCrossCompany, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@hid, @fc, @tb, @tc, @amt, @cross, CASE WHEN @cross = 1 THEN 'PendingTransfer' ELSE 'Draft' END, @cb, SYSDATETIME())
+      `);
+    await tx.commit();
+    return result;
+  } catch (e) {
+    try { await tx.rollback(); } catch {}
+    throw e;
+  }
+}
+
 // Once a source credit is fully consumed (Applied) by one flow, any other
 // still-open claim on it is now stale — auto-reject it the same way
 // cancellation-approval already auto-rejects conflicting amendment requests,
@@ -186,6 +255,7 @@ const REFUND_SELECT = `
 // idempotent, so this simply finishes the job. Never blocks the list.
 async function settlePaidRefunds(pool, userEmail) {
   try {
+    let repairedGstNotes = 0;
     const stuck = (await pool.request().query(`
       SELECT r.Id, r.FinanceNewPaymentId FROM dbo.CrmRefund r
       JOIN dbo.NewPayment np ON np.PPaymentID = r.FinanceNewPaymentId
@@ -196,14 +266,36 @@ async function settlePaidRefunds(pool, userEmail) {
         console.warn(`[crm-refunds] settled refund ${s.Id} whose voucher was already paid:`, out?.reason || "ok");
       } catch (e) { console.error(`[crm-refunds] could not settle refund ${s.Id}:`, e.message); }
     }
-    if (stuck.length) await bumpCacheVersion("crm-refunds");
+    // Settlement is deliberately non-fatal after the payout has moved. If
+    // statutory GST document issuance failed after the refund became Paid,
+    // it will no longer appear in `stuck`; safely retry only refunds with no
+    // GST-note history at all. issueForRefund is idempotent and locks the
+    // refund/booking before issuing, while the history check preserves notes
+    // that staff intentionally cancelled for a later manual reissue.
+    const missingGstNotes = (await pool.request().query(`
+      SELECT r.Id FROM dbo.CrmRefund r
+      JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+      WHERE r.Status = 'Paid' AND r.NetAmount > 0 AND ISNULL(b.TotalGstAmount, 0) > 0
+        AND b.GrandTotal > 0
+        AND ROUND(r.NetAmount * b.TotalGstAmount / NULLIF(b.GrandTotal, 0), 2) > 0
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmGstNote n WHERE n.RefundId = r.Id)
+    `)).recordset;
+    for (const row of missingGstNotes) {
+      try {
+        const out = await require("../services/crmGstNotes").issueForRefund(pool, row.Id, userEmail);
+        repairedGstNotes += out?.issued?.length || 0;
+      } catch (e) {
+        console.error(`[crm-refunds] could not issue GST documents for paid refund ${row.Id}:`, e.message);
+      }
+    }
+    if (stuck.length || repairedGstNotes) await bumpCacheVersion("crm-refunds");
   } catch (e) { console.error("[crm-refunds] settlePaidRefunds:", e.message); }
 }
 
 router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    await settlePaidRefunds(pool, req.user?.email || req.user?.name || null);
+    // Note: settlePaidRefunds should be called by scheduled cron job only, not on every read.
     const { status, search } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
@@ -279,8 +371,8 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
     const req0 = pool.request();
     if (customerId) req0.input("cust", sql.Int, customerId);
     // Only the user's projects (a restricted user was offered every project's held credit).
-    const custFilter = (customerId ? "AND a.CustomerId = @cust" : "")
-      + (req.projectScope ? ` AND ${projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : "");
+    const custFilter = customerId ? "AND a.CustomerId = @cust" : "";
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await req0.query(`
       SELECT
         'CancellationHeldCredit' AS SourceType,
@@ -294,7 +386,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       LEFT JOIN dbo.CrmCancellation c ON c.Id = oa.HeldSourceRefId
       LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = oa.HeldSourceRefId
-      WHERE oa.Status = 'Held' AND (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) > 0.01 ${custFilter}
+      WHERE oa.Status = 'Held' AND (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) > 0.01 ${custFilter} ${scope}
 
       UNION ALL
 
@@ -310,7 +402,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       WHERE ISNULL(oa.Status,'') IN ('Unapplied','PartiallyApplied')
         AND (oa.Amount - ISNULL(oa.AppliedAmount,0) - ${RESERVED_SUBQUERY}) > 0.01
-        AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred') ${custFilter}
+        AND b.Status NOT IN ('Cancelled','Rejected', 'Expired','Transferred') ${custFilter} ${scope}
       ORDER BY AsOf DESC
     `);
     res.json(result.recordset);
@@ -477,6 +569,20 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
   try {
     const pool = getPool();
     const b = req.body || {};
+
+    // Basic field type validation — GrossAmount must be a positive number
+    const { z } = require("zod");
+    const refundBodySchema = z.object({
+      GrossAmount: z.coerce.number().positive({ message: "GrossAmount must be a positive number" }),
+      SourceType: z.string().min(1, "SourceType is required"),
+      BookingId: z.coerce.number().int().positive({ message: "BookingId must be a positive integer" }).optional().nullable(),
+      TdsAmount: z.coerce.number().min(0).optional().nullable(),
+    });
+    const parsed = refundBodySchema.safeParse(b);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+    }
+
     const sourceType = b.SourceType;
     // Every refund pays back money we hold: a cancelled booking's held credit
     // or an overpayment. A 'Manual' refund (any customer, any amount, nothing
@@ -513,6 +619,9 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
       `);
       const oa = oaRow.recordset[0];
       if (!oa) return res.status(404).json({ error: "Source on-account row not found" });
+
+      const allowed = await assertBookingProjectScope(req, res, oa.BookingId);
+      if (allowed === false) return;
       const { unclaimed } = await getUnclaimedRemaining(pool, sourceOnAccountId);
       if (gross > unclaimed + 0.01) {
         return res.status(400).json({ error: `Amount exceeds the source's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by another pending refund or re-booking transfer` });
@@ -553,7 +662,23 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     }
 
     const refundNo = await getNextDocNumber(pool, "CRFD", "CRFD");
-    const ins = await pool.request()
+    // Serialize the final availability check and claim insert on the source
+    // deposit. The earlier check above gives a fast user-facing error, but
+    // two concurrent refund/transfer requests could both pass it before
+    // either one inserted its reservation.
+    const reserveTx = pool.transaction();
+    await reserveTx.begin();
+    let ins;
+    try {
+      const lockedSource = await reserveTx.request().input("id", sql.Int, sourceOnAccountId)
+        .query("SELECT Id, BookingId FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id");
+      if (!lockedSource.recordset.length) throw Object.assign(new Error("Source on-account row not found"), { status: 404 });
+      await assertNoActiveBuyBack(reserveTx, lockedSource.recordset[0].BookingId);
+      const { unclaimed: liveUnclaimed } = await getUnclaimedRemaining(reserveTx, sourceOnAccountId);
+      if (gross > liveUnclaimed + 0.01) {
+        throw Object.assign(new Error(`Amount exceeds the source's available balance (₹${liveUnclaimed.toLocaleString("en-IN")}) — another refund or re-booking transfer may have claimed it`), { status: 409 });
+      }
+      ins = await reserveTx.request()
       .input("rno", sql.NVarChar(30), refundNo)
       .input("cust", sql.Int, customerId)
       .input("comp", sql.Int, companyId ?? null)
@@ -589,6 +714,12 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
            @cbn, @cba, @cbi, NULLIF(@pmode, ''),
            'Pending', @due, @rb, SYSDATETIME(), @rb, SYSDATETIME())
       `);
+      await reserveTx.commit();
+    } catch (reserveError) {
+      try { await reserveTx.rollback(); } catch {}
+      if (reserveError.status) return res.status(reserveError.status).json({ error: reserveError.message });
+      throw reserveError;
+    }
     await bumpCacheVersion("crm-refunds");
     res.status(201).json({ success: true, id: ins.recordset[0].Id, RefundNo: refundNo, NetAmount: netAmount, DeductionAmount: deductionAmt });
   } catch (e) {
@@ -609,7 +740,7 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
     if (!["Draft", "Pending"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot edit — refund is already ${cur.recordset[0].Status}` });
     }
-    await pool.request()
+    const updated = await pool.request()
       .input("id", sql.Int, id)
       .input("reason", sql.NVarChar(sql.MAX), b.Reason ?? null)
       .input("bank", sql.Int, b.RefundBankLHeadId !== undefined && b.RefundBankLHeadId !== null && b.RefundBankLHeadId !== "" ? parseInt(b.RefundBankLHeadId, 10) : null)
@@ -625,8 +756,11 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
           CustomerAccountNo = ISNULL(@cba, CustomerAccountNo),
           CustomerIfscCode  = ISNULL(@cbi, CustomerIfscCode),
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status IN ('Draft', 'Pending')
       `);
+    if (updated.rowsAffected[0] !== 1) {
+      return res.status(409).json({ error: "This refund changed status while you were editing it; reload before making further changes" });
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-refunds] PUT error:", e.message);
@@ -636,22 +770,50 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
 
 // ── PUT /:id/submit — Draft -> Pending ──────────────────────────────────
 router.put("/:id/submit", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  let tx;
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
-    if (!["Draft", "Rejected"].includes(cur.recordset[0].Status)) {
-      return res.status(400).json({ error: `Cannot submit — refund is ${cur.recordset[0].Status}` });
+    tx = pool.transaction();
+    await tx.begin();
+    // Read the source ID first, then use the same source-row-first lock order
+    // as new claims and adjustments to avoid over-reserving on resubmission.
+    const snapshot = (await tx.request().input("id", sql.Int, id)
+      .query("SELECT r.SourceOnAccountId, r.BookingId FROM dbo.CrmRefund r WHERE r.Id = @id")).recordset[0];
+    if (!snapshot) { await tx.rollback(); return res.status(404).json({ error: "Refund not found" }); }
+    if (snapshot.SourceOnAccountId) {
+      const source = await tx.request().input("sid", sql.Int, snapshot.SourceOnAccountId)
+        .query("SELECT Id, BookingId FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @sid");
+      if (!source.recordset.length) { await tx.rollback(); return res.status(409).json({ error: "The source credit no longer exists" }); }
+      await assertNoActiveBuyBack(tx, source.recordset[0].BookingId);
     }
-    await pool.request().input("id", sql.Int, id)
-      .query("UPDATE dbo.CrmRefund SET Status = 'Pending', RejectionNote = NULL, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    const cur = (await tx.request().input("id", sql.Int, id).query(`
+      SELECT Status, SourceOnAccountId, GrossAmount
+      FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+    `)).recordset[0];
+    if (!cur) { await tx.rollback(); return res.status(404).json({ error: "Refund not found" }); }
+    if (!["Draft", "Rejected"].includes(cur.Status)) {
+      await tx.rollback();
+      return res.status(400).json({ error: `Cannot submit — refund is ${cur.Status}` });
+    }
+    if (cur.SourceOnAccountId) {
+      const { found, unclaimed } = await getUnclaimedRemaining(tx, cur.SourceOnAccountId, { excludeRefundId: id });
+      if (!found || Number(cur.GrossAmount) > unclaimed + 0.01) {
+        await tx.rollback();
+        return res.status(409).json({ error: `Cannot resubmit — the source credit has only ₹${unclaimed.toLocaleString("en-IN")} available` });
+      }
+    }
+    const upd = await tx.request().input("id", sql.Int, id)
+      .query("UPDATE dbo.CrmRefund SET Status = 'Pending', RejectionNote = NULL, UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status IN ('Draft', 'Rejected')");
+    if (upd.rowsAffected[0] !== 1) throw new Error("Refund status changed while submitting");
+    await tx.commit();
     await bumpCacheVersion("crm-refunds");
     res.json({ success: true, status: "Pending" });
   } catch (e) {
+    try { if (tx) await tx.rollback(); } catch {}
     console.error("[crm-refunds] submit error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
   }
 });
 
@@ -711,10 +873,26 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
     } catch (e) {
       try { await tx.rollback(); } catch { /* rolled back */ }
       // Approved, but the voucher couldn't be raised: kept for Finance with the reason.
-      await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actorId(req)).input("n", sql.NVarChar(500), `[Payout] ${e.message}`.slice(0, 500))
-        .query("UPDATE dbo.CrmRefund SET Status = 'FinancePending', ApprovedBy = @ab, ApprovedAt = SYSDATETIME(), RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      const recovered = await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actorId(req)).input("n", sql.NVarChar(500), `[Payout] ${e.message}`.slice(0, 500))
+        .query(`UPDATE dbo.CrmRefund
+          SET Status = 'FinancePending', ApprovedBy = @ab, ApprovedAt = SYSDATETIME(), RejectionNote = @n, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id AND Status = 'Approved' AND FinanceNewPaymentId IS NULL`);
       await bumpCacheVersion("crm-refunds");
-      return res.json({ success: true, status: "FinancePending", warning: `Approved, but the payout voucher couldn't be raised: ${e.message}` });
+      if (recovered.rowsAffected[0] === 1) {
+        return res.status(202).json({ success: true, status: "FinancePending", partialFailure: true, warning: `Approved, but the payout voucher couldn't be raised: ${e.message}` });
+      }
+      const latest = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT Status, FinanceNewPaymentId FROM dbo.CrmRefund WHERE Id = @id
+      `)).recordset[0];
+      return res.status(latest?.FinanceNewPaymentId != null ? 202 : 409).json({
+        success: false,
+        partialFailure: true,
+        status: latest?.Status || "Unknown",
+        newPaymentId: latest?.FinanceNewPaymentId ?? null,
+        warning: latest?.FinanceNewPaymentId != null
+          ? "This refund changed while recovery was running and now has a payout voucher. Reload before taking further action."
+          : `This refund changed while recovery was running; it remains ${latest?.Status || "unavailable"}. Reload before taking further action.`,
+      });
     }
   } catch (e) {
     console.error("[crm-refunds] approve error:", e.message);
@@ -751,6 +929,13 @@ async function raisePayoutVoucher(tx, rf, opts) {
     // balance, not the snapshot taken when the refund was raised: a re-booking
     // transfer or another refund may have used the same held credit since.
     if (rf.SourceOnAccountId) {
+      // Claim writers use this row lock before reserving credit. Without it,
+      // a transfer could commit after this availability read but before the
+      // payout voucher transaction commits.
+      const source = await tx.request().input("sid", sql.Int, rf.SourceOnAccountId).query(`
+        SELECT Id FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @sid
+      `);
+      if (!source.recordset.length) throw new RefundPayoutError("The source credit for this refund no longer exists", 409);
       const { found, unclaimed } = await getUnclaimedRemaining(tx, rf.SourceOnAccountId, { excludeRefundId: rf.Id });
       if (!found) throw new RefundPayoutError("The source credit for this refund no longer exists", 409);
       if (Number(rf.GrossAmount) > unclaimed + 0.01) {
@@ -925,19 +1110,38 @@ router.put(["/:id/finance-reject", "/:id/finance/reject"], requirePageRight("crm
     if (!(await isFinanceApprover(role, viewerUserId))) {
       return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-reject a refund" });
     }
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
-    if (cur.recordset[0].Status !== "FinancePending") {
-      return res.status(400).json({ error: `Cannot finance-reject — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
-    }
     const note = req.body?.note || "Finance sent back — please revise";
-    await pool.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), `[Finance] ${note}`)
-      .query("UPDATE dbo.CrmRefund SET Status = 'Pending', RejectionNote = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const cur = (await tx.request().input("id", sql.Int, id).query(`
+        SELECT Status, FinanceNewPaymentId
+        FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      `)).recordset[0];
+      if (!cur) {
+        await tx.rollback();
+        return res.status(404).json({ error: "Refund not found" });
+      }
+      if (cur.Status !== "FinancePending" || cur.FinanceNewPaymentId != null) {
+        await tx.rollback();
+        return res.status(409).json({ error: `Cannot finance-reject — refund status is '${cur.Status}'${cur.FinanceNewPaymentId != null ? " and its payout voucher already exists" : ""}` });
+      }
+      const upd = await tx.request().input("id", sql.Int, id).input("n", sql.NVarChar(500), `[Finance] ${note}`)
+        .query(`
+          UPDATE dbo.CrmRefund SET Status = 'Pending', RejectionNote = @n, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id AND Status = 'FinancePending' AND FinanceNewPaymentId IS NULL
+        `);
+      if (upd.rowsAffected[0] !== 1) throw Object.assign(new Error("Refund state changed while Finance was sending it back"), { status: 409 });
+      await tx.commit();
+    } catch (txError) {
+      try { await tx.rollback(); } catch {}
+      throw txError;
+    }
     await bumpCacheVersion("crm-refunds");
     res.json({ success: true, status: "Pending" });
   } catch (e) {
     console.error("[crm-refunds] finance-reject error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
   }
 });
 
@@ -1019,10 +1223,14 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   // on it (a Draft/PendingTransfer rebooking transfer nobody cancelled) is
   // now stale — reject it instead of leaving it for someone to act on later.
   if (rf.SourceOnAccountId) {
-    await rejectStaleClaimsOnSource(pool, rf.SourceOnAccountId, {
-      exceptRefundId: refundId,
-      note: `Auto-rejected — the source credit was fully consumed by refund ${rf.Id} on ${new Date().toISOString().slice(0, 10)}.`,
-    }, userEmail);
+    const source = await pool.request().input("id", sql.Int, rf.SourceOnAccountId)
+      .query("SELECT Status FROM dbo.CrmOnAccountPayment WHERE Id = @id");
+    if (source.recordset[0]?.Status === "Applied") {
+      await rejectStaleClaimsOnSource(pool, rf.SourceOnAccountId, {
+        exceptRefundId: refundId,
+        note: `Auto-rejected — the source credit was fully consumed by refund ${rf.Id} on ${new Date().toISOString().slice(0, 10)}.`,
+      }, userEmail);
+    }
   }
 
   // Forfeiture GL leg (no-op when DeductionAmount = 0). Never fatal.
@@ -1047,6 +1255,52 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
 // on the target booking. Called inline for a same-company transfer, and from
 // the fund-transfer approve hook once a cross-company transfer is Approved.
 // Idempotent; the caller treats a throw as non-fatal where appropriate.
+async function postRebookingTransferSideEffects(pool, rt, newOaId, userEmail) {
+  // Serialize recovery attempts so two user retries cannot both observe a
+  // missing voucher/ledger row and post it twice.
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const current = (await tx.request().input("id", sql.Int, rt.Id).query(`
+      SELECT Status, NewOnAccountId FROM dbo.CrmRebookingTransfer WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+    `)).recordset[0];
+    if (!current || current.Status !== "Applied" || !current.NewOnAccountId) {
+      await tx.rollback();
+      return { ok: false, reason: "Re-booking transfer is not Applied" };
+    }
+    newOaId = current.NewOnAccountId;
+    const failures = [];
+    if (rt.IsCrossCompany) {
+      try {
+        const mirror = await postCrmHeldCreditCrossCompanyMirror(pool, rt.Id, userEmail);
+        await recordGLPosting("crm-rebooking-transfer-mirror", rt.Id, mirror, userEmail);
+        if (!mirror?.posted) failures.push(mirror?.reason || "Cross-company CRM ledger mirror was not posted");
+      } catch (err) {
+        await recordGLPosting("crm-rebooking-transfer-mirror", rt.Id, { failed: true, reason: err.message }, userEmail);
+        failures.push(err.message);
+      }
+    }
+    try {
+      const allocation = await postCrmHeldCreditReallocateLedgerOnly(pool, {
+        customerId: rt.CustomerId, newOnAccountId: newOaId, amount: Number(rt.Amount),
+        companyId: rt.ToCompanyId, projectId: rt.ToProjectId, receiptNo: `REBK-${rt.Id}`, userEmail,
+      });
+      await recordGLPosting("crm-rebooking-transfer", rt.Id, allocation, userEmail);
+      if (!allocation?.posted) failures.push(allocation?.reason || "Customer on-account ledger entry was not posted");
+    } catch (err) {
+      await recordGLPosting("crm-rebooking-transfer", rt.Id, { failed: true, reason: err.message }, userEmail);
+      failures.push(err.message);
+    }
+    await tx.commit();
+    return failures.length
+      ? { ok: false, applied: true, newOnAccountId: newOaId, reason: failures.join("; ") }
+      : { ok: true, applied: true, newOnAccountId: newOaId };
+  } catch (err) {
+    try { await tx.rollback(); } catch {}
+    throw err;
+  }
+}
+
 async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEmail) {
   const rtRes = await pool.request().input("id", sql.Int, rebookingTransferId).query(`
     SELECT rt.Id, rt.HeldOnAccountId, rt.ToBookingId, rt.ToCompanyId, rt.Amount,
@@ -1059,7 +1313,9 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
   `);
   const rt = rtRes.recordset[0];
   if (!rt) return { ok: false, reason: "rebooking transfer not found" };
-  if (rt.Status === "Applied" && rt.NewOnAccountId) return { ok: true, reason: "already applied (idempotent)" };
+  if (rt.Status === "Applied" && rt.NewOnAccountId) {
+    return postRebookingTransferSideEffects(pool, rt, rt.NewOnAccountId, userEmail);
+  }
 
   const hcRes = await pool.request().input("id", sql.Int, rt.HeldOnAccountId)
     .query("SELECT Id, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE Id = @id");
@@ -1078,6 +1334,26 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
   const tx = pool.transaction();
   await tx.begin();
   try {
+    const targetBooking = (await tx.request().input("bid", sql.Int, rt.ToBookingId).query(`
+      SELECT b.Id, b.Status, b.IsActive
+      FROM dbo.CrmBooking b WITH (UPDLOCK, HOLDLOCK)
+      WHERE b.Id = @bid
+    `)).recordset[0];
+    if (!targetBooking || !targetBooking.IsActive || DEAD_BOOKING_STATUSES.includes(targetBooking.Status)) {
+      throw Object.assign(new Error("Target booking is no longer active; held credit was not applied."), { status: 409 });
+    }
+    const currentTransfer = (await tx.request().input("id", sql.Int, rebookingTransferId).query(`
+      SELECT Status, NewOnAccountId FROM dbo.CrmRebookingTransfer WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+    `)).recordset[0];
+    if (!currentTransfer) throw Object.assign(new Error("Re-booking transfer not found"), { status: 404 });
+    if (currentTransfer.Status === "Applied" && currentTransfer.NewOnAccountId) {
+      newOaId = currentTransfer.NewOnAccountId;
+      await tx.commit();
+      return postRebookingTransferSideEffects(pool, rt, newOaId, userEmail);
+    }
+    if (!["Draft", "PendingTransfer"].includes(currentTransfer.Status)) {
+      throw Object.assign(new Error(`Re-booking transfer is ${currentTransfer.Status} and cannot be applied.`), { status: 409 });
+    }
     // Re-check once more under lock, immediately before consuming — closes
     // the window between the check above and this transaction acquiring the
     // row, the same TOCTOU class this whole function already guards against
@@ -1086,9 +1362,9 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
       SELECT Amount, AppliedAmount FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
     `);
     const lockRow = lockRes.recordset[0];
-    const remainingLocked = lockRow ? Number(lockRow.Amount) - Number(lockRow.AppliedAmount || 0) : 0;
-    if (!lockRow || amount > remainingLocked + 0.01) {
-      throw new Error(`amount ${amount} exceeds held remaining ${remainingLocked} at lock time`);
+    const { found: sourceFound, unclaimed: unclaimedLocked } = await getUnclaimedRemaining(tx, rt.HeldOnAccountId, { excludeTransferId: rebookingTransferId });
+    if (!lockRow || !sourceFound || amount > unclaimedLocked + 0.01) {
+      throw new Error(`amount ${amount} exceeds held unclaimed remaining ${unclaimedLocked} at lock time`);
     }
     const oaIns = await tx.request()
       .input("no", sql.NVarChar(30), receiptNo)
@@ -1138,22 +1414,9 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
     }, userEmail);
   }
 
-  // GL (post-commit, non-fatal): cross-company reclass first, then the
-  // ledger-only reallocation that makes the fresh row an available advance.
-  try {
-    if (rt.IsCrossCompany) {
-      const m = await postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, userEmail);
-      await recordGLPosting("crm-rebooking-transfer-mirror", rebookingTransferId, m, userEmail);
-    }
-    const a = await postCrmHeldCreditReallocateLedgerOnly(pool, {
-      customerId: rt.CustomerId, newOnAccountId: newOaId, amount,
-      companyId: rt.ToCompanyId, projectId: rt.ToProjectId, receiptNo, userEmail,
-    });
-    await recordGLPosting("crm-rebooking-transfer", rebookingTransferId, a, userEmail);
-  } catch (glErr) {
-    await recordGLPosting("crm-rebooking-transfer", rebookingTransferId, { failed: true, reason: glErr.message }, userEmail);
-  }
-  return { ok: true, newOnAccountId: newOaId };
+  // GL and customer on-account ledger follow the committed CRM transfer.
+  // Failures remain visible and can be retried by an authorized user.
+  return postRebookingTransferSideEffects(pool, rt, newOaId, userEmail);
 }
 
 // POST /rebooking-transfer — start moving held credit onto a new booking.
@@ -1180,6 +1443,11 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     `);
     const held = heldRes.recordset[0];
     if (!held) return res.status(404).json({ error: "Held credit not found" });
+
+    const fromAllowed = await assertBookingProjectScope(req, res, held.FromBookingId);
+    if (fromAllowed === false) return;
+    const toAllowed = await assertBookingProjectScope(req, res, toBookingId);
+    if (toAllowed === false) return;
     if (held.Status !== "Held") return res.status(400).json({ error: "That on-account row is not a held credit" });
     const { unclaimed } = await getUnclaimedRemaining(pool, heldId);
     if (amount > unclaimed + 0.01) {
@@ -1207,21 +1475,22 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     const isCross = Number(held.FromCompanyId) !== Number(to.ToCompanyId);
 
     if (!isCross) {
-      const rtIns = await pool.request()
-        .input("hid", sql.Int, heldId).input("fc", sql.Int, held.FromCompanyId)
-        .input("tb", sql.Int, toBookingId).input("tc", sql.Int, to.ToCompanyId)
-        .input("amt", sql.Decimal(18, 2), amount).input("cb", sql.Int, actorId(req))
-        .query(`
-          INSERT INTO dbo.CrmRebookingTransfer
-            (HeldOnAccountId, FromCompanyId, ToBookingId, ToCompanyId, Amount, IsCrossCompany, Status, CreatedBy, CreatedAt)
-          OUTPUT INSERTED.Id
-          VALUES (@hid, @fc, @tb, @tc, @amt, 0, 'Draft', @cb, SYSDATETIME())
-        `);
+      const rtIns = await reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId: held.FromCompanyId, toBookingId, toCompanyId: to.ToCompanyId, actorUserId: actorId(req), isCrossCompany: false });
       const rtId = rtIns.recordset[0].Id;
       let outcome;
       try {
         outcome = await applyRebookingTransferToBooking(pool, rtId, userEmail);
-        if (outcome && outcome.ok === false) throw Object.assign(new Error(`The credit couldn't be moved: ${outcome.reason}`), { status: 409 });
+        if (outcome && outcome.ok === false) {
+          if (outcome.applied) {
+            await bumpCacheVersion("crm-refunds");
+            return res.status(202).json({
+              success: true, id: rtId, crossCompany: false, partialFailure: true,
+              newOnAccountId: outcome.newOnAccountId,
+              message: `Held credit was applied in CRM, but its accounting ledger follow-up failed: ${outcome.reason}`,
+            });
+          }
+          throw Object.assign(new Error(`The credit couldn't be moved: ${outcome.reason}`), { status: 409 });
+        }
       } catch (applyErr) {
         // Left Draft, it reserved the held credit for good (a live claim) with
         // no way to retry or cancel - release it, as the cross-company path does.
@@ -1246,64 +1515,153 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     // Reserve the held credit first (a live claim counts in getUnclaimedRemaining),
     // so nothing else can take it while the fund transfer is raised; if raising
     // it fails, the claim is released again.
-    const rtIns = await pool.request()
-      .input("hid", sql.Int, heldId).input("fc", sql.Int, held.FromCompanyId)
-      .input("tb", sql.Int, toBookingId).input("tc", sql.Int, to.ToCompanyId)
-      .input("amt", sql.Decimal(18, 2), amount).input("cb", sql.Int, actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmRebookingTransfer
-          (HeldOnAccountId, FromCompanyId, ToBookingId, ToCompanyId, Amount, IsCrossCompany, Status, CreatedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@hid, @fc, @tb, @tc, @amt, 1, 'PendingTransfer', @cb, SYSDATETIME())
-      `);
+    const rtIns = await reserveRebookingTransfer(pool, { heldId, amount, fromCompanyId: held.FromCompanyId, toBookingId, toCompanyId: to.ToCompanyId, actorUserId: actorId(req), isCrossCompany: true });
     const rtId = rtIns.recordset[0].Id;
     let ftId, ftDocNo;
     try {
-    const dtId = await resolveDocTypeId(pool, sql, "FT");
-    ftDocNo = await lockNextDocNumber(pool, sql, { docTypeId: dtId, tableName: "FundTransfer", docNoColumn: "DocNo", issuedBy: userEmail });
-    const ftIns = await pool.request()
-      .input("no", sql.NVarChar(100), ftDocNo || null)
-      .input("dt", sql.Date, new Date().toISOString().slice(0, 10))
-      .input("sc", sql.Int, held.FromCompanyId).input("dc", sql.Int, to.ToCompanyId)
-      .input("sb", sql.Int, srcBank.recordset[0].BankLHeadId).input("db", sql.Int, dstBank.recordset[0].BankLHeadId)
-      .input("amt", sql.Decimal(18, 2), amount)
-      .input("nar", sql.NVarChar(500), `CRM re-booking credit transfer — held credit from a cancelled booking moved to BKG #${toBookingId}`)
-      .input("dtid", sql.Int, dtId != null ? dtId : null)
-      .input("cb", sql.NVarChar(150), userEmail)
-      .query(`
-        INSERT INTO dbo.FundTransfer
-          (DocNo, TransferDate, TransferType, SourceCompanyId, DestinationCompanyId,
-           SourceBankId, DestinationBankId, Amount, Narration, Status, DocTypeId, CreatedBy, Mode)
-        OUTPUT INSERTED.FTId
-        VALUES
-          (@no, @dt, 'Inter', @sc, @dc, @sb, @db, @amt, @nar, 'Draft', @dtid, @cb, 'Transfer')
-      `);
-    ftId = ftIns.recordset[0].FTId;
-    if (ftDocNo) await backPatchRecordId(pool, sql, ftDocNo, "FundTransfer", ftId);
-    await pool.request().input("id", sql.Int, rtId).input("ft", sql.Int, ftId)
-      .query("UPDATE dbo.CrmRebookingTransfer SET FundTransferId = @ft, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      const dtId = await resolveDocTypeId(pool, sql, "FT");
+      ftDocNo = await lockNextDocNumber(pool, sql, { docTypeId: dtId, tableName: "FundTransfer", docNoColumn: "DocNo", issuedBy: userEmail });
+      const createTx = pool.transaction();
+      await createTx.begin();
+      try {
+        const ftIns = await createTx.request()
+          .input("no", sql.NVarChar(100), ftDocNo || null)
+          .input("dt", sql.Date, new Date().toISOString().slice(0, 10))
+          .input("sc", sql.Int, held.FromCompanyId).input("dc", sql.Int, to.ToCompanyId)
+          .input("sb", sql.Int, srcBank.recordset[0].BankLHeadId).input("db", sql.Int, dstBank.recordset[0].BankLHeadId)
+          .input("amt", sql.Decimal(18, 2), amount)
+          .input("nar", sql.NVarChar(500), `CRM re-booking credit transfer — held credit from a cancelled booking moved to BKG #${toBookingId}`)
+          .input("dtid", sql.Int, dtId != null ? dtId : null)
+          .input("cb", sql.NVarChar(150), userEmail)
+          .query(`
+            INSERT INTO dbo.FundTransfer
+              (DocNo, TransferDate, TransferType, SourceCompanyId, DestinationCompanyId,
+               SourceBankId, DestinationBankId, Amount, Narration, Status, DocTypeId, CreatedBy, Mode)
+            OUTPUT INSERTED.FTId
+            VALUES
+              (@no, @dt, 'Inter', @sc, @dc, @sb, @db, @amt, @nar, 'Draft', @dtid, @cb, 'Transfer')
+          `);
+        ftId = ftIns.recordset[0].FTId;
+        const linked = await createTx.request().input("id", sql.Int, rtId).input("ft", sql.Int, ftId).query(`
+          UPDATE dbo.CrmRebookingTransfer SET FundTransferId = @ft, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id AND Status = 'PendingTransfer' AND FundTransferId IS NULL
+        `);
+        if (linked.rowsAffected[0] !== 1) throw new Error("CRM re-booking transfer could not be linked to its Fund Transfer");
+        await createTx.commit();
+      } catch (createErr) {
+        try { await createTx.rollback(); } catch {}
+        throw createErr;
+      }
+      if (ftDocNo) {
+        try { await backPatchRecordId(pool, sql, ftDocNo, "FundTransfer", ftId); }
+        catch (patchErr) { console.error("[crm-refunds] Fund Transfer DocNo back-patch failed:", patchErr.message); }
+      }
     } catch (ftErr) {
       await pool.request().input("id", sql.Int, rtId).input("n", sql.NVarChar(500), `Fund transfer could not be raised: ${String(ftErr.message).slice(0, 400)}`)
         .query("UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', Notes = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
       throw ftErr;
     }
+    let fundTransferSubmitError = null;
     try {
       await approvalTransition("fund-transfer", ftId, "Pending", req.user?.email, req.user?.role);
     } catch (subErr) {
-      console.warn("[crm-refunds] fund-transfer auto-submit failed (non-fatal):", subErr.message);
+      fundTransferSubmitError = subErr.message;
+      console.warn("[crm-refunds] fund-transfer approval submission failed:", subErr.message);
     }
 
     await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("fund-transfer")]);
-    res.status(201).json({
+    res.status(fundTransferSubmitError ? 202 : 201).json({
       success: true, id: rtId, crossCompany: true, fundTransferId: ftId, fundTransferDocNo: ftDocNo,
-      message: "Inter-company fund transfer raised — the credit lands on the new booking once Finance approves the transfer.",
+      partialFailure: Boolean(fundTransferSubmitError),
+      fundTransferSubmitError: fundTransferSubmitError || undefined,
+      message: fundTransferSubmitError
+        ? "The Fund Transfer was created, but could not be submitted for approval. It remains Draft and the held credit is reserved; submit it manually when ready. No bank transfer was made."
+        : "Inter-company Fund Transfer submitted for approval. The bank transfer must be completed manually; Finance approval records that it has happened and then applies the credit to the new booking.",
     });
   } catch (e) {
     console.error("[crm-refunds] rebooking-transfer error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "An internal error occurred. Please try again later." });
+  }
+});
+
+// Manual recovery when CRM creation succeeded but ERP approval submission
+// failed. This only submits the existing Fund Transfer into the approval
+// workflow; it never moves or schedules bank funds.
+router.put("/rebooking-transfer/:transferId/submit-fund-transfer",
+  requirePageRight("crm-refunds", "edit"),
+  requirePageRight("fund-transfer", "edit"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const transferId = parseId(req.params.transferId);
+      if (!transferId) return res.status(400).json({ error: "Invalid re-booking transfer id" });
+      const row = (await pool.request().input("id", sql.Int, transferId).query(`
+        SELECT rt.Status, rt.FundTransferId, hc.BookingId AS SourceBookingId,
+               rt.ToBookingId, ft.Status AS FundTransferStatus
+        FROM dbo.CrmRebookingTransfer rt
+        JOIN dbo.CrmOnAccountPayment hc ON hc.Id = rt.HeldOnAccountId
+        JOIN dbo.FundTransfer ft ON ft.FTId = rt.FundTransferId
+        WHERE rt.Id = @id AND rt.IsCrossCompany = 1
+      `)).recordset[0];
+      if (!row) return res.status(404).json({ error: "Cross-company re-booking transfer not found" });
+      if (row.Status !== "PendingTransfer" || row.FundTransferStatus !== "Draft") {
+        return res.status(409).json({ error: `Manual submission requires PendingTransfer/Draft status; current status is ${row.Status}/${row.FundTransferStatus}` });
+      }
+      for (const bookingId of [row.SourceBookingId, row.ToBookingId]) {
+        const allowed = await assertBookingProjectScope(req, res, bookingId);
+        if (allowed === false) return;
+      }
+      const result = await approvalTransition(
+        "fund-transfer", row.FundTransferId, "Pending",
+        req.user?.email || req.user?.name, req.user?.role, null,
+        req.user?.userId ?? req.user?.id ?? null,
+      );
+      await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("fund-transfer")]);
+      return res.json({ success: true, message: "Fund Transfer submitted for approval. Any bank transfer remains a manual staff action.", ...result });
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+  },
+);
+
+// Explicit staff retry for ledger follow-up after the CRM credit itself was
+// committed. No bank action is performed by this endpoint.
+router.put("/rebooking-transfer/:transferId/retry-ledger", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const transferId = parseId(req.params.transferId);
+    if (!transferId) return res.status(400).json({ error: "Invalid re-booking transfer id" });
+    const row = (await pool.request().input("id", sql.Int, transferId).query(`
+      SELECT rt.Id, rt.Status, rt.IsCrossCompany, rt.FundTransferId,
+             hc.BookingId AS SourceBookingId, rt.ToBookingId,
+             ft.Status AS FundTransferStatus
+      FROM dbo.CrmRebookingTransfer rt
+      JOIN dbo.CrmOnAccountPayment hc ON hc.Id = rt.HeldOnAccountId
+      LEFT JOIN dbo.FundTransfer ft ON ft.FTId = rt.FundTransferId
+      WHERE rt.Id = @id
+    `)).recordset[0];
+    if (!row) return res.status(404).json({ error: "Re-booking transfer not found" });
+    if (row.Status !== "Applied") return res.status(409).json({ error: `Re-booking transfer is ${row.Status}; retry requires Applied status` });
+    if (row.IsCrossCompany) {
+      if (row.FundTransferStatus !== "Approved") return res.status(409).json({ error: "The linked Fund Transfer must be approved first" });
+      if (!(await require("../services/generalLedger").hasCompleteFundTransferPosting(pool, row.FundTransferId))) {
+        return res.status(409).json({ error: "The linked Fund Transfer GL posting is incomplete; resolve that approval first" });
+      }
+    }
+    for (const bookingId of [row.SourceBookingId, row.ToBookingId]) {
+      const allowed = await assertBookingProjectScope(req, res, bookingId);
+      if (allowed === false) return;
+    }
+    const result = await applyRebookingTransferToBooking(pool, transferId, req.user?.email || req.user?.name || "system");
+    await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("general-ledger")]);
+    if (!result.ok) return res.status(202).json({ success: true, partialFailure: true, message: result.reason, ...result });
+    res.json({ success: true, message: "Re-booking ledger entries are up to date", ...result });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
 module.exports = router;
 module.exports.markCrmRefundPaid = markCrmRefundPaid;
 module.exports.applyRebookingTransferToBooking = applyRebookingTransferToBooking;
+module.exports.settlePaidRefunds = settlePaidRefunds;

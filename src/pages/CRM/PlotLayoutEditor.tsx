@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Minus, Move, Network, Plus, RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const PLOT_API = "/api/plot-master";
@@ -71,6 +72,9 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const initialised = useRef<number | null>(null);
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
 
   const byId = useMemo(() => new Map(plots.map((plot) => [plot.Id, plot])), [plots]);
   const sorted = useMemo(() => [...plots].sort(plotOrder), [plots]);
@@ -191,7 +195,11 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
   };
 
   const close = (next: boolean) => {
-    if (!next && dirty && !window.confirm("Discard the unsaved layout changes?")) return;
+    if (!next && dirty) {
+      // Replaces window.confirm — uses Radix AlertDialog instead
+      requestConfirm("Discard the unsaved layout changes?", () => onOpenChange(next));
+      return;
+    }
     onOpenChange(next);
   };
 
@@ -361,6 +369,19 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
           </div>
         )}
       </DialogContent>
+      {/* Shared AlertDialog — replaces window.confirm */}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard Changes?</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Discard</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

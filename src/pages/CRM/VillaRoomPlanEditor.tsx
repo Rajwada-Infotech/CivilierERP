@@ -4,6 +4,7 @@ import { Plus, Trash2, Copy, Layers, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { VILLA_TYPE_API, type VillaType } from "./VillaTypesDialog";
 import { storeyDisplay, storeyRank } from "@/lib/floorLabel";
 
@@ -68,6 +69,9 @@ export function VillaRoomPlanEditor({
   const [behind, setBehind] = useState<{ villas: number; rooms: number } | null>(null);
   const [updatingVillas, setUpdatingVillas] = useState(false);
   const villasUrl = `/api/crm/project-auto-setup/projects/${type.ProjectId}/villas/add-missing-rooms?villaTypeId=${type.Id}`;
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
   const checkBuiltVillas = async () => {
     if (!type.VillaCount) { setBehind(null); return; }
     const r = await fetchWithAuth(`${villasUrl}&dryRun=1`, { method: "POST" });
@@ -76,17 +80,21 @@ export function VillaRoomPlanEditor({
   };
   const updateBuiltVillas = async () => {
     if (!behind) return;
-    if (!window.confirm(`Add ${behind.rooms} room(s) to ${behind.villas} built ${type.Code} villa(s)?
-Only missing rooms are added — existing rooms, their names and their DPR work stay exactly as they are.`)) return;
-    setUpdatingVillas(true);
-    try {
-      const r = await fetchWithAuth(villasUrl, { method: "POST" });
-      const b = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(b.error || "Could not update the villas");
-      toast.success(`${b.roomsAdded} room(s) added to ${(b.changed || []).length} villa(s)` + (b.failed?.length ? ` — ${b.failed.length} left unchanged: ${b.failed[0]}` : ""));
-      setBehind(null);
-      onSaved();
-    } catch (e: any) { toast.error(e.message); } finally { setUpdatingVillas(false); }
+    // Replaces window.confirm — uses Radix AlertDialog instead
+    requestConfirm(
+      `Add ${behind.rooms} room(s) to ${behind.villas} built ${type.Code} villa(s)? Only missing rooms are added — existing rooms, their names and their DPR work stay exactly as they are.`,
+      async () => {
+        setUpdatingVillas(true);
+        try {
+          const r = await fetchWithAuth(villasUrl, { method: "POST" });
+          const b = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(b.error || "Could not update the villas");
+          toast.success(`${b.roomsAdded} room(s) added to ${(b.changed || []).length} villa(s)` + (b.failed?.length ? ` — ${b.failed.length} left unchanged: ${b.failed[0]}` : ""));
+          setBehind(null);
+          onSaved();
+        } catch (e: any) { toast.error(e.message); } finally { setUpdatingVillas(false); }
+      }
+    );
   };
 
   // Floor-builder state
@@ -247,6 +255,7 @@ Only missing rooms are added — existing rooms, their names and their DPR work 
   };
 
   return (
+    <>
     <div className="rounded-lg border border-primary/40 bg-primary/[0.02] p-4 space-y-4">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -508,5 +517,19 @@ Only missing rooms are added — existing rooms, their names and their DPR work 
         </div>
       )}
     </div>
+    {/* Shared AlertDialog — replaces window.confirm */}
+    <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Confirm Action</AlertDialogTitle>
+          <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

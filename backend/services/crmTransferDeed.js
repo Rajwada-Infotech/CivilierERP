@@ -123,6 +123,16 @@ async function openForCase(db, resaleId, actorUserId) {
       .input("p", sql.NVarChar(20), doc.Party).input("by", sql.Int, actorUserId)
       .query("INSERT INTO dbo.CrmTransferDeedDocument (DeedId, DocumentType, Label, Party, IsMandatory, Status, CreatedBy) VALUES (@d, @t, @l, @p, 1, N'Requested', @by)");
   }
+  const toCustomerId = st.case.ToCustomerId;
+  if (toCustomerId) {
+    const { ensurePortalUser } = require("./crmPortalProvision");
+    try {
+      await ensurePortalUser(db, null, toCustomerId); // pass customerId directly
+    } catch (provErr) {
+      console.error("[crmTransferDeed] Portal provisioning failed for buyer:", toCustomerId, provErr);
+      // Non-fatal: don't fail the deed creation
+    }
+  }
   await log(db, id, "Opened", { userId: actorUserId, remarks: `${deedNo} for case #${resaleId}` });
   return id;
 }

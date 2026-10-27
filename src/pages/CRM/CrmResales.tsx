@@ -127,6 +127,7 @@ const CrmResales: React.FC = () => {
   const save = async () => {
     if (!form.FromBookingId) return toast.error("Choose the property that is changing hands");
     if (form.Kind === "Resale" && !form.ToCustomerId) return toast.error("Choose the new buyer");
+    if (form.Kind === "Resale" && holding && String(form.ToCustomerId) === String(holding.CustomerId)) return toast.error("The seller and the buyer can't be the same customer");
     // The server needs the price for both kinds (it goes on the transfer); the form used to let a resale go without it.
     if (!(Number(form.AgreedValue) > 0)) return toast.error(form.Kind === "BuyBack" ? "Enter the agreed buy-back price" : "Enter the price the buyers agreed");
     setSaving(true);

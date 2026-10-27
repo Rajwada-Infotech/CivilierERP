@@ -1,4 +1,4 @@
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,6 +12,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { SearchableSelect } from "@/components/SearchableSelect";
@@ -502,13 +503,43 @@ const CrmApplication: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId, selectedUnit?.Id]);
 
-  const computedTotal = useMemo(() => {
-    const area = selectedPlots.length
+  const totalAreaSqFt = useMemo(() => (
+    selectedPlots.length
       ? selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0)
-      : Number(selectedUnit?.AreaSqFt) || 0;
+      : Number(selectedUnit?.AreaSqFt) || 0
+  ), [selectedUnit, selectedPlots]);
+  const computedTotal = useMemo(() => {
     const rate = Number(form.RatePerSqFt) || 0;
-    return area && rate ? Math.round(area * rate) : 0;
-  }, [selectedUnit, selectedPlots, form.RatePerSqFt]);
+    return totalAreaSqFt && rate ? Math.round(totalAreaSqFt * rate) : 0;
+  }, [totalAreaSqFt, form.RatePerSqFt]);
+
+  // Total Value can be typed directly instead of Rate — the rate is back-
+  // calculated from it (Rate = Total ÷ Area) so staff who are quoted a flat
+  // price don't have to do that division themselves. The field keeps its
+  // own local text while focused (so typing isn't fought by the rounded
+  // echo coming back through Rate → computedTotal) and only snaps to the
+  // settled, rate-accurate total on blur or when the rate/unit changes from
+  // elsewhere.
+  const [totalValueInput, setTotalValueInput] = useState("");
+  const totalFieldFocused = useRef(false);
+  useEffect(() => {
+    if (totalFieldFocused.current) return;
+    setTotalValueInput(computedTotal ? String(computedTotal) : "");
+  }, [computedTotal]);
+  const handleTotalValueChange = (raw: string) => {
+    setTotalValueInput(raw);
+    if (!totalAreaSqFt) return;
+    const total = Number(raw);
+    if (!raw.trim() || !Number.isFinite(total) || total <= 0) return;
+    // 4-decimal rate keeps the settled total (area × rate, shown on blur)
+    // within a paise of what was typed — rounds away to nothing once
+    // computedTotal rounds to the nearest rupee. 2 decimals wasn't enough
+    // precision and visibly drifted the total by several rupees; raw
+    // (unrounded) division also isn't used here since it can surface
+    // floating-point noise like 1874.7238999999998 in the Rate field.
+    const rate = Math.round((total / totalAreaSqFt) * 10000) / 10000;
+    setForm((f) => ({ ...f, RatePerSqFt: String(rate) }));
+  };
   const unitParkingGstPreview = useMemo(
     () => (crmGstRates ? computeUnitParkingGst(computedTotal, detailParkingBase, crmGstRates) : null),
     [crmGstRates, computedTotal, detailParkingBase],
@@ -935,6 +966,9 @@ const CrmApplication: React.FC = () => {
   const [cancellingApp, setCancellingApp] = useState<any | null>(null);
   const [cancelRemarks, setCancelRemarks] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  // Replaces window.confirm
+  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
+  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
   const handleCancelApplication = async () => {
     if (!cancellingApp) return;
     setCancelling(true);
@@ -965,20 +999,21 @@ const CrmApplication: React.FC = () => {
     }
   };
   const handleDeleteApplication = async (a: any) => {
-    if (!window.confirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`)) return;
-    try {
-      const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete application");
-      toast.success(data.message || "Application deleted");
-      qc.invalidateQueries({ queryKey: ["crm-apps"] });
-      qc.invalidateQueries({ queryKey: ["unit-master"] });
-      qc.invalidateQueries({ queryKey: ["unit-matrix"] });
-      qc.invalidateQueries({ queryKey: ["parking-matrix"] });
-      if (viewingAppId === a.Id) closeApplication();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    }
+    requestConfirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`, async () => {
+      try {
+        const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to delete application");
+        toast.success(data.message || "Application deleted");
+        qc.invalidateQueries({ queryKey: ["crm-apps"] });
+        qc.invalidateQueries({ queryKey: ["unit-master"] });
+        qc.invalidateQueries({ queryKey: ["unit-matrix"] });
+        qc.invalidateQueries({ queryKey: ["parking-matrix"] });
+        if (viewingAppId === a.Id) closeApplication();
+      } catch (e: any) {
+        toast.error(translateError(e.message));
+      }
+    });
   };
   const handleCreateBooking = async (a: any) => {
     if (!a.PreferredUnitId) {
@@ -1141,7 +1176,10 @@ const CrmApplication: React.FC = () => {
         // Displaying "Pending" here misleads staff into thinking the record
         // still needs attention. Show "Booked" instead so the conversion is
         // immediately visible without opening the detail panel.
-        const displayStatus = r.Stage === "Converted" ? "Booked" : r.Status;
+        // Only an approved booking is "Booked"; until then it is still
+        // working through the booking approvals.
+        const displayStatus = r.Stage !== "Converted" ? r.Status
+          : r.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In Approval";
         return (
           <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5">
             <SheetMark text={displayStatus} tone={appTone(displayStatus)} />
@@ -1294,9 +1332,16 @@ const CrmApplication: React.FC = () => {
                 <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
               </span>
             )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && (
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && a.Stage !== "Converted" && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
+              </span>
+            )}
+            {activeStage === "InProcess" && a.Stage === "Converted" && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+                <Clock size={10} /> Booking {a.BookingNo || ""} — {a.BookingStatus === CrmStatus.PENDING
+                  ? `pending ${bookingWorkflowStageLabel[a.BookingWorkflowStage] || "approval"}`
+                  : a.BookingStatus}
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
@@ -1667,9 +1712,12 @@ const CrmApplication: React.FC = () => {
                       <input type="number" value={form.RatePerSqFt} onChange={(e) => setForm((f) => ({ ...f, RatePerSqFt: e.target.value }))} className={inputCls} />
                     </div>
                     <div className="col-span-3 lg:col-span-3">
-                      <label className={labelCls}>Est. Total Value</label>
-                      <input type="text" readOnly value={computedTotal ? `₹${computedTotal.toLocaleString("en-IN")}` : "—"}
-                        className={`${inputCls} bg-muted/30 text-muted-foreground`} />
+                      <label className={labelCls}>Total Value</label>
+                      <input type="text" inputMode="decimal" disabled={!totalAreaSqFt} value={totalValueInput}
+                        onFocus={() => { totalFieldFocused.current = true; }}
+                        onBlur={() => { totalFieldFocused.current = false; setTotalValueInput(computedTotal ? String(computedTotal) : ""); }}
+                        onChange={(e) => { if (/^[0-9]*\.?[0-9]*$/.test(e.target.value)) handleTotalValueChange(e.target.value); }}
+                        className={`${inputCls} disabled:bg-muted/30 disabled:text-muted-foreground`} />
                     </div>
                   </div>
                 </div>
@@ -2592,6 +2640,18 @@ const CrmApplication: React.FC = () => {
           onClose={() => setPdfDialogApp(null)}
         />
       )}
+      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
+        <AlertDialogContent className="rounded-none" style={{ border: RULE }}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-heading">Confirm</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className={`${KEY_LINE} h-9 px-4 rounded-none`}>Cancel</AlertDialogCancel>
+            <AlertDialogAction className={`${KEY_INK} h-9 px-4 rounded-none`} onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SheetShell>
     </>
   );
