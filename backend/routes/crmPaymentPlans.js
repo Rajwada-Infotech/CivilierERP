@@ -4,7 +4,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
@@ -131,7 +131,8 @@ async function syncPaymentPlanProjectTags(db, planId, projectIds) {
 // Master's tag picker and the Application wizard's dropdown); the plan
 // management page itself omits the param so it can still see/reactivate
 // inactive plans.
-router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
+// Unit Master tags units with plans from this list, so its users may read it too.
+router.get("/", requireAnyPageRight(["crm-payment-plans", "followup-unit-master"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const showAll = req.query.showAll === "true";

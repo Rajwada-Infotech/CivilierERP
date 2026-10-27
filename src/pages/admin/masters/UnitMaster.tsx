@@ -7,8 +7,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { UnitKindsDialog } from "@/components/UnitKindsDialog";
 import { Settings2 } from "lucide-react";
 import { safeHtml } from "@/utils/escapeHtml";
-import { FollowupShell } from "@/components/followup/FollowupShell";
-import { StatusBadge } from "@/components/StatusBadge";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -21,6 +20,13 @@ import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/unit-master";
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY_LINE = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors border border-foreground text-foreground hover:bg-primary/10 h-9 px-3";
+// A project can belong to several companies (company_ids); company_id is only its primary one. Filtering on it hid a
+// project from every company but the first.
+const companiesOf = (p: { company_id?: number; company_ids?: string }) =>
+  String(p.company_ids ?? p.company_id ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+const STATUS_TONE: Record<string, "done" | "waiting" | "stopped" | "draft"> = { Available: "done", "On Hold": "waiting", Booked: "stopped", Blocked: "draft" };
 const DROPDOWN_API = "/api/business/dropdown";
 
 // "Type of Unit" is picked once here and auto-fetched everywhere the unit
@@ -78,11 +84,11 @@ const fields: FieldDef[] = [
     disabledWhen: (form) => !form?.companyId,
     disabledPlaceholder: "Select a Company first",
     optionsProvider: (_data, _currentId, form) => {
-      const projects: { id: number; name: string; company_id: number }[] = (form?.__projects as any) ?? [];
+      const projects: { id: number; name: string; company_id: number; company_ids?: string }[] = (form?.__projects as any) ?? [];
       const selectedCompany = form?.companyId as string | undefined;
       if (!selectedCompany) return [];
       return projects
-        .filter((p) => String(p.company_id) === selectedCompany)
+        .filter((p) => companiesOf(p).includes(selectedCompany))
         .map((p) => ({ value: String(p.id), label: p.name }));
     },
   },
@@ -201,30 +207,30 @@ const fields: FieldDef[] = [
       const unitType = formData?.unitType as string;
       const fmt = (v: string) => v ? `${parseFloat(v).toLocaleString("en-IN")} sq ft` : "—";
       return (
-        <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Inherited from Block Type Spec</span>
+        <div className="bg-card px-3 py-2.5 text-sm space-y-1.5 border border-foreground/25">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Inherited from the block&apos;s unit type spec</span>
             {blockId && unitType && (
-              <span className="text-xs text-muted-foreground italic">Set these in Block Master → Unit Type Specifications</span>
+              <span className="text-xs text-muted-foreground">Set these in Block Master → Unit Type Specifications</span>
             )}
           </div>
           {hasAny ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
               <div>
-                <div className="text-xs text-muted-foreground mb-0.5">Carpet</div>
-                <div className="font-medium tabular-nums">{fmt(carpet)}</div>
+                <div className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Carpet</div>
+                <div className="font-heading font-semibold tabular-nums">{fmt(carpet)}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-0.5">Built-up</div>
-                <div className="font-medium tabular-nums">{fmt(builtUp)}</div>
+                <div className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Built-up</div>
+                <div className="font-heading font-semibold tabular-nums">{fmt(builtUp)}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-0.5">Super Built-up (Saleable)</div>
-                <div className="font-medium tabular-nums">{fmt(sbu)}</div>
+                <div className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Super Built-up (Saleable)</div>
+                <div className="font-heading font-semibold tabular-nums">{fmt(sbu)}</div>
               </div>
             </div>
           ) : (
-            <div className="text-muted-foreground italic text-xs">
+            <div className="text-muted-foreground text-xs">
               No spec defined for this Block + Unit Type yet.
               {blockId && unitType
                 ? " Go to Block Master → Unit Type Specifications to define areas."
@@ -262,10 +268,10 @@ const fields: FieldDef[] = [
         ? Math.round(rate * sbu)
         : null;
       return (
-        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+        <div className="bg-card px-3 py-2.5 text-sm border border-foreground/25">
           {price != null
-            ? <span className="font-semibold tabular-nums">₹ {price.toLocaleString("en-IN")}</span>
-            : <span className="text-muted-foreground italic">Enter Rate and Super Built-up Area to see Base Price</span>}
+            ? <span className="font-heading text-base font-semibold tabular-nums">₹{price.toLocaleString("en-IN")}</span>
+            : <span className="text-muted-foreground text-xs">Enter the rate (and the block&apos;s super built-up area) to see the base price.</span>}
         </div>
       );
     },
@@ -370,7 +376,7 @@ const UnitMaster: React.FC = () => {
   // own Company -> Project chain.
   const { data: dropdownData } = useQuery<{
     companies: { id: number; name: string }[];
-    projects: { id: number; name: string; company_id: number }[];
+    projects: { id: number; name: string; company_id: number; company_ids?: string }[];
   }>({
     queryKey: ["business-dropdown"],
     queryFn: async () => {
@@ -411,7 +417,7 @@ const UnitMaster: React.FC = () => {
       const project = projectsList.find((p) => p.id === item.ProjectId);
       return {
       _id: String(item.Id),
-      companyId: project ? String(project.company_id) : "",
+      companyId: project ? String(project.company_id ?? companiesOf(project)[0] ?? "") : "",
       projectId: String(item.ProjectId),
       projectName: item.ProjectName ?? "",
       blockId: String(item.BlockId),
@@ -442,7 +448,7 @@ const UnitMaster: React.FC = () => {
       // (Blocked > Booked > OnHold > Available), driven off the exact same
       // LockBookingNo/LockHoldId this GET endpoint already returns — never
       // a separate guess, so it can't drift from what the matrix shows.
-      status: !Boolean(item.IsActive)
+      status: !item.IsActive
         ? "Blocked"
         : item.LockBookingNo
           ? "Booked"
@@ -512,7 +518,7 @@ const UnitMaster: React.FC = () => {
         method: "DELETE",
       });
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to delete unit");
+        throw new Error((await res.json().catch(() => ({}))).error || "Failed to delete unit");
       toast.success("Unit deleted!");
     }
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
@@ -520,130 +526,155 @@ const UnitMaster: React.FC = () => {
     invalidateRoomData(queryClient);
   };
 
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading units...</div>;
-  if (error)
-    return <div className="p-6 text-red-500">Failed to load units.</div>;
+  const count = (st: string) => mappedData.filter((r) => r.status === st).length;
+  const figures = [
+    { label: "Units", value: mappedData.length, note: "in your projects" },
+    { label: "Available", value: count("Available"), note: "free to sell" },
+    { label: "Booked / on hold", value: count("Booked") + count("On Hold"), note: "locked — not editable here" },
+    { label: "Blocked", value: count("Blocked"), note: "inactive" },
+  ];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Follow-Up", "Setup", "Unit Master"]} />
-      {/* Unit kinds (flat, villa, shop, office…) live with the units they describe. */}
-      {rights.canEdit && (
-        <div className="flex justify-end -mb-2">
-          <button type="button" onClick={() => setKindsOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg hover:bg-muted">
-            <Settings2 size={14} /> Unit kinds
+      <UnitKindsDialog open={kindsOpen} onOpenChange={setKindsOpen} canCreate={rights.canCreate} canEdit={rights.canEdit} />
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Setup"
+        title="Units"
+        subtitle="Every flat, shop and villa: its block and floor, type and kind, area, rate and payment plans. Booked and held units are locked."
+        action={(rights.canCreate || rights.canEdit) && (
+          // Unit kinds (flat, villa, shop, office…) live with the units they describe.
+          <button type="button" onClick={() => setKindsOpen(true)} className={KEY_LINE}>
+            <Settings2 size={13} /> Unit kinds
           </button>
+        )}
+      >
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {figures.map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      )}
-      <UnitKindsDialog open={kindsOpen} onOpenChange={setKindsOpen} />
-      <FollowupShell title="Unit Master">
-      <MasterPage
-        title="Unit"
-        canCreate={rights.canCreate}
-        canEdit={rights.canEdit}
-        canDelete={rights.canDelete}
-        fields={fields}
-        columns={columns}
-        columnRenderers={{
-          status: (value) => <StatusBadge status={value as string} />,
-          saleableAreaSqFt: (value) =>
-            value != null && value !== ""
-              ? <span className="tabular-nums">{Number(value).toLocaleString("en-IN")} sqft</span>
-              : <span className="text-muted-foreground">—</span>,
-          ratePerSqFt: (value) =>
-            value && value !== ""
-              ? <span className="tabular-nums">₹ {Number(value).toLocaleString("en-IN")}</span>
-              : <span className="text-muted-foreground">—</span>,
-        }}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        // A Booked or OnHold unit can't be edited or deleted from here —
-        // matches the server-side guard in unitMaster.js exactly, using the
-        // lock fields the GET endpoint now returns per row.
-        isRowLocked={(row) =>
-          row.lockBookingNo
-            ? `Booked (${row.lockBookingNo as string})`
-            : row.lockHoldId != null
-              ? "On Hold"
-              : null
-        }
-        // Inject __blocks + reset blockId when project changes
-        externalFormPatch={blocksPatch}
-        externalFormPatchKey={`${unitKinds.length}:${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}:${layoutTypes.map((t) => `${t.id}-${t.roomCount}`).join(",")}`}
-        onFieldChange={(form, fieldName) => {
-          if (fieldName === "companyId") {
-            return { ...form, projectId: "", blockId: "" };
-          }
-          if (fieldName === "projectId") {
-            return { ...form, blockId: "" };
-          }
-          return form;
-        }}
-        exportConfig={{
-          title: "Unit Master",
-          filename: "unit-master",
-          columns: exportColumns,
-        }}
-        viewConfig={{
-          title: "Unit Details",
-          fields: [
-            { key: "projectName", label: "Project" },
-            { key: "blockName", label: "Block" },
-            { key: "unitName", label: "Unit Name" },
-            { key: "floorNo", label: "Floor No." },
-            { key: "unitType", label: "Type of Unit" },
-            { key: "carpetAreaSqFt", label: "Carpet Area (sq ft)" },
-            { key: "builtUpAreaSqFt", label: "Built-up Area (sq ft)" },
-            { key: "superBuiltUpAreaSqFt", label: "Super Built-up / Saleable Area (sq ft)" },
-            { key: "openTerraceAreaSqFt", label: "Open Terrace Area (sq ft)" },
-            { key: "ratePerSqFt", label: "Rate per sq ft (₹)" },
-            {
-              key: "saleableAreaSqFt",
-              label: "Base Price",
-              render: (_, row) => {
-                const rate = parseFloat(row.ratePerSqFt as string);
-                const sbu = parseFloat(row.superBuiltUpAreaSqFt as string);
-                const price = !isNaN(rate) && !isNaN(sbu) && rate > 0 && sbu > 0
-                  ? Math.round(rate * sbu)
-                  : null;
-                return price != null
-                  ? <span className="font-semibold tabular-nums">₹ {price.toLocaleString("en-IN")}</span>
-                  : <span className="text-muted-foreground">—</span>;
-              },
-            },
-            { key: "paymentPlanNames", label: "Payment Plans" },
-            { key: "status", label: "Status" },
-          ],
-        }}
-        onPrint={(row) => {
-          const win = window.open("", "_blank", "width=600,height=400");
-          if (!win) return;
-          win.document.write(safeHtml`
-            <html><head><title>Unit — ${row.unitName}</title>
-            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Unit Card</h2><div className="overflow-x-auto thin-scroll"><table>
-              <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
-              <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
-              <tr><td>Unit Name</td><td>${row.unitName || "—"}</td></tr>
-              <tr><td>Floor No.</td><td>${row.floorNo || "—"}</td></tr>
-              <tr><td>Type of Unit</td><td>${row.unitType || "—"}</td></tr>
-              <tr><td>Carpet Area (sq ft)</td><td>${row.carpetAreaSqFt || "—"}</td></tr>
-              <tr><td>Built-up Area (sq ft)</td><td>${row.builtUpAreaSqFt || "—"}</td></tr>
-              <tr><td>Super Built-up / Saleable Area (sq ft)</td><td>${row.superBuiltUpAreaSqFt || "—"}</td></tr>
-              <tr><td>Open Terrace Area (sq ft)</td><td>${row.openTerraceAreaSqFt || "—"}</td></tr>
-              <tr><td>Rate per sq ft (₹)</td><td>${row.ratePerSqFt ? "₹ " + Number(row.ratePerSqFt).toLocaleString("en-IN") : "—"}</td></tr>
-              <tr><td>Base Price</td><td>${(() => { const r = parseFloat(row.ratePerSqFt as string); const s = parseFloat(row.superBuiltUpAreaSqFt as string); return !isNaN(r) && !isNaN(s) && r > 0 && s > 0 ? "₹ " + Math.round(r * s).toLocaleString("en-IN") : "—"; })()}</td></tr>
-              <tr><td>Payment Plans</td><td>${row.paymentPlanNames || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.status || "—"}</td></tr>
-            </table></div></body></html>
-          `);
-          win.document.close();
-          win.print();
-        }}
-      />
-      </FollowupShell>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading units…</p>
+        ) : error ? (
+          <div className="px-4 py-2.5 text-xs text-destructive bg-card" style={{ border: "1px solid hsl(var(--destructive))" }}>
+            {(error as Error)?.message || "Failed to load units."}
+          </div>
+        ) : (
+          <MasterPage
+            title="Unit"
+            canCreate={rights.canCreate}
+            canEdit={rights.canEdit}
+            canDelete={rights.canDelete}
+            fields={fields}
+            columns={columns}
+            columnRenderers={{
+              status: (value) => <SheetMark text={String(value)} tone={STATUS_TONE[String(value)] ?? "waiting"} />,
+              unitName: (value) => <span className="font-heading text-xs font-semibold tabular-nums">{String(value ?? "")}</span>,
+              floorNo: (value) => <span className="font-heading tabular-nums">{value === "" || value == null ? "—" : String(value)}</span>,
+              saleableAreaSqFt: (value) =>
+                value != null && value !== ""
+                  ? <span className="font-heading tabular-nums">{Number(value).toLocaleString("en-IN")} sq ft</span>
+                  : <span className="text-muted-foreground">—</span>,
+              ratePerSqFt: (value) =>
+                value && value !== ""
+                  ? <span className="font-heading tabular-nums">₹{Number(value).toLocaleString("en-IN")}</span>
+                  : <span className="text-muted-foreground">—</span>,
+            }}
+            initialData={mappedData}
+            onDataEvent={handleDataEvent}
+            // A Booked or OnHold unit can't be edited or deleted from here —
+            // matches the server-side guard in unitMaster.js exactly, using the
+            // lock fields the GET endpoint now returns per row.
+            isRowLocked={(row) =>
+              row.lockBookingNo
+                ? `Booked (${row.lockBookingNo as string})`
+                : row.lockHoldId != null
+                  ? "On Hold"
+                  : null
+            }
+            // Inject __blocks + reset blockId when project changes
+            externalFormPatch={blocksPatch}
+            externalFormPatchKey={`${unitKinds.length}:${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}:${layoutTypes.map((t) => `${t.id}-${t.roomCount}`).join(",")}`}
+            onFieldChange={(form, fieldName) => {
+              if (fieldName === "companyId") {
+                return { ...form, projectId: "", blockId: "" };
+              }
+              if (fieldName === "projectId") {
+                return { ...form, blockId: "" };
+              }
+              return form;
+            }}
+            exportConfig={rights.canExport ? {
+              title: "Unit Master",
+              filename: "unit-master",
+              columns: exportColumns,
+            } : undefined}
+            viewConfig={{
+              title: "Unit Details",
+              fields: [
+                { key: "projectName", label: "Project" },
+                { key: "blockName", label: "Block" },
+                { key: "unitName", label: "Unit Name" },
+                { key: "floorNo", label: "Floor No." },
+                { key: "unitType", label: "Type of Unit" },
+                { key: "carpetAreaSqFt", label: "Carpet Area (sq ft)" },
+                { key: "builtUpAreaSqFt", label: "Built-up Area (sq ft)" },
+                { key: "superBuiltUpAreaSqFt", label: "Super Built-up / Saleable Area (sq ft)" },
+                { key: "openTerraceAreaSqFt", label: "Open Terrace Area (sq ft)" },
+                { key: "ratePerSqFt", label: "Rate per sq ft (₹)" },
+                {
+                  key: "saleableAreaSqFt",
+                  label: "Base Price",
+                  render: (_, row) => {
+                    const rate = parseFloat(row.ratePerSqFt as string);
+                    const sbu = parseFloat(row.superBuiltUpAreaSqFt as string);
+                    const price = !isNaN(rate) && !isNaN(sbu) && rate > 0 && sbu > 0
+                      ? Math.round(rate * sbu)
+                      : null;
+                    return price != null
+                      ? <span className="font-heading font-semibold tabular-nums">₹{price.toLocaleString("en-IN")}</span>
+                      : <span className="text-muted-foreground">—</span>;
+                  },
+                },
+                { key: "paymentPlanNames", label: "Payment Plans" },
+                { key: "status", label: "Status", render: (v) => <SheetMark text={String(v)} tone={STATUS_TONE[String(v)] ?? "waiting"} /> },
+              ],
+            }}
+            onPrint={(row) => {
+              const win = window.open("", "_blank", "width=600,height=400");
+              if (!win) return;
+              win.document.write(safeHtml`
+                <html><head><title>Unit — ${row.unitName}</title>
+                <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+                </head><body><h2>Unit Card</h2><table>
+                  <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
+                  <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
+                  <tr><td>Unit Name</td><td>${row.unitName || "—"}</td></tr>
+                  <tr><td>Floor No.</td><td>${row.floorNo || "—"}</td></tr>
+                  <tr><td>Type of Unit</td><td>${row.unitType || "—"}</td></tr>
+                  <tr><td>Carpet Area (sq ft)</td><td>${row.carpetAreaSqFt || "—"}</td></tr>
+                  <tr><td>Built-up Area (sq ft)</td><td>${row.builtUpAreaSqFt || "—"}</td></tr>
+                  <tr><td>Super Built-up / Saleable Area (sq ft)</td><td>${row.superBuiltUpAreaSqFt || "—"}</td></tr>
+                  <tr><td>Open Terrace Area (sq ft)</td><td>${row.openTerraceAreaSqFt || "—"}</td></tr>
+                  <tr><td>Rate per sq ft (₹)</td><td>${row.ratePerSqFt ? "₹ " + Number(row.ratePerSqFt).toLocaleString("en-IN") : "—"}</td></tr>
+                  <tr><td>Base Price</td><td>${(() => { const r = parseFloat(row.ratePerSqFt as string); const s = parseFloat(row.superBuiltUpAreaSqFt as string); return !isNaN(r) && !isNaN(s) && r > 0 && s > 0 ? "₹ " + Math.round(r * s).toLocaleString("en-IN") : "—"; })()}</td></tr>
+                  <tr><td>Payment Plans</td><td>${row.paymentPlanNames || "—"}</td></tr>
+                  <tr><td>Status</td><td>${row.status || "—"}</td></tr>
+                </table></body></html>
+              `);
+              win.document.close();
+              win.print();
+            }}
+          />
+        )}
+      </SheetShell>
     </>
   );
 };

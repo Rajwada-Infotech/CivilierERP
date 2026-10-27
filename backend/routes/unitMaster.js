@@ -66,7 +66,11 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const req0 = pool.request();
-    const where = req.query.isActive != null ? "WHERE u.IsActive = 1" : "";
+    // Only the user's projects (the cache key carries the scope). Every project's units used to come back to everyone.
+    const conds = [];
+    if (req.query.isActive != null) conds.push("u.IsActive = 1");
+    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "u.ProjectId", "").trim());
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const result = await req0.query(`
       SELECT
         u.Id,
@@ -157,7 +161,7 @@ router.get("/blocks", async (req, res) => {
     let query = `
       SELECT Id, BlockName AS Name, ProjectId
       FROM dbo.BlockMaster
-      WHERE IsActive = 1
+      WHERE IsActive = 1${require("../services/projectScope").projectPredicate(req.projectScope, "ProjectId")}
     `;
     if (Number.isFinite(projectId) && projectId > 0) {
       request.input("ProjectId", sql.Int, projectId);
