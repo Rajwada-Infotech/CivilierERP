@@ -272,7 +272,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
         SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName, bk.LHeadName AS BankName,
                COALESCE(cu.name, jv.CreatedBy) AS CreatedByName
         FROM dbo.JournalVoucher jv
-        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(jv.CreatedBy)
+        LEFT JOIN dbo.users cu ON cu.email = jv.CreatedBy
         LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
         LEFT JOIN dbo.AccountHeadMaster bk ON bk.LHeadId = jv.BankId

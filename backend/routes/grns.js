@@ -850,7 +850,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster  s  ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.DocNumberSequence  ds ON ds.TableName = 'GoodsReceiptNotes'
                                             AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
-        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
+        LEFT JOIN dbo.Users cu ON cu.email = ds.IssuedBy
         OUTER APPLY (
           SELECT
             SUM(base) AS TaxableAmount,
@@ -874,7 +874,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
             AND ISNULL(a.IsDeleted, 0) = 0
           ORDER BY a.CreatedAt DESC
         ) amd
-        LEFT JOIN dbo.Users mu ON LOWER(mu.email) = LOWER(amd.CreatedBy)
+        LEFT JOIN dbo.Users mu ON mu.email = amd.CreatedBy
         OUTER APPLY (
           SELECT TOP 1 aal.ApproverEmail, aal.ActionAt
           FROM dbo.ApprovalAuditLog aal
@@ -882,7 +882,7 @@ router.get("/register", cache("grns", 300), async (req, res) => {
             AND aal.ActionStatus = 'Approved'
           ORDER BY aal.ActionAt DESC
         ) appr
-        LEFT JOIN dbo.Users pu ON LOWER(pu.email) = LOWER(appr.ApproverEmail)
+        LEFT JOIN dbo.Users pu ON pu.email = appr.ApproverEmail
         WHERE (@companyId  IS NULL OR p.CompanyId = @companyId)
           AND (@projectId  IS NULL OR p.ProjectId = @projectId)${projectPredicate(req.projectScope, "p.ProjectId")}
           AND (@supplierId IS NULL OR grn.SupplierID = @supplierId)
@@ -1031,7 +1031,7 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.VehicleInOut vio ON vio.VehicleInOutID = grn.VehicleInOutID
         LEFT JOIN dbo.DocNumberSequence ds ON ds.TableName = 'GoodsReceiptNotes'
                                           AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
-        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
+        LEFT JOIN dbo.Users cu ON cu.email = ds.IssuedBy
         WHERE grn.GRNID = @GRNID
       `);
 

@@ -182,7 +182,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
              ls.LoanNo AS LinkedLoanNo, ls.Status AS LinkedLoanStatus,
              COALESCE(cu.name, ft.CreatedBy) AS CreatedByName
       FROM dbo.FundTransfer ft
-      LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(ft.CreatedBy)
+      LEFT JOIN dbo.users cu ON cu.email = ft.CreatedBy
       LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
       LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
       LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId

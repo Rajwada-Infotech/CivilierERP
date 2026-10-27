@@ -26,7 +26,7 @@ router.get("/", authenticateToken, requirePageRight("stock-update", "view"), asy
       LEFT JOIN dbo.enterprise co ON co.id = su.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = su.ProjectId
       LEFT JOIN dbo.Godowns g ON g.GodownID = su.GodownId
-      LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(su.CreatedBy)
+      LEFT JOIN dbo.users cu ON cu.email = su.CreatedBy
       WHERE 1=1${projectPredicate(req.projectScope, "su.ProjectId")}
       ORDER BY su.UpdateDate DESC, su.StockUpdateId DESC
     `);
@@ -50,7 +50,7 @@ router.get("/:id", authenticateToken, requirePageRight("stock-update", "view"), 
       LEFT JOIN dbo.enterprise co ON co.id = su.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = su.ProjectId
       LEFT JOIN dbo.Godowns g ON g.GodownID = su.GodownId
-      LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(su.CreatedBy)
+      LEFT JOIN dbo.users cu ON cu.email = su.CreatedBy
       WHERE su.StockUpdateId = @id
     `);
     if (!header.recordset.length) return res.status(404).json({ error: "Not found" });

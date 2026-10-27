@@ -1500,10 +1500,13 @@ function buildInboxQueries(module, projectScope = null) {
 
 // One request per module, merged here, instead of one 30-way UNION ALL: with the project filters added, SQL Server's
 // plan for the combined statement took over a minute, while each module on its own answers in milliseconds.
+// One batch on one connection: the ~37 module queries (they take no parameters) used to run in parallel, each
+// on its own connection — more than the pool's 30, so every badge refresh held the whole pool and queued the
+// rest of the page behind it. Run as one batch they take about the same time, warm.
 async function runInboxQueries(pool, queries) {
-  const parts = await Promise.all(queries.map((q) => pool.request().query(q)));
+  const { recordsets } = await pool.request().query(queries.join(";\n"));
   const time = (r) => (r.LastModified ? new Date(r.LastModified).getTime() || 0 : 0);
-  return parts.flatMap((p) => p.recordset).sort((x, y) => time(y) - time(x));
+  return recordsets.flat().sort((x, y) => time(y) - time(x));
 }
 
 router.get("/", async (req, res) => {

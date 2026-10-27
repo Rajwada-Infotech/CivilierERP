@@ -509,7 +509,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           WHERE pl.PPaymentID = np.PPaymentID
         ) x
       ) mproj
-      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
+      LEFT JOIN dbo.users pcu ON pcu.email = np.PCreatedBy
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -2260,7 +2260,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
-      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
+      LEFT JOIN dbo.users pcu ON pcu.email = np.PCreatedBy
       WHERE np.PPaymentID = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });

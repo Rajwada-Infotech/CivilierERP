@@ -764,7 +764,9 @@ async function getPOSelect(pool) {
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
   LEFT JOIN dbo.Quotations        qt ON qt.QuotationId = po.SourceQTId
-  LEFT JOIN dbo.users             cu ON LOWER(cu.email) = LOWER(po.CreatedBy)
+  -- Plain = (both columns are case-insensitive, CI_AS): LOWER() on both sides hid the email index and gave a
+  -- plan that took 3-4 s to run the 10-row list page.
+  LEFT JOIN dbo.users             cu ON cu.email = po.CreatedBy
   ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
   ${hasPT ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = po.PaymentTermId" : ""}
 `;
