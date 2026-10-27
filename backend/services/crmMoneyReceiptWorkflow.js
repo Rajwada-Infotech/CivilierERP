@@ -3,7 +3,6 @@ const { getNextDocNumber } = require("./docNumber");
 const { generateMoneyReceiptPdf, getMoneyReceiptByReceivedPaymentId } = require("./moneyReceiptPdf");
 const { STAGE_REVIEW, stageLabel } = require("./crmBookingStageService");
 
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 
 class MoneyReceiptError extends Error {
   constructor(message, status = 400) {
@@ -12,8 +11,9 @@ class MoneyReceiptError extends Error {
   }
 }
 
-function isMoneyReceiptApprover(role) {
-  return APPROVER_ROLES.includes(String(role || "").trim().toLowerCase());
+// Who approves money receipts is set in Approval Setup ("crm-money-receipts").
+function isMoneyReceiptApprover(role, userId) {
+  return require("./approvalService").isApproverFor("crm-money-receipts", userId, role);
 }
 
 function cleanString(v) {

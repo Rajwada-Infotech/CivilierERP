@@ -40,19 +40,13 @@ const STAGE_CONFIRMED = "Confirmed";
 
 const WORKFLOW_STAGES = [STAGE_REVIEW, STAGE_MARKETING, STAGE_DIRECTOR, STAGE_CONFIRMED];
 
-// Who may act at each stage comes from Approval Setup: the "crm-bookings"
-// workflow's Level 1 is Marketing Head, Level 2 is Director, and a user may
-// act at a stage when their role is on that level OR they are named on it.
-// These role sets are only the fallback for a database with no workflow
-// configured (or a level with neither roles nor people set).
+// Who may act at each stage comes only from Approval Setup: the
+// "crm-bookings" workflow's Level 1 is Marketing Head, Level 2 is Director,
+// and a user may act at a stage when that level names their role or them.
 const STAGE_LEVEL = { MarketingHeadApproval: 1, DirectorApproval: 2 };
 // The booking flow has two approval stages, so Approval Setup must define
 // at least that many levels (a structural need of this flow, not a setting).
 const MIN_APPROVAL_LEVELS = Object.keys(STAGE_LEVEL).length;
-const STAGE_ROLES = {
-  [STAGE_MARKETING]: ["admin", "super_admin", "marketing_head"],
-  [STAGE_DIRECTOR]: ["admin", "super_admin", "director"],
-};
 
 // Human labels for UI badges / banners / logs.
 const STAGE_LABELS = {
@@ -140,26 +134,15 @@ async function getStageState(pool, bookingId, viewer = null) {
   };
 }
 
-// Role gate used by the routes: the passed role may approve at the given
-// stage if it is the stage's own role set. super_admin is included on both
-// stages as the parallel approver.
+// May this user act at the given stage? Decided only by the crm-bookings
+// workflow's matching level in Approval Setup (its roles or named people).
 async function canApproveStage(role, stage, userId = null) {
   const level = STAGE_LEVEL[stage];
   if (!level) return false;
-  const r = String(role || "").toLowerCase();
-  // admin / super_admin hold every right: they may act at any stage.
-  if (r === "admin" || r === "super_admin") return true;
-  let def = null;
-  try {
-    const wf = await require("./approvalService").getWorkflow("crm-bookings");
-    def = wf?.LevelDefs?.[level - 1] || null;
-  } catch (_) { /* no workflow table / row: fall back below */ }
-  const roles = Array.isArray(def?.roles) ? def.roles.map((x) => String(x).toLowerCase()) : [];
-  const users = Array.isArray(def?.userIds) ? def.userIds.map(Number) : [];
-  if (roles.length || users.length) {
-    return roles.includes(r) || (userId != null && users.includes(Number(userId)));
-  }
-  return (STAGE_ROLES[stage] || []).includes(r);
+  const { getWorkflow, userMatchesLevel } = require("./approvalService");
+  const wf = await getWorkflow("crm-bookings").catch(() => null);
+  const def = wf?.LevelDefs?.[level - 1];
+  return !!def && userMatchesLevel(def, role, userId);
 }
 
 // Shared guard: a booking must be live (not Cancelled/Rejected) and

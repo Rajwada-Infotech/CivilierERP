@@ -708,7 +708,7 @@ const CrmSalesDeed: React.FC = () => {
                             {status === "Pending" && !bookingCancelled && (
                               <div className="flex items-center gap-2 flex-wrap pt-0.5">
                                 <ApprovalActions status={status} recordId={detail.Id} endpoint={API} actionPathSuffix=""
-                                  approverRoles={["admin", "dba", "super_admin"]} submitOnly={false} onSuccess={invalidate} />
+                                  module="crm-sales-deed-senior" submitOnly={false} onSuccess={invalidate} />
                               </div>
                             )}
                             {rejected && canWork && (
@@ -794,7 +794,7 @@ const CrmSalesDeed: React.FC = () => {
                             {!bookingCancelled && status === "Pending" && (
                               <div className="flex items-center gap-2 flex-wrap pt-0.5">
                                 <ApprovalActions status={status} recordId={detail.Id} endpoint={API} actionPathSuffix="director"
-                                  approverRoles={["super_admin"]} onSuccess={invalidate} />
+                                  module="crm-sales-deed-director" onSuccess={invalidate} />
                               </div>
                             )}
                           </div>

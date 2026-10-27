@@ -56,11 +56,9 @@ jest.mock("../services/approvalService", () => ({
   MODULE_MAP: {
     "material-requests": { table: "dbo.MaterialRequests", pk: "MRId", status: "Status" },
   },
-  MODULE_APPROVER_ROLE_OVERRIDES: {},
-  APPROVER_ROLES: ["admin", "super_admin", "dba"],
   getWorkflow: jest.fn(),
   resolveCurrentLevel: jest.fn(() => Promise.resolve(mockCurrentLevel)),
-  hasApprovalInboxEditRight: jest.fn(async () => false),
+  isApproverFor: jest.fn(async () => false),
 }));
 
 const { isVisibleToViewer, isNamedOnLevel, filterVisibleToViewer } = require("../routes/approvalInbox");
@@ -89,9 +87,9 @@ describe("isNamedOnLevel", () => {
     expect(isNamedOnLevel({ roles: ["marketing_head"] }, "director", null)).toBe(false);
   });
 
-  it("returns null (uncustomised) when the level has neither roles nor userIds", () => {
-    expect(isNamedOnLevel({}, "director", 6)).toBeNull();
-    expect(isNamedOnLevel({ roles: [], userIds: [] }, "director", 6)).toBeNull();
+  it("a level naming nobody admits nobody", () => {
+    expect(isNamedOnLevel({}, "director", 6)).toBe(false);
+    expect(isNamedOnLevel({ roles: [], userIds: [] }, "director", 6)).toBe(false);
   });
 });
 
@@ -135,10 +133,15 @@ describe("isVisibleToViewer", () => {
     expect((await isVisibleToViewer(item, "director", 999, cache)).visible).toBe(false);
   });
 
-  it("always shows everything to admin/super_admin, regardless of level, and lets them act", async () => {
-    mockCurrentLevel = 3;
-    expect(await isVisibleToViewer(item, "admin", 999, cache)).toEqual({ visible: true, canAct: true });
-    expect(await isVisibleToViewer(item, "super_admin", 999, cache)).toEqual({ visible: true, canAct: true });
+  it("admin/super_admin see everything for oversight but may act only where Approval Setup names them", async () => {
+    mockCurrentLevel = 1;
+    expect(await isVisibleToViewer(item, "admin", 999, cache)).toMatchObject({ visible: true, canAct: false });
+    expect(await isVisibleToViewer(item, "super_admin", 1, cache)).toMatchObject({ visible: true, canAct: true });
+  });
+
+  it("a module with no workflow in Approval Setup is actionable by nobody", async () => {
+    const none = new Map([["material-requests", null]]);
+    expect(await isVisibleToViewer(item, "director", 2100, none)).toEqual({ visible: false, canAct: false });
   });
 });
 

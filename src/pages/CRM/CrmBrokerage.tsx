@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,7 +10,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useAuth } from "@/contexts/AuthContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
@@ -25,8 +25,6 @@ const BKG_API = "/api/crm/bookings";
 const BROKER_API = "/api/account-head?type=BR";
 const PAGE_SIZE = 20;
 const DIALOG = "rounded-none p-5 gap-4";
-// Who sees "Approve & send to Finance" — the approval workflow decides on the server.
-const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", TDSId: "", Notes: "" };
 const STATUS_TABS = [
   { value: "", label: "All" },
@@ -57,9 +55,8 @@ const CrmBrokerage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const rights = usePageRights("crm-brokerage");
-  const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
-  const { currentUser } = useAuth();
-  const isApprover = CRM_APPROVER_ROLES.includes(String(currentUser?.role || "")) || hasApprovalInboxEdit;
+  // Who sees "Approve & send to Finance" is set in Approval Setup (crm-brokerage).
+  const isApprover = useCanApprove("crm-brokerage");
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });

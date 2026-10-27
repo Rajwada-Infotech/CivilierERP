@@ -271,6 +271,36 @@ export const MODULE_OPTIONS = [
     icon: "💸",
     desc: "Customer refund before it's paid out",
   },
+  {
+    id: "crm-refunds-finance",
+    label: "CRM Refund — Finance",
+    icon: "🏦",
+    desc: "Finance's sign-off on a refund before payment",
+  },
+  {
+    id: "received-payment",
+    label: "Received Payment",
+    icon: "📥",
+    desc: "Money received, before it posts to the ledger",
+  },
+  {
+    id: "crm-money-receipts",
+    label: "CRM Money Receipt",
+    icon: "🧾",
+    desc: "Approving, bouncing or sweeping a customer's money receipt",
+  },
+  {
+    id: "crm-bank-details-edit",
+    label: "Edit locked bank / KYC details",
+    icon: "🔐",
+    desc: "Who besides the assigned salesperson may change a customer's saved bank and KYC details",
+  },
+  {
+    id: "crm-sales-deed-docs",
+    label: "Upload sale deed documents",
+    icon: "📎",
+    desc: "Who besides the assigned legal executive may upload a sale deed's documents",
+  },
 ] as const;
 
 export type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -302,7 +332,7 @@ export const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
+    modules: ["NewPayment", "received-payment", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "sales",
@@ -328,6 +358,10 @@ export const MODULE_GROUPS = [
       "crm-query-payment-confirm",
       "crm-noc",
       "crm-brokerage",
+      "crm-money-receipts",
+      "crm-refunds-finance",
+      "crm-bank-details-edit",
+      "crm-sales-deed-docs",
       "crm-refunds",
       "crm-resales",
       "crm-transfer-deeds",

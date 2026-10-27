@@ -58,9 +58,9 @@ function handleError(res, e, context) {
   return res.status(500).json({ error: e.message });
 }
 
-function requireMoneyReceiptApprover(req, res) {
-  if (isMoneyReceiptApprover(req.user?.role)) return true;
-  res.status(403).json({ error: "Only Finance / Account's Head approvers can perform this action" });
+async function requireMoneyReceiptApprover(req, res) {
+  if (await isMoneyReceiptApprover(req.user?.role, Number(req.user?.userId ?? req.user?.id) || null)) return true;
+  res.status(403).json({ error: "You are not a money-receipt approver in Approval Setup" });
   return false;
 }
 
@@ -306,7 +306,7 @@ router.put("/:id/resubmit", requirePageRight("crm-money-receipts", "edit"), asyn
 
 router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!requireMoneyReceiptApprover(req, res)) return;
+    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -322,7 +322,7 @@ router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async 
 // them would be a routing change, not a restructure, so left alone.
 router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!requireMoneyReceiptApprover(req, res)) return;
+    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -336,7 +336,7 @@ router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async 
 
 router.put("/:id/approve", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
-    if (!requireMoneyReceiptApprover(req, res)) return;
+    if (!(await requireMoneyReceiptApprover(req, res))) return;
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
@@ -366,7 +366,7 @@ router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), as
   try {
     const pool = getPool();
     // Same check as approve (req.user has role, never roleName - this always refused).
-    if (!requireMoneyReceiptApprover(req, res)) return;
+    if (!(await requireMoneyReceiptApprover(req, res))) return;
     // Only the projects the user may work in — the sweep approved receipts across every project.
     const scopeSql = req.projectScope
       ? ` AND ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}`

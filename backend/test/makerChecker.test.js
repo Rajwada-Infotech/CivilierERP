@@ -5,7 +5,14 @@ let mockMaker = 7;
 let mockRaiserMay = false;
 jest.mock("../db", () => {
   const request = () => {
-    const r = { input() { return r; }, async query(q) { return { recordset: [/ApprovalRaiserRule/.test(q) ? { RaiserMayApprove: mockRaiserMay } : { Maker: mockMaker }] }; } };
+    const r = { input() { return r; }, async query(q) {
+      if (/ApprovalRaiserRule/.test(q)) return { recordset: [{ RaiserMayApprove: mockRaiserMay }] };
+      // Approval Setup names the admin role, so the approver gate passes and
+      // maker-checker is what's under test.
+      if (/ApprovalWorkflows/.test(q)) return { recordset: [{ Id: 1, LevelsJson: '[{"id":1,"label":"Approval","roles":["admin"]}]' }] };
+      if (/ApprovalAuditLog/.test(q)) return { recordset: [] };
+      return { recordset: [{ Maker: mockMaker }] };
+    } };
     return r;
   };
   return {
