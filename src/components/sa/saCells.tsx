@@ -2,6 +2,7 @@ import React from "react";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { RecordWithId } from "@/components/MasterPage";
+import { LEAD_STAGES } from "@/components/sa/leadStages";
 
 // Shared cell/value renderers for Sales Automation masters (Ads, Campaigns,
 // ...) so every SA list formats money, ROI and status the same way.
@@ -37,7 +38,18 @@ export const StatusCell = (v: unknown, row?: RecordWithId) => (
   </span>
 );
 
-export const CodeCell = (v: unknown) => <span className="font-mono text-xs text-muted-foreground">{String(v || "—")}</span>;
+/** A lead's stage as its LEAD_STAGES label and colour (e.g. "Visit Scheduled"). */
+export const StageCell = (v: unknown) => {
+  const s = LEAD_STAGES.find((x) => x.key === v);
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium whitespace-nowrap">
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s?.hex ?? "#94a3b8" }} />
+      {s?.label ?? String(v ?? "—")}
+    </span>
+  );
+};
+
+export const CodeCell =(v: unknown) => <span className="font-mono text-xs text-muted-foreground">{String(v || "—")}</span>;
 
 /** Record name with an optional muted second line. */
 export const TitleCell = (title: unknown, sub?: unknown) => (
