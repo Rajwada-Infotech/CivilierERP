@@ -938,7 +938,7 @@ router.get(
                COALESCE(u.name, qc.QcBy) AS qcBy
         FROM dbo.DependencyActivityQc qc
         JOIN dbo.DependencyActivityAssignment daa ON daa.Id = qc.AssignmentId
-        LEFT JOIN dbo.users u ON LOWER(u.email) = LOWER(qc.QcBy)
+        LEFT JOIN dbo.users u ON u.email = qc.QcBy
         WHERE daa.DependencyMasterActivityId = @rungId
         ORDER BY qc.QcAt DESC, qc.Id DESC
       `);
@@ -2131,7 +2131,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         SELECT TOP 1 qc.Id AS id, qc.Decision AS decision, qc.Remarks AS remarks, qc.QcAt AS qcAt,
                COALESCE(u.name, qc.QcBy) AS qcBy
         FROM dbo.DependencyActivityQc qc
-        LEFT JOIN dbo.users u ON LOWER(u.email) = LOWER(qc.QcBy)
+        LEFT JOIN dbo.users u ON u.email = qc.QcBy
         WHERE qc.AssignmentId = @assignmentId
         ORDER BY qc.QcAt DESC, qc.Id DESC
       `);

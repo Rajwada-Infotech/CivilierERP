@@ -83,6 +83,44 @@ router.put("/role/:roleId", authMiddleware, adminOnly, async (req, res) => {
 
 // GET /:userId — the user's OWN list (empty = none), plus the list of the role
 // they fall back to when they have none.
+// GET /project/:projectId — who can see this project, and why, by the same rule as getProjectScope: an
+// admin-tier role sees everything; otherwise the user's own list if they have one, else their role's list,
+// else no restriction. `without` counts the users whose list leaves the project out.
+router.get("/project/:projectId", authMiddleware, adminOnly, async (req, res) => {
+  const projectId = parseInt(req.params.projectId, 10);
+  if (!Number.isInteger(projectId) || projectId <= 0) return res.status(400).json({ error: "Invalid project" });
+  try {
+    const pool = getPool();
+    const users = (await pool.request().query(`
+      SELECT u.id, u.name, u.RoleId AS roleId, r.RName AS roleName
+      FROM dbo.users u LEFT JOIN dbo.Role r ON r.RId = u.RoleId
+      ORDER BY u.name
+    `)).recordset;
+    const own = await rowsOrNone(pool.request(), "SELECT UserId, ProjectId FROM dbo.UserProjectAccess");
+    const byRole = await rowsOrNone(pool.request(), "SELECT RoleId, ProjectId FROM dbo.RoleProjectAccess");
+    const group = (rows, key) => rows.reduce((m, x) => m.set(Number(x[key]), (m.get(Number(x[key])) || new Set()).add(Number(x.ProjectId))), new Map());
+    const ownMap = group(own, "UserId");
+    const roleMap = group(byRole, "RoleId");
+    const roleKey = (name) => String(name || "").trim().toLowerCase().replace(/\s+/g, "_");
+    const UNRESTRICTED = new Set(["super_admin", "sa", "dba", "admin"]);
+
+    const withAccess = [];
+    let without = 0;
+    for (const u of users) {
+      let via;
+      if (UNRESTRICTED.has(roleKey(u.roleName))) via = "admin";
+      else if (ownMap.has(Number(u.id))) via = ownMap.get(Number(u.id)).has(projectId) ? "own" : null;
+      else if (roleMap.has(Number(u.roleId))) via = roleMap.get(Number(u.roleId)).has(projectId) ? "role" : null;
+      else via = "open";
+      if (via) withAccess.push({ id: u.id, name: u.name, role: u.roleName, via });
+      else without += 1;
+    }
+    res.json({ users: withAccess, without });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load who can see this project" });
+  }
+});
+
 router.get("/:userId", authMiddleware, adminOnly, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
   if (!Number.isFinite(userId)) return res.status(400).json({ error: "Invalid userId" });

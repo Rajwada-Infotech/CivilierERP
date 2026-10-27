@@ -99,7 +99,7 @@ const SI_SELECT = `
   LEFT JOIN dbo.enterprise          pr ON pr.id           = si.ProjectId
   LEFT JOIN dbo.FinYear             fy ON fy.FId          = si.fy_id
   LEFT JOIN dbo.TypeOfDoc           td ON td.TypeOfDocId  = si.DocTypeId
-  LEFT JOIN dbo.users               cu ON LOWER(cu.email) = LOWER(si.CreatedBy)
+  LEFT JOIN dbo.users               cu ON cu.email = si.CreatedBy
   WHERE si.IsDeleted = 0
 `;
 

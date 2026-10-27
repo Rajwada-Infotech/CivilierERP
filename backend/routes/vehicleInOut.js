@@ -570,7 +570,7 @@ router.get("/:id", async (req, res) => {
         FROM dbo.VehicleInOut v
         LEFT JOIN dbo.enterprise ec ON ec.id = v.CompanyID
         LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
-        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(v.CreatedBy)
+        LEFT JOIN dbo.users cu ON cu.email = v.CreatedBy
         WHERE v.VehicleInOutID = @ID
       `);
 
