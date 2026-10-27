@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Building2, Map as MapIcon, Store, Home, Shapes, Lock, Pencil } from "lucide-react";
+import { Building2, Map as MapIcon, Store, Home, Pencil } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { INP, KEY_INK, KEY_LINE, LBL, Notice, RULE } from "./config";
 
 // The project type, shown and chosen at the top of Auto Project Setup — it
 // decides how every block below is laid out (tower floors or a plot layout)
@@ -33,11 +34,13 @@ interface Props {
 export function ProjectTypeBar({ projectId, status, canEdit, onChanged }: Props) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
-  const { data: types = [] } = useQuery<TypeRow[]>({
+  // A failed load says so; it used to read as "no type chosen".
+  const { data: types = [], isError: typesFailed } = useQuery<TypeRow[]>({
     queryKey: ["project-type-master"],
     queryFn: async () => {
       const r = await fetchWithAuth("/api/project-master/types");
-      return r.ok ? r.json() : [];
+      if (!r.ok) throw new Error("Could not load the project types");
+      return r.json();
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -61,47 +64,48 @@ export function ProjectTypeBar({ projectId, status, canEdit, onChanged }: Props)
   };
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-3 sm:p-4 space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <Shapes size={15} className="text-violet-600" />
-        <span className="text-sm font-semibold">Project type</span>
+    <section className="bg-card" style={{ border: RULE }}>
+      <div className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">Project type</span>
         {locked ? (
-          <span className="inline-flex items-center gap-1.5 text-sm font-medium"><Lock size={12} className="text-muted-foreground" /> {current?.Name}</span>
+          <span className="text-sm font-semibold">{current?.Name}</span>
         ) : (
           <select value={projectTypeId ?? ""} disabled={!canEdit}
             onChange={(e) => put(`${API}/project-type`, { ProjectId: projectId, TypeId: e.target.value || null })}
-            className="px-2 py-1 text-sm rounded-lg border border-border bg-background">
+            className={`${INP} !w-auto !h-8 min-w-[14rem]`}>
             <option value="">— Not set (towers, flats) —</option>
             {types.map((t) => <option key={t.Id} value={t.Id}>{t.Name}</option>)}
           </select>
         )}
         <div className="flex flex-wrap items-center gap-1.5">
           {(current ? sells(current) : [{ icon: Home, label: "Flats" }]).map((s) => (
-            <span key={s.label} className="inline-flex items-center gap-1 text-[0.6875rem] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+            <span key={s.label} className="inline-flex items-center gap-1 h-6 px-2 text-[0.6875rem] border border-foreground/30 text-muted-foreground">
               <s.icon size={11} /> {s.label}
             </span>
           ))}
         </div>
-        {!current && <span className="text-[0.6875rem] text-amber-700 dark:text-amber-400">Choose a type so the setup and bookings follow it.</span>}
         {canEdit && blocks.length > 0 && current && (
-          editing ? (
-            <button type="button" onClick={() => setEditing(false)} className="ml-auto px-2.5 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">Done</button>
-          ) : (
-            <button type="button" onClick={() => setEditing(true)} className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
-              <Pencil size={11} /> Edit
-            </button>
-          )
+          <button type="button" onClick={() => setEditing((v) => !v)} className={`${editing ? KEY_INK : KEY_LINE} h-8 px-3 ml-auto`}>
+            {editing ? "Done" : <><Pencil size={11} /> Edit</>}
+          </button>
         )}
       </div>
+      {(typesFailed || !current) && (
+        <div className="px-4 pb-3">
+          {typesFailed
+            ? <Notice tone="error">The project types didn&apos;t load, so this project&apos;s type can&apos;t be shown or changed. Reload the page.</Notice>
+            : <Notice tone="fix">Choose a type so the setup and bookings follow it.</Notice>}
+        </div>
+      )}
 
       {blocks.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[0.6875rem] uppercase tracking-widest text-muted-foreground mr-1">Blocks</span>
+        <div className="px-4 py-3 flex flex-wrap items-center gap-2" style={{ borderTop: "1px solid hsl(var(--foreground) / 0.15)" }}>
+          <span className={`${LBL} mr-1`}>Blocks</span>
           {blocks.map((b) => {
             const L = layoutOf(b.HasFloors !== false);
             return (
-              <span key={b.Id} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs">
-                <L.icon size={12} className={b.HasFloors !== false ? "text-violet-600" : "text-emerald-600"} />
+              <span key={b.Id} className="inline-flex items-center gap-1.5 h-7 px-2.5 text-xs border border-foreground/30">
+                <L.icon size={12} />
                 <span className="font-medium">{b.BlockName}</span>
                 {perBlock && !locked ? (
                   <select value={b.OwnTypeId ?? ""} disabled={!canEdit}
@@ -118,6 +122,6 @@ export function ProjectTypeBar({ projectId, status, canEdit, onChanged }: Props)
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
