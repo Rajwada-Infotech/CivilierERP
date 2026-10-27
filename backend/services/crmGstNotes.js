@@ -252,8 +252,14 @@ const SELECT_NOTE_DETAIL = `
   LEFT JOIN dbo.enterprise proj ON proj.id = n.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.CrmGstNote rn ON rn.Id = n.ReplacesId`;
 
+// The page's kinds of document (its tabs), as SQL: a raised note before issue, cancelled, past deadline,
+// a credit note on an invoice, or a refund voucher on an advance.
+const KIND_SQL = `CASE WHEN n.Status IN (N'Draft', N'Pending', N'Rejected') THEN 'request'
+  WHEN n.Status = N'Cancelled' THEN 'cancelled' WHEN n.Status = N'TimeBarred' THEN 'barred'
+  WHEN n.DocType = N'CreditNote' THEN 'invoice' ELSE 'advance' END`;
+
 async function list(pool, {
-  refundId = null, customerId = null, companyId = null, projectId = null,
+  refundId = null, customerId = null, companyId = null, projectId = null, blockId = null,
   from = null, to = null, type = null, status = null, search = null,
   projectScope = null, includeCancelled = true, page = null, pageSize = null, offset = null
 } = {}) {
@@ -263,6 +269,7 @@ async function list(pool, {
   if (customerId) { w.push("n.CustomerId = @c"); req.input("c", sql.Int, customerId); }
   if (companyId) { w.push("n.CompanyId = @co"); req.input("co", sql.Int, companyId); }
   if (projectId) { w.push("n.ProjectId = @pr"); req.input("pr", sql.Int, projectId); }
+  if (blockId) { w.push("b.BlockId = @bl"); req.input("bl", sql.Int, blockId); }
   if (from) { w.push("n.DocDate >= @f"); req.input("f", sql.Date, from); }
   if (to) { w.push("n.DocDate <= @t"); req.input("t", sql.Date, to); }
   if (type) { w.push("n.DocType = @ty"); req.input("ty", sql.NVarChar(20), type); }
@@ -290,20 +297,27 @@ async function list(pool, {
   if (projectScope) w.push(require("./projectScope").projectPredicate(projectScope, "n.ProjectId", "").trim());
 
   if (page != null && pageSize != null) {
-    const countSql = `SELECT COUNT(*) AS total
+    const FROM = `
       FROM dbo.CrmGstNote n
       LEFT JOIN dbo.CrmRefund r ON r.Id = n.RefundId
       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
-      LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId
-      WHERE ${w.join(" AND ")}`;
-    const total = (await req.query(countSql)).recordset[0].total;
+      LEFT JOIN dbo.CrmCustomer c ON c.Id = n.CustomerId`;
+    const total = (await req.query(`SELECT COUNT(*) AS total ${FROM} WHERE ${w.join(" AND ")}`)).recordset[0].total;
+    // Per kind for the same filters, the tab aside — the page's figures and tabs (it used to fetch every note).
+    const kw = w.filter((x) => !x.startsWith("n.Status") && !x.startsWith("n.DocType = N'"));
+    const kinds = (await req.query(`SELECT ${KIND_SQL} AS Kind, COUNT(*) AS n, SUM(n.GstAmount) AS gst,
+        SUM(CASE WHEN n.Status = N'Issued' AND n.DocType = N'CreditNote' AND n.DeadlineDate >= CAST(SYSDATETIME() AS DATE)
+                  AND n.DeadlineDate <= DATEADD(DAY, 30, CAST(SYSDATETIME() AS DATE)) THEN 1 ELSE 0 END) AS dueSoon
+      ${FROM} WHERE ${kw.join(" AND ")} GROUP BY ${KIND_SQL}`)).recordset;
+    const kindCounts = {};
+    for (const k of kinds) kindCounts[k.Kind] = { count: k.n, gst: Number(k.gst) || 0, dueSoon: k.dueSoon };
 
     const off = offset != null ? offset : (page - 1) * pageSize;
     req.input("offset", sql.Int, off);
     req.input("limit", sql.Int, pageSize);
     const dataSql = `${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
     const rows = (await req.query(dataSql)).recordset;
-    return { rows, total };
+    return { rows, total, kindCounts };
   }
 
   return (await req.query(`${SELECT_NOTE_BASE} WHERE ${w.join(" AND ")} ORDER BY n.DocDate DESC, n.Id DESC`)).recordset.map(withSupply);

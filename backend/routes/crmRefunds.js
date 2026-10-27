@@ -336,6 +336,7 @@ router.get("/gst-notes", requirePageRight("crm-refunds", "view"), async (req, re
       search: req.query.search || null,
       companyId: req.query.companyId ? parseInt(req.query.companyId, 10) : null,
       projectId: req.query.projectId ? parseInt(req.query.projectId, 10) : null,
+      blockId: req.query.blockId ? parseInt(req.query.blockId, 10) : null,
       projectScope: req.projectScope,
       page: pag?.page,
       pageSize: pag?.pageSize,
