@@ -2,7 +2,8 @@ import React from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
+import { StatusCell, TitleCell } from "@/components/sa/saCells";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   MasterPage,
@@ -12,7 +13,7 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { PlugZap, Megaphone } from "lucide-react";
+import { PlugZap, Megaphone, Share2, KeyRound } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const API = "/api/sa/social-media";
@@ -32,35 +33,64 @@ async function fetchApiConfigOptions(): Promise<{ value: string; label: string }
   } catch { return []; }
 }
 
+// Sections -> MasterPage shows the form as tabs.
 const fields: FieldDef[] = [
-  { name: "name", label: "Platform Name", type: "text", required: true },
+  { name: "_platform", label: "Platform", type: "section" },
+  { name: "name", label: "Platform Name", type: "text", required: true, placeholder: "e.g. Facebook – Silver Woods page" },
   {
     name: "platformType",
-    label: "Platform Type",
+    label: "Type",
     type: "select",
     options: ["Facebook", "Instagram", "Google", "LinkedIn", "YouTube", "WhatsApp", "SMS", "Email Marketing", "Other"],
   },
-  { name: "accountDetails", label: "Account Details", type: "textarea", fullWidth: true },
-  { name: "apiConfigId", label: "API Integration Channel", type: "select", asyncOptions: fetchApiConfigOptions },
-  { name: "adAccountId", label: "Ad Account ID", type: "text" },
-  { name: "pixelId", label: "Pixel / Conversion ID", type: "text" },
-  { name: "accessToken", label: "Access Token", type: "textarea", fullWidth: true, placeholder: "Leave blank to keep existing token while editing" },
-  { name: "refreshToken", label: "Refresh Token", type: "textarea", fullWidth: true, placeholder: "Optional" },
-  { name: "tokenExpiresAt", label: "Token Expires At", type: "date" },
-  { name: "apiEnabled", label: "API Enabled", type: "toggle", defaultValue: false },
+  { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
+  { name: "accountDetails", label: "Account Details", type: "textarea", fullWidth: true, placeholder: "Page / account name, login owner, agency managing it…" },
   { name: "notes", label: "Notes", type: "textarea", fullWidth: true },
-  { name: "isActive", label: "Status", type: "toggle", defaultValue: true },
+
+  { name: "_connection", label: "Connection", type: "section" },
+  { name: "apiConfigId", label: "Integration Channel", type: "select", asyncOptions: fetchApiConfigOptions },
+  { name: "adAccountId", label: "Ad Account ID", type: "text", placeholder: "act_1234567890" },
+  { name: "pixelId", label: "Pixel / Conversion ID", type: "text" },
+  { name: "apiEnabled", label: "Pull leads & results automatically", type: "toggle", defaultValue: false },
+
+  { name: "_tokens", label: "Access Tokens", type: "section" },
+  { name: "accessToken", label: "Access Token", type: "textarea", fullWidth: true, placeholder: "Paste a new token to replace it. Leave blank to keep the saved one." },
+  { name: "refreshToken", label: "Refresh Token", type: "textarea", fullWidth: true, placeholder: "Optional" },
+  { name: "tokenExpiresAt", label: "Token Expires On", type: "date" },
 ];
 
 const columns = [
-  { key: "name", label: "Platform Name" },
-  { key: "platformType", label: "Type" },
-  { key: "apiConfigLabel", label: "API Channel", hideOnMobile: true },
-  { key: "apiEnabled", label: "API", hideOnMobile: true },
+  { key: "name", label: "Platform" },
+  { key: "apiEnabled", label: "Connection", hideOnMobile: true },
   { key: "campaignCount", label: "Campaigns" },
-  { key: "activeAdCount", label: "Active Ads" },
+  { key: "activeAdCount", label: "Active Ads", hideOnMobile: true },
   { key: "isActive", label: "Status" },
 ];
+
+const DAY = 24 * 60 * 60 * 1000;
+/** Days until the token expires (negative = already expired), or null. */
+const tokenDaysLeft = (row: RecordWithId): number | null =>
+  row.tokenExpiresAt ? Math.ceil((new Date(String(row.tokenExpiresAt)).getTime() - Date.now()) / DAY) : null;
+
+const ConnectionCell = (_: unknown, row: RecordWithId) => {
+  if (!row.apiEnabled) return <span className="text-xs text-muted-foreground">Manual — not connected</span>;
+  const days = tokenDaysLeft(row);
+  const tone = !row.hasAccessToken || (days !== null && days < 0) ? "text-red-600"
+    : days !== null && days <= 7 ? "text-amber-600" : "text-emerald-600";
+  const text = !row.hasAccessToken ? "Connected — no token saved"
+    : days === null ? "Connected"
+    : days < 0 ? "Token expired"
+    : days <= 7 ? `Token expires in ${days} day${days === 1 ? "" : "s"}`
+    : "Connected";
+  return (
+    <div className="min-w-0">
+      <div className={`text-xs font-medium ${tone}`}>{text}</div>
+      {row.apiConfigLabel ? <div className="text-[0.6875rem] text-muted-foreground truncate">{String(row.apiConfigLabel)}</div> : null}
+    </div>
+  );
+};
+
+const YesNo = (v: unknown) => <p className="text-sm">{v ? "Yes" : "No"}</p>;
 
 const exportColumns: ExportColumn[] = [
   { header: "Platform Name", accessor: "name" },
@@ -179,22 +209,50 @@ const SaSocialMediaMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["sa-social-media"] });
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading platforms...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load platforms.</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Setup", "Social Media"]} title="Social Media">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load platforms. Refresh the page to try again." : "Loading platforms…"}
+      </div>
+    </SalesAutoShell>
+  );
+
+  const connected = mappedData.filter((p) => p.apiEnabled);
+  const needsToken = connected.filter((p) => {
+    const d = tokenDaysLeft(p);
+    return !p.hasAccessToken || (d !== null && d <= 7);
+  });
+  const campaigns = mappedData.reduce((s, p) => s + Number(p.campaignCount ?? 0), 0);
+  const ads = mappedData.reduce((s, p) => s + Number(p.activeAdCount ?? 0), 0);
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Social Media"]} title="Social Media Master" subtitle="Step 1 of the lead workflow: platforms → campaigns → ads → leads">
-      <div className="space-y-8">
+    <SalesAutoShell
+      breadcrumbs={["Sales Automation", "Setup", "Social Media"]}
+      title="Social Media"
+      subtitle="Where your leads come from: platforms → campaigns → ads → leads"
+    >
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <SalesAutoGlassCard label="Platforms" value={mappedData.length} sub={`${mappedData.filter((p) => p.isActive).length} active`} icon={Share2} accentColor="#2563eb" />
+          <SalesAutoGlassCard label="Connected" value={connected.length} sub="pull leads automatically" icon={PlugZap} accentColor="#059669" />
+          <SalesAutoGlassCard label="Needs a token" value={needsToken.length} sub={needsToken.length ? needsToken.map((p) => p.name).join(", ") : "all tokens current"} icon={KeyRound} accentColor={needsToken.length ? "#dc2626" : "#64748b"} />
+          <SalesAutoGlassCard label="Campaigns" value={campaigns} sub={`${ads} active ads`} icon={Megaphone} accentColor="#7c3aed" />
+        </div>
         <MasterPage
-          title="Social Media Platform"
+          title="Platform"
           fields={fields}
           columns={columns}
+          collapsibleAddForm
+          gridCols={3}
           canCreate={canDoAction("sa-social-media", "create")}
           canEdit={canDoAction("sa-social-media", "edit")}
           canDelete={canDoAction("sa-social-media", "delete")}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           columnRenderers={{
+            name: (v, row) => TitleCell(v, row.platformType),
+            apiEnabled: ConnectionCell,
+            isActive: (v) => StatusCell(v ? "Active" : "Inactive"),
             // Platform -> Campaign -> Ad is a real hierarchy that was never
             // discoverable in the UI — these counts now link straight into
             // the filtered next level instead of requiring a user to
@@ -215,33 +273,33 @@ const SaSocialMediaMaster: React.FC = () => {
               type="button"
               onClick={() => testConnection(row)}
               className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-              title="Test API connection"
+              title="Check the saved token and account work"
             >
-              <PlugZap size={13} /> Test
+              <PlugZap size={13} /> Test connection
             </button>
           )}
           exportConfig={{
-            title: "Social Media Master",
+            title: "Social Media",
             filename: "social-media-master",
             columns: exportColumns,
           }}
           viewConfig={{
             title: "Platform Details",
             fields: [
-              { key: "name", label: "Platform Name" },
+              { key: "name", label: "Platform" },
               { key: "platformType", label: "Type" },
-              { key: "apiConfigLabel", label: "API Channel" },
+              { key: "apiEnabled", label: "Connection", render: (v, row) => ConnectionCell(v, row) },
+              { key: "apiConfigLabel", label: "Integration Channel" },
               { key: "adAccountId", label: "Ad Account ID" },
               { key: "pixelId", label: "Pixel / Conversion ID" },
-              { key: "apiEnabled", label: "API Enabled" },
-              { key: "hasAccessToken", label: "Access Token Saved" },
-              { key: "hasRefreshToken", label: "Refresh Token Saved" },
-              { key: "tokenExpiresAt", label: "Token Expires" },
+              { key: "hasAccessToken", label: "Access Token Saved", render: YesNo },
+              { key: "hasRefreshToken", label: "Refresh Token Saved", render: YesNo },
+              { key: "tokenExpiresAt", label: "Token Expires On" },
+              { key: "campaignCount", label: "Campaigns" },
+              { key: "activeAdCount", label: "Active Ads" },
               { key: "accountDetails", label: "Account Details" },
               { key: "notes", label: "Notes" },
-              { key: "campaignCount", label: "Total Campaigns" },
-              { key: "activeAdCount", label: "Active Ads" },
-              { key: "isActive", label: "Status" },
+              { key: "isActive", label: "Status", render: (v) => StatusCell(v ? "Active" : "Inactive") },
             ],
           }}
         />
