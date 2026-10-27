@@ -146,6 +146,8 @@ export const InboxRow: React.FC<{
           reviewInstead={
             needsBankReview(item) && cfg?.navPath
               ? { label: "Review — set bank", onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+              : item.Module === "fund-transfer"
+              ? { label: "Confirm manual transfer", onClick: () => setReviewOpen(true) }
               : REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
               ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
               : undefined

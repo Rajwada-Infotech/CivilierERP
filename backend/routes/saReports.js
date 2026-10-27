@@ -210,6 +210,18 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
     const pool = getPool();
     const filter = dateRangeFilter(req, "l.CreatedAt");
     const whereClause = filter ? filter.replace("WHERE ", "AND ") : "";
+    // CallsMade/SiteVisits were joined with no date predicate at all, so
+    // they always showed each user's all-time totals regardless of the
+    // requested range while LeadsHandled was correctly windowed — a
+    // narrow-range report showed lifetime call/visit counts next to a
+    // correctly-scoped lead count. SaInquiryCall has no other timestamp
+    // than CallTime; SaSiteVisit has no "actually occurred" timestamp,
+    // only PreferredDate — same column the team-leader-performance report
+    // below already uses for this exact purpose.
+    const callFilter = dateRangeFilter(req, "c.CallTime");
+    const callClause = callFilter ? callFilter.replace("WHERE ", "AND ") : "";
+    const visitFilter = dateRangeFilter(req, "v.PreferredDate");
+    const visitClause = visitFilter ? visitFilter.replace("WHERE ", "AND ") : "";
 
     const r2 = pool.request();
     let userScope = "";
@@ -234,8 +246,8 @@ router.get("/sales-performance", requirePageRight("sa-leads", "view"), async (re
         SUM(CASE WHEN l.CrmBookingId IS NOT NULL THEN 1 ELSE 0 END) AS Bookings
       FROM dbo.Users u
       INNER JOIN dbo.SaLead l ON l.AssignedSalespersonId = u.id AND l.IsActive = 1 ${whereClause}
-      LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id
-      LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id
+      LEFT JOIN dbo.SaInquiryCall c ON c.SalespersonId = u.id ${callClause}
+      LEFT JOIN dbo.SaSiteVisit v ON v.ExecutiveId = u.id ${visitClause}
       WHERE 1=1 ${userScope}
       GROUP BY u.id, u.name
       ORDER BY Bookings DESC

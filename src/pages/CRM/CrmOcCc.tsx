@@ -1,9 +1,11 @@
 // CRM OC / CC: the Occupancy / Completion Certificate of each project (or block). Possession is gated on it: until a
-// certificate is Received, no booking in its scope can go to Pre-Possession.
+// certificate is Received, no booking in its scope can go to Pre-Possession. Worked out by block (migration 577): a block
+// has OC / CC by its own certificate or by a project-wide one received while it existed, and the project has it when
+// every active block does — a block added later puts it back to not complete until that block's certificate arrives.
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Lock, PenSquare, Plus, RefreshCw, ShieldCheck, Users } from "lucide-react";
+import { ChevronDown, Lock, PenSquare, Plus, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -231,6 +233,89 @@ function checkForm(f: OcForm, recording: boolean): string | null {
   return null;
 }
 
+type Board = { projects: any[]; blocks: any[] };
+async function fetchBoard(): Promise<Board> {
+  const r = await fetchWithAuth(`${API}/board`);
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(data?.error || `Could not load the projects (${r.status}).`);
+  return { projects: data?.projects ?? [], blocks: data?.blocks ?? [] };
+}
+
+/** Each project as its blocks make it: complete or not, which blocks are covered and how, and who is waiting. */
+function ProjectBoard({ board, canCreate, onAdd }: { board: Board; canCreate: boolean; onAdd: (projectId: string, blockId?: string) => void }) {
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const blocksBy = useMemo(() => {
+    const m: Record<number, any[]> = {};
+    for (const b of board.blocks) (m[b.ProjectId] ||= []).push(b);
+    return m;
+  }, [board]);
+  // What needs attention first: bookings waiting, then not complete, then complete.
+  const shown = [...board.projects].sort((a, b) =>
+    (b.WaitingBookings || 0) - (a.WaitingBookings || 0) || (a.Received - b.Received) || String(a.ProjectName).localeCompare(String(b.ProjectName)));
+  if (!shown.length) return null;
+  return (
+    <div className="bg-card" style={{ border: RULE }}>
+      <div className="px-4 py-2.5 flex flex-wrap items-baseline justify-between gap-2" style={{ borderBottom: RULE }}>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Projects</span>
+        <span className="text-[0.6875rem] text-muted-foreground">Complete when every active block has OC / CC</span>
+      </div>
+      {shown.map((p) => {
+        const blocks = blocksBy[p.ProjectId] || [];
+        const isOpen = open[p.ProjectId] ?? false;
+        const toggle = () => setOpen((o) => ({ ...o, [p.ProjectId]: !isOpen }));
+        return (
+          <div key={p.ProjectId} style={{ borderBottom: RULE_SOFT }}>
+            <div role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter") toggle(); }}
+              className="px-4 py-3 flex items-center gap-4 flex-wrap cursor-pointer hover:bg-primary/5 transition-colors">
+              <ChevronDown size={14} className={`text-muted-foreground shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+              <div className="min-w-[180px] flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-semibold">{p.ProjectName}</span>
+                  <SheetMark text={p.Received === 1 ? "Has OC / CC" : "Not complete"} tone={p.Received === 1 ? "done" : "waiting"} />
+                </div>
+                {p.Received === 1 && p.ReceivedDate && <p className="text-[0.6875rem] text-muted-foreground mt-0.5 tabular-nums">Complete since {fmtDate(p.ReceivedDate)}</p>}
+              </div>
+              {p.ActiveBlocks > 0 && (
+                <div className="w-40 shrink-0">
+                  <div className="flex gap-0.5">
+                    {blocks.map((b) => <div key={b.BlockId} title={`Block ${b.BlockName}`} className="flex-1 h-1.5"
+                      style={{ background: b.Covered === 1 ? "hsl(var(--foreground))" : "transparent", border: RULE_SOFT }} />)}
+                  </div>
+                  <div className="text-[0.6875rem] text-muted-foreground mt-1 tabular-nums">{p.CoveredBlocks} of {p.ActiveBlocks} blocks</div>
+                </div>
+              )}
+              <div className="w-28 shrink-0 text-[0.6875rem] tabular-nums">
+                <div className="flex items-center gap-1 text-muted-foreground"><Users size={11} /> {p.LiveBookings} live</div>
+                {p.WaitingBookings > 0 && <div className="font-semibold text-destructive">{p.WaitingBookings} waiting</div>}
+              </div>
+            </div>
+            {isOpen && (
+              <div className="px-4 pb-3 pl-11">
+                {blocks.length ? blocks.map((b) => {
+                  const cov = b.Covered === 1;
+                  return (
+                    <div key={b.BlockId} className="py-2 flex items-center gap-3 flex-wrap text-xs" style={{ borderTop: RULE_SOFT }}>
+                      <span className="font-semibold w-28 truncate">Block {b.BlockName}</span>
+                      <span className={`flex-1 min-w-[160px] ${cov ? "" : "text-destructive"}`}>
+                        {cov ? `${b.Source === "block" ? "Own certificate" : "Project certificate"}${b.CertType ? ` (${b.CertType})` : ""}${b.CoveredDate ? ` · ${fmtDate(b.CoveredDate)}` : ""}` : "Not covered yet"}
+                        {cov && b.CertificateNo && <span className="font-heading tabular-nums text-muted-foreground ml-1.5">{b.CertificateNo}</span>}
+                      </span>
+                      <span className="w-16 text-muted-foreground tabular-nums flex items-center gap-1"><Users size={11} /> {b.LiveBookings}</span>
+                      {!cov && canCreate
+                        ? <button onClick={() => onAdd(String(p.ProjectId), String(b.BlockId))} className={`${KEY_LINE} h-7 px-2`}><Plus size={11} /> Add OC / CC</button>
+                        : <span className="w-24" />}
+                    </div>
+                  );
+                }) : <p className="text-xs text-muted-foreground py-2" style={{ borderTop: RULE_SOFT }}>No blocks: the project-wide certificate decides.</p>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const CrmOcCc: React.FC = () => {
   const qc = useQueryClient();
   const { canCreate, canEdit } = usePageRights("crm-oc-cc");
@@ -245,6 +330,12 @@ const CrmOcCc: React.FC = () => {
 
   const { data: rows = [], isLoading, isError, error, isFetching, refetch } = useQuery({ queryKey: ["crm-oc-cc"], queryFn: fetchAll, staleTime: 30_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
+  const { data: board } = useQuery({ queryKey: ["crm-oc-cc-board"], queryFn: fetchBoard, staleTime: 30_000 });
+  // "Add OC / CC" on an uncovered block: the Record dialog for that block.
+  const addFor = (projectId: string, blockId?: string) => {
+    setCreateForm({ ...EMPTY_FORM, ProjectId: projectId, BlockId: blockId ?? "" });
+    setCreateOpen(true);
+  };
 
   const stats = useMemo(() => {
     const r = rows as any[];
@@ -260,7 +351,7 @@ const CrmOcCc: React.FC = () => {
   }, [rows]);
   const filtered = useMemo(() => (rows as any[]).filter((r: any) => activeTab === "All" || r.Status === activeTab), [rows, activeTab]);
 
-  const refresh = () => ["crm-oc-cc", "crm-pre-possession-gateway", "crm-pre-possession-eligible", "crm-possession-notice-eligible", "crm-dashboard", "crm-legal-milestones"]
+  const refresh = () => ["crm-oc-cc", "crm-oc-cc-board", "crm-pre-possession-gateway", "crm-pre-possession-eligible", "crm-possession-notice-eligible", "crm-dashboard", "crm-legal-milestones"]
     .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
   const openDetail = (row: any) => {
@@ -293,7 +384,7 @@ const CrmOcCc: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not record the certificate.");
-      toast.success(createForm.Status === "Received" ? "Certificate recorded; possession is open" : "Application recorded");
+      toast.success(createForm.Status === "Received" ? `Certificate recorded; possession is open${createForm.BlockId ? " for that block" : ""}` : "Application recorded");
       setCreateOpen(false);
       setCreateForm({ ...EMPTY_FORM });
       refresh();
@@ -347,7 +438,7 @@ const CrmOcCc: React.FC = () => {
         subtitle="The Occupancy / Completion Certificate of each project or block. Until it is received, no booking in its scope can go on to possession."
         action={
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            <button onClick={() => { refetch(); qc.invalidateQueries({ queryKey: ["crm-oc-cc-board"] }); }} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
             {canCreate && <button onClick={() => setCreateOpen(true)} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Record OC / CC</button>}
           </div>
         }
@@ -364,6 +455,8 @@ const CrmOcCc: React.FC = () => {
               ))}
             </div>
           </div>
+
+          {board && <ProjectBoard board={board} canCreate={canCreate} onAdd={addFor} />}
 
           <div className="flex items-stretch bg-card overflow-x-auto" style={{ border: RULE }}>
             {([["All", stats.total], ["Applied", stats.applied], ["Received", stats.received]] as const).map(([k, n]) => (

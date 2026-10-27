@@ -45,6 +45,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { actorId } = require("../services/saAccess");
 const { LineStatus, ResaleStatus } = require("../constants/crmStatuses");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -176,6 +177,18 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
     }
 
     await tx.begin();
+
+    // A resale changes ownership and may close the seller booking. Serialize
+    // that work with cancellation and verify the source booking is still live
+    // after acquiring the lock; the earlier resale read was only a preflight.
+    if (resale.FromBookingId != null) {
+      const sourceBooking = (await tx.request().input("bid", sql.Int, resale.FromBookingId).query(`
+        SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+      `)).recordset[0];
+      if (!sourceBooking || !sourceBooking.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(sourceBooking.Status)) {
+        throw Object.assign(new Error("The seller booking is no longer active; refresh the resale before completing it."), { status: 409 });
+      }
+    }
 
     // The seller's application line for the plot moves with the land too:
     // one Active application line per plot is enforced, and the plot is no
@@ -383,7 +396,8 @@ router.get("/holdings", requirePageRight("crm-resales", "view"), async (req, res
                   WHEN EXISTS (SELECT 1 FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = b.UnitId AND p.IsActive = 1) THEN N'Villa'
                   ELSE ISNULL(u.UnitKind, N'Unit') END AS Kind,
              (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
-               + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
+               + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount, 0)
+                   THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS Paid
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
@@ -430,6 +444,9 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
   const kind = b.Kind === "BuyBack" ? "BuyBack" : "Resale";
   const bookingId = parseInt(b.FromBookingId, 10);
   if (!Number.isInteger(bookingId)) return res.status(400).json({ error: "Choose the property that is changing hands" });
+
+  const allowed = await assertBookingProjectScope(req, res, bookingId);
+  if (allowed === false) return;
   const toCustomerId = b.ToCustomerId != null && b.ToCustomerId !== "" ? parseInt(b.ToCustomerId, 10) : null;
   if (kind === "Resale" && !Number.isInteger(toCustomerId)) return res.status(400).json({ error: "Choose the new buyer" });
   const agreed = num(b.AgreedValue);
@@ -463,7 +480,26 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
       try { feeGst = await resolveResaleFeeGst(pool, num(b.DeveloperFeeAmount), { landSale: unitId == null }); }
       catch (e) { if (e instanceof GstSetupError) return res.status(400).json({ error: e.message }); throw e; }
     }
-    const r = await pool.request()
+    const createTx = pool.transaction();
+    await createTx.begin();
+    let r;
+    try {
+      const lockReq = createTx.request();
+      ids.forEach((sourceId, i) => lockReq.input(`source${i}`, sql.Int, sourceId));
+      const sourceInList = ids.map((_, i) => `@source${i}`).join(",");
+      const lockedBookings = (await lockReq.query(`
+        SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK)
+        WHERE Id IN (${sourceInList}) ORDER BY Id
+      `)).recordset;
+      if (lockedBookings.length !== ids.length || lockedBookings.some((bk) =>
+        !bk.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(bk.Status))) {
+        throw Object.assign(new Error("That property is no longer live; refresh before opening a resale case."), { status: 409 });
+      }
+      const existingOpen = await openResaleOn(createTx, ids);
+      if (existingOpen) {
+        throw Object.assign(new Error(`This property already has an open ${existingOpen.Kind === "BuyBack" ? "buy-back" : "resale"} (#${existingOpen.Id})`), { status: 409 });
+      }
+      r = await createTx.request()
       .input("kind", sql.NVarChar(10), kind).input("plot", sql.Int, plotId).input("unit", sql.Int, unitId)
       .input("fb", sql.Int, bookings[0].Id).input("ids", sql.NVarChar(200), ids.join(","))
       .input("fc", sql.Int, seller).input("tc", sql.Int, kind === "Resale" ? toCustomerId : null)
@@ -482,13 +518,18 @@ router.post("/deal", requirePageRight("crm-resales", "create"), async (req, res)
               OUTPUT INSERTED.Id
               VALUES (@kind, @plot, @unit, @fb, @ids, @fc, @tc, @date, @agreed, @orig,
                       @fee, @feeGst, @feeHsn, @feeRate, @tds, @bbGst, @stamp, N'Draft', @notes, @by)`);
+      await createTx.commit();
+    } catch (createError) {
+      try { await createTx.rollback(); } catch {}
+      throw createError;
+    }
     await bumpResales();
     res.status(201).json({ success: true, id: r.recordset[0].Id, message: kind === "BuyBack"
       ? "Case opened — confirm the seller is clear, then send it for approval"
       : "Case opened — seller clearance, NOC and the buyer's KYC first, then send it for approval" });
   } catch (e) {
     console.error("[crm-resales] POST /deal:", e.message);
-    res.status(500).json({ error: "Failed to record it" });
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to record it" });
   }
 });
 
@@ -500,6 +541,25 @@ router.put("/:id/approve", requirePageRight("crm-resales", "edit"), async (req, 
   try {
     const email = req.user?.email || req.user?.name;
     if (!email) return res.status(401).json({ error: "Sign in again" });
+    const pool0 = getPool();
+
+    // Re-check eligibility at approval time, not just at Draft creation —
+    // the CRM-head-then-Finance chain can legitimately take days, long
+    // enough for the Sale Deed to get registered (conveyed) in the
+    // meantime. POST /deal's conveyedReason/openResaleOn checks ran once,
+    // long before this request; without re-running them here, an already-
+    // conveyed or otherwise no-longer-eligible case would still approve.
+    const caseRow = (await pool0.request().input("id", sql.Int, id)
+      .query("SELECT BookingIds FROM dbo.CrmUnitResale WHERE Id = @id AND Status = N'Pending'")).recordset[0];
+    if (caseRow?.BookingIds) {
+      const { conveyedReason, openResaleOn } = require("../services/crmResaleTransfer");
+      const bookingIds = caseRow.BookingIds.split(",").map((s) => parseInt(s, 10)).filter(Number.isInteger);
+      const conveyed = bookingIds.length ? await conveyedReason(pool0, bookingIds) : null;
+      if (conveyed) return res.status(409).json({ error: `No longer eligible — ${conveyed}` });
+      const open = bookingIds.length ? await openResaleOn(pool0, bookingIds, id) : null;
+      if (open) return res.status(409).json({ error: `No longer eligible — this property now has another open ${open.Kind === "BuyBack" ? "buy-back" : "resale"} (#${open.Id})` });
+    }
+
     const { transition } = require("../services/approvalService");
     const result = await transition("crm-resales", id, "Approved", email, req.user?.role, null, req.user?.userId ?? null);
     if (result.newStatus === "Approved") {

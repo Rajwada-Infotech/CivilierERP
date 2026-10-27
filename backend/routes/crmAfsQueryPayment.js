@@ -246,14 +246,16 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    // The fee amount is optional at creation but mandatory here — the customer
-    // is being told what to pay at the Sub-Registrar, so there must be a
-    // figure on record before the paperwork goes out.
-    if (row.Status === CrmStatus.PENDING
-        && (row.StampDuty == null || Number(row.StampDuty) === 0)
-        && (row.RegistrationFee == null || Number(row.RegistrationFee) === 0)) {
-      return res.status(400).json({ error: "Enter the Stamp Duty or Registration Fee amount before sending the details to the customer." });
-    }
+    // The fee amount stays optional here too (business decision 2026-10-22 —
+    // staff genuinely may not know it yet, e.g. still waiting on the Sub-
+    // Registrar's own valuation). Forcing a number before this could proceed
+    // only pushed staff to type a placeholder to get past the block, which is
+    // worse than sending with none. The real, binding figure is what gets
+    // recorded at /:id/confirm (ConfirmedAmount) once the customer actually
+    // pays — that step still requires a real amount; nothing downstream reads
+    // StampDuty/RegistrationFee as anything but an optional estimate (see
+    // AfsQpStampDuty/AfsQpRegistrationFee in crmAgreements.js).
+    const hasAmount = (row.StampDuty != null && Number(row.StampDuty) > 0) || (row.RegistrationFee != null && Number(row.RegistrationFee) > 0);
 
     const rawFiles = Array.isArray(req.body?.files) ? req.body.files : [];
     if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });
@@ -296,7 +298,9 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
       await logCommunication(tx, {
         bookingId: row.BookingId, direction: "Outbound",
         subject: "AFS stamp duty / registration fee details sent to customer",
-        summary: "Required government payment amount and paperwork for AFS registration shared with the customer.",
+        summary: hasAmount
+          ? "Required government payment amount and paperwork for AFS registration shared with the customer."
+          : "Paperwork for AFS registration shared with the customer; the exact stamp duty / registration fee amount was not yet known and will follow.",
         createdBy: actor,
       });
 

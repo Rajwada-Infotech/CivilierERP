@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const router = express.Router();
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: a sale deed belongs to its booking's project.
@@ -38,6 +38,7 @@ const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const { applyPagination } = require("../services/crmListPagination");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const multer = require('multer');
 
 router.use(authMiddleware);
@@ -62,7 +63,13 @@ const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4
 const DEED_SELECT = `
   SELECT d.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
          b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile,
-         le.name AS LegalExecutiveName
+         le.name AS LegalExecutiveName,
+         -- For the list: where each deed stands (fees, registry, papers).
+         (SELECT TOP 1 qp.Status FROM dbo.CrmQueryPayment qp WHERE qp.BookingId = d.BookingId ORDER BY qp.Id DESC) AS ListQpStatus,
+         (SELECT TOP 1 r.Status FROM dbo.CrmRegistry r WHERE r.BookingId = d.BookingId
+            ORDER BY CASE WHEN r.Status = 'Cancelled' THEN 1 ELSE 0 END, r.Id DESC) AS ListRegistryStatus,
+         (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1) AS MandatoryDocCount,
+         (SELECT COUNT(*) FROM dbo.CrmSalesDeedDocument x WHERE x.SalesDeedId = d.Id AND x.IsMandatory = 1 AND x.FileBase64 IS NOT NULL) AS MandatoryUploadedCount
   FROM dbo.CrmSalesDeed d
   JOIN dbo.CrmBooking b ON b.Id = d.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -70,8 +77,11 @@ const DEED_SELECT = `
   LEFT JOIN dbo.Users le ON le.id = d.LegalExecutiveId
 `;
 
-function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline }) {
+function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline, storedStatus = null }) {
   const today = new Date(new Date().toDateString());
+  // A deed cancelled on its own (booking still live) stays Cancelled - it
+  // showed as Draft / Overdue, since nothing below looked at its own status.
+  if (storedStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
   if (bookingStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
   if (registrationNo) return CrmStatus.REGISTERED;
   if (executedBy && registrationDeadline && new Date(registrationDeadline) < today) return "Overdue";
@@ -203,6 +213,7 @@ async function getDeedBookingLockReason(pool, deedId) {
 router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              ag.Status AS AgreementStatus, ag.AgreementNo,
@@ -220,6 +231,7 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
       ) hov
       WHERE b.IsActive = 1
         AND b.Status NOT IN ${DEAD_BOOKING_SQL}
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id AND ISNULL(Status, '') <> 'Cancelled')
         AND ag.Status = 'Registered'${projectPredicate(req.projectScope, "b.ProjectId")}
         AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
@@ -265,7 +277,7 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
       Status: deriveDeedStatus({
         bookingStatus: r.BookingStatus, registrationNo: r.RegistrationNo,
         executedBy: r.ExecutedBy, deedDate: r.DeedDate,
-        registrationDeadline: r.RegistrationDeadline,
+        registrationDeadline: r.RegistrationDeadline, storedStatus: r.Status,
       }),
     }));
     const statusCounts = {};
@@ -445,13 +457,16 @@ router.get("/registry", requireAnyPageRight(["crm-registry", "crm-sales-deed"], 
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY r.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
+      (() => {
+        const countReq = pool.request()
+          .input("st2", sql.NVarChar(20), status || null)
+          .input("companyId2", sql.Int, companyId)
+          .input("projectId2", sql.Int, projectId)
+          .input("blockId2", sql.Int, blockId)
+          .input("search2", sql.NVarChar(200), search ? `%${search}%` : null);
+        let scopeClause = "";
+        if (req.projectScope) scopeClause = require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId");
+        return countReq.query(`
           SELECT COUNT(*) AS total
           FROM dbo.CrmRegistry r
           JOIN dbo.CrmBooking b ON b.Id = r.BookingId
@@ -461,8 +476,10 @@ router.get("/registry", requireAnyPageRight(["crm-registry", "crm-sales-deed"], 
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
             AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))${projectPredicate(req.projectScope, "b.ProjectId")}
-        `),
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+            ${scopeClause}
+        `);
+      })(),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
@@ -491,6 +508,7 @@ router.get("/registry/booking/:bookingId", requireAnyPageRight(["crm-registry", 
 router.get("/registry/eligible-bookings", requireAnyPageRight(["crm-registry", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              qp.QPNo, sd.DeedNo
@@ -500,7 +518,8 @@ router.get("/registry/eligible-bookings", requireAnyPageRight(["crm-registry", "
       JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')${projectPredicate(req.projectScope, "b.ProjectId")}
+        ${scope}
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id AND Status <> 'Cancelled')
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -549,6 +568,9 @@ router.post("/registry", requireAnyPageRight(["crm-registry", "crm-sales-deed"],
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
     if (!(await assertBookingAllowed(req, res, bookingId))) return;
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -764,6 +786,25 @@ router.put("/registry/:id/complete", requireAnyPageRight(["crm-registry", "crm-s
     const tx = pool.transaction();
     await tx.begin();
     try {
+      const booking = (await tx.request().input("bid", sql.Int, cur.recordset[0].BookingId).query(`
+        SELECT Id, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+      `)).recordset[0];
+      if (!booking || !booking.IsActive || DEAD_BOOKING_STATUSES.includes(booking.Status)) {
+        throw Object.assign(new Error("Cannot complete registry because the booking is no longer active"), { status: 409 });
+      }
+      const pendingCancellation = (await tx.request().input("bid", sql.Int, booking.Id).query(`
+        SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation
+        WHERE BookingId = @bid AND Status NOT IN ('Rejected', 'Cancelled')
+      `)).recordset[0];
+      if (pendingCancellation) {
+        throw Object.assign(new Error(`Cannot complete registry while cancellation ${pendingCancellation.CancellationNo} is open; resolve it first.`), { status: 409 });
+      }
+      const currentRegistry = (await tx.request().input("id", sql.Int, id).query(`
+        SELECT Status FROM dbo.CrmRegistry WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      `)).recordset[0];
+      if (!currentRegistry || currentRegistry.Status !== "Scheduled") {
+        throw Object.assign(new Error("Registry is no longer scheduled; reload before completing it."), { status: 409 });
+      }
       await tx.request()
         .input("id", sql.Int, id)
         .input("dt", sql.Date, completedDate)
@@ -841,6 +882,7 @@ router.put("/registry/:id/complete", requireAnyPageRight(["crm-registry", "crm-s
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-sales-deed/registry] PUT /:id/complete error:", e.message);
+    if (e.status) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
@@ -1129,6 +1171,7 @@ router.get("/query-payment/booking/:bookingId", requireAnyPageRight(["crm-query-
 router.get("/query-payment/eligible-bookings", requireAnyPageRight(["crm-query-payment", "crm-sales-deed"], "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              sd.DeedNo, sd.Id AS SalesDeedId
@@ -1137,7 +1180,8 @@ router.get("/query-payment/eligible-bookings", requireAnyPageRight(["crm-query-p
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND sd.DirectorApprovalStatus = 'Approved'
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)${projectPredicate(req.projectScope, "b.ProjectId")}
+        ${scope}
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -1175,6 +1219,9 @@ router.post("/query-payment", requireAnyPageRight(["crm-query-payment", "crm-sal
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
     if (!(await assertBookingAllowed(req, res, bookingId))) return;
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1516,6 +1563,7 @@ router.get("/:id", requirePageRight("crm-sales-deed", "view"), async (req, res) 
         executedBy: deedRes.recordset[0].ExecutedBy,
         deedDate: deedRes.recordset[0].DeedDate,
         registrationDeadline: deedRes.recordset[0].RegistrationDeadline,
+        storedStatus: deedRes.recordset[0].Status,
       })
     };
     res.json({ deed, documents: docRes.recordset, approvalLog: logRes.recordset });
@@ -2410,6 +2458,9 @@ router.post("/", requirePageRight("crm-sales-deed", "create"), validateBody(crmS
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
     if (!(await assertBookingAllowed(req, res, bookingId))) return;
+
+    const allowed = await assertBookingProjectScope(req, res, bookingId);
+    if (allowed === false) return;
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

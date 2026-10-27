@@ -1,75 +1,21 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  BarChart3,
-  X,
-  Receipt,
-  HardHat,
-  FileText,
-  Puzzle,
-  Users,
-  ChevronRight,
-  ChevronDown,
-  Search,
-  UserRound,
-  Landmark,
-  TrendingUp,
-  ClipboardList,
-  Grip,
-  Home,
-  Settings,
-  Layers,
-  Map,
-  Hash,
-  ReceiptIndianRupee,
-  CreditCard,
-  BookOpen,
-  Tag,
-  FileType2,
-  LayoutGrid,
-  Ruler,
-  Activity,
-  DoorOpen,
-  Target,
-  Calendar,
-  Package,
-  RotateCcw,
-  Wallet,
-  Car,
-  PlusCircle,
-  Truck,
-  Megaphone,
-  SlidersHorizontal,
-  UsersRound,
-  ShieldCheck,
-  CalendarClock,
-  Wand2,
-  GitBranch,
-  XCircle,
-  Percent,
-  Wrench,
-  Handshake,
-} from "lucide-react";
-import {
-  Bank,
-  Receipt21,
-  Category2,
-  ClipboardText,
-  Message2,
-  Archive,
-  Building3,
-  Chart21,
-  VideoPlay,
-  Shield,
-  ShieldTick,
-  Crown,
-  Data,
-  Profile,
-  Logout,
-  MoneyRecive,
-  Cpu,
-  ShoppingCart,
-} from "iconsax-react";
+  type SetupItem,
+  financeSetupItems,
+  salesSetupItems,
+  maintenanceSetupItems,
+  hrPayrollSetupItems,
+  materialSetupItems,
+  fixedAssetSetupItems,
+  followupSetupItems,
+  engineeringSetupItems,
+  civilWorkDprSetupItems,
+  salesAutomationSetupItems,
+  crmSetupItems,
+  adminSetupItems,
+} from "./setupMenus";
+import { Grip } from "lucide-react";
 
 import {
   IconChartBar as TbChartBar,
@@ -94,7 +40,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useReminders } from "@/hooks/useReminders";
-import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
 // ── Desktop sidebar definitions — single source of truth, mirrored here ──────
@@ -137,17 +82,8 @@ interface NavItem {
   pageKey?: string;
 }
 
-interface SetupItem {
-  icon: React.ElementType<any>;
-  label: string;
-  path: string;
-  color: string;
-  pageKey?: string;
-}
 
 // ── Module colour system ──────────────────────────────────────────────────────
-// Built from the shared module list (moduleDefs.tsx) — the same icon, name, colour and order as the
-// desktop module strip and the top bar. Only the "Menu" placeholder (no module open) is local.
 type ModuleMeta = {
   h: number;
   s: number;
@@ -165,401 +101,6 @@ const MODULE_META: Record<string, ModuleMeta> = {
     ]),
   ),
 };
-
-// ── Setup item lists (mirrors TopNavbar) ─────────────────────────────────────
-const financeSetupItems: SetupItem[] = [
-  {
-    icon: Layers,
-    label: "AC Group",
-    path: "/masters/account-group",
-    color: "text-indigo-400",
-    pageKey: "account-head",
-  },
-  {
-    icon: Receipt,
-    label: "General Ledger",
-    path: "/masters/general-ledger",
-    color: "text-orange-400",
-    pageKey: "general-ledger",
-  },
-  {
-    icon: Truck,
-    label: "Vendors",
-    path: "/masters/suppliers",
-    color: "text-blue-400",
-    pageKey: "supplier-master",
-  },
-  {
-    icon: HardHat,
-    label: "Contractors",
-    path: "/masters/contractors",
-    color: "text-amber-500",
-    pageKey: "contractor-master",
-  },
-  {
-    icon: Landmark,
-    label: "Banks",
-    path: "/masters/banks",
-    color: "text-emerald-500",
-    pageKey: "bank-master",
-  },
-  {
-    icon: Handshake,
-    label: "Partners",
-    path: "/masters/partners",
-    color: "text-orange-500",
-    pageKey: "partner-master",
-  },
-  {
-    icon: Calendar,
-    label: "Fin Year",
-    path: "/masters/financial-year",
-    color: "text-purple-400",
-    pageKey: "financial-year-master",
-  },
-  {
-    icon: BookOpen,
-    label: "Cheque",
-    path: "/masters/cheque",
-    color: "text-cyan-500",
-    pageKey: "cheque-master",
-  },
-  {
-    icon: CreditCard,
-    label: "Card",
-    path: "/masters/card",
-    color: "text-rose-500",
-    pageKey: "card-master",
-  },
-  {
-    icon: FileText,
-    label: "TDS",
-    path: "/masters/tds",
-    color: "text-green-500",
-    pageKey: "tds-master",
-  },
-  {
-    icon: Target,
-    label: "Cost Center",
-    path: "/masters/cost-center",
-    color: "text-pink-500",
-    pageKey: "cost-center",
-  },
-  {
-    icon: TrendingUp,
-    label: "Profit Center",
-    path: "/masters/profit-center",
-    color: "text-teal-500",
-    pageKey: "profit-center",
-  },
-  {
-    icon: RotateCcw,
-    label: "Return Reason",
-    path: "/masters/return-reason",
-    color: "text-red-400",
-    pageKey: "return-reason-master",
-  },
-  {
-    icon: Wallet,
-    label: "Payment Reason",
-    path: "/masters/payment-reason",
-    color: "text-lime-500",
-    pageKey: "payment-reason-master",
-  },
-  {
-    icon: Users,
-    label: "Customer Master",
-    path: "/masters/customers",
-    color: "text-violet-500",
-    pageKey: "customer-master",
-  },
-];
-
-const materialSetupItems: SetupItem[] = [
-  {
-    icon: Package,
-    label: "Items",
-    path: "/masters/items",
-    color: "text-teal-500",
-  },
-  {
-    icon: Layers,
-    label: "Items Group",
-    path: "/masters/item-groups",
-    color: "text-indigo-400",
-  },
-  {
-    icon: Hash,
-    label: "Unit of Measurement",
-    path: "/masters/unit-measurement",
-    color: "text-orange-400",
-  },
-  {
-    icon: ReceiptIndianRupee,
-    label: "HSN",
-    path: "/masters/hsn",
-    color: "text-pink-400",
-  },
-  {
-    icon: BillingIcon,
-    label: "Billing",
-    path: "/masters/billing-terms",
-    color: "text-lime-500",
-  },
-  {
-    icon: FileText,
-    label: "T&C",
-    path: "/material/t-c-master",
-    color: "text-purple-500",
-  },
-  {
-    icon: CalendarClock,
-    label: "Payment Terms",
-    path: "/masters/payment-terms",
-    color: "text-sky-500",
-    pageKey: "payment-terms",
-  },
-  {
-    icon: ClipboardList,
-    label: "Inventory",
-    path: "/material/inventory-master",
-    color: "text-teal-400",
-  },
-];
-
-const fixedAssetSetupItems: SetupItem[] = [
-  {
-    icon: Percent,
-    label: "Depreciation Setup",
-    path: "/fixed-asset/depreciation-setup",
-    color: "text-yellow-500",
-    pageKey: "depreciation-setup",
-  },
-  {
-    icon: Hash,
-    label: "ID Template Master",
-    path: "/fixed-asset/id-template-master",
-    color: "text-yellow-500",
-    pageKey: "id-template-master",
-  },
-];
-
-const maintenanceSetupItems: SetupItem[] = [
-  {
-    icon: Receipt,
-    label: "Charge Head",
-    path: "/masters/charge-head",
-    color: "text-slate-500",
-    pageKey: "charge-head-master",
-  },
-];
-
-const followupSetupItems: SetupItem[] = [
-  // "Task Master" moved into the Follow-Up module sidebar (followupNavItems)
-  // — kept out of the Setup sheet so it isn't listed twice on mobile.
-  {
-    icon: Users,
-    label: "Department Master",
-    path: "/followup/setup/department-master",
-    color: "text-cyan-500",
-    pageKey: "followup-department-master",
-  },
-  {
-    icon: Tag,
-    label: "Tag Master",
-    path: "/followup/setup/tag-master",
-    color: "text-pink-500",
-    pageKey: "followup-tag-master",
-  },
-  {
-    icon: XCircle,
-    label: "Cancel Template",
-    path: "/followup/setup/cancel-template",
-    color: "text-red-500",
-    pageKey: "followup-cancel-template-master",
-  },
-];
-
-const engineeringSetupItems: SetupItem[] = [
-  {
-    icon: Activity,
-    label: "Engineering Activity Master",
-    path: "/masters/engineering-activity",
-    color: "text-orange-400",
-    pageKey: "engineering-activity-master",
-  },
-];
-
-const salesAutomationSetupItems: SetupItem[] = [
-  {
-    icon: Megaphone,
-    label: "Social Media",
-    path: "/sales-automation/social-media",
-    color: "text-pink-500",
-    pageKey: "sa-social-media",
-  },
-  {
-    icon: SlidersHorizontal,
-    label: "Distribution Rules",
-    path: "/sales-automation/distribution-rules",
-    color: "text-amber-500",
-    pageKey: "sa-distribution-rules",
-  },
-  {
-    icon: UsersRound,
-    label: "Teams",
-    path: "/sales-automation/teams",
-    color: "text-purple-500",
-    pageKey: "sa-teams",
-  },
-  {
-    icon: ShieldCheck,
-    label: "Role Master",
-    path: "/sales-automation/role-master",
-    color: "text-orange-500",
-    pageKey: "sa-role-master",
-  },
-];
-
-// Unit/Block/Room/Parking/Extra-Charge masters are shared with the
-// Follow-Up module (same underlying data and pageKey gating), but they're
-// now ALSO registered under /crm/setup/* in App.tsx so these links stay
-// inside the crm module — a /followup/... URL would flip the whole app
-// into Follow-Up chrome the moment it's clicked (ModuleContext derives
-// activeModule purely from the path prefix). pageKey still points at the
-// real (shared, followup-*) permission the route actually checks, so
-// visibility for non-privileged users matches the real access gate. Kept
-// in sync with TopNavbar.tsx's own copy.
-const crmSetupItems: SetupItem[] = [
-  {
-    icon: Wand2,
-    label: "Auto Project Setup",
-    path: "/crm/setup/auto-project-setup",
-    color: "text-fuchsia-500",
-    pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Ruler,
-    label: "Unit Master",
-    path: "/crm/setup/unit-master",
-    color: "text-orange-500",
-    pageKey: "followup-unit-master",
-  },
-  {
-    icon: Map,
-    label: "Plot Master",
-    path: "/crm/setup/plot-master",
-    color: "text-emerald-500",
-    pageKey: "crm-auto-project-setup",
-  },
-  {
-    icon: Layers,
-    label: "Block Master",
-    path: "/crm/setup/block-master",
-    color: "text-cyan-500",
-    pageKey: "followup-block-master",
-  },
-  {
-    icon: HardHat,
-    label: "Broker Master",
-    path: "/masters/brokers",
-    color: "text-amber-500",
-    pageKey: "broker-master",
-  },
-  {
-    icon: ClipboardList,
-    label: "Payment Plan Master",
-    path: "/crm/payment-plans",
-    color: "text-emerald-500",
-    pageKey: "crm-payment-plans",
-  },
-  {
-    icon: Car,
-    label: "Parking Rate Master",
-    path: "/crm/setup/parking-master",
-    color: "text-blue-500",
-    pageKey: "followup-parking-master",
-  },
-  {
-    icon: Hash,
-    label: "Parking Slot Master",
-    path: "/crm/setup/parking-slot-master",
-    color: "text-sky-500",
-    pageKey: "followup-parking-slot-master",
-  },
-  {
-    icon: PlusCircle,
-    label: "Extra Charge Master",
-    path: "/crm/setup/extra-charge-master",
-    color: "text-pink-500",
-    pageKey: "followup-extra-charge-master",
-  },
-  {
-    icon: Activity,
-    label: "Pending Tasks",
-    path: "/crm/setup/pending-tasks",
-    color: "text-purple-500",
-    pageKey: "followup-pending-tasks",
-  },
-  {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/crm/setup/reminders",
-    color: "text-indigo-500",
-    pageKey: "followup-reminders",
-  },
-];
-
-const adminSetupItems: SetupItem[] = [
-  {
-    icon: LayoutGrid,
-    label: "Menu Types",
-    path: "/admin/masters/menu-types",
-    color: "text-emerald-500",
-  },
-  {
-    icon: Tag,
-    label: "Entry Type",
-    path: "/masters/named-entry-type",
-    color: "text-purple-400",
-  },
-  {
-    icon: FileType2,
-    label: "Type of Doc",
-    path: "/masters/type-of-doc",
-    color: "text-sky-500",
-  },
-  {
-    icon: Users,
-    label: "Role Master",
-    path: "/admin/masters/role-master",
-    color: "text-blue-400",
-  },
-];
-
-const civilWorkDprSetupItems: SetupItem[] = [
-  {
-    icon: ClipboardList,
-    label: "Activity Master",
-    path: "/masters/activity",
-    color: "text-cyan-500",
-    pageKey: "activity-master",
-  },
-  {
-    icon: DoorOpen,
-    label: "Flat Master",
-    path: "/civilworkdpr/room-master",
-    color: "text-cyan-500",
-    pageKey: "civilworkdpr-room-master",
-  },
-  {
-    icon: GitBranch,
-    label: "Dependency Master",
-    path: "/masters/dependency",
-    color: "text-cyan-500",
-    pageKey: "dependency-master",
-  },
-];
 
 export const MobileNav: React.FC = () => {
   // Which full-height sheet is open from the bottom bar: the module menu, or "Me" (profile, theme, sign out).
@@ -632,6 +173,10 @@ export const MobileNav: React.FC = () => {
       };
     if (activeModule === "finance")
       return { items: financeSetupItems, label: "Finance", available: true };
+    if (activeModule === "sales")
+      return { items: salesSetupItems, label: "Sales", available: true };
+    if (activeModule === "hr-payroll")
+      return { items: hrPayrollSetupItems, label: "HR and Payroll", available: true };
     if (activeModule === "sales-automation")
       return {
         items: salesAutomationSetupItems,

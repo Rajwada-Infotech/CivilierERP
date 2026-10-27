@@ -11,18 +11,22 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
 const PN_SELECT = `
   SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
-    (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
-       AND m.AmountDue > ISNULL(m.AmountPaid, 0)) AS OutstandingMilestones,
-    ISNULL((SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
-       AND m.AmountDue > ISNULL(m.AmountPaid, 0)), 0) AS OutstandingBalance
+    CASE WHEN ${bookingFullyFundedSql("n.BookingId")} THEN 0 ELSE
+      (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
+       WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+         AND m.AmountDue > ISNULL(m.AmountPaid, 0)) END AS OutstandingMilestones,
+    CASE WHEN ${bookingFullyFundedSql("n.BookingId")} THEN 0 ELSE
+      ISNULL((SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
+       WHERE m.BookingId = n.BookingId AND m.Status NOT IN ('Paid','Waived')
+         AND m.AmountDue > ISNULL(m.AmountPaid, 0)), 0) END AS OutstandingBalance
   FROM dbo.CrmPossessionNotice n
   JOIN dbo.CrmBooking b ON b.Id = n.BookingId
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -34,6 +38,7 @@ const PN_SELECT = `
 router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT
         b.Id, b.BookingNo,
@@ -46,19 +51,17 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
         SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
       ) bv
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId")}
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred')
+        ${scope}
         AND EXISTS (
           SELECT 1 FROM dbo.CrmPrePossession pp
-          WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
+          WHERE pp.BookingId = b.Id
+            AND pp.DocumentationCheck = 1 AND pp.QualityInspectionCheck = 1 AND pp.UtilityReadinessCheck = 1
+            AND (${bookingFullyFundedSql("b.Id")})
         )
-        -- Block-level OC/CC (migration 447) checked first, falling back to
-        -- the project's blanket cert — same fallback as crmPrePossession.js.
+        -- OC/CC cleared for this booking (migration 577, vw_CrmBookingOcCc).
         AND (b.ProjectId IS NULL OR EXISTS (
-          SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-          WHERE oc.Status = 'Received' AND (
-            (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
-            OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
-          )
+          SELECT 1 FROM dbo.vw_CrmBookingOcCc v WHERE v.BookingId = b.Id AND v.Received = 1
         ))
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmPossessionNotice pn
@@ -174,6 +177,9 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId);
     if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

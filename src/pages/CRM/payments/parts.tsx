@@ -127,11 +127,16 @@ export function BookingSummary({ booking, summary, onAccountBalance, totalPendin
   );
 }
 
-export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, bookingOnAccountReceived, bookingGrandTotal, fullPaymentShortfall, canEdit, onApply }: {
-  onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; bookingOnAccountReceived: number; bookingGrandTotal: number;
-  fullPaymentShortfall: number; canEdit: boolean; onApply: (payment: any) => void;
+// Deposits that aren't usable money: never counted, never applied.
+const UNAVAILABLE = ["Bounced", "Held", "Void", "Cancelled", "Refunded"];
+
+export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, fundsOnHand, requiredAmount, fullPaymentShortfall, milestones, canManuallyApply, canEdit, onApply }: {
+  onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fundsOnHand: number; requiredAmount: number;
+  fullPaymentShortfall: number; milestones: any[]; canManuallyApply: boolean; canEdit: boolean; onApply: (payment: any) => void;
 }) {
-  const funded = bookingGrandTotal > 0 ? Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100) : 0;
+  const funded = requiredAmount > 0 ? Math.min(100, (fundsOnHand / requiredAmount) * 100) : 0;
+  const hasOutstanding = milestones.some((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && Number(m.AmountDue) > Number(m.AmountPaid || 0));
+  const usableLeft = onAccountData.payments.some((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) > Number(p.AppliedAmount || 0));
   return (
     <div className="bg-card" style={{ border: RULE }}>
       <div className={`${head} justify-between`} style={{ borderBottom: RULE }}>
@@ -143,27 +148,33 @@ export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, 
           <div className="px-3 py-2.5 space-y-1.5" style={{ border: RULE_SOFT }}>
             <div className="flex items-center justify-between gap-3 text-[0.6875rem] flex-wrap">
               <span className="font-semibold flex items-center gap-1.5"><Wallet size={12} /> Held on-account — settles itself once fully funded</span>
-              <span className="text-muted-foreground tabular-nums">{fmt(bookingOnAccountReceived)} of {fmt(bookingGrandTotal)} ({Math.round(funded)}%)</span>
+              <span className="text-muted-foreground tabular-nums">{fmt(fundsOnHand)} of {fmt(requiredAmount)} ({Math.round(funded)}%)</span>
             </div>
             <div className="h-1.5" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${funded}%` }} /></div>
             <div className="text-[0.6875rem] text-muted-foreground">
-              No action needed — {fmt(fullPaymentShortfall)} more on-account settles every eligible milestone, in order. Milestones already covered by money on hand show "Paid (on-account)" below.
+              {fmt(fullPaymentShortfall)} more in valid payments funds the remaining dues; eligible milestones then settle in order. Milestones already covered by money on hand show "Paid (on-account)" below.
             </div>
           </div>
         ) : (
           <div className="px-3 py-2 text-[0.6875rem] flex items-center gap-1.5" style={{ border: RULE_SOFT }}>
-            <CheckCircle2 size={12} className="shrink-0" /> The full booking amount is on-account — every eligible milestone settles itself, in order.
+            <CheckCircle2 size={12} className="shrink-0" /> The booking is fully funded — eligible milestones settle themselves, in order.
+          </div>
+        )}
+        {milestones.length > 0 && !hasOutstanding && usableLeft && (
+          <div className="px-3 py-2 text-[0.6875rem]" style={{ border: RULE_SOFT }}>
+            No milestone balance is outstanding. What's left on account stays unapplied on this booking until a balance is due.
           </div>
         )}
         <div>
           {onAccountData.payments.map((p: any) => {
-            const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
+            const isUnavailable = UNAVAILABLE.includes(p.Status);
+            const remaining = isUnavailable ? 0 : Number(p.Amount) - Number(p.AppliedAmount || 0);
             const isApplied = p.Status === "Applied";
             const isPartial = p.Status === "PartiallyApplied";
-            const canApply = canEdit && remaining > 0 && !isApplied && !notFullyPaid;
+            const canApply = canEdit && remaining > 0 && !isApplied && !isUnavailable && canManuallyApply && hasOutstanding;
             return (
-              <div key={p.Id} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isApplied ? "opacity-60" : ""}`}
-                style={{ borderBottom: RULE_SOFT, borderLeft: `3px solid ${isApplied ? "hsl(var(--foreground) / 0.25)" : "hsl(var(--foreground))"}` }}>
+              <div key={p.Id} className={`flex items-center justify-between gap-3 px-3 py-2.5 ${isApplied || isUnavailable ? "opacity-60" : ""}`}
+                style={{ borderBottom: RULE_SOFT, borderLeft: `3px solid ${isUnavailable ? "hsl(var(--destructive))" : isApplied ? "hsl(var(--foreground) / 0.25)" : "hsl(var(--foreground))"}` }}>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap text-xs">
                     <span className="font-heading font-semibold tabular-nums">{p.ReceiptNo}</span>
@@ -171,10 +182,12 @@ export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, 
                     {p.PaymentMode && <span className="text-muted-foreground">· {p.PaymentMode}</span>}
                     {p.ReceivedDate && <span className="text-muted-foreground tabular-nums">· {fmtDate(p.ReceivedDate)}</span>}
                   </div>
-                  {remaining > 0 && remaining < Number(p.Amount) && <div className="text-[0.6875rem] font-medium mt-1 tabular-nums">{fmt(remaining)} remaining</div>}
+                  {isUnavailable
+                    ? <div className="text-[0.6875rem] font-medium mt-1 text-destructive">{p.Status} · not available to apply</div>
+                    : remaining > 0 && remaining < Number(p.Amount) && <div className="text-[0.6875rem] font-medium mt-1 tabular-nums">{fmt(remaining)} remaining</div>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <SheetMark text={isApplied ? "Applied" : isPartial ? "Partial" : "Unapplied"} tone={isApplied ? "done" : "waiting"} />
+                  <SheetMark text={isUnavailable ? p.Status : isApplied ? "Applied" : isPartial ? "Partial" : "Unapplied"} tone={isUnavailable ? "stopped" : isApplied ? "done" : "waiting"} />
                   {canApply && (
                     <button onClick={() => onApply(p)} title="This deposit should apply itself once its milestone is eligible — use this only as a manual fallback"
                       className={`${KEY_LINE} h-7 px-2`}>Apply manually</button>
@@ -189,8 +202,9 @@ export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, 
   );
 }
 
-export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, onPay, onApply, onWaive, onRemarks }: {
+export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBalance, notFullyPaid, fullPaymentShortfall, nextMilestone, canManuallyApply, onPay, onApply, onWaive, onRemarks }: {
   milestones: any[]; canEdit: boolean; onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fullPaymentShortfall: number;
+  nextMilestone: any; canManuallyApply: boolean;
   onPay: (m: any) => void; onApply: (payment: any, m: any) => void; onWaive: (m: any) => void; onRemarks: (m: any) => void;
 }) {
   const th = `!px-3 !py-2.5 text-left ${LBL}`;
@@ -218,7 +232,10 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
               const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
               const status = covered ? "Paid (on-account)" : overdue ? "Overdue" : m.Status;
               const open = m.Status !== CrmStatus.PAID && m.Status !== "Waived";
-              const pmt = onAccountBalance > 0 ? onAccountData?.payments?.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount || 0) > 0) : null;
+              const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
+                ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
+                : null;
+              const noAmount = Number(m.AmountDue) === 0 && Number(m.AmountPaid || 0) === 0 && m.Status === CrmStatus.PAID;
               return (
                 <tr key={m.Id} className="align-top" style={{ borderBottom: RULE_SOFT, borderLeft: overdue && !covered ? "3px solid hsl(var(--destructive))" : undefined }}>
                   <td className={`${td} text-xs text-muted-foreground tabular-nums`}>{m.MilestoneNo}</td>
@@ -237,7 +254,9 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   <td className={`${td} text-xs text-muted-foreground`}>{m.ResponsibleDepartment || "—"}</td>
                   <td className={`${td} text-xs tabular-nums whitespace-nowrap ${overdue ? "text-destructive font-semibold" : ""}`}>{fmtDate(m.DueDate)}</td>
                   <td className={`${td} text-right`}>
-                    <div className="font-heading font-semibold tabular-nums whitespace-nowrap">{fmt(m.AmountDue)}</div>
+                    {noAmount
+                      ? <div className="text-xs font-medium text-muted-foreground whitespace-nowrap">No amount due</div>
+                      : <div className="font-heading font-semibold tabular-nums whitespace-nowrap">{fmt(m.AmountDue)}{m.Status === "Waived" && <span className="ml-1 text-[0.625rem] font-medium text-muted-foreground">(waived)</span>}</div>}
                     {m.Percent != null && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{Number(m.Percent)}%</div>}
                   </td>
                   <td className={`${td} text-right`}>
@@ -271,10 +290,13 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                       <div className="flex flex-wrap items-center gap-1.5">
                         {!covered && <button onClick={() => onPay(m)} className={`${KEY_INK} h-7 px-2`}>Pay</button>}
                         {pmt && (notFullyPaid
-                          ? <span title={`Settles itself once fully funded — ${fmt(fullPaymentShortfall)} more on-account triggers it, no manual action needed`}
+                          ? <span title={`Settles itself once the remaining dues are funded — ${fmt(fullPaymentShortfall)} more in valid payments`}
                               className={`${tag} px-2 h-7 inline-flex items-center border border-foreground/25 text-muted-foreground cursor-help`}>Auto</span>
+                          : !canManuallyApply
+                          ? <span title="Raise the Demand before applying on-account money to this milestone"
+                              className={`${tag} px-2 h-7 inline-flex items-center border border-foreground/25 text-muted-foreground cursor-help`}>Raise demand</span>
                           : <button onClick={() => onApply(pmt, m)}
-                              title="The full booking amount is on-account and this milestone should settle itself shortly — use this only if it hasn't (e.g. a demand still needs raising first)"
+                              title="The booking is funded and this milestone should settle itself shortly — use this only if it hasn't"
                               className={`${KEY_LINE} h-7 px-2`}>Apply</button>)}
                         {!covered && <button onClick={() => onWaive(m)} className={`${KEY_LINE} h-7 px-2`}>Waive</button>}
                       </div>

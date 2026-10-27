@@ -1,11 +1,13 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { logAudit } = require("../utils/auditLog");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+// A unit (by id) and any project / block given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/kinds", null], ["/", "unit"]] });
 const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
@@ -433,7 +435,8 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 });
 
 // PUT — update unit
-router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
+// Also edited from Auto Project Setup's unit lists.
+router.put("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-project-setup"], "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
@@ -575,6 +578,32 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UPDATE dbo.RoomMaster SET ProjectId = @ProjectId, BlockId = @BlockId, Floor = @Floor
           WHERE UnitId = @Id AND (ProjectId <> @ProjectId OR BlockId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
         `);
+      // DependencyMaster (DPR work chains) carries its own copy of
+      // ProjectId/TowerId(=BlockId)/Floor, stamped once at chain creation
+      // (autoDprChains.js) and never re-joined through UnitMaster/RoomMaster
+      // afterward — DPR filtering, dashboards and attendance screens all key
+      // off these columns directly. Without this, moving a unit to a
+      // different block/project left its DPR chains permanently showing
+      // under the OLD block/floor, even though Room Master and Unit Master
+      // itself correctly show the new one. Only attempted when chains
+      // actually exist — chainFloorLabel can throw for a plot-built unit
+      // that isn't converted yet, which must not block an otherwise-normal
+      // edit of a unit that has no DPR work started at all.
+      const hasChains = (await tx.request().input("Id", sql.Int, parseInt(id))
+        .query("SELECT TOP 1 1 AS x FROM dbo.DependencyMaster WHERE FlatId = @Id")).recordset.length > 0;
+      if (hasChains) {
+        const { chainFloorLabel } = require("../services/unitLayout");
+        const newFloorLabel = await chainFloorLabel(tx, { UnitId: parseInt(id), UnitName, ProjectId: parseInt(ProjectId), BlockId: parseInt(BlockId), FloorNo: FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null });
+        await tx.request()
+          .input("Id",        sql.Int, parseInt(id))
+          .input("ProjectId", sql.Int, parseInt(ProjectId))
+          .input("BlockId",   sql.Int, parseInt(BlockId))
+          .input("Floor",     sql.NVarChar(50), newFloorLabel)
+          .query(`
+            UPDATE dbo.DependencyMaster SET ProjectId = @ProjectId, TowerId = @BlockId, Floor = @Floor
+            WHERE FlatId = @Id AND (ProjectId <> @ProjectId OR TowerId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
+          `);
+      }
       await moveUnitOverrides(tx, parseInt(id), parseInt(ProjectId), parseInt(BlockId));
       // Type changed: add the new layout's rooms, soft-deactivate rooms it
       // doesn't have — only those with no DPR work (kept ones are reported).
@@ -626,7 +655,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
 //      sys.foreign_keys), so even a HISTORICAL/terminal reference (e.g. a
 //      long-Cancelled Application) still physically blocks a hard DELETE.
 // Only once both come back clear does the row actually get removed.
-router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-project-setup"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });

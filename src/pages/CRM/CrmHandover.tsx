@@ -27,7 +27,7 @@ const SA_LEADS_API = "/api/sa/leads";
 // The server's state machine, mirrored so no step is offered that it would refuse.
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   Scheduled: ["SnagInspection", "Cancelled"],
-  SnagInspection: ["SnagPending", "Cancelled"],
+  SnagInspection: ["SnagPending", "Completed", "Cancelled"],
   SnagPending: ["Completed", "Cancelled"],
   Completed: [],
   Cancelled: [],
@@ -179,7 +179,7 @@ const CrmHandover: React.FC = () => {
   // ?bookingId=X opens that booking's handover, or the Schedule dialog for it.
   useEffect(() => {
     if (!deepLinkBookingId) return;
-    setSp({}, { replace: true });
+    setSp((prev) => { prev.delete("bookingId"); return prev; }, { replace: true });
     fetchHandoverByBooking(deepLinkBookingId).then((existing) => {
       if (existing) setSelectedId(existing.Id);
       else if (rights.canCreate) { setNewForm({ ...emptySchedule(), BookingId: deepLinkBookingId }); setNewDialog(true); }

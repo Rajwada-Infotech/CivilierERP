@@ -50,7 +50,7 @@ router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) =
       "    JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId",
       "    WHERE m.BookingId = b.Id AND r.PaymentMode = 'Home Loan'",
       "  ), 0) + ISNULL((",
-      "    SELECT SUM(o.Amount) FROM dbo.CrmOnAccountPayment o",
+      "    SELECT SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END) FROM dbo.CrmOnAccountPayment o",
       "    WHERE o.BookingId = b.Id AND o.PaymentMode = 'Home Loan'",
       "  ), 0) AS DisbursedAmount",
       "FROM dbo.CrmBooking b",

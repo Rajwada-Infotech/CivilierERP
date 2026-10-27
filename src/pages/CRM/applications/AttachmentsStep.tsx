@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { Upload, Trash2, FileText, X, Eye, Download } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
@@ -129,10 +130,11 @@ export const AttachmentsStep: React.FC<{
                       <Eye size={12} />
                     </button>
                   )}
-                  <a href={fileUrl} download={d.FileName}
+                  <button type="button" title="Download"
+                    onClick={async () => { if (!(await downloadAuthFile(fileUrl, d.FileName))) toast.error("Couldn't download the file — try again."); }}
                     className="text-muted-foreground hover:text-primary flex items-center gap-0.5">
                     <Download size={12} />
-                  </a>
+                  </button>
                   <button onClick={() => handleRemoveDoc(d.Id)} className="text-muted-foreground hover:text-destructive"><Trash2 size={12} /></button>
                 </div>
               </div>

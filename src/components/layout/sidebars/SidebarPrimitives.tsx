@@ -381,8 +381,11 @@ export const SidebarNav = ({
   const location = useLocation();
   // One link lit at a time: the one whose path matches the page most closely. A prefix match alone lit the
   // module's dashboard ("/finance") on every page under it ("/finance/contracts") as well as the page's own link.
+  // A dashboard often sits at the module root (/finance, /sales-automation), so it lights only on that exact path —
+  // a page under it with no link of its own lights nothing rather than the dashboard.
+  const dashboards = new Set(items.filter((it) => it.isDashboard).map((it) => it.path));
   const covers = (path?: string) =>
-    !!path && (path === "/" ? location.pathname === "/" : location.pathname === path || location.pathname.startsWith(path + "/"));
+    !!path && (path === "/" || dashboards.has(path) ? location.pathname === path : location.pathname === path || location.pathname.startsWith(path + "/"));
   // Group entries count too, so a page inside a group (Transaction › Payment) doesn't also light the dashboard.
   const allPaths = items.flatMap((it) => [it.path, ...(it.children ?? []).map((c) => c.path), ...(it.sections ?? []).flatMap((s) => s.items.map((x) => x.path))]);
   const activePath = allPaths

@@ -1,6 +1,6 @@
 // Shared by CRM Bookings and its parts: the APIs, the New Booking form, the list and master-data fetches, the
 // "next step" a booking is waiting on, and the sheet styles.
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel } from "@/constants/crmStatuses";
 import { statusTone } from "@/components/sheet/Sheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -15,12 +15,7 @@ export const STATUSES = ["Pending", "Approved", "Rejected", "Cancelled", "Transf
 export const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
 export const TOKEN_TYPES = ["Percentage", "Amount"];
 
-export const workflowStageLabel: Record<string, string> = {
-  Review: "Application Review",
-  MarketingHeadApproval: "Marketing Head Approval",
-  DirectorApproval: "Director Approval",
-  Confirmed: "Confirmed",
-};
+export const workflowStageLabel = bookingWorkflowStageLabel;
 
 // Transferred (closed by a resale: the sale stands, the land / villa has a new owner) counts as settled.
 export const bookingTone = (status: string): "done" | "waiting" | "stopped" =>

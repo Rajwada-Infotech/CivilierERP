@@ -5,15 +5,54 @@ const { getRedis } = require("./redis");
 const { runTicketEscalationJob } = require("./services/ticketEscalationService");
 const { runRecordsRetentionJob } = require("./services/recordsRetentionService");
 const { runWorkerRetentionJob } = require("./services/workerRetentionService");
+const { getPool } = require("./db");
 
 let workerInterval = null;
 let ticketEscalationInterval = null;
 let recordsRetentionInterval = null;
 let workerRetentionInterval = null;
+let crmRefundSettlementInterval = null;
 let workerRunning = false;
+let crmRefundSettlementRunning = false;
+// Logged once per process lifetime (not every 5-minute tick) - see
+// settleApprovedCrmReceivedPayments's "orphaned" count in crmPayments.js.
+let loggedOrphanedReceivedPayments = false;
 
 const RECORDS_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day is plenty for a 7-day grace window
 const WORKER_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day is plenty for a 4-month window
+const CRM_REFUND_SETTLEMENT_INTERVAL_MS = 5 * 60 * 1000;
+
+async function settlePaidCrmRefunds() {
+  if (crmRefundSettlementRunning) return;
+  crmRefundSettlementRunning = true;
+  try {
+    // The NewPayment approval hook intentionally keeps refund synchronization
+    // non-fatal after money has moved. Retry any missed syncs from the worker.
+    const { settlePaidRefunds } = require("./routes/crmRefunds");
+    await settlePaidRefunds(getPool(), "CRM system");
+    const { settleApprovedCrmReceivedPayments } = require("./routes/crmPayments");
+    const result = await settleApprovedCrmReceivedPayments(getPool(), "CRM system");
+    if (result.failed) {
+      logger.warn({ event: "WORKER_CRM_RECEIVED_PAYMENT_RETRY", ...result }, "Some approved CRM payment follow-ups still need recovery");
+    }
+    if (result.orphaned && !loggedOrphanedReceivedPayments) {
+      loggedOrphanedReceivedPayments = true;
+      logger.warn(
+        { event: "WORKER_CRM_RECEIVED_PAYMENT_ORPHANED", orphaned: result.orphaned },
+        "Some approved CRM received payments reference a deleted Booking/Milestone and can never be recovered - excluded from retry (logged once per server start, not every cycle)",
+      );
+    }
+    const { retryConfirmedPendingMoneyReceipts } = require("./services/crmMoneyReceiptWorkflow");
+    const mrResult = await retryConfirmedPendingMoneyReceipts(getPool(), "CRM system");
+    if (mrResult.failed) {
+      logger.warn({ event: "WORKER_CRM_MONEY_RECEIPT_RETRY", ...mrResult }, "Some confirmed CRM money receipts still need recovery");
+    }
+  } catch (err) {
+    logger.error({ event: "WORKER_CRM_REFUND_SETTLEMENT_ERROR", err }, "CRM refund settlement recovery failed");
+  } finally {
+    crmRefundSettlementRunning = false;
+  }
+}
 
 function getTicketEscalationIntervalMs() {
   const configured = Number(process.env.TICKET_ESCALATION_INTERVAL_MS);
@@ -107,6 +146,7 @@ async function startWorker() {
     await runTicketEscalationJob();
     await runRecordsRetentionJob();
     await runWorkerRetentionJob();
+    await settlePaidCrmRefunds();
     logger.info({ event: "WORKER_INIT_DONE" }, "Initial decay & cleanup complete");
   } catch (err) {
     logger.error({ event: "WORKER_INIT_ERROR", err }, "Worker init failed");
@@ -174,6 +214,8 @@ async function startWorker() {
       );
     }
   }, WORKER_RETENTION_INTERVAL_MS);
+
+  crmRefundSettlementInterval = setInterval(settlePaidCrmRefunds, CRM_REFUND_SETTLEMENT_INTERVAL_MS);
 }
 
 function stopWorker() {
@@ -182,10 +224,12 @@ function stopWorker() {
   clearInterval(ticketEscalationInterval);
   clearInterval(recordsRetentionInterval);
   clearInterval(workerRetentionInterval);
+  clearInterval(crmRefundSettlementInterval);
   workerInterval = null;
   ticketEscalationInterval = null;
   recordsRetentionInterval = null;
   workerRetentionInterval = null;
+  crmRefundSettlementInterval = null;
   workerRunning = false;
   logger.info({ event: "WORKER_STOPPED" }, "Redis worker stopped");
 }

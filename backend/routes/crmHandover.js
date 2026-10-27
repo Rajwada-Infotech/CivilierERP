@@ -11,7 +11,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/crmWorkflowGuards");
-const { applyPagination } = require("../services/crmListPagination");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
+const { getBookingFunding, bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -37,53 +38,100 @@ const HANDOVER_SELECT = `
   LEFT JOIN dbo.Users kh     ON kh.id = h.KeyHandoverBy
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmPossessionNotice / CrmMutation / CrmNoc:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Scheduled, SnagInspection, SnagPending, Completed, Cancelled } }
+// `counts` honours search + company/project/block but NOT status, so the
+// tabs always show what each status would contain. `?bookingId=` is a
+// separate deep-link lookup mode that always returns the small bare-array
+// result, bypassing pagination entirely. Without `page` the legacy
+// full-array response is returned so existing callers keep working.
+const HO_STATUSES = ["Scheduled", "SnagInspection", "SnagPending", "Completed", "Cancelled"];
+const HO_SORT = {
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Status: "h.Status",
+  ScheduledDate: "h.ScheduledDate",
+  ActualHandoverDate: "h.ActualHandoverDate",
+  CreatedAt: "h.CreatedAt",
+};
+function buildHoWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
+  }
+  if (includeStatus && HO_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("h.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all handovers
 router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search, bookingId } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    // Rows, total and per-status counts share one set of inputs and conditions (the total used to repeat the filters
-    // without the project scope, so a restricted user's pages didn't add up).
-    const reqs = [pool.request(), pool.request(), pool.request()];
-    const req0 = reqs[0];
-    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
-    const conds = [];
-    // Deep-link lookup mode ("does this one booking already have a handover?") returns the small bare-array result.
-    if (bookingId) { bind("bid", sql.Int, parseInt(bookingId, 10)); conds.push("h.BookingId = @bid"); }
-    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      bind("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    // The status counts cover every status under the other filters.
-    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    if (status) { bind("st", sql.NVarChar(30), status); conds.push("h.Status = @st"); }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const { bookingId } = req.query;
     const SELECT_WITH_BLOCK = `${HANDOVER_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
     const ORDER = "ORDER BY h.ScheduledDate ASC, h.CreatedAt DESC";
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+    // Deep-link lookup mode ("does this one booking already have a
+    // handover?") — always returns the small bare-array result, bypassing
+    // pagination entirely, same convention as crmBookings.js's applicationId
+    // scope and crmMoneyReceipts.js's bookingId scope.
+    if (bookingId) {
+      const r0 = pool.request().input("bid", sql.Int, parseInt(bookingId, 10));
+      const scope = req.projectScope ? `AND ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : "";
+      const result = await r0.query(`${SELECT_WITH_BLOCK} WHERE h.BookingId = @bid ${scope} ${ORDER}`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const FROM = `FROM dbo.CrmHandover h JOIN dbo.CrmBooking b ON b.Id = h.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
-      reqs[2].query(`SELECT h.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY h.Status`),
-    ]);
-    const statusCounts = Object.fromEntries(statusResult.recordset.map((x) => [x.Status, x.n]));
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildHoWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+      return res.json(result.recordset);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(HO_SORT, req.query.sortKey) ? HO_SORT[req.query.sortKey] : HO_SORT.ScheduledDate;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildHoWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT h.Status, COUNT(*) AS C FROM dbo.CrmHandover h
+       JOIN dbo.CrmBooking b ON b.Id = h.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${countWhere} GROUP BY h.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = HO_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildHoWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, h.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    // statusCounts (no All) for the sheet page's tabs; counts kept for other callers.
+    const { All: _all, ...statusCounts } = counts;
+    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, page, pageSize });
   } catch (e) {
     console.error("[crm-handover] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -98,65 +146,48 @@ router.get("/", requirePageRight("crm-handover", "view"), async (req, res) => {
 router.get("/eligible-bookings", requirePageRight("crm-handover", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    // Candidates: active bookings with no handover yet
-    const candidates = await pool.request().query(`
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
+    // Single query replacing the prior N+1 loop (4 individual queries per booking).
+    // All four prerequisite checks are inlined as EXISTS/NOT EXISTS / subquery
+    // conditions so only one round-trip is needed regardless of how many
+    // candidate bookings exist.
+    const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId")}
+      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}', 'Expired','Transferred')
+        ${scope}
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmHandover h WHERE h.BookingId = b.Id AND h.Status <> '${CrmStatus.CANCELLED}')
+        -- 1. Agreement must be Registered
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmAgreement ag
+          WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}'
+        )
+        -- 2. Possession Notice must be Acknowledged
+        AND EXISTS (
+          SELECT 1 FROM dbo.CrmPossessionNotice pn
+          WHERE pn.BookingId = b.Id AND pn.Status = 'Acknowledged'
+            AND pn.CreatedAt = (
+              SELECT MAX(CreatedAt) FROM dbo.CrmPossessionNotice WHERE BookingId = b.Id
+            )
+        )
+        -- 3. No NOC left in Pending or Approved
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status IN ('Pending','Approved')
+        )
+        -- 4. Net booking funding covers every non-waived due.
+        AND (${bookingFullyFundedSql("b.Id")})
       ORDER BY b.BookingNo
     `);
 
-    const eligible = [];
-    for (const c of candidates.recordset) {
-      const bid = c.Id;
-      // 1. Agreement must be Registered (AFS physically registered at
-      // Sub-Registrar) — mandatory for every booking, regardless of
-      // project type.
-      const agr = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CASE WHEN Status = 'Cancelled' THEN 1 ELSE 0 END, Id DESC");
-      if (!agr.recordset.length || agr.recordset[0].Status !== CrmStatus.REGISTERED) continue;
-
-      // 2. Possession Notice must be Acknowledged by the customer
-      const pn = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 Status FROM dbo.CrmPossessionNotice WHERE BookingId = @bid ORDER BY CreatedAt DESC");
-      if (!pn.recordset.length || pn.recordset[0].Status !== "Acknowledged") continue;
-
-      // 3. No NOC left in Pending or Approved (must be Issued or never requested)
-      const openNoc = await pool.request().input("bid", sql.Int, bid)
-        .query("SELECT TOP 1 Id FROM dbo.CrmNoc WHERE BookingId = @bid AND Status IN ('Pending','Approved')");
-      if (openNoc.recordset.length) continue;
-
-      // 4. No outstanding payment dues — mirrors the POST / dues check
-      // EXACTLY (same columns: AmountDue/AmountPaid — CrmPaymentMilestone
-      // has no Amount or WaivedAmount column, those never existed; querying
-      // them threw "Invalid column name" on every call, so this endpoint
-      // 500'd for every single booking regardless of project type. Also
-      // aligned to POST's real rule — ANY outstanding balance blocks
-      // Handover, not just an overdue one — so this list can't offer a
-      // booking that then fails on submit.)
-      const dues = await pool.request().input("bid", sql.Int, bid)
-        .query(`
-          SELECT SUM(m.AmountDue - ISNULL(m.AmountPaid,0)) AS Bal
-          FROM dbo.CrmPaymentMilestone m
-          WHERE m.BookingId = @bid
-            AND m.Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
-        `);
-      const bal = dues.recordset[0]?.Bal ?? 0;
-      if (bal > 0) continue;
-
-      eligible.push({ Id: c.Id, BookingNo: c.BookingNo, UnitNo: c.UnitNo, ApplicantName: c.ApplicantName });
-    }
-
-    res.json(eligible);
+    res.json(result.recordset);
   } catch (e) {
     console.error("[crm-handover] GET /eligible-bookings error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
+
 
 // GET /:id — handover with snag list
 router.get("/:id", requirePageRight("crm-handover", "view"), async (req, res) => {
@@ -191,6 +222,9 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
     // The booking comes in the body, which the path guards don't see.
     if (!(await require("../services/projectScope").assertBookingAllowed(req, res, b.BookingId))) return;
 
+    const projectId = await assertBookingProjectScope(req, res, b.BookingId);
+    if (projectId === false) return;
+
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
 
@@ -215,6 +249,18 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: "Handover requires the Possession Notice to be Acknowledged by the customer first" });
     }
 
+    // Re-check Pre-Possession here too: its three manual checklist items can
+    // be unchecked at any time (e.g. a defect found during a walkthrough),
+    // including after the notice above was already sent and Acknowledged —
+    // nothing on the notice itself re-validates when that happens. Without
+    // this, a flagged, uncorrected inspection defect would still let the
+    // unit go out the door because Handover only ever looked at the notice.
+    const pp = await pool.request().input("bid", sql.Int, parseInt(b.BookingId))
+      .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+    if (pp.recordset.length && pp.recordset[0].Status !== "Ready") {
+      return res.status(400).json({ error: `Handover requires Pre-Possession to still be Ready — it is currently ${pp.recordset[0].Status}. Resolve the open item there first.` });
+    }
+
     // Workflow guard: if an NOC (Org or Bank) was ever requested for this
     // booking, it has to have actually been issued before handover — a NOC
     // in Pending/Approved-but-not-yet-issued means the paperwork isn't
@@ -227,18 +273,13 @@ router.post("/", requirePageRight("crm-handover", "create"), async (req, res) =>
       return res.status(400).json({ error: `Handover requires the ${openNoc.recordset[0].NocType} NOC to be issued first (currently ${openNoc.recordset[0].Status})` });
     }
 
-    // Workflow guard: all payment milestones must be paid or waived — no
-    // outstanding balance should remain at possession time.
-    const unpaid = await pool.request().input("bid", sql.Int, parseInt(b.BookingId)).query(`
-      SELECT COUNT(*) AS Cnt, ISNULL(SUM(AmountDue - ISNULL(AmountPaid, 0)), 0) AS Balance
-      FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-        AND AmountDue > ISNULL(AmountPaid, 0)
-    `);
-    const unpaidRow = unpaid.recordset[0];
-    if (unpaidRow.Cnt > 0) {
-      const bal = Math.round(unpaidRow.Balance);
-      return res.status(400).json({ error: `Handover cannot be scheduled — ${unpaidRow.Cnt} milestone(s) have an outstanding balance of ₹${bal.toLocaleString("en-IN")}` });
+    // Under the full-booking hold rule, milestone rows can remain unpaid while
+    // valid customer funds are still available On Account. Gate on net booking
+    // funding so those funds count once and invalid deposits never clear dues.
+    const funding = await getBookingFunding(pool, b.BookingId);
+    if (funding.shortfall > 0.009) {
+      const bal = Math.round(funding.shortfall);
+      return res.status(400).json({ error: `Handover cannot be scheduled — the booking has an outstanding balance of ₹${bal.toLocaleString("en-IN")}` });
     }
 
     const result = await pool.request()
@@ -295,7 +336,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     if (b.Status && b.Status !== currentStatus) {
       const ALLOWED_TRANSITIONS = {
         Scheduled:      ["SnagInspection", CrmStatus.CANCELLED],
-        SnagInspection: ["SnagPending", CrmStatus.CANCELLED],
+        SnagInspection: ["SnagPending", "Completed", CrmStatus.CANCELLED],
         SnagPending:    ["Completed", CrmStatus.CANCELLED],
         Completed:      [],   // terminal
         Cancelled:      [],   // terminal
@@ -325,15 +366,22 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
       if (!b.FinalDuesCleared) {
         return res.status(400).json({ error: "FinalDuesCleared must be confirmed before completing handover" });
       }
-      // The tick is staff's word; the balance is checked too — a charge, parking
-      // or a bounced payment can appear after the handover was scheduled.
+      // Recheck net funding at completion because new charges or a bounced
+      // receipt can change the balance after the handover was scheduled.
       {
-        const due = (await pool.request().input("hid", sql.Int, id).query(`
-          SELECT COUNT(*) AS Cnt, ISNULL(SUM(m.AmountDue - ISNULL(m.AmountPaid, 0)), 0) AS Balance
-          FROM dbo.CrmHandover h JOIN dbo.CrmPaymentMilestone m ON m.BookingId = h.BookingId
-          WHERE h.Id = @hid AND m.Status NOT IN ('Paid', 'Waived') AND m.AmountDue > ISNULL(m.AmountPaid, 0)`)).recordset[0];
-        if (due.Cnt > 0) {
-          return res.status(400).json({ error: `Cannot complete handover — ${due.Cnt} milestone(s) still owe ₹${Math.round(due.Balance).toLocaleString("en-IN")}` });
+        const funding = await getBookingFunding(pool, cur0.recordset[0].BookingId);
+        if (funding.shortfall > 0.009) {
+          return res.status(400).json({ error: `Cannot complete handover — the booking still owes ₹${Math.round(funding.shortfall).toLocaleString("en-IN")}` });
+        }
+      }
+      // Recheck Pre-Possession at completion too, same reasoning — its
+      // checklist can be unchecked (e.g. a defect found) any time after the
+      // Possession Notice was already scheduled/acknowledged.
+      {
+        const pp = await pool.request().input("bid", sql.Int, cur0.recordset[0].BookingId)
+          .query(`SELECT TOP 1 Status FROM dbo.CrmPrePossession WHERE BookingId = @bid ORDER BY CreatedAt DESC`);
+        if (pp.recordset.length && pp.recordset[0].Status !== "Ready") {
+          return res.status(400).json({ error: `Cannot complete handover — Pre-Possession is currently ${pp.recordset[0].Status}, not Ready. Resolve the open item there first.` });
         }
       }
       if (!b.CustomerAcknowledged) {

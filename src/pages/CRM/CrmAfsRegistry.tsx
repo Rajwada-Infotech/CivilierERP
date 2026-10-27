@@ -272,6 +272,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
   const handleSchedule = async () => {
     if (scheduleId == null || !scheduledDate) { toast.error("Date is required"); return; }
+    setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${scheduleId}/schedule`, {
         method: "PUT",
@@ -288,6 +289,8 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
       if (embedded) afterChange();
     } catch (e: any) {
       toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -296,6 +299,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
     // Capture bookingId before clearing state so promptNextStep can deep-link
     const completingRow = (rows as any[]).find((r: any) => r.Id === completeId);
     const completingBookingId = completingRow?.BookingId;
+    setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${completeId}/complete`, {
         method: "PUT",
@@ -321,6 +325,8 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
       }
     } catch (e: any) {
       toast.error(translateError(e.message));
+    } finally {
+      setSaving(false);
     }
   };
 

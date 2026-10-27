@@ -153,7 +153,19 @@ const PortalLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [selectedApplicationId, setSelectedApplicationId] = useState<number | null>(null);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<number | null>(() => {
+    const stored = sessionStorage.getItem("crm_portal_app_id");
+    return stored ? parseInt(stored, 10) : null;
+  });
+
+  const handleSelectApplication = (id: number | null) => {
+    if (id === null) {
+      sessionStorage.removeItem("crm_portal_app_id");
+    } else {
+      sessionStorage.setItem("crm_portal_app_id", String(id));
+    }
+    setSelectedApplicationId(id);
+  };
 
   const { data: me, error: meError } = useQuery({ queryKey: ["portal-me"], queryFn: fetchMe, retry: false, staleTime: 60_000 });
   const { data: applications, error: appsError } = useQuery({ queryKey: ["portal-applications"], queryFn: fetchApplications, retry: false, staleTime: 60_000 });
@@ -162,7 +174,7 @@ const PortalLayout: React.FC = () => {
   useEffect(() => {
     if (!applications) return;
     if (applications.length === 1 && !selectedApplicationId) {
-      setSelectedApplicationId(applications[0].ApplicationId);
+      handleSelectApplication(applications[0].ApplicationId);
     }
   }, [applications, selectedApplicationId]);
 
@@ -188,6 +200,7 @@ const PortalLayout: React.FC = () => {
     const isUnauthorized = [meError, appsError, tlError].some((e: any) => e?.message === "unauthorized");
     const needsPasswordChange = [meError, appsError, tlError].some((e: any) => e?.message === "password_change_required");
     if (isUnauthorized) {
+      sessionStorage.removeItem("crm_portal_app_id");
       localStorage.removeItem("crm_portal_token");
       navigate("/crm-client-portal/login");
     }
@@ -195,11 +208,12 @@ const PortalLayout: React.FC = () => {
   }, [meError, appsError, tlError, navigate]);
 
   const handleLogout = () => {
+    sessionStorage.removeItem("crm_portal_app_id");
     localStorage.removeItem("crm_portal_token");
     navigate("/crm-client-portal/login");
   };
 
-  const handleBackToSelector = () => setSelectedApplicationId(null);
+  const handleBackToSelector = () => handleSelectApplication(null);
 
   const hasMultipleApps = (applications?.length ?? 0) > 1;
 
@@ -371,7 +385,7 @@ const PortalLayout: React.FC = () => {
             {hasMultipleApps && selectedApplicationId && (
               <div className="px-3 pt-3">
                 <button
-                  onClick={() => { setSelectedApplicationId(null); setMobileOpen(false); }}
+                  onClick={() => { handleSelectApplication(null); setMobileOpen(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
                   style={{ color: "rgba(233,225,250,0.75)", border: "1px solid rgba(255,255,255,0.12)" }}
                 >
@@ -426,7 +440,7 @@ const PortalLayout: React.FC = () => {
           ) : showSelector ? (
             <ApplicationSelector
               applications={applications!}
-              onSelect={setSelectedApplicationId}
+              onSelect={handleSelectApplication}
               me={me}
             />
           ) : accountWide ? (

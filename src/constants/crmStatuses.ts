@@ -32,3 +32,11 @@ export const CrmStatus = {
 } as const;
 
 export type CrmStatusType = typeof CrmStatus[keyof typeof CrmStatus];
+
+// Booking approval stages (CrmBooking.WorkflowStage) -> what staff read.
+export const bookingWorkflowStageLabel: Record<string, string> = {
+  Review: 'Application Review',
+  MarketingHeadApproval: 'Marketing Head Approval',
+  DirectorApproval: 'Director Approval',
+  Confirmed: 'Confirmed',
+};

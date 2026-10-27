@@ -1423,40 +1423,79 @@ router.get("/:id/posting", requirePageRight("loan-sanction", "view"), async (req
 // logic the route runs, rather than reimplementing it — see
 // scripts/repostLoanToGL.js. Throws Object.assign(new Error(...), {status})
 // on any guard failure, same convention as createLoanSanctionInternal.
+// Inserts one voucher's GL legs on an ALREADY-OPEN transaction — unlike
+// generalLedger.js's postVoucher (which always opens its own transaction via
+// pool.transaction() and so can't be nested inside the row lock below), this
+// lets postLoanToGLInternal keep the LoanSanction row locked (UPDLOCK/HOLDLOCK)
+// for the whole check-then-insert so two concurrent posts can't both pass the
+// "already posted" check before either one's INSERTs land (see call site).
+async function insertVoucherLegsInTx(tx, { voucherNo, voucherDate, legs, sourceType, sourceId, companyId, createdBy }) {
+  for (const leg of legs) {
+    const debit = Math.round((leg.debit || 0) * 100) / 100;
+    const credit = Math.round((leg.credit || 0) * 100) / 100;
+    if (debit === 0 && credit === 0) continue;
+    await tx.request()
+      .input("VoucherNo", sql.NVarChar(50), voucherNo)
+      .input("VoucherDate", sql.Date, voucherDate)
+      .input("LHeadId", sql.Int, leg.lHeadId)
+      .input("DebitAmount", sql.Decimal(18, 2), debit)
+      .input("CreditAmount", sql.Decimal(18, 2), credit)
+      .input("Narration", sql.NVarChar(255), leg.narration || null)
+      .input("SourceType", sql.NVarChar(30), sourceType)
+      .input("SourceId", sql.Int, sourceId)
+      .input("CompanyId", sql.Int, companyId)
+      .input("CreatedBy", sql.NVarChar(150), createdBy)
+      .query(`
+        INSERT INTO dbo.GeneralLedgerEntry
+          (VoucherNo, VoucherDate, LHeadId, DebitAmount, CreditAmount, Narration, SourceType, SourceId, CompanyId, CreatedBy)
+        VALUES
+          (@VoucherNo, @VoucherDate, @LHeadId, @DebitAmount, @CreditAmount, @Narration, @SourceType, @SourceId, @CompanyId, @CreatedBy)
+      `);
+  }
+}
+
 async function postLoanToGLInternal(pool, loanId, userEmail) {
-  const { postVoucher } = require("../services/generalLedger");
+  // TOCTOU fix: the "already posted" SELECT used to run with no lock, so two
+  // concurrent post-to-gl/disburse calls for the same loan could both pass it
+  // before either one's INSERTs committed, double-posting the loan (and, for
+  // Bank/Customer Loan, double-crediting cash). WITH (UPDLOCK, HOLDLOCK) here
+  // blocks a second concurrent caller until the first transaction commits or
+  // rolls back, same pattern as the EMI-pay row lock below (see "pay" route).
+  const tx = pool.transaction();
+  await tx.begin();
+  let loan;
+  try {
+    const loanRes = await tx.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT LoanId, LoanNo, LoanType, LoanDate, Amount, LenderCompanyId, BorrowerCompanyId,
+             LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId
+      FROM dbo.LoanSanction WITH (UPDLOCK, HOLDLOCK) WHERE LoanId = @LoanId
+    `);
+    if (!loanRes.recordset.length) throw Object.assign(new Error("Loan not found"), { status: 404 });
+    loan = loanRes.recordset[0];
+    if (!loan.LenderLHeadId || !loan.BorrowerLHeadId) {
+      throw Object.assign(new Error("This loan is missing its lender/borrower GL accounts — cannot post."), { status: 422 });
+    }
 
-  const loanRes = await pool.request().input("LoanId", sql.Int, loanId).query(`
-    SELECT LoanId, LoanNo, LoanType, LoanDate, Amount, LenderCompanyId, BorrowerCompanyId,
-           LenderLHeadId, BorrowerLHeadId, LenderBankAccountId, BorrowerBankAccountId
-    FROM dbo.LoanSanction WHERE LoanId = @LoanId
-  `);
-  if (!loanRes.recordset.length) throw Object.assign(new Error("Loan not found"), { status: 404 });
-  const loan = loanRes.recordset[0];
-  if (!loan.LenderLHeadId || !loan.BorrowerLHeadId) {
-    throw Object.assign(new Error("This loan is missing its lender/borrower GL accounts — cannot post."), { status: 422 });
-  }
+    const alreadyPosted = await tx.request().input("SrcId", sql.Int, loanId).query(`
+      SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
+    `);
+    if (alreadyPosted.recordset.length) {
+      throw Object.assign(new Error("This loan has already been posted to GL."), { status: 409 });
+    }
 
-  const alreadyPosted = await pool.request().input("SrcId", sql.Int, loanId).query(`
-    SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType = 'LoanPosting' AND SourceId = @SrcId AND IsReversed = 0
-  `);
-  if (alreadyPosted.recordset.length) {
-    throw Object.assign(new Error("This loan has already been posted to GL."), { status: 409 });
-  }
+    // A Fund Transfer-originated Inter-Company loan already posted its own
+    // combined bank-movement + lender/borrower legs at approval time (see
+    // postFundTransferApproval in generalLedger.js) — posting again here
+    // would double-count both loan heads' balances.
+    const ftLinked = await tx.request().input("LoanId", sql.Int, loanId).query(`
+      SELECT TOP 1 FTId FROM dbo.FundTransfer WHERE LinkedLoanId = @LoanId
+    `);
+    if (ftLinked.recordset.length) {
+      throw Object.assign(new Error("This loan was created by a Fund Transfer, which already posted it to GL."), { status: 409 });
+    }
 
-  // A Fund Transfer-originated Inter-Company loan already posted its own
-  // combined bank-movement + lender/borrower legs at approval time (see
-  // postFundTransferApproval in generalLedger.js) — posting again here
-  // would double-count both loan heads' balances.
-  const ftLinked = await pool.request().input("LoanId", sql.Int, loanId).query(`
-    SELECT TOP 1 FTId FROM dbo.FundTransfer WHERE LinkedLoanId = @LoanId
-  `);
-  if (ftLinked.recordset.length) {
-    throw Object.assign(new Error("This loan was created by a Fund Transfer, which already posted it to GL."), { status: 409 });
-  }
-
-  const amt = Number(loan.Amount);
-  if (!amt || amt <= 0) throw Object.assign(new Error("Loan has no amount to post."), { status: 400 });
+    const amt = Number(loan.Amount);
+    if (!amt || amt <= 0) throw Object.assign(new Error("Loan has no amount to post."), { status: 400 });
 
   // Inter-Company involves TWO of our own companies — each needs its own
   // book entry (Lender's books show the receivable, Borrower's books show
@@ -1467,67 +1506,73 @@ async function postLoanToGLInternal(pool, loanId, userEmail) {
   // Loan/Customer Loan only ever involve ONE of our own companies (the
   // other side is an external bank or customer), so those still get one
   // voucher.
-  if (loan.LoanType === "Inter-Company") {
-    if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
-      throw Object.assign(new Error("This Inter-Company loan is missing a Lender or Borrower Bank A/C — cannot post."), { status: 422 });
+    if (loan.LoanType === "Inter-Company") {
+      if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
+        throw Object.assign(new Error("This Inter-Company loan is missing a Lender or Borrower Bank A/C — cannot post."), { status: 422 });
+      }
+      await insertVoucherLegsInTx(tx, {
+        voucherNo: loan.LoanNo,
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.LenderCompanyId,
+        createdBy: userEmail,
+        legs: [
+          { lHeadId: loan.BorrowerLHeadId, debit: amt, narration: `${loan.LoanNo} — inter-company loan receivable (funds sent)` },
+          { lHeadId: loan.LenderBankAccountId, credit: amt, narration: `${loan.LoanNo} — loan disbursed` },
+        ],
+      });
+      await insertVoucherLegsInTx(tx, {
+        voucherNo: loan.LoanNo,
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.BorrowerCompanyId,
+        createdBy: userEmail,
+        legs: [
+          { lHeadId: loan.BorrowerBankAccountId, debit: amt, narration: `${loan.LoanNo} — loan received` },
+          { lHeadId: loan.LenderLHeadId, credit: amt, narration: `${loan.LoanNo} — inter-company loan payable (funds received)` },
+        ],
+      });
+    } else {
+      // Dr the borrower's Loan ledger (they now owe this — a receivable from
+      // the sanctioning side), Cr the lender's Loan ledger (funds went out).
+      const lines = [
+        { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
+        { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
+      ];
+      await insertVoucherLegsInTx(tx, {
+        voucherNo: loan.LoanNo,
+        // The loan's own date, not the date it happened to get posted —
+        // matches the Inter-Company branch above, which already got this
+        // right.
+        voucherDate: loan.LoanDate,
+        sourceType: "LoanPosting",
+        sourceId: loanId,
+        companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
+        createdBy: userEmail,
+        legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      });
     }
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      voucherDate: loan.LoanDate,
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.LenderCompanyId,
-      createdBy: userEmail,
-      legs: [
-        { lHeadId: loan.BorrowerLHeadId, debit: amt, narration: `${loan.LoanNo} — inter-company loan receivable (funds sent)` },
-        { lHeadId: loan.LenderBankAccountId, credit: amt, narration: `${loan.LoanNo} — loan disbursed` },
-      ],
-    });
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      voucherDate: loan.LoanDate,
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.BorrowerCompanyId,
-      createdBy: userEmail,
-      legs: [
-        { lHeadId: loan.BorrowerBankAccountId, debit: amt, narration: `${loan.LoanNo} — loan received` },
-        { lHeadId: loan.LenderLHeadId, credit: amt, narration: `${loan.LoanNo} — inter-company loan payable (funds received)` },
-      ],
-    });
-  } else {
-    // Dr the borrower's Loan ledger (they now owe this — a receivable from
-    // the sanctioning side), Cr the lender's Loan ledger (funds went out).
-    const lines = [
-      { LHeadId: loan.BorrowerLHeadId, DebitAmount: amt, CreditAmount: 0, Narration: `Loan Posting: ${loan.LoanNo} — Borrower` },
-      { LHeadId: loan.LenderLHeadId, DebitAmount: 0, CreditAmount: amt, Narration: `Loan Posting: ${loan.LoanNo} — Lender` },
-    ];
-    await postVoucher(pool, {
-      voucherNo: loan.LoanNo,
-      // The loan's own date, not the date it happened to get posted —
-      // matches the Inter-Company branch above, which already got this
-      // right.
-      voucherDate: loan.LoanDate,
-      sourceType: "LoanPosting",
-      sourceId: loanId,
-      companyId: loan.LenderCompanyId || loan.BorrowerCompanyId || null,
-      createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
-    });
-  }
 
-  // BUG 9 FIX: stamp DisbursedAt when the GL posting confirms money moved.
-  // Null until then; setting it here (and in the Inter-Company auto-post
-  // path in POST / above) gives the loan a distinct disbursement moment
-  // separate from its sanction date, enabling the "Given vs Received"
-  // lifecycle distinction on the frontend. Uses the loan's own LoanDate,
-  // not SYSDATETIME() — "Post to GL" can happen well after the real
-  // disbursement (a legacy loan reposted today shouldn't show today as
-  // its disbursement date).
-  await pool.request()
-    .input("LoanId", sql.Int, loanId)
-    .input("LoanDate", sql.Date, loan.LoanDate)
-    .query("UPDATE dbo.LoanSanction SET DisbursedAt = @LoanDate WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+    // BUG 9 FIX: stamp DisbursedAt when the GL posting confirms money moved.
+    // Null until then; setting it here (and in the Inter-Company auto-post
+    // path in POST / above) gives the loan a distinct disbursement moment
+    // separate from its sanction date, enabling the "Given vs Received"
+    // lifecycle distinction on the frontend. Uses the loan's own LoanDate,
+    // not SYSDATETIME() — "Post to GL" can happen well after the real
+    // disbursement (a legacy loan reposted today shouldn't show today as
+    // its disbursement date).
+    await tx.request()
+      .input("LoanId", sql.Int, loanId)
+      .input("LoanDate", sql.Date, loan.LoanDate)
+      .query("UPDATE dbo.LoanSanction SET DisbursedAt = @LoanDate WHERE LoanId = @LoanId AND DisbursedAt IS NULL");
+
+    await tx.commit();
+  } catch (err) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    throw err;
+  }
 
   await bumpCacheVersion("loan-sanction");
   return { voucherNo: loan.LoanNo };

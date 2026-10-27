@@ -14,13 +14,7 @@ export const crmNavItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/crm/dashboard", pageKey: "crm-dashboard" },
 
   // ── Leads (SA handoff pool) ──────────────────────────────────────────────────
-  {
-    label: "Leads",
-    icon: Users,
-    children: [
-      { label: "All Leads", path: "/crm/leads", pageKey: "crm-leads" },
-    ],
-  },
+  { label: "Leads", icon: Users, path: "/crm/leads", pageKey: "crm-leads" },
 
   // ── Pipeline ─────────────────────────────────────────────────────────────────
   {
@@ -29,7 +23,7 @@ export const crmNavItems: NavItem[] = [
     children: [
       { label: "Customers",               path: "/crm/customers",             pageKey: "crm-customers"           },
       { label: "Applications",            path: "/crm/applications",          pageKey: "crm-applications"        },
-      { label: "Applications & Bookings", path: "/crm/bookings",              pageKey: "crm-bookings"            },
+      { label: "Bookings",                path: "/crm/bookings",              pageKey: "crm-bookings"            },
       { label: "Welcome Calls",           path: "/crm/welcome-calls",         pageKey: "crm-welcome-calls"       },
       { label: "Booking Amendments",       path: "/crm/booking-amendments",    pageKey: "crm-bookings"            },
       { label: "Customer Bank Details", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
@@ -74,13 +68,7 @@ export const crmNavItems: NavItem[] = [
   // ── NOC ──────────────────────────────────────────────────────────────────────
   // Gate: Sale Deed registered. Bank NOC: lender releases charge on unit after
   // loan is cleared post-deed. Organisation NOC: developer confirms no dues.
-  {
-    label: "NOC",
-    icon: Building2,
-    children: [
-      { label: "NOC (Org & Bank)", path: "/crm/noc", pageKey: "crm-noc" },
-    ],
-  },
+  { label: "NOC (Org & Bank)", icon: Building2, path: "/crm/noc", pageKey: "crm-noc" },
 
   // ── Possession ───────────────────────────────────────────────────────────────
   // Gate: Sale Deed executed (ownership secured before handing keys).

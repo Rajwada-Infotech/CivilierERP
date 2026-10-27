@@ -22,7 +22,11 @@ router.use(apiRateLimit);
 // whatever the client happened to send.
 async function validateItems(pool, items) {
   if (!items.length) return { error: "At least one milestone item is required" };
-  const totalPct = items.reduce((s, i) => s + (parseFloat(i.Percent) || 0), 0);
+  const percentages = items.slice(1).map((item) => Number(item.Percent));
+  if (percentages.some((pct) => !Number.isFinite(pct) || pct <= 0 || pct > 100)) {
+    return { error: "Each payment milestone percentage must be greater than 0 and no more than 100" };
+  }
+  const totalPct = percentages.reduce((sum, pct) => sum + pct, 0);
   if (Math.round(totalPct * 100) !== 10000) return { error: `Milestone percentages must sum to 100 (currently ${totalPct})` };
 
   // Guard against the same master milestone (e.g. "Foundation") being picked
@@ -105,12 +109,12 @@ const PLAN_SELECT = `
 // crmProjectBanks.js's syncBankProjectTags one tier over (Bank <-> Project)
 // and unitMaster.js's syncUnitPaymentPlanTags one tier below (Unit <->
 // Plan). Pass an empty array to clear all tags.
-async function syncPaymentPlanProjectTags(pool, planId, projectIds) {
-  await pool.request().input("pid", sql.Int, planId)
+async function syncPaymentPlanProjectTags(db, planId, projectIds) {
+  await db.request().input("pid", sql.Int, planId)
     .query("UPDATE dbo.CrmPaymentPlanProject SET IsActive = 0 WHERE PlanId = @pid");
   for (const projectId of projectIds) {
     if (!Number.isFinite(projectId)) continue;
-    await pool.request()
+    await db.request()
       .input("pid", sql.Int, planId)
       .input("proj", sql.Int, projectId)
       .query(`
@@ -262,11 +266,11 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
         `);
     }
 
-    await tx.commit();
-
     if (Array.isArray(b.ProjectIds) && b.ProjectIds.length) {
-      await syncPaymentPlanProjectTags(pool, planId, b.ProjectIds.map((p) => parseInt(p, 10)));
+      await syncPaymentPlanProjectTags(tx, planId, b.ProjectIds.map((p) => parseInt(p, 10)));
     }
+
+    await tx.commit();
 
     res.status(201).json({ success: true, id: planId });
   } catch (e) {
@@ -344,16 +348,14 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
       }
     }
 
-    await tx.commit();
-
-    // Only touches the Project tags if the caller actually sent the field —
-    // same "don't clobber on a partial edit" reasoning as BookingAmount
-    // above. An explicit empty array clears every tag; the key being absent
-    // entirely leaves whatever's already tagged untouched.
+    // Keep Project tag replacement atomic with the template edits. A failed
+    // tag write must not leave a committed plan update behind.
     if (Object.prototype.hasOwnProperty.call(b, "ProjectIds")) {
       const projectIds = Array.isArray(b.ProjectIds) ? b.ProjectIds.map((p) => parseInt(p, 10)) : [];
-      await syncPaymentPlanProjectTags(pool, id, projectIds);
+      await syncPaymentPlanProjectTags(tx, id, projectIds);
     }
+
+    await tx.commit();
 
     const usage = await pool.request().input("id", sql.Int, id)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmBooking WHERE PaymentPlanId = @id AND IsActive = 1");

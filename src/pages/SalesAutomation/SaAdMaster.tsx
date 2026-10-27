@@ -1,11 +1,11 @@
 import React, { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -16,6 +16,7 @@ import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { LayoutList, BarChart2, RefreshCw, Image as ImageIcon, Upload, Download, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SaTabs } from "@/components/sa/SaTabs";
 
 const API = "/api/sa/ads";
 
@@ -235,6 +236,11 @@ const SaAdMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"list" | "performance">("list");
   const [creativesFor, setCreativesFor] = useState<{ id: string; name: string } | null>(null);
+  // Pre-filter when arriving from Campaign Master's "N ads" link.
+  const [searchParams] = useSearchParams();
+  const campaignFilter = searchParams.get("campaignId");
+  // ...or from Social Media Master's "N active ads" link.
+  const platformFilter = searchParams.get("platformId");
 
   const { data: ads, isLoading, error } = useQuery({
     queryKey: ["sa-ads"],
@@ -242,13 +248,14 @@ const SaAdMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const mappedData: RecordWithId[] = React.useMemo(() => {
+  const allMappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(ads)) return [];
     return ads.map((item) => ({
       _id: String(item.Id),
       adCode: item.AdCode ?? "",
       campaignId: String(item.CampaignId ?? ""),
       campaignName: item.CampaignName ?? "",
+      platformId: String(item.PlatformId ?? ""),
       name: item.Name ?? "",
       adType: item.AdType ?? "",
       creativeRef: item.CreativeRef ?? "",
@@ -295,6 +302,13 @@ const SaAdMaster: React.FC = () => {
       isActive: Boolean(item.IsActive),
     }));
   }, [ads]);
+
+  const mappedData = React.useMemo(
+    () => allMappedData.filter((a) =>
+      (!campaignFilter || a.campaignId === campaignFilter) &&
+      (!platformFilter || a.platformId === platformFilter)),
+    [allMappedData, campaignFilter, platformFilter],
+  );
 
   const toPayload = (r: Record<string, any>) => ({
     CampaignId: r.campaignId ? parseInt(r.campaignId) : null,
@@ -394,21 +408,22 @@ const SaAdMaster: React.FC = () => {
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
 
   return (
-    <SalesAutoShell title="Ad Master" subtitle="Manage advertisements running under each campaign">
-      <Breadcrumbs items={["Sales Automation", "Ad Master"]} />
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Ad Master"]} title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : platformFilter ? "Showing ads for the selected platform" : "Manage advertisements running under each campaign"}>
       <div className="space-y-6">
+        {(campaignFilter || platformFilter) && (
+          <Link to="/sales-automation/ads" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
+            ← Clear {campaignFilter ? "campaign" : "platform"} filter, show all ads
+          </Link>
+        )}
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
-            {([
+          <SaTabs
+            tabs={[
               { key: "list", icon: LayoutList, label: "List" },
               { key: "performance", icon: BarChart2, label: "Performance" },
-            ] as const).map(({ key, icon: Icon, label }) => (
-              <button key={key} onClick={() => setActiveTab(key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
+            ]}
+            active={activeTab}
+            onChange={(key) => setActiveTab(key)}
+          />
         </div>
 
         {/* PERFORMANCE TAB */}
@@ -489,18 +504,18 @@ const SaAdMaster: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setCreativesFor({ id: String(row._id), name: String(row.name) })}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Manage creatives (image/video upload)"
               >
-                <ImageIcon size={13} />
+                <ImageIcon size={13} /> Creatives
               </button>
               <button
                 type="button"
                 onClick={() => syncAd(row)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Prepare external ad sync"
               >
-                <RefreshCw size={13} />
+                <RefreshCw size={13} /> Sync
               </button>
             </>
           )}

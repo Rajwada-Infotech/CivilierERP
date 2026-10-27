@@ -10,7 +10,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, requireNotMidApproval } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate, isLandSale } = require("../services/crmGst");
 
@@ -44,6 +44,16 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
 
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) throw chargeError(activeErr);
+  // Same amendment-queue timing gap as the edit/release helpers below — the
+  // route handler only checks this when the amendment is queued, not when
+  // it's later approved.
+  const midApproval = await requireNotMidApproval(pool, bookingId);
+  if (midApproval) throw chargeError(midApproval);
+  const checklistLock = await assertWelcomeChecklistUnlocked(pool, bookingId);
+  if (checklistLock) throw chargeError(checklistLock);
+  if (await isSaleDeedRegistered(pool, bookingId)) {
+    throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be added in the ERP. A Deed of Rectification is required for any correction.");
+  }
 
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
@@ -104,6 +114,20 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw chargeError(activeErr);
+    // The route handler only checks these at the moment an amendment is
+    // QUEUED (when legal work has already started) — the amendment-approval
+    // path (crmBookingAmendments.js) calls this function directly with no
+    // re-check, so a request approved after the deed registered, or while
+    // the booking is mid-approval, would silently change figures that are
+    // either already baked into a registered legal deed or sitting inside
+    // an in-flight approval. Re-checked here so every caller gets it.
+    const midApproval = await requireNotMidApproval(pool, BookingId);
+    if (midApproval) throw chargeError(midApproval);
+    const checklistLock = await assertWelcomeChecklistUnlocked(pool, BookingId);
+    if (checklistLock) throw chargeError(checklistLock);
+    if (await isSaleDeedRegistered(pool, BookingId)) {
+      throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be changed in the ERP. A Deed of Rectification is required for any correction.");
+    }
   } else if (ApplicationId != null) {
     const app = await pool.request().input("aid", sql.Int, ApplicationId)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
@@ -266,6 +290,17 @@ async function applyReleaseExtraCharge(pool, id) {
 
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw chargeError(activeErr);
+  // Same amendment-queue timing gap as applyEditExtraCharge above — re-check
+  // here so an approval reached after the deed registered, or mid-approval,
+  // can't silently release a charge the route-level check only caught at
+  // queue time.
+  const midApproval = await requireNotMidApproval(pool, BookingId);
+  if (midApproval) throw chargeError(midApproval);
+  const checklistLock = await assertWelcomeChecklistUnlocked(pool, BookingId);
+  if (checklistLock) throw chargeError(checklistLock);
+  if (await isSaleDeedRegistered(pool, BookingId)) {
+    throw chargeError("This booking's Sale Deed is already registered — extra charges can no longer be changed in the ERP. A Deed of Rectification is required for any correction.");
+  }
 
   const milestone = await pool.request().input("ecid", sql.Int, id)
     .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC");

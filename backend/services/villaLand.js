@@ -36,9 +36,17 @@ async function landPositionOfUnits(poolOrTx, unitIds) {
     FROM dbo.UnitMaster u
     JOIN dbo.PlotMaster p ON p.ConvertedUnitId = u.Id AND p.IsActive = 1
     OUTER APPLY (
+      -- UPDLOCK+HOLDLOCK: when called inside the booking-creation
+      -- transaction (crmEntityCreation.js's re-check, right before its own
+      -- insert), this must serialize against a concurrent resale/transfer
+      -- endorsing the same plot's booking row — crmResaleTransfer.js takes
+      -- the identical UPDLOCK+HOLDLOCK on CrmBooking for exactly that write.
+      -- Outside a transaction (the plain-pool pre-check earlier in the same
+      -- flow) these hints are a same-statement no-op, so this stays safe to
+      -- call from either context.
       SELECT TOP 1 a.CustomerId, c.CustomerName
       FROM dbo.CrmBookingPlot bp
-      JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+      JOIN dbo.CrmBooking b WITH (UPDLOCK, HOLDLOCK) ON b.Id = bp.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
       WHERE bp.PlotId = p.Id AND bp.Status = N'Active'

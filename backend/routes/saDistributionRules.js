@@ -2,6 +2,7 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { distributableStatus } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -186,9 +187,28 @@ router.post("/run-now/:level", requirePageRight("sa-lead-distribution", "create"
 
       // Wrap the distribution log INSERT and lead UPDATE atomically so a crash
       // between them can't leave an orphaned distribution row with a stale lead status.
+      //
+      // The pending list above was fetched once, up front, outside any
+      // transaction - two concurrent /run-now calls (double-click, or a
+      // scheduled job racing a manual trigger) could both see the same lead
+      // as pending before either writes it, producing the exact duplicate
+      // SaLeadDistribution row / fairness-skew bug already fixed for the
+      // manual /distribute route (see saLeadDistribution.js). Re-check the
+      // lead's eligibility under an UPDLOCK/HOLDLOCK inside this per-lead
+      // transaction, same pattern, so a second concurrent run sees the
+      // already-updated row and skips it.
       const tx = pool.transaction();
       await tx.begin();
       try {
+        const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
+        const cur = await tx.request().input("lid", sql.Int, lead.Id).input("st", sql.NVarChar(30), distributableStatus(level)).query(
+          `SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid AND IsActive = 1 AND Status = @st`,
+        );
+        if (!cur.recordset.length || cur.recordset[0].assignedTo != null) {
+          await tx.commit();
+          continue;
+        }
+
         await tx.request()
           .input("lid", sql.Int, lead.Id)
           .input("fuid", sql.Int, distributedBy)

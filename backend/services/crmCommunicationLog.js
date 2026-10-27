@@ -7,7 +7,18 @@ const { sql } = require("../db");
 // real unified interaction trail (Call/Email/SMS/WhatsApp entries staff add
 // by hand, sitting alongside every automated system event) instead of only
 // showing manually-logged contact attempts.
-async function logCommunication(pool, { applicationId = null, bookingId = null, direction = "Outbound", subject, summary = null, contactedAt = null, createdBy = null }) {
+async function logCommunication(pool, {
+  applicationId = null,
+  bookingId = null,
+  direction = "Outbound",
+  subject,
+  summary = null,
+  contactedAt = null,
+  createdBy = null,
+  // Optional: gateway delivery tracking (added in migration 573)
+  deliveryStatus = null,
+  externalMessageId = null,
+}) {
   if (applicationId == null && bookingId == null) return;
   await pool.request()
     .input("aid", sql.Int, applicationId)
@@ -17,11 +28,14 @@ async function logCommunication(pool, { applicationId = null, bookingId = null, 
     .input("sum", sql.NVarChar(sql.MAX), summary)
     .input("cat", sql.DateTime2(3), contactedAt)
     .input("cb", sql.Int, createdBy)
+    .input("ds", sql.NVarChar(50), deliveryStatus)
+    .input("emi", sql.NVarChar(255), externalMessageId)
     .query(`
       INSERT INTO dbo.CrmCommunicationLog
-        (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt)
-      VALUES (@aid, @bid, 'System', @dir, @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME())
+        (ApplicationId, BookingId, Channel, Direction, Subject, Summary, ContactedAt, CreatedBy, CreatedAt, DeliveryStatus, ExternalMessageId)
+      VALUES (@aid, @bid, 'System', @dir, @subj, @sum, ISNULL(@cat, SYSDATETIME()), @cb, SYSDATETIME(), @ds, @emi)
     `);
 }
 
 module.exports = { logCommunication };
+

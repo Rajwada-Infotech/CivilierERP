@@ -6,7 +6,21 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
-const { promoteLeadToFollowup } = require("../services/saHandoff");
+const { statusesThatCanMoveTo } = require("../constants/saStatuses");
+
+// Move a lead to `to` only if STATUS_TRANSITIONS allows it from its current
+// status. The check is in the UPDATE's WHERE, so it's atomic. Returns true
+// when the lead actually moved.
+async function advanceLead(pool, leadId, to) {
+  const from = statusesThatCanMoveTo(to);
+  const r = pool.request().input("lid", sql.Int, leadId).input("to", sql.NVarChar(30), to);
+  from.forEach((f, i) => r.input(`f${i}`, sql.NVarChar(30), f));
+  const result = await r.query(`
+    UPDATE dbo.SaLead SET Status = @to, UpdatedAt = SYSDATETIME()
+    WHERE Id = @lid AND Status IN (${from.map((_, i) => `@f${i}`).join(", ")})
+  `);
+  return result.rowsAffected[0] > 0;
+}
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -45,6 +59,24 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
     const b = req.body;
     if (!b.LeadId) return res.status(400).json({ error: "LeadId required" });
 
+    // No conflict check existed at all — two different leads could be
+    // scheduled to the same executive at the same date+time with nothing
+    // to catch it.
+    if (b.ExecutiveId && b.PreferredDate && b.PreferredTime) {
+      const clash = await pool.request()
+        .input("eid", sql.Int, parseInt(b.ExecutiveId))
+        .input("pd", sql.Date, b.PreferredDate)
+        .input("pt", sql.NVarChar(20), b.PreferredTime)
+        .query(`
+          SELECT TOP 1 Id FROM dbo.SaSiteVisit
+          WHERE ExecutiveId = @eid AND PreferredDate = @pd AND PreferredTime = @pt
+            AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Completed')
+        `);
+      if (clash.recordset.length) {
+        return res.status(409).json({ error: "This executive already has a site visit booked for that date and time." });
+      }
+    }
+
     await pool.request()
       .input("lid", sql.Int, parseInt(b.LeadId))
       .input("pn", sql.NVarChar(200), b.ProjectName || null)
@@ -61,11 +93,8 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
            PickupRequired, CustomerNotes, Status, IsActive, CreatedBy, CreatedAt)
         VALUES
           (@lid, @pn, @pd, @pt, @eid, @pu, @cn, @st, 1, @cb, SYSDATETIME());
-
-        UPDATE dbo.SaLead
-        SET Status = 'VisitScheduled', UpdatedAt = SYSDATETIME()
-        WHERE Id = @lid AND Status NOT IN ('VisitScheduled','Visited','Booking');
       `);
+    await advanceLead(pool, parseInt(b.LeadId), "VisitScheduled");
 
     res.status(201).json({ success: true });
   } catch (e) {
@@ -74,13 +103,30 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
   }
 });
 
-// PUT /:id — update a site visit; auto-promote to followup when Completed
+// PUT /:id — update a site visit; moves the lead to Visited when Completed
 router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
+
+    // GET / scopes by applyLeadScope so a sales_person/team_lead only ever
+    // sees their own leads' visits — PUT/DELETE never checked that, letting
+    // anyone with the edit/delete page right mark or remove another
+    // salesperson's visit (including triggering the Completed lead move
+    // below) by id alone.
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("id", sql.Int, id)
+      .query(`SELECT 1 AS ok FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId WHERE v.Id = @id AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
+
+    // Read the visit before saving so a re-save of an already-Completed
+    // visit (e.g. fixing a note) doesn't re-run the lead move / promotion.
+    const before = await pool.request().input("id", sql.Int, id)
+      .query("SELECT LeadId, Status FROM dbo.SaSiteVisit WHERE Id = @id");
+    const prev = before.recordset[0];
 
     await pool.request()
       .input("id", sql.Int, id)
@@ -100,26 +146,9 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
         WHERE Id = @id
       `);
 
-    if (b.Status === "Completed") {
-      // Mark lead as Visited
-      const leadRow = await pool.request()
-        .input("id", sql.Int, id)
-        .query("SELECT LeadId FROM dbo.SaSiteVisit WHERE Id = @id");
-
-      if (leadRow.recordset.length) {
-        const leadId = leadRow.recordset[0].LeadId;
-        await pool.request()
-          .input("lid", sql.Int, leadId)
-          .query("UPDATE dbo.SaLead SET Status = 'Visited', UpdatedAt = SYSDATETIME() WHERE Id = @lid");
-
-        // Auto-promote to follow-up module
-        try {
-          await promoteLeadToFollowup(pool, leadId, actorId(req));
-        } catch (handoffErr) {
-          // Log but don't fail the request — visit update succeeded
-          console.warn("[sa-site-visits] followup promotion failed:", handoffErr.message);
-        }
-      }
+    if (b.Status === "Completed" && prev && prev.Status !== "Completed") {
+      // Forward only: a Booking or Lost lead is left as it is.
+      await advanceLead(pool, prev.LeadId, "Visited");
     }
 
     res.json({ success: true });
@@ -133,8 +162,14 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
 router.delete("/:id", requirePageRight("sa-site-visits", "delete"), async (req, res) => {
   try {
     const pool = getPool();
+    const id = parseInt(req.params.id);
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("id", sql.Int, id)
+      .query(`SELECT 1 AS ok FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId WHERE v.Id = @id AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
     await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, id)
       .query("UPDATE dbo.SaSiteVisit SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

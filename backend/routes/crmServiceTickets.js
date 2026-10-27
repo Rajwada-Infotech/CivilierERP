@@ -13,7 +13,6 @@ const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
-const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -42,73 +41,109 @@ const TICKET_SELECT = `
   LEFT JOIN dbo.Users cu ON cu.id = t.CreatedBy
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmHandover / CrmMutation / CrmNoc:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&priority=&category=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Open, Assigned, InProgress, Resolved, Closed, Reopened } }
+// `counts` honours priority/category/search/company/project/block/scope but
+// NOT status, so the tabs always show what each status would contain.
+// Non-admins only ever see their own assigned tickets, in counts too.
+// Without `page` the legacy full-array response is returned (also used,
+// unpaginated, by the Maintenance module's handedOverOnly=true lookup).
+const TST_STATUSES = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reopened"];
+const TST_PRIORITY_RANK = "CASE t.Priority WHEN 'Urgent' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END";
+const TST_SORT = {
+  TicketNo: "t.TicketNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Category: "t.Category",
+  Priority: TST_PRIORITY_RANK,
+  Status: "t.Status",
+  SlaDueDate: "t.SlaDueDate",
+  CreatedAt: "t.CreatedAt",
+};
+function buildTicketWhere(request, query, includeStatus, isAdmin, req) {
+  const conds = [];
+  if (!isAdmin) { request.input("actorId", sql.Int, actorId(req)); conds.push("t.AssignedTo = @actorId"); }
+  // Only the user's projects (the list and its total ignored them).
+  if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  if (PRIORITIES.includes(query.priority)) { request.input("priority", sql.NVarChar(20), query.priority); conds.push("t.Priority = @priority"); }
+  if (CATEGORIES.includes(query.category)) { request.input("category", sql.NVarChar(50), query.category); conds.push("t.Category = @category"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
+  }
+  // handedOverOnly=true — used by the Maintenance module's "Service Requests" view
+  // to scope tickets to genuinely post-handover (after-sales) customers only.
+  // Same eligibility rule as services/maintenanceEligibility.js.
+  if (query.handedOverOnly === "true") {
+    conds.push("EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')");
+  }
+  // status=Overdue: past its SLA and not resolved / closed.
+  if (includeStatus && query.status === "Overdue") conds.push("t.SlaDueDate < SYSDATETIME() AND t.Status NOT IN ('Resolved', 'Closed')");
+  else if (includeStatus && TST_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("t.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all tickets (non-admins see only tickets assigned to them)
 router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, priority, category, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    // One set of conditions for the rows, the total and the counts by status (the list and its total ignored the
-    // user's projects).
-    const reqs = [pool.request(), pool.request(), pool.request()];
-    const req0 = reqs[0];
-    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
-    const conds = [];
     const isAdmin = isSaAdmin(req);
-    if (!isAdmin) {
-      bind("actorId", sql.Int, actorId(req));
-      conds.push("t.AssignedTo = @actorId");
-    }
-    if (req.projectScope) conds.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (priority) { bind("pr", sql.NVarChar(20), priority); conds.push("t.Priority = @pr"); }
-    if (category) { bind("ct", sql.NVarChar(50), category); conds.push("t.Category = @ct"); }
-    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      bind("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
-    }
-    // handedOverOnly=true — used by the Maintenance module's "Service Requests" view
-    // to scope tickets to genuinely post-handover (after-sales) customers only.
-    // Same eligibility rule as services/maintenanceEligibility.js.
-    if (req.query.handedOverOnly === "true") {
-      conds.push("EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')");
-    }
-    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    // status=Overdue: past its SLA and not resolved / closed.
-    if (status === "Overdue") conds.push("t.SlaDueDate < SYSDATETIME() AND t.Status NOT IN ('Resolved', 'Closed')");
-    else if (status) { bind("st", sql.NVarChar(30), status); conds.push("t.Status = @st"); }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${TICKET_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const ORDER = `ORDER BY
-      CASE t.Priority WHEN 'Urgent' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END,
-      t.CreatedAt DESC`;
+    const ORDER = `ORDER BY ${TST_PRIORITY_RANK}, t.CreatedAt DESC`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildTicketWhere(r0, req.query, true, isAdmin, req);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(TST_SORT, req.query.sortKey) ? TST_SORT[req.query.sortKey] : null;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+    const orderClause = sortCol ? `ORDER BY ${sortCol} ${dir}, t.Id DESC` : ORDER;
     const FROM = `FROM dbo.CrmServiceTicket t
         JOIN dbo.CrmBooking b ON b.Id = t.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
-      reqs[2].query(`SELECT t.Status, COUNT(*) AS n,
-          SUM(CASE WHEN t.SlaDueDate < SYSDATETIME() AND t.Status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) AS overdue
-        ${FROM} ${countsWhere} GROUP BY t.Status`),
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId`;
+
+    // One set of conditions for the rows, the total and the counts by status (the list and its total ignored the
+    // user's projects).
+    const pageReq = pool.request();
+    const pageWhere = buildTicketWhere(pageReq, req.query, true, isAdmin, req);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const totalReq = pool.request();
+    const totalWhere = buildTicketWhere(totalReq, req.query, true, isAdmin, req);
+    const countReq = pool.request();
+    const countWhere = buildTicketWhere(countReq, req.query, false, isAdmin, req);
+    const [rowsRes, totalRes, countRes] = await Promise.all([
+      pageReq.query(`${SELECT_WITH_BLOCK} ${pageWhere} ${orderClause} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      totalReq.query(`SELECT COUNT(*) AS total ${FROM} ${totalWhere}`),
+      countReq.query(`SELECT t.Status, COUNT(*) AS C,
+          SUM(CASE WHEN t.SlaDueDate < SYSDATETIME() AND t.Status NOT IN ('Resolved', 'Closed') THEN 1 ELSE 0 END) AS Overdue
+        ${FROM} ${countWhere} GROUP BY t.Status`),
     ]);
+    const counts = { All: 0 };
     const statusCounts = { Overdue: 0 };
-    for (const r of statusResult.recordset) { statusCounts[r.Status] = r.n; statusCounts.Overdue += r.overdue; }
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
+    for (const row of countRes.recordset) {
+      counts[row.Status] = row.C; counts.All += row.C;
+      statusCounts[row.Status] = row.C; statusCounts.Overdue += row.Overdue;
+    }
+    res.json({ rows: rowsRes.recordset, total: totalRes.recordset[0].total, page, pageSize, counts, statusCounts });
   } catch (e) {
     console.error("[crm-service-tickets] GET error:", e.message);
     res.status(500).json({ error: e.message });

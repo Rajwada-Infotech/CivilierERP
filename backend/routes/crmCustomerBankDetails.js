@@ -119,19 +119,19 @@ router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-detail
     // Adjustment.
     const bookingRow = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT b.FinancingType,
-             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
-             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Id,
+             (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Status,
+             (SELECT TOP 1 Id FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Id,
              CAST(CASE WHEN EXISTS (
                SELECT 1 FROM dbo.ReceivedPayment rp
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
-               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = 1 AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
                  AND rp.RPStatus = '${CrmStatus.PENDING}'
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1PendingApproval,
              CAST(CASE WHEN EXISTS (
                SELECT 1 FROM dbo.CrmOnAccountPayment oap
                JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = oap.SourceReceivedPaymentId
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
-               WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+               WHERE m.BookingId = b.Id AND m.MilestoneNo = 1 AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL
                  AND oap.Amount > oap.AppliedAmount
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment,
              -- The real ledger sweep (Status='Paid') only fires automatically
@@ -141,15 +141,23 @@ router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-detail
              -- arrived for Milestone 1", which is true the moment on-account
              -- covers Milestone 1's own amount, so the shortfall shown is
              -- against that, not the whole booking.
-             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Due,
-             ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
+             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id) AS Milestone1Due,
+             ISNULL((SELECT SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0)
+               THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END) FROM dbo.CrmOnAccountPayment
+               WHERE BookingId = b.Id AND ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')), 0) AS OnAccountAvailable
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
     bookingExtra.Milestone1VirtuallyCovered = await isMilestoneOneCoveredByOnAccount(pool, bid);
 
     const result = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
+             d.AccountNo, d.IfscCode, d.AccountHolderName,
+             d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
+             d.PanNo, d.AadhaarNo,
+             d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
+             d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
+             vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
       LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
       WHERE d.BookingId = @bid
@@ -166,7 +174,11 @@ router.get("/booking/:bookingId", requireAnyPageRight(["crm-customer-bank-detail
     // genuinely new information this form is the first place to capture, so
     // they stay blank and unlocked.
     const prefill = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
+      SELECT
+        CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+        c.CustomerName AS AccountHolderName,
+        CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+        c.Occupation, c.AnnualIncome
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
@@ -372,7 +384,13 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     const aid = parseId(req.params.applicationId);
     if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
-      SELECT d.*, vu.name AS BookingStageVerifiedByName
+      SELECT d.Id, d.ApplicationId, d.BookingId, d.BankName, d.BranchName,
+             d.AccountNo, d.IfscCode, d.AccountHolderName,
+             d.NomineeName, d.NomineeRelation, d.NomineeDob, d.NomineeContact, d.NomineeAddress,
+             d.PanNo, d.AadhaarNo,
+             d.Occupation, d.AnnualIncome, d.ChequeNo, d.ChequeDate, d.TransactionRef, d.Notes,
+             d.BookingStageVerifiedAt, d.BookingStageVerifiedBy, d.CreatedBy, d.CreatedAt, d.UpdatedBy, d.UpdatedAt,
+             vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
       LEFT JOIN dbo.users vu ON vu.id = d.BookingStageVerifiedBy
       WHERE d.ApplicationId = @aid
@@ -384,6 +402,13 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // staff never have to retype data the system already captured at
     // Customer intake (dbo.CrmCustomer). Flagged _prefilledFrom so the UI can
     // lock these fields for review/confirm rather than freshly-typed edit.
+    // Unmasked, like the saved-row branch above: this feeds the same
+    // editable save form, and the Aadhaar/AccountNo regex checks (both here
+    // and on the frontend) reject a masked value's "XXXX" placeholder
+    // characters outright, so a masked value round-tripped unmodified either
+    // silently corrupts the real stored value (no format check at all) or
+    // blocks every save until the field is retyped — masking a value this
+    // form will write straight back was the bug, not a privacy improvement.
     const prefill = await pool.request().input("aid", sql.Int, aid).query(`
       SELECT c.PanNo, c.CustomerName AS AccountHolderName, c.AadhaarNo, c.Occupation, c.AnnualIncome
       FROM dbo.CrmApplication a

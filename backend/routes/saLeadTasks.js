@@ -104,7 +104,17 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
     const pool  = getPool();
     const b     = req.body;
     const actor = actorId(req);
+    const isAdmin = isSaAdmin(req);
     const tid   = parseInt(req.params.id);
+
+    // GET / scopes non-admins to their own tasks (t.AssignedTo = actor) —
+    // this never checked that, letting anyone with the edit page right
+    // act on any other user's task by id alone.
+    if (!isAdmin) {
+      const owned = await pool.request().input("id", sql.Int, tid).input("actorId", sql.Int, actor)
+        .query("SELECT 1 AS ok FROM dbo.SaLeadTask WHERE Id = @id AND AssignedTo = @actorId");
+      if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
 
     await pool.request()
       .input("id",    sql.Int,           tid)
@@ -138,8 +148,18 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
 router.delete("/:id", requirePageRight("sa-lead-tasks", "delete"), async (req, res) => {
   try {
     const pool = getPool();
+    const tid = parseInt(req.params.id);
+    const actor = actorId(req);
+    const isAdmin = isSaAdmin(req);
+
+    if (!isAdmin) {
+      const owned = await pool.request().input("id", sql.Int, tid).input("actorId", sql.Int, actor)
+        .query("SELECT 1 AS ok FROM dbo.SaLeadTask WHERE Id = @id AND AssignedTo = @actorId");
+      if (!owned.recordset.length) return res.status(403).json({ error: "Access denied" });
+    }
+
     await pool.request()
-      .input("id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, tid)
       .query("DELETE FROM dbo.SaLeadTask WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

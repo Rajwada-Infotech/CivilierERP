@@ -50,7 +50,9 @@ async function emitNotification(pool, userId, type, title, body, refId, refType,
       }, { apps: opts.apps });
     }
   } catch (e) {
-    console.error("[notify] emitNotification error:", e.message);
+    // No retry/record of the failure — logged with enough context to find
+    // the missed notification by grep, since there's nowhere else it's kept.
+    console.error(`[notify] emitNotification error (userId=${userId}, type=${type}, refType=${refType}, refId=${refId}):`, e.message);
   }
 }
 

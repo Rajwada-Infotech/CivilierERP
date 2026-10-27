@@ -53,6 +53,7 @@ describe("crmResale services", () => {
     it("returns null when property has not been conveyed", async () => {
       const mockDb = {
         request: () => ({
+          input: function () { return this; },
           query: async () => ({ recordset: [] }),
         }),
       };
@@ -63,6 +64,7 @@ describe("crmResale services", () => {
     it("blocks resale and directs to Ownership Changes if sale deed is registered", async () => {
       const mockDb = {
         request: () => ({
+          input: function () { return this; },
           query: async () => ({
             recordset: [{ BookingNo: "BKG-2026-0001", Why: "its sale deed is registered" }],
           }),
@@ -76,6 +78,7 @@ describe("crmResale services", () => {
     it("blocks resale if handover has already started", async () => {
       const mockDb = {
         request: () => ({
+          input: function () { return this; },
           query: async () => ({
             recordset: [{ BookingNo: "BKG-2026-0002", Why: "its handover has started" }],
           }),

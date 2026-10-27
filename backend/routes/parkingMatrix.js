@@ -77,7 +77,8 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
         pa.Id AS AllotmentId, pa.BookingId, pa.CreatedAt AS AllotmentDate, b.BookingNo, b.Status AS BookingStatus, b.ConfirmDeadline,
         pa.TotalAmount, pa.PaymentStatus AS AllotmentPaymentStatus, pa.Quantity,
         CASE WHEN pa.BookingId IS NOT NULL AND EXISTS (
-          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = pa.BookingId AND m.MilestoneNo = 1 AND m.Status = 'Paid'
+          SELECT 1 FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = pa.BookingId AND m.MilestoneNo = 1
+            AND m.ExtraChargeId IS NULL AND m.ParkingAllotmentId IS NULL AND m.Status = 'Paid'
         ) THEN 1 ELSE 0 END AS Milestone1Paid,
         a.Id AS ApplicationId, a.ApplicationNo, a.ApplicantName, a.Mobile,
         assn.name AS AssignedToName, assn.email AS AssignedToEmail,
