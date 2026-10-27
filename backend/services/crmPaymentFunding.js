@@ -12,6 +12,14 @@ function onAccountAvailableSql(alias = "o") {
     ELSE 0 END`;
 }
 
+// onAccountAvailableSql() contains subqueries, and SQL Server refuses a
+// subquery inside SUM(). Anything that totals available on-account money
+// selects FROM this instead and SUMs `${alias}.AvailableAmount`.
+function onAccountWithAvailableSql(alias = "o") {
+  return `(SELECT ${alias}.*, ${onAccountAvailableSql(alias)} AS AvailableAmount
+    FROM dbo.CrmOnAccountPayment ${alias}) ${alias}`;
+}
+
 // SQL twin of getBookingFunding for larger list queries. The caller supplies
 // a trusted booking-id expression (for example `b.Id` or `@bid`).
 function bookingFullyFundedSql(bookingIdExpr) {
@@ -20,20 +28,8 @@ function bookingFullyFundedSql(bookingIdExpr) {
       (SELECT ISNULL(NULLIF(bf.GrandTotal, 0), bf.TotalValue) FROM dbo.CrmBooking bf WHERE bf.Id = ${bookingIdExpr}), 0)
     <= ISNULL((SELECT SUM(ISNULL(m.AmountPaid, 0)) FROM dbo.CrmPaymentMilestone m
       WHERE m.BookingId = ${bookingIdExpr}), 0)
-      + ISNULL((SELECT SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
-          AND o.Amount > ISNULL(o.AppliedAmount, 0) THEN CASE WHEN
-            o.Amount - ISNULL(o.AppliedAmount, 0)
-              - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
-                  WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
-              - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
-                  WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0) > 0
-            THEN o.Amount - ISNULL(o.AppliedAmount, 0)
-              - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
-                  WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
-              - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
-                  WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)
-            ELSE 0 END ELSE 0 END)
-        FROM dbo.CrmOnAccountPayment o WHERE o.BookingId = ${bookingIdExpr}), 0) + 0.009`;
+      + ISNULL((SELECT SUM(o.AvailableAmount)
+        FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = ${bookingIdExpr}), 0) + 0.009`;
 }
 
 // Applied deposits are already represented in milestone AmountPaid, so the
@@ -46,23 +42,8 @@ async function getBookingFunding(pool, bookingId) {
         ELSE ISNULL(SUM(CASE WHEN m.Status = 'Waived' THEN 0 ELSE ISNULL(m.AmountDue, 0) END), 0)
       END AS RequiredAmount,
       ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS MilestonePaid,
-      ISNULL((
-      SELECT SUM(CASE WHEN o.Amount > ISNULL(o.AppliedAmount, 0) THEN CASE WHEN
-          o.Amount - ISNULL(o.AppliedAmount, 0)
-            - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
-                WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
-            - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
-                WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0) > 0
-          THEN o.Amount - ISNULL(o.AppliedAmount, 0)
-            - ISNULL((SELECT SUM(r.GrossAmount) FROM dbo.CrmRefund r
-                WHERE r.SourceOnAccountId = o.Id AND r.Status NOT IN ('Rejected', 'Paid')), 0)
-            - ISNULL((SELECT SUM(t.Amount) FROM dbo.CrmRebookingTransfer t
-                WHERE t.HeldOnAccountId = o.Id AND t.Status NOT IN ('Rejected', 'Applied')), 0)
-          ELSE 0 END ELSE 0 END)
-        FROM dbo.CrmOnAccountPayment o
-        WHERE o.BookingId = b.Id
-          AND ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
-      ), 0) AS OnAccountAvailable
+      ISNULL((SELECT SUM(o.AvailableAmount) FROM ${onAccountWithAvailableSql("o")}
+        WHERE o.BookingId = b.Id), 0) AS OnAccountAvailable
     FROM dbo.CrmBooking b
     LEFT JOIN dbo.CrmPaymentMilestone m ON m.BookingId = b.Id
     WHERE b.Id = @bid
@@ -82,4 +63,4 @@ async function getBookingFunding(pool, bookingId) {
   };
 }
 
-module.exports = { getBookingFunding, bookingFullyFundedSql, onAccountAvailableSql };
+module.exports = { getBookingFunding, bookingFullyFundedSql, onAccountAvailableSql, onAccountWithAvailableSql };

@@ -16,7 +16,7 @@ const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
 const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage } = require("../services/crmOnAccountCoverage");
-const { getBookingFunding, onAccountAvailableSql } = require("../services/crmPaymentFunding");
+const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
 
@@ -1201,8 +1201,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       pool.request().input("bid", sql.Int, bid).query(`
         SELECT
           ISNULL(SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END), 0) AS OnAccountTotalReceived,
-          ISNULL(SUM(${ON_ACCOUNT_AVAILABLE_SQL}), 0) AS OnAccountAvailable
-        FROM dbo.CrmOnAccountPayment o WHERE o.BookingId = @bid
+          ISNULL(SUM(o.AvailableAmount), 0) AS OnAccountAvailable
+        FROM ${onAccountWithAvailableSql("o")} WHERE o.BookingId = @bid
       `),
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
@@ -1819,15 +1819,15 @@ router.get("/on-account/summary", requirePageRight("crm-payments", "view"), asyn
       SELECT
         COUNT(*)                                                          AS TotalCount,
         ISNULL(SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.Amount ELSE 0 END), 0) AS TotalReceived,
-        ISNULL(SUM(${ON_ACCOUNT_AVAILABLE_SQL}), 0) AS TotalAvailable,
+        ISNULL(SUM(o.AvailableAmount), 0) AS TotalAvailable,
         ISNULL(SUM(CASE WHEN ISNULL(o.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') THEN o.AppliedAmount ELSE 0 END), 0) AS TotalApplied,
         SUM(CASE WHEN o.Status = 'Unapplied'        THEN 1 ELSE 0 END) AS UnappliedCount,
         SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN 1 ELSE 0 END) AS PartialCount,
         SUM(CASE WHEN o.Status = 'Applied'          THEN 1 ELSE 0 END) AS AppliedCount,
         SUM(CASE WHEN o.Status = 'Bounced'          THEN 1 ELSE 0 END) AS BouncedCount,
-        ISNULL(SUM(CASE WHEN o.Status = 'Unapplied' THEN ${ON_ACCOUNT_AVAILABLE_SQL} ELSE 0 END), 0) AS UnappliedBalance,
-        ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN ${ON_ACCOUNT_AVAILABLE_SQL} ELSE 0 END), 0) AS PartialBalance
-      FROM dbo.CrmOnAccountPayment o
+        ISNULL(SUM(CASE WHEN o.Status = 'Unapplied' THEN o.AvailableAmount ELSE 0 END), 0) AS UnappliedBalance,
+        ISNULL(SUM(CASE WHEN o.Status = 'PartiallyApplied' THEN o.AvailableAmount ELSE 0 END), 0) AS PartialBalance
+      FROM ${onAccountWithAvailableSql("o")}
       JOIN dbo.CrmBooking b ON b.Id = o.BookingId AND b.IsActive = 1
     `);
     res.json(result.recordset[0]);

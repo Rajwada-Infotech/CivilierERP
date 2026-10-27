@@ -36,7 +36,7 @@ const { recordGLPosting } = require("../services/approvalService");
 const { transition: approvalTransition } = require("../services/approvalService");
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
 const { logStatusChange, advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
-const { getBookingFunding, onAccountAvailableSql } = require("../services/crmPaymentFunding");
+const { getBookingFunding, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
 
 // Keep the fixed Booking Amount line aligned with CrmBooking.BookingAmount.
 // recalculateRemainingMilestones intentionally excludes Milestone 1, so this
@@ -233,7 +233,7 @@ const BOOKING_SELECT = `
     CAST(CASE WHEN EXISTS (
        SELECT 1 FROM dbo.CrmPaymentMilestone m1 WHERE m1.BookingId = b.Id AND m1.MilestoneNo = 1 AND m1.ExtraChargeId IS NULL AND m1.ParkingAllotmentId IS NULL
          AND (m1.Status IN ('${CrmStatus.PAID}', 'Waived')
-              OR ISNULL(m1.AmountPaid, 0) + ISNULL((SELECT SUM(${onAccountAvailableSql("oa")}) FROM dbo.CrmOnAccountPayment oa
+              OR ISNULL(m1.AmountPaid, 0) + ISNULL((SELECT SUM(oa.AvailableAmount) FROM ${onAccountWithAvailableSql("oa")}
                 WHERE oa.BookingId = b.Id), 0) >= ISNULL(m1.AmountDue, 0))
      ) THEN 1 ELSE 0 END AS BIT) AS Milestone1VirtuallyCovered,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
@@ -250,7 +250,7 @@ const BOOKING_SELECT = `
     -- CrmOnAccountPayment row for the exact same money — adding them
     -- double-counted every on-account deposit (confirmed: booking 77 showed
     -- ₹20,000 on-account for a real ₹10,000 deposit).
-    (SELECT ISNULL(SUM(${onAccountAvailableSql("oa")}),0) FROM dbo.CrmOnAccountPayment oa
+    (SELECT ISNULL(SUM(oa.AvailableAmount),0) FROM ${onAccountWithAvailableSql("oa")}
       WHERE oa.BookingId = b.Id) AS ApprovedOnAccount,
     -- Post-agreement lifecycle flags — mirror GET /:id/lifecycle's own gates
     -- exactly (agRegistered/sdDone/hoDone/regDone/mutDone there) so this
