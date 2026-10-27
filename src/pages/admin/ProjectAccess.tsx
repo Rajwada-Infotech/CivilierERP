@@ -13,7 +13,16 @@ interface ProjectOpt {
   label: string;
 }
 
-type Mode = "user" | "role";
+type Mode = "user" | "role" | "project";
+
+// Who can see a project, and through what (backend GET /api/user-project-access/project/:id).
+type Via = "own" | "role" | "open" | "admin";
+const VIA: { key: Via; title: string; note: string }[] = [
+  { key: "own", title: "Through their own list", note: "This project is on the user's personal list." },
+  { key: "role", title: "Through their role", note: "No personal list — their role's list includes this project." },
+  { key: "open", title: "No restriction", note: "Neither the user nor their role has a list, so they see every project." },
+  { key: "admin", title: "Admin role", note: "Admin roles are never restricted." },
+];
 
 // Admin-tier roles are never restricted (see backend/services/projectScope.js).
 const UNRESTRICTED_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
@@ -46,6 +55,8 @@ export default function ProjectAccess() {
   const [loadingTarget, setLoadingTarget] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [projectId, setProjectId] = useState<number | null>(null);
+  const [projectUsers, setProjectUsers] = useState<{ users: { id: number; name: string; role: string | null; via: Via }[]; without: number } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -62,7 +73,19 @@ export default function ProjectAccess() {
       .finally(() => setLoading(false));
   }, []);
 
-  const targetId = mode === "user" ? userId : roleId;
+  const targetId = mode === "user" ? userId : mode === "role" ? roleId : null;
+
+  // By project: everyone who can see the chosen project.
+  useEffect(() => {
+    if (mode !== "project" || projectId == null) return;
+    setLoadingTarget(true);
+    setProjectUsers(null);
+    fetchWithAuth(`/api/user-project-access/project/${projectId}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => setProjectUsers({ users: d.users ?? [], without: Number(d.without) || 0 }))
+      .catch(() => toast.error("Failed to load who can see this project"))
+      .finally(() => setLoadingTarget(false));
+  }, [mode, projectId]);
 
   // Load the chosen user's / role's current list.
   useEffect(() => {
@@ -189,18 +212,70 @@ export default function ProjectAccess() {
     <SheetShell
       eyebrow="CivilierERP · Admin · Rights"
       title="Project access"
-      subtitle="Limit which projects a user — or everyone in a role — can see in Material Requests, Purchase Orders, GRNs, Vehicle In/Out, Issues and every project dropdown."
+      subtitle="Limit which projects a user — or everyone in a role — can see in Material Requests, Purchase Orders, GRNs, Vehicle In/Out, Issues and every project dropdown; or see who can see a project."
     >
       <div className="bg-card" style={{ border: RULE }}>
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
-          <span className={HEAD}>{mode === "user" ? "Projects a person can see" : "Projects a role can see"}</span>
+          <span className={HEAD}>{mode === "user" ? "Projects a person can see" : mode === "role" ? "Projects a role can see" : "People who can see a project"}</span>
           <div className="inline-flex items-stretch border border-foreground">
             <button type="button" onClick={() => switchMode("user")} aria-pressed={mode === "user"} className={tabCls(mode === "user")}>By user</button>
             <button type="button" onClick={() => switchMode("role")} aria-pressed={mode === "role"} className={`${tabCls(mode === "role")} border-l border-foreground`}>By role</button>
+            <button type="button" onClick={() => switchMode("project")} aria-pressed={mode === "project"} className={`${tabCls(mode === "project")} border-l border-foreground`}>By project</button>
           </div>
         </div>
         <div className="p-4 space-y-5">
 
+        {mode === "project" ? (
+          <>
+            <div className="max-w-sm">
+              <label className={`${LBL} block mb-1.5`}>Project</label>
+              <select value={projectId ?? ""} onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : null)} disabled={loading} className={FIELD}>
+                <option value="">Select a project…</option>
+                {projects.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+            </div>
+            {projectId == null ? (
+              <p className="text-sm text-muted-foreground">Pick a project to see everyone who can see it, and why.</p>
+            ) : loadingTarget || !projectUsers ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm py-6"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground max-w-prose border-l-2 border-foreground/40 pl-3 py-0.5">
+                  {projectUsers.users.length} {projectUsers.users.length === 1 ? "person" : "people"} can see {projects.find((p) => p.id === projectId)?.label ?? "this project"}
+                  {projectUsers.without ? `; ${projectUsers.without} other${projectUsers.without === 1 ? " is" : "s are"} limited to other projects.` : "."}{" "}
+                  To change someone's access, open them under By user (or their role under By role).
+                </p>
+                <div className="relative max-w-xs">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people…" className={`${FIELD} pl-8`} />
+                </div>
+                {VIA.map((g) => {
+                  const q = search.trim().toLowerCase();
+                  const list = projectUsers.users.filter((u) => u.via === g.key && (!q || u.name.toLowerCase().includes(q) || String(u.role || "").toLowerCase().includes(q)));
+                  if (!list.length) return null;
+                  return (
+                    <div key={g.key}>
+                      <div className="flex items-baseline justify-between gap-3 pb-1.5" style={{ borderBottom: RULE }}>
+                        <span className={HEAD}>{g.title} <span className="tabular-nums text-muted-foreground">{list.length}</span></span>
+                        <span className="text-[0.6875rem] text-muted-foreground">{g.note}</span>
+                      </div>
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6">
+                        {list.map((u) => (
+                          <li key={u.id} className="flex items-center justify-between gap-2 py-2 border-b border-foreground/15 text-sm">
+                            <button type="button" onClick={() => { switchMode("user"); setUserId(u.id); }} className="truncate text-left hover:underline" title="Open this user's project access">{u.name}</button>
+                            <span className="shrink-0 text-xs text-muted-foreground">{String(u.role || "—").replace(/_/g, " ")}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+                {projectUsers.users.length === 0 && <p className="text-sm text-muted-foreground">Nobody can see this project.</p>}
+              </>
+            )}
+          </>
+        ) : (
+        <>
         <div className="flex flex-col sm:flex-row sm:items-end gap-3">
           <div className="flex-1 max-w-sm">
             <label className={`${LBL} block mb-1.5`}>{mode === "user" ? "User" : "Role"}</label>
@@ -300,6 +375,8 @@ export default function ProjectAccess() {
               {visible.length === 0 && <li className="text-sm text-muted-foreground">No projects match.</li>}
             </ul>
           </>
+        )}
+        </>
         )}
         </div>
       </div>
