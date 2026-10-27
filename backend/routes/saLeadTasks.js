@@ -122,6 +122,9 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
       .input("desc",  sql.NVarChar(sql.MAX), b.Description || null)
       .input("asgn",  sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : null)
       .input("due",   sql.DateTime2(3),  b.DueDate || null)
+      // A status-only update (Mark done / Reopen) sends no DueDate — keep it.
+      // Only a body that carries DueDate (even empty, to clear it) changes it.
+      .input("dueSet", sql.Bit,          Object.prototype.hasOwnProperty.call(b, "DueDate") ? 1 : 0)
       .input("pri",   sql.NVarChar(10),  b.Priority || null)
       .input("st",    sql.NVarChar(20),  b.Status || null)
       .input("ub",    sql.Int,           actor)
@@ -130,10 +133,10 @@ router.put("/:id", requirePageRight("sa-lead-tasks", "edit"), async (req, res) =
           Title       = ISNULL(@title, Title),
           Description = ISNULL(@desc, Description),
           AssignedTo  = ISNULL(@asgn, AssignedTo),
-          DueDate     = @due,
+          DueDate     = CASE WHEN @dueSet = 1 THEN @due ELSE DueDate END,
           Priority    = ISNULL(@pri, Priority),
           Status      = ISNULL(@st, Status),
-          CompletedAt = CASE WHEN @st = 'Done' THEN SYSDATETIME() ELSE CompletedAt END,
+          CompletedAt = CASE WHEN @st = 'Done' THEN SYSDATETIME() WHEN @st IS NOT NULL THEN NULL ELSE CompletedAt END,
           UpdatedBy   = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
