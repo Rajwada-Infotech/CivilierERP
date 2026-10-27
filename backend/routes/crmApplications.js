@@ -103,7 +103,7 @@ const APP_SELECT = `
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
-    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
+    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.WorkflowStage AS BookingWorkflowStage, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     (SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = bk.Id ORDER BY CreatedAt DESC) AS DeedStatus,
     -- Stage drives the Converted/In Process/Not Converted split every
@@ -162,7 +162,7 @@ const APP_SELECT = `
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
   LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
   OUTER APPLY (
-    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
+    SELECT TOP 1 Id, BookingNo, Status, WorkflowStage, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
     ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred') THEN 0 ELSE 1 END, CreatedAt DESC

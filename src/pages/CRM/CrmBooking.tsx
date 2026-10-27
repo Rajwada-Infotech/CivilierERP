@@ -1,4 +1,4 @@
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel } from "@/constants/crmStatuses";
 import { StatusBadge } from "@/components/StatusBadge";
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -60,12 +60,7 @@ const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-mu
 const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
 const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 
-const workflowStageLabel: Record<string, string> = {
-  Review: "Application Review",
-  MarketingHeadApproval: "Marketing Head Approval",
-  DirectorApproval: "Director Approval",
-  Confirmed: "Confirmed",
-};
+const workflowStageLabel = bookingWorkflowStageLabel;
 
 // Manual/direct Booking creation — brought back at the user's explicit
 // request after the auto-create-only design proved too rigid in practice

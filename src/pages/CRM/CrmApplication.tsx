@@ -1,4 +1,4 @@
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -63,6 +63,7 @@ const statusColor: Record<string, string> = {
   // staff into thinking the application still needs action; "Booked" makes
   // the conversion immediately obvious.
   Booked:    "text-indigo-600 bg-indigo-50 border-indigo-200",
+  "In Approval": "text-amber-600 bg-amber-50 border-amber-200",
   Approved:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
   Cancelled: "text-sky-600 bg-sky-50 border-sky-200",
@@ -1864,7 +1865,10 @@ const CrmApplication: React.FC = () => {
         // Displaying "Pending" here misleads staff into thinking the record
         // still needs attention. Show "Booked" instead so the conversion is
         // immediately visible without opening the detail panel.
-        const displayStatus = r.Stage === "Converted" ? "Booked" : r.Status;
+        // Only an approved booking is "Booked"; until then it is still
+        // working through the booking approvals.
+        const displayStatus = r.Stage !== "Converted" ? r.Status
+          : r.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In Approval";
         return (
           <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5">
             <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[displayStatus] || ""}`}>
@@ -2026,7 +2030,9 @@ const CrmApplication: React.FC = () => {
             )}
             {activeStage === "InProcess" && a.Stage === "Converted" && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-                <Clock size={10} /> Booking {a.BookingNo || ""} — {a.BookingStatus || "awaiting approval"}
+                <Clock size={10} /> Booking {a.BookingNo || ""} — {a.BookingStatus === CrmStatus.PENDING
+                  ? `pending ${bookingWorkflowStageLabel[a.BookingWorkflowStage] || "approval"}`
+                  : a.BookingStatus}
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
