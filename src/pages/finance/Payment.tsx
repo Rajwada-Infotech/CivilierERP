@@ -739,6 +739,20 @@ const Payment: React.FC = () => {
     queryKey: ["supplier-options-payment-filter"],
     queryFn: fetchSupplierOptions,
   });
+  // Parties grouped by category (Vendors / Suppliers / Landlords / Contractors / Brokers / Customers / Partners), so
+  // a picker isn't one flat block — anything without a recognised type falls under "Other". The Payee picker and
+  // the list's Supplier / Contractor / Broker filter both read it.
+  const partyGroups = useMemo(() => {
+    const groups = new Map<string, typeof supplierOptions>();
+    supplierOptions.forEach((s) => {
+      // A landlord is saved as a supplier-type account whose category is "Landlord".
+      const key = (s.category ?? "").trim() === "Landlord" ? "Landlords" : PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(s);
+    });
+    const order = ["Vendors", "Suppliers", "Landlords", "Contractors", "Brokers", "Customers", "Partners", "Other"];
+    return [...groups.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((label) => ({ label, parties: groups.get(label)! }));
+  }, [supplierOptions]);
   // A ledger, vendor, contractor, broker, customer or partner added anywhere appears in the Payee / filter pickers at once.
   useLiveData("ledgers", () => {
     void queryClient.invalidateQueries({ queryKey: ["supplier-options-payment-filter"] });
@@ -2538,31 +2552,15 @@ const Payment: React.FC = () => {
                           }}
                         >
                           <option value="">Select party…</option>
-                          {(() => {
-                            // Group by category (Suppliers / Contractors / Brokers / Customers)
-                            // so the list isn't one flat undifferentiated block — falls back
-                            // to a single "Other" group for any row missing a recognised type.
-                            const groups = new Map<string, typeof supplierOptions>();
-                            supplierOptions.forEach((s) => {
-                              // A landlord is saved as a supplier-type account whose category is "Landlord".
-                              const key = (s.category ?? "").trim() === "Landlord" ? "Landlords" : PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
-                              if (!groups.has(key)) groups.set(key, []);
-                              groups.get(key)!.push(s);
-                            });
-                            const order = ["Vendors", "Suppliers", "Landlords", "Contractors", "Brokers", "Customers", "Partners", "Other"];
-                            const sortedKeys = [...groups.keys()].sort(
-                              (a, b) => order.indexOf(a) - order.indexOf(b),
-                            );
-                            return sortedKeys.map((groupLabel) => (
-                              <optgroup key={groupLabel} label={groupLabel}>
-                                {groups.get(groupLabel)!.map((s) => (
-                                  <option key={s.id} value={String(s.id)}>
-                                    {s.label}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            ));
-                          })()}
+                          {partyGroups.map((g) => (
+                            <optgroup key={g.label} label={g.label}>
+                              {g.parties.map((s) => (
+                                <option key={s.id} value={String(s.id)}>
+                                  {s.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
                         </SearchableNativeSelect>
                       </div>
                     </Field>
@@ -4348,27 +4346,28 @@ const Payment: React.FC = () => {
                             <Truck size={10} /> Supplier / Contractor / Broker
                           </label>
                           <div className="relative">
-                            <input
-                              type="text"
-                              placeholder="Search name…"
+                            {/* One dropdown of every party, grouped, with its own search box; the server matches the
+                                picked name. */}
+                            <SearchableNativeSelect
                               value={supplierFilter}
+                              searchPlaceholder="Search supplier, contractor, broker…"
                               onChange={(e) => {
                                 setSupplierFilter(e.target.value);
                                 setPage(1);
                               }}
-                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                            {supplierFilter && (
-                              <button
-                                onClick={() => {
-                                  setSupplierFilter("");
-                                  setPage(1);
-                                }}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                              >
-                                <X size={11} />
-                              </button>
-                            )}
+                              className="w-full text-xs"
+                            >
+                              <option value="">All parties</option>
+                              {partyGroups.map((g) => (
+                                <optgroup key={g.label} label={g.label}>
+                                  {g.parties.map((s) => (
+                                    <option key={s.id} value={s.label}>
+                                      {s.label}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            </SearchableNativeSelect>
                           </div>
                         </div>
                       </div>

@@ -530,6 +530,9 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
     const projectId = parseInt(req.query.projectId);
     const blockId = req.query.blockId ? parseInt(req.query.blockId) : null;
     if (!projectId) return res.status(400).json({ error: "projectId is required" });
+    if (!require("../services/projectScope").projectAllowed(req.projectScope, projectId)) {
+      return res.status(403).json({ error: "You don't have access to this project" });
+    }
 
     const rates = await pool.request()
       .input("pid", sql.Int, projectId).input("bid", sql.Int, blockId)
@@ -740,6 +743,9 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT Id, ProjectId, Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (!application.recordset.length) return res.status(404).json({ error: "Application not found" });
+    if (!require("../services/projectScope").projectAllowed(req.projectScope, application.recordset[0].ProjectId)) {
+      return res.status(403).json({ error: "You don't have access to this project" });
+    }
     const plotApp = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))
       .query("SELECT TOP 1 1 AS x FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid AND Status = N'Active'");
     if (plotApp.recordset.length) return res.status(400).json({ error: PLOT_SALE_NO_PARKING });

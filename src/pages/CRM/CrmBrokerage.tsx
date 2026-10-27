@@ -3,56 +3,48 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, ShieldAlert, IndianRupee, Lock, Unlock, Search } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, IndianRupee, Lock, RefreshCw, ExternalLink, ShieldAlert } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
+import { SheetShell } from "@/components/sheet/Sheet";
+import { API, BrokerageMark, fmt, trancheText } from "./brokerage/config";
+import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
-const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
 const BROKER_API = "/api/account-head?type=BR";
-
-const statusColor: Record<string, string> = {
-  Pending: "text-orange-600 bg-orange-50 border-orange-200",
-  Approved: "text-blue-600 bg-blue-50 border-blue-200",
-  Paid: "text-green-600 bg-green-50 border-green-200",
-};
-
-const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", TDSId: "", Notes: "" };
-
-async function fetchAll(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
-}
-
 const PAGE_SIZE = 20;
-interface BrokerageListFilters {
-  search: string;
-  companyId: string;
-  projectId: string;
-  blockId: string;
-}
-async function fetchBrokerageList(filters: BrokerageListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-  if (filters.search) params.set("search", filters.search);
-  if (filters.companyId) params.set("companyId", filters.companyId);
-  if (filters.projectId) params.set("projectId", filters.projectId);
-  if (filters.blockId) params.set("blockId", filters.blockId);
-  try {
-    const r = await fetchWithAuth(`${API}?${params}`);
-    if (!r.ok) return { rows: [], total: 0 };
-    const data = await r.json();
-    return { rows: data.rows || [], total: data.total || 0 };
-  } catch { return { rows: [], total: 0 }; }
+const DIALOG = "rounded-none p-5 gap-4";
+// Who sees "Approve & send to Finance" — the approval workflow decides on the server.
+const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
+const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Percentage", RateValue: "", ComputedAmount: "", TDSId: "", Notes: "" };
+const STATUS_TABS = [
+  { value: "", label: "All" },
+  { value: CrmStatus.PENDING, label: "Pending" },
+  { value: CrmStatus.APPROVED, label: "With Finance" },
+  { value: CrmStatus.PAID, label: "Paid" },
+];
+
+type StatusCounts = Record<string, { count: number; net: number }>;
+interface ListFilters { search: string; status: string; companyId: string; projectId: string; blockId: string }
+
+async function fetchBrokerageList(f: ListFilters, page: number): Promise<{ rows: any[]; total: number; statusCounts: StatusCounts }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  for (const k of ["search", "status", "companyId", "projectId", "blockId"] as const) if (f[k]) params.set(k, f[k]);
+  const r = await fetchWithAuth(`${API}?${params}`);
+  const d = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(d?.error || "Could not load the brokerage records.");
+  return { rows: d.rows || [], total: d.total || 0, statusCounts: d.statusCounts || {} };
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -61,123 +53,90 @@ async function fetchBrokers(): Promise<any[]> {
   try { const r = await fetchWithAuth(BROKER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-// Read role from JWT to decide whether to show the Approve button in the
-// Customize dialog. The backend re-checks independently — this only affects rendering.
-function getUserRole(): string | null {
-  try {
-    const token = sessionStorage.getItem("token");
-    if (!token) return null;
-    return JSON.parse(atob(token.split(".")[1])).role ?? null;
-  } catch { return null; }
-}
-const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-
 const CrmBrokerage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const rights = usePageRights("crm-brokerage");
   const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
+  const { currentUser } = useAuth();
+  const isApprover = CRM_APPROVER_ROLES.includes(String(currentUser?.role || "")) || hasApprovalInboxEdit;
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingStatus, setEditingStatus] = useState<string | null>(null);
+  const [editing, setEditing] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
-  const isApprover = CRM_APPROVER_ROLES.includes(getUserRole() ?? "") || hasApprovalInboxEdit;
   const [searchInput, setSearchInput] = useState("");
-  // Searches as you type (after a short pause); Enter still searches at once.
-  useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE);
-  function updateFilter<T>(setter: (v: T) => void) {
-    return (v: T) => { setter(v); setPage(1); };
-  }
+  const reset = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setPage(1); };
+  // Searches as you type (after a short pause); Enter still searches at once.
+  useSearchAsYouType(searchInput, (v) => reset(setSearch)(v));
 
-  const listFilters: BrokerageListFilters = useMemo(
-    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
-    [search, cpb]
-  );
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-brokerage", listFilters, page, pageSize],
-    queryFn: () => fetchBrokerageList(listFilters, page, pageSize),
+  const listFilters: ListFilters = useMemo(() => ({ search, status, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }), [search, status, cpb]);
+  const { data: listResult, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: ["crm-brokerage", listFilters, page],
+    queryFn: () => fetchBrokerageList(listFilters, page),
+    placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
   const records = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
+  const counts = listResult?.statusCounts ?? {};
+  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000, enabled: dialogOpen && !editing });
+  const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000, enabled: dialogOpen });
   const { tdsRecords } = useTds();
-  // Broker Master is the source of truth for the broker's own identity —
-  // once picked, his details are only ever displayed read-only here, never
-  // re-typed. Only the Firm/Rate below are genuinely per-deal fields.
+  // Broker Master is the broker's identity — shown read-only once picked; firm and rate are per deal.
   const selectedBroker = useMemo(() => (brokers as any[]).find((b: any) => String(b.LHeadId) === form.BrokerId) || null, [brokers, form.BrokerId]);
 
-  const openCreate = () => {
-    setEditingId(null);
-    setForm({ ...EMPTY_FORM });
-    setDialogOpen(true);
-  };
-
+  const closeDialog = () => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditing(null); };
+  const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM }); setDialogOpen(true); };
   const openEdit = (r: any) => {
-    setEditingId(r.Id);
-    setEditingStatus(r.Status ?? null);
+    setEditing(r);
     setForm({
-      BookingId: String(r.BookingId || ""),
-      BrokerId: String(r.BrokerId || ""),
-      BrokerFirm: r.BrokerFirm || "",
-      RateType: r.RateType || "Percentage",
-      RateValue: r.RateValue != null ? String(r.RateValue) : "",
-      ComputedAmount: r.ComputedAmount != null ? String(r.ComputedAmount) : "",
-      TDSId: r.TDSId != null ? String(r.TDSId) : "",
-      Notes: r.Notes || "",
+      BookingId: String(r.BookingId || ""), BrokerId: String(r.BrokerId || ""), BrokerFirm: r.BrokerFirm || "",
+      RateType: r.RateType || "Percentage", RateValue: r.RateValue != null ? String(r.RateValue) : "",
+      ComputedAmount: r.ComputedAmount != null ? String(r.ComputedAmount) : "", TDSId: r.TDSId != null ? String(r.TDSId) : "", Notes: r.Notes || "",
     });
     setDialogOpen(true);
   };
 
-  // Deep-link from the Admin Approval Inbox's "Review & Approve" action
-  // (/crm/brokerage?view=X) — opens the same Customize dialog a manual
-  // "Customize amount" click would, instead of leaving the reviewer to
-  // hunt for the row themselves or approve blind straight from the inbox
-  // list. Waits for the records list to load so the row is actually there
-  // to find.
+  // ?view= (the Approval Inbox's Review & Approve, Broker Payments' Review) opens that record — looked up directly,
+  // since it's often not on the page loaded.
+  const viewId = searchParams.get("view");
   useEffect(() => {
-    const viewId = searchParams.get("view");
-    if (!viewId || !(records as any[]).length) return;
-    const row = (records as any[]).find((r) => String(r.Id) === viewId);
-    if (row) {
-      if (rights.canEdit) {
-        openEdit(row);
-      } else {
-        toast.info("You don't have edit rights on this page — ask an admin to grant access to review this record.");
+    if (!viewId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetchWithAuth(`${API}/${encodeURIComponent(viewId)}`);
+        const d = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(d?.error || "Brokerage record not found");
+        if (cancelled) return;
+        if (rights.canEdit && d.brokerage.Status === CrmStatus.PENDING && !d.brokerage.IsLocked) openEdit(d.brokerage);
+        else setSearchInput(d.brokerage.BookingNo || "");
+      } catch (e: any) {
+        if (!cancelled) toast.error(e.message);
+      } finally {
+        if (!cancelled) setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
       }
-    }
-    setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, records]);
+  }, [viewId]);
 
   const handleApprove = async () => {
-    if (editingId == null) return;
+    if (!editing) return;
     setApproving(true);
     try {
-      const token = sessionStorage.getItem("token");
-      const res = await fetch(`${API}/${editingId}/approve`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
+      const res = await fetchWithAuth(`${API}/${editing.Id}/approve`, { method: "PUT", headers: { "Content-Type": "application/json" } });
       const data = await res.json().catch(() => ({}));
       if (!res.ok && res.status !== 207) throw new Error(data.error || `HTTP ${res.status}`);
-      if (data.financeHandoffError) {
-        toast.warning(data.financeHandoffError);
-      } else {
-        toast.success("Brokerage approved and sent to Finance");
-      }
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
-      setEditingId(null);
-      setEditingStatus(null);
+      if (data.financeHandoffError) toast.warning(data.financeHandoffError);
+      else toast.success("Brokerage approved and sent to Finance");
+      closeDialog();
       qc.invalidateQueries({ queryKey: ["crm-brokerage"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -187,27 +146,27 @@ const CrmBrokerage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (editingId == null && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
-    if (editingId != null && (!form.RateValue || !form.ComputedAmount)) { toast.error("Rate and approved amount are required"); return; }
+    if (!editing && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
+    if (editing && (!form.RateValue || !form.ComputedAmount)) { toast.error("Rate and approved amount are required"); return; }
+    if (!(Number(form.RateValue) > 0)) { toast.error("Enter a rate above zero"); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(editingId != null ? `${API}/${editingId}` : API, {
-        method: editingId != null ? "PUT" : "POST",
+      const res = await fetchWithAuth(editing ? `${API}/${editing.Id}` : API, {
+        method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          BookingId: form.BookingId ? parseInt(form.BookingId) : undefined,
-          BrokerId: form.BrokerId ? parseInt(form.BrokerId) : undefined,
+          BookingId: form.BookingId ? parseInt(form.BookingId, 10) : undefined,
+          BrokerId: form.BrokerId ? parseInt(form.BrokerId, 10) : undefined,
           RateValue: form.RateValue ? Number(form.RateValue) : undefined,
           ComputedAmount: form.ComputedAmount ? Number(form.ComputedAmount) : undefined,
-          TDSId: form.TDSId ? parseInt(form.TDSId) : null,
+          TDSId: form.TDSId ? parseInt(form.TDSId, 10) : null,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(editingId != null ? "Brokerage updated" : "Brokerage recorded");
-      setDialogOpen(false);
-      setForm({ ...EMPTY_FORM });
-      setEditingId(null);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error);
+      toast.success(editing ? "Brokerage updated" : "Brokerage recorded");
+      closeDialog();
       qc.invalidateQueries({ queryKey: ["crm-brokerage"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -216,255 +175,227 @@ const CrmBrokerage: React.FC = () => {
     }
   };
 
-  const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "BookingNo", header: "Booking", size: 110, cell: (i) => <span className="font-mono text-xs">{i.getValue() as string}</span> },
-    { accessorKey: "BrokerName", header: "Broker", size: 150,
-      cell: (i) => (
-        <div>
-          <div className="font-medium">{i.row.original.BrokerName}</div>
-          <div className="text-xs text-muted-foreground">{i.row.original.BrokerFirm || "—"}</div>
-        </div>
-      ) },
-    { id: "rate", header: "Rate", size: 90, enableSorting: false,
-      cell: (i) => <span className="text-xs">{i.row.original.RateType === "Percentage" ? `${i.row.original.RateValue}%` : `₹${i.row.original.RateValue}`}</span> },
-    { id: "tranche", header: "Tranche", size: 150, enableSorting: false,
-      cell: (i) => {
-        const r = i.row.original;
-        // TrancheLabel/UnlockGate cover all three payment plans now:
-        // OneTime -> single "Full" row, gate "Booking".
-        // TwoPart -> "Booking" (unlocked immediately) + "Agreement" tranches.
-        // AgreementOnly -> single "Agreement"-gated tranche.
-        // Older milestone-tranche records (pre-plan rework) still carry
-        // MilestoneNo/MilestoneId and fall through to that rendering.
-        if (r.TrancheLabel === "Full" || (r.UnlockGate == null && r.MilestoneNo == null)) {
-          return <span className="text-xs text-muted-foreground">Full payout</span>;
-        }
-        const label = r.UnlockGate === "Agreement"
-          ? `${r.TrancheLabel || "Agreement"} — unlocks on Agreement Executed`
-          : r.UnlockGate === "Booking"
-          ? `${r.TrancheLabel || "Booking"} — unlocks on booking amount paid`
-          : `Milestone ${r.MilestoneNo}${r.MilestoneName ? ` — ${r.MilestoneName}` : ""}`;
-        return (
-          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${r.IsLocked ? "text-red-600 bg-red-50 border-red-200" : "text-green-600 bg-green-50 border-green-200"}`}>
-            {r.IsLocked ? <Lock size={11} /> : <Unlock size={11} />} {label}
-          </span>
-        );
-      } },
-    { accessorKey: "ComputedAmount", header: "Amount / TDS / Net", size: 180,
-      cell: (i) => {
-        const r = i.row.original;
-        const gross = Number(r.ComputedAmount || 0);
-        const tds   = Number(r.TDSAmount || 0);
-        const net   = Number(r.NetPayable ?? gross);
-        return (
-          <div className="text-xs space-y-0.5">
-            <div className="font-semibold text-foreground">₹{gross.toLocaleString("en-IN")}</div>
-            {tds > 0 && (
-              <div className="text-sky-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
-            )}
-            <div className={`font-bold ${tds > 0 ? "text-green-600" : "text-foreground"}`}>
-              Net: ₹{net.toLocaleString("en-IN")}
-            </div>
-          </div>
-        );
-      } },
-    { accessorKey: "Status", header: "Status", size: 100,
-      cell: (i) => <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[i.row.original.Status] || ""}`}>{i.row.original.Status}</span> },
-    { id: "actions", header: "Actions", size: 160, enableSorting: false,
-      cell: (i) => {
-        const r = i.row.original;
-        if (r.IsLocked) {
-          // Only an Agreement-gated tranche (TwoPart's second half /
-          // AgreementOnly) is ever created locked — a Booking-gated tranche
-          // always starts unlocked (see buildBrokerageTranches).
-          return <span className="flex items-center gap-1 text-xs text-red-600"><Lock size={11} /> Unlocks once the Agreement is Executed</span>;
-        }
-        return (
-          <>
-            {/* submitOnly: Approve/Reject only ever happen from the Admin
-                Approval Inbox (admin/super_admin/dba), never self-service here */}
-            <ApprovalActions
-              status={r.Status}
-              recordId={r.Id}
-              endpoint={API}
-              submitOnly
-              onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
-            />
-            {rights.canEdit && r.Status === CrmStatus.PENDING && (
-              <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
-            )}
-            {r.Status === CrmStatus.APPROVED && (
-              <button onClick={() => navigate(r.FinancePaymentId != null ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
-                {r.FinancePaymentDocNo ? `Finance: ${r.FinancePaymentDocNo}` : "Sent to Finance"}
-              </button>
-            )}
-            {r.Status === CrmStatus.PAID && <span className="text-xs text-muted-foreground">Fully paid</span>}
-          </>
-        );
-      } },
+  const c = (k: string) => counts[k] ?? { count: 0, net: 0 };
+  const allCount = Object.values(counts).reduce((s, x) => s + x.count, 0);
+  const figures = [
+    { label: "Pending", value: fmt(c(CrmStatus.PENDING).net), note: `${c(CrmStatus.PENDING).count} to approve`, tab: CrmStatus.PENDING as string },
+    { label: "With Finance", value: fmt(c(CrmStatus.APPROVED).net), note: `${c(CrmStatus.APPROVED).count} approved, being paid`, tab: CrmStatus.APPROVED as string },
+    { label: "Paid", value: fmt(c(CrmStatus.PAID).net), note: `${c(CrmStatus.PAID).count} paid out`, tab: CrmStatus.PAID as string },
+    { label: "Locked", value: String(c("Locked").count), note: "Unlock when the agreement is executed", tab: "" },
   ];
+  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
+  const th = `!px-4 !py-2.5 text-left ${LBL}`;
+  const td = "!px-4 !py-3";
+  const SEL = `${INP} text-sm`;
+  const tdsAllowed = selectedBroker?.IsTdsApplicable !== false;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Brokerage"]} />
-      <CrmShell
-        title="CRM — Brokerage"
-      subtitle="Per-booking broker assignment — internal only, never shown to the customer"
-      action={
-          <div className="flex items-center gap-3">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          {rights.canCreate && (
-            <button onClick={openCreate}
-            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg ">
-            <Plus size={14} /> Add Broker
-          </button>
-          )}
-        </div>
-      }
-    >
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 text-xs text-sky-600 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
-          <ShieldAlert size={14} /> This data is internal-only and is excluded from the customer portal by design.
-        </div>
-        <button onClick={() => navigate("/crm/broker-payments")}
-          className="flex items-center gap-1.5 text-xs px-3 py-2 border border-border rounded-lg hover:bg-muted transition-colors">
-          <IndianRupee size={14} /> Go to Broker Payment
-        </button>
-      </div>
-
-      <div className="flex gap-3 flex-wrap items-center mt-3 mb-3">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
-            placeholder="Search customer, booking, broker..."
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-        </div>
-        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
-      </div>
-
-      <DataTable serverPagination={{ page, pageSize, total, onPageChange: setPage, onPageSizeChange: (n) => { setPageSize(n); setPage(1); } }}
-        data={records}
-        columns={columns}
-        loading={isLoading}
-        emptyMessage="No brokerage records"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
-        <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">{editingId != null ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <SearchableNativeSelect value={form.BookingId} disabled={editingId != null} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select booking</option>
-                {(bookings as any[]).map((b: any) => (
-                  <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName} (₹{Number(b.TotalValue || 0).toLocaleString("en-IN")})</option>
-                ))}
-              </SearchableNativeSelect>
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Finance"
+        title="Brokerage"
+        subtitle="Each booking's broker and the brokerage owed — approved here, paid by Finance. Internal only: never shown to the customer."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            <button onClick={() => navigate("/crm/broker-payments")} className={`${KEY_LINE} h-9 px-4`}><IndianRupee size={13} /> Broker payments</button>
+            {rights.canCreate && <button onClick={openCreate} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> Add broker</button>}
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  <button onClick={() => reset(setStatus)(x.tab)} className="label link">{x.label}</button>
+                  <p className="figure" style={{ fontSize: "clamp(16px, 1.8vw, 24px)", marginTop: 9 }}>{isLoading && !listResult ? "…" : x.value}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }} className="tabular-nums">{x.note}</p>
+                </div>
+              ))}
             </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Broker * (from Broker Master)</label>
-              <SearchableNativeSelect value={form.BrokerId} disabled={editingId != null} onChange={(e) => {
-                  const brokerId = e.target.value;
-                  const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === brokerId);
-                  setForm((f) => ({
-                    ...f,
-                    BrokerId: brokerId,
-                    // Clear TDS if broker is marked TDS not applicable
-                    TDSId: broker && !broker.IsTdsApplicable ? "" : f.TDSId,
-                  }));
-                }}
-                className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                <option value="">Select broker</option>
-                {(brokers as any[]).map((b: any) => (
-                  <option key={b.LHeadId} value={String(b.LHeadId)}>{b.LHeadName}{b.LHeadPhone ? ` — ${b.LHeadPhone}` : ""}</option>
-                ))}
-              </SearchableNativeSelect>
-              {!brokers.length && (
-                <p className="text-xs text-muted-foreground mt-1">No brokers found — add one in Broker Master first.</p>
-              )}
-            </div>
+          </div>
 
-            {selectedBroker && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg bg-muted/20 border border-border p-2.5 text-xs">
-                {selectedBroker.LHeadPhone && <div><span className="text-muted-foreground">Phone: </span><span className="font-medium">{selectedBroker.LHeadPhone}</span></div>}
-                {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
-                {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
-                {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms: </span><span className="font-medium">{selectedBroker.LHeadPaymentTerms}</span></div>}
-                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-sky-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Firm (optional, for this deal)</label>
-                <input type="text" value={form.BrokerFirm} onChange={(e) => setForm((f) => ({ ...f, BrokerFirm: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Rate Type</label>
-                <select value={form.RateType} onChange={(e) => setForm((f) => ({ ...f, RateType: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="Percentage">Percentage</option>
-                  <option value="Amount">Fixed Amount</option>
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
-                <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  TDS (Sec. 194H)
-                  {selectedBroker && selectedBroker.IsTdsApplicable === false && (
-                    <span className="ml-1.5 text-[0.625rem] text-muted-foreground">· Not applicable per Broker Master</span>
-                  )}
-                </label>
-                <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))}
-                  disabled={selectedBroker?.IsTdsApplicable === false}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background disabled:opacity-50 disabled:cursor-not-allowed">
-                  <option value="">None / Nil certificate</option>
-                  {tdsRecords.filter((t) => t.status).map((t) => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.percentage}%)</option>
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-5 py-4 space-y-3" style={{ borderBottom: RULE }}>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
+                  {STATUS_TABS.map((t) => (
+                    <button key={t.value || "all"} onClick={() => reset(setStatus)(t.value)} className={tabClass(status === t.value)} style={{ borderRight: RULE_SOFT }}>
+                      {t.label} <span className="tabular-nums">{t.value ? c(t.value).count : allCount}</span>
+                    </button>
                   ))}
-                </select>
+                </div>
+                <span className="ml-auto text-[0.6875rem] text-muted-foreground inline-flex items-center gap-1.5"><ShieldAlert size={12} /> Internal only — never in the customer portal</span>
+              </div>
+              <div className="flex gap-2.5 flex-wrap items-center">
+                <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") reset(setSearch)(searchInput.trim()); }}
+                  placeholder="Search customer, booking, broker…"
+                  className="h-9 flex-1 min-w-48 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+                <CrmCompanyProjectBlockFilter value={cpb} onChange={reset(setCpb)} />
               </div>
             </div>
-            {editingId != null && (
+
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[1000px]">
+                <thead>
+                  <tr style={{ borderBottom: RULE }}>
+                    <th className={th}>Booking</th><th className={th}>Broker</th><th className={th}>Rate · tranche</th>
+                    <th className={`${th} !text-right`}>Amount · TDS · net</th><th className={th}>State</th><th className={th} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {isError ? (
+                    <tr><td colSpan={6} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                  ) : isLoading && !listResult ? (
+                    <tr><td colSpan={6} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
+                  ) : records.length === 0 ? (
+                    <tr><td colSpan={6} className={`${td} text-center text-muted-foreground`}>{search || status || cpb.projectId ? "No brokerage matches." : "No brokerage recorded yet."}</td></tr>
+                  ) : records.map((r: any) => {
+                    const gross = Number(r.ComputedAmount || 0);
+                    const tds = Number(r.TDSAmount || 0);
+                    const net = Number(r.NetPayable ?? gross);
+                    return (
+                      <tr key={r.Id} className={`align-top ${r.IsLocked ? "text-muted-foreground" : ""}`} style={{ borderBottom: RULE_SOFT }}>
+                        <td className={td}>
+                          <div className="font-heading text-xs font-semibold tabular-nums text-foreground">{r.BookingNo}</div>
+                          {r.ApplicantName && <div className="mt-1 text-[0.6875rem] text-muted-foreground truncate max-w-[180px]"><ApplicantNames name={r.ApplicantName} bookingId={r.BookingId} /></div>}
+                        </td>
+                        <td className={td}>
+                          <div className="text-xs font-medium text-foreground">{r.BrokerName}</div>
+                          {r.BrokerFirm && <div className="mt-1 text-[0.6875rem] text-muted-foreground">{r.BrokerFirm}</div>}
+                        </td>
+                        <td className={td}>
+                          <div className="font-heading text-xs tabular-nums">{r.RateType === "Percentage" ? `${r.RateValue}%` : fmt(r.RateValue)}</div>
+                          <div className="mt-1 text-[0.6875rem] text-muted-foreground inline-flex items-center gap-1">{r.IsLocked && <Lock size={10} />}{trancheText(r)}</div>
+                        </td>
+                        <td className={`${td} text-right tabular-nums`}>
+                          <div className="font-heading text-xs">{fmt(gross)}</div>
+                          {tds > 0 && <div className="mt-1 text-[0.6875rem] text-muted-foreground">− TDS {r.TDSPercentage}%: {fmt(tds)}</div>}
+                          <div className="mt-1 font-heading font-semibold text-foreground">{fmt(net)}</div>
+                        </td>
+                        <td className={td}><BrokerageMark r={r} /></td>
+                        <td className={`${td} text-right`}>
+                          {r.IsLocked ? (
+                            <span className="text-[0.6875rem]">Unlocks once the agreement is executed</span>
+                          ) : (
+                            <div className="inline-flex items-center gap-2 flex-wrap justify-end">
+                              {/* Approve / reject happen in the Approval Inbox; this only submits. */}
+                              <ApprovalActions status={r.Status} recordId={r.Id} endpoint={API} submitOnly sheet onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })} />
+                              {rights.canEdit && r.Status === CrmStatus.PENDING && <button onClick={() => openEdit(r)} className={`${KEY_LINE} h-8 px-3`}>Customise amount</button>}
+                              {r.Status === CrmStatus.APPROVED && (
+                                <button onClick={() => navigate(r.FinancePaymentId != null ? `/payments?view=${r.FinancePaymentId}` : "/payments")} className={`${KEY_LINE} h-8 px-3`}>
+                                  {r.FinancePaymentDocNo ? `Finance ${r.FinancePaymentDocNo}` : "In Finance"} <ExternalLink size={11} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ borderTop: RULE_SOFT }}><CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} /></div>
+          </div>
+        </div>
+
+        <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) closeDialog(); }}>
+          <DialogContent className={`max-w-md max-h-[90vh] overflow-y-auto ${DIALOG}`} style={{ border: RULE }}>
+            <DialogHeader>
+              <DialogTitle className="font-heading">{editing ? "Customise brokerage" : "Add broker to a booking"}</DialogTitle>
+              {editing && <DialogDescription className="text-xs tabular-nums">{editing.BookingNo} · {editing.BrokerName} · {trancheText(editing)}</DialogDescription>}
+            </DialogHeader>
+            <div className="space-y-3">
+              {!editing && (
+                <>
+                  <div>
+                    <label className={`block mb-1 ${LBL}`}>Booking *</label>
+                    <SearchableNativeSelect value={form.BookingId} searchPlaceholder="Search booking, customer…" onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))} className={SEL}>
+                      <option value="">Select booking</option>
+                      {(bookings as any[]).map((b: any) => (
+                        <option key={b.Id} value={String(b.Id)}>{`${b.BookingNo} — ${b.ApplicantName} (${fmt(b.TotalValue)})`}</option>
+                      ))}
+                    </SearchableNativeSelect>
+                  </div>
+                  <div>
+                    <label className={`block mb-1 ${LBL}`}>Broker * (from Broker Master)</label>
+                    <SearchableNativeSelect value={form.BrokerId} searchPlaceholder="Search broker…"
+                      onChange={(e) => {
+                        const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === e.target.value);
+                        // A broker marked TDS not applicable clears the TDS choice.
+                        setForm((f) => ({ ...f, BrokerId: e.target.value, TDSId: broker && !broker.IsTdsApplicable ? "" : f.TDSId }));
+                      }} className={SEL}>
+                      <option value="">Select broker</option>
+                      {(brokers as any[]).map((b: any) => (
+                        <option key={b.LHeadId} value={String(b.LHeadId)}>{`${b.LHeadName}${b.LHeadPhone ? ` — ${b.LHeadPhone}` : ""}`}</option>
+                      ))}
+                    </SearchableNativeSelect>
+                    {!brokers.length && <p className="mt-1 text-xs text-muted-foreground">No brokers yet — add one in Broker Master first.</p>}
+                  </div>
+                </>
+              )}
+              {selectedBroker && (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 px-3 py-2 text-xs" style={{ border: RULE_SOFT }}>
+                  {selectedBroker.LHeadPhone && <div><span className="text-muted-foreground">Phone </span><span className="tabular-nums">{selectedBroker.LHeadPhone}</span></div>}
+                  {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN </span><span className="font-heading tabular-nums">{selectedBroker.LHeadPan}</span></div>}
+                  {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA </span><span className="font-heading tabular-nums">{selectedBroker.LHeadRera}</span></div>}
+                  {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms </span>{selectedBroker.LHeadPaymentTerms}</div>}
+                  <div><span className="text-muted-foreground">TDS </span><span className="font-medium">{tdsAllowed ? "Applicable (s.194H)" : "Not applicable"}</span></div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block mb-1 ${LBL}`}>Firm (this deal)</label>
+                  <input value={form.BrokerFirm} onChange={(e) => setForm((f) => ({ ...f, BrokerFirm: e.target.value }))} className={INP} />
+                </div>
+                <div>
+                  <label className={`block mb-1 ${LBL}`}>Rate type</label>
+                  <select value={form.RateType} onChange={(e) => setForm((f) => ({ ...f, RateType: e.target.value }))} className={SEL}>
+                    <option value="Percentage">Percentage</option>
+                    <option value="Amount">Fixed amount</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={`block mb-1 ${LBL}`}>Rate * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
+                  <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))} className={`${INP} tabular-nums`} />
+                </div>
+                <div>
+                  <label className={`block mb-1 ${LBL}`}>TDS (s.194H)</label>
+                  <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))} disabled={!tdsAllowed} className={`${SEL} disabled:opacity-50`}>
+                    <option value="">None / nil certificate</option>
+                    {tdsRecords.filter((t) => t.status).map((t) => <option key={t.id} value={t.id}>{`${t.name} (${t.percentage}%)`}</option>)}
+                  </select>
+                </div>
+              </div>
+              {editing && (
+                <div>
+                  <label className={`block mb-1 ${LBL}`}>Approved amount *</label>
+                  <input type="number" value={form.ComputedAmount} onChange={(e) => setForm((f) => ({ ...f, ComputedAmount: e.target.value }))} className={`${INP} tabular-nums`} />
+                </div>
+              )}
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Approved Amount *</label>
-                <input type="number" value={form.ComputedAmount} onChange={(e) => setForm((f) => ({ ...f, ComputedAmount: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                <label className={`block mb-1 ${LBL}`}>Notes</label>
+                <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))} rows={2} className={TEXTAREA} />
               </div>
-            )}
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-              <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
             </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={handleSave} disabled={saving || approving}
-              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Add"}
-            </button>
-            {editingId != null && editingStatus === CrmStatus.PENDING && isApprover && (
-              <button onClick={handleApprove} disabled={saving || approving}
-                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40">
-                {approving ? "Approving..." : "Approve & Send to Finance"}
+            <DialogFooter className="gap-2">
+              <button onClick={closeDialog} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+              <button onClick={handleSave} disabled={saving || approving} className={`${KEY_LINE} h-9 px-4 ${editing ? "" : "!bg-foreground !text-card"}`}>
+                {saving ? "Saving…" : editing ? "Save changes" : "Add"}
               </button>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-      </CrmShell>
+              {editing && editing.Status === CrmStatus.PENDING && isApprover && (
+                <button onClick={handleApprove} disabled={saving || approving} className={`${KEY_INK} h-9 px-4`}>{approving ? "Approving…" : "Approve & send to Finance"}</button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </SheetShell>
     </>
   );
 };

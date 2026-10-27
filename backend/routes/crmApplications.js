@@ -8,7 +8,7 @@ router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmApplication W
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
 const { validateSourceChain } = require("../services/sourceChain");
@@ -218,7 +218,8 @@ function buildApplicationFilters(req0, query, projectScope = null) {
 // applied to crmInvoices.js's grouped-view query this session).
 const DISPLAY_STAGE_EXPR = `CASE WHEN x.Stage = 'Converted' AND x.BookingStatus <> '${CrmStatus.APPROVED}' THEN 'InProcess' ELSE x.Stage END`;
 
-router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
+// Parking Booking sells standalone parking to an application, so its right lists them too.
+router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { stage, includeConverted, forBooking, page } = req.query;
