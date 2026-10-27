@@ -86,7 +86,7 @@ export function ProfileShell({
         {/* ── Title block ──────────────────────────────────────────────────── */}
         <div style={{ padding: "20px 22px 18px" }}>
           <p className="label">CivilierERP · Profile</p>
-          <div className="flex flex-col xl:flex-row xl:items-end gap-5 mt-3">
+          <div className="flex flex-col gap-5 mt-3">
             <div className="flex items-end gap-4 sm:gap-5 flex-1 min-w-0">
             <span
               className="pf-avatar"
@@ -115,7 +115,7 @@ export function ProfileShell({
             </div>
 
             {stats.length > 0 && (
-              <div className={`statrow ${stats.length >= 4 ? "four" : ""} w-full xl:w-auto xl:shrink-0`} style={{ minWidth: 0 }}>
+              <div className={`statrow ${stats.length >= 4 ? "four" : ""} w-full pt-4`} style={{ minWidth: 0, borderTop: "1px solid var(--rule)" }}>
                 {stats.map((s) => (
                   <div key={s.label}>
                     <p className="label">{s.label}</p>
