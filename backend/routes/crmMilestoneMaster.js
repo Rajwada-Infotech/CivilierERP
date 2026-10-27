@@ -4,7 +4,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
@@ -12,7 +12,8 @@ router.use(apiRateLimit);
 
 // GET / — the reusable milestone catalog, sorted for display in the Payment
 // Plan Master's step picker.
-router.get("/", requirePageRight("crm-milestone-master", "view"), async (req, res) => {
+// Payment plans are built from these milestones, so Payment Plans users may read the list too.
+router.get("/", requireAnyPageRight(["crm-milestone-master", "crm-payment-plans"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
