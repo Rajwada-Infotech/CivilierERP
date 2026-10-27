@@ -199,7 +199,7 @@ const SaMarketingInvoices: React.FC = () => {
 
   return (
     <SalesAutoShell breadcrumbs={["Sales Automation", "Finance", "Invoices"]} title="Marketing Invoices"
-      subtitle="Bills from agencies and ad platforms. Every invoice that isn't cancelled counts toward its campaign's and ad's spend."
+      subtitle="Bills from agencies and ad platforms. Every invoice that isn't cancelled or rejected counts toward its campaign's and ad's spend."
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
       <div className="space-y-6">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
