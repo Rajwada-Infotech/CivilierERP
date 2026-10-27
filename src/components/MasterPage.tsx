@@ -662,7 +662,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5" ref={rootRef}>
       {/* ── FORM CARD ── */}
-      {(canCreate || canEdit) && <div
+      {/* A collapsible form on a page that can't create shows only while a row
+          is being edited — otherwise it would offer "New Entry" with a Save
+          that can never be clicked. */}
+      {(canCreate || canEdit) && !(collapsibleAddForm && !canCreate && editingId === null) && <div
         className={sx("rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden", "bg-card")}
         style={sheet ? { border: RULE } : undefined}
         // Enter inside a text/number/date/select field must not act like a

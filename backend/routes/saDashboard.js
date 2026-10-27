@@ -5,6 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, isSaAdmin } = require("../services/saAccess");
+const { CLOSED_LEAD_SQL } = require("../constants/saStatuses");
 router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -271,7 +272,7 @@ router.get("/attention", requirePageRight("sa-leads", "view"), async (req, res) 
       // older activities are superseded by newer ones, so only the latest counts.
       count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaLead l
         CROSS APPLY (SELECT TOP 1 a.NextFollowupDate FROM dbo.SaLeadActivity a WHERE a.LeadId = l.Id ORDER BY a.CreatedAt DESC) last
-        WHERE l.IsActive = 1 AND ${scope} AND l.Status NOT IN ('Booking','Converted','Lost')
+        WHERE l.IsActive = 1 AND ${scope} AND l.Status NOT IN ${CLOSED_LEAD_SQL}
           AND last.NextFollowupDate < CAST(SYSDATETIME() AS DATE)`),
       count((scope) => `SELECT COUNT(*) AS Cnt FROM dbo.SaSiteVisit v JOIN dbo.SaLead l ON l.Id = v.LeadId
         WHERE v.IsActive = 1 AND ${scope} AND v.PreferredDate = CAST(SYSDATETIME() AS DATE)

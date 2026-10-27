@@ -14,7 +14,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CrmMoneyReceipt_Bookin
 BEGIN
   CREATE NONCLUSTERED INDEX IX_CrmMoneyReceipt_Booking_Status
     ON dbo.CrmMoneyReceipt (BookingId, Status)
-    INCLUDE (Amount, ReceiptNo, CreatedAt, ReceiptDate);
+    INCLUDE (Amount, ReceiptNo, CreatedAt);
 END
 GO
 
@@ -23,7 +23,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CrmOnAccountPayment_Bo
 BEGIN
   CREATE NONCLUSTERED INDEX IX_CrmOnAccountPayment_Booking_Status
     ON dbo.CrmOnAccountPayment (BookingId, Status)
-    INCLUDE (Amount, AvailableAmount, DepositBankId);
+    INCLUDE (Amount, DepositBankId);
 END
 GO
 
@@ -57,6 +57,6 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_CrmMutation_Booking_Li
 BEGIN
   CREATE UNIQUE INDEX UX_CrmMutation_Booking_Live 
     ON dbo.CrmMutation (BookingId) 
-    WHERE Status NOT IN (N'Rejected', N'Cancelled');
+    WHERE Status <> N'Rejected' AND Status <> N'Cancelled';
 END
 GO

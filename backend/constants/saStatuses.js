@@ -43,4 +43,9 @@ const statusesThatCanMoveTo = (to) =>
 // pull a lead that has moved on back to Assigned.
 const distributableStatus = (level) => (level === 1 ? "New" : "Assigned");
 
-module.exports = { distributableStatus, STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };
+// Leads that are finished with in SA — handed to CRM or dropped. Everything
+// else is "open" and still needs someone working it.
+const CLOSED_LEAD_STATUSES = [SA_LEAD_BOOKED, SA_LEAD_CONVERTED, "Lost"];
+const CLOSED_LEAD_SQL = `(${CLOSED_LEAD_STATUSES.map((s) => `'${s}'`).join(", ")})`;
+
+module.exports = { CLOSED_LEAD_STATUSES, CLOSED_LEAD_SQL, distributableStatus, STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };
