@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({ user: { id: "u1", role: "super_admin" } }));
@@ -227,6 +227,13 @@ describe("Compass search and navigation", () => {
   });
 });
 
+// An entry under "Recent", by its label. The Finance dashboard (/finance) is labelled "Dashboard", like every module's
+// landing page, so it's looked for inside the Recent group only.
+const recentEntry = (label: string) => {
+  const group = screen.getByText("Recent").closest("[cmdk-group]") as HTMLElement;
+  return within(group).getByText(label);
+};
+
 describe("Compass recent pages", () => {
   it("records visited pages per user and lists them (excluding the current page)", async () => {
     mount("/finance");
@@ -243,7 +250,7 @@ describe("Compass recent pages", () => {
     press();
     await screen.findByRole("dialog");
     expect(screen.getByText("Recent")).toBeInTheDocument();
-    expect(screen.getByText("Proceeding")).toBeInTheDocument(); // /finance's label
+    expect(recentEntry("Dashboard")).toBeInTheDocument(); // /finance
   });
 
   it("ignores stored routes the user can no longer open", async () => {
@@ -259,7 +266,7 @@ describe("Compass recent pages", () => {
     mount("/home");
     press();
     await screen.findByRole("dialog");
-    const latest = screen.getByText("Proceeding").closest("[cmdk-item]")!; // /finance's label
+    const latest = recentEntry("Dashboard").closest("[cmdk-item]")!; // /finance
     await waitFor(() => expect(latest).toHaveAttribute("aria-selected", "true"));
     const list = document.querySelector("[cmdk-list]") as HTMLElement;
     expect(list.scrollTop).toBe(0);
