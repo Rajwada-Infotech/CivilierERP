@@ -886,7 +886,6 @@ function WeekPlot({ rows }: { rows: Array<{ day: string; count: number; amount: 
             <g key={i} onMouseEnter={() => setHover(i)}>
               <rect x={pad + slot * i} y={0} width={slot} height={H} fill={hover === i ? "var(--blue-wash)" : "transparent"} />
               <rect x={cx(i) - w / 2} y={base - h} width={w} height={Math.max(0, h)} fill="var(--blue)" fillOpacity={hover == null || hover === i ? 0.9 : 0.4} />
-              {r.count > 0 && <text x={cx(i)} y={base - h - 9} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="11" fill="var(--ink)">{r.count}</text>}
               <text x={cx(i)} y={base + 20} textAnchor="middle" fontFamily="Sora, sans-serif" fontWeight="600" fontSize="10" letterSpacing="1" fill={hover === i ? "var(--ink)" : "var(--graphite)"}>{r.day.toUpperCase()}</text>
             </g>
           );
@@ -899,6 +898,19 @@ function WeekPlot({ rows }: { rows: Array<{ day: string; count: number; amount: 
             ))}
           </>
         )}
+        {rows.map((r, i) => {
+          if (r.count <= 0) return null;
+          const h = base - y(r.count, maxCount);
+          const w = Math.min(46, slot * 0.5);
+          const labelY = base - h - 9;
+          const dotY = y(r.amount, maxAmount);
+          const clash = rows.length > 1 && dotY > labelY - 16 && dotY < labelY + 8;
+          return (
+            <text key={i} x={clash ? cx(i) + w / 2 + 5 : cx(i)} y={clash ? Math.max(labelY + 12, top + 10) : labelY}
+              textAnchor={clash ? "start" : "middle"} fontFamily="Sora, sans-serif" fontWeight="600" fontSize="11" fill="var(--ink)"
+              stroke="var(--sheet)" strokeWidth="4" strokeLinejoin="round" paintOrder="stroke" pointerEvents="none">{r.count}</text>
+          );
+        })}
       </svg>
     </div>
   );

@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invalidateRoomData } from "@/lib/roomQueries";
@@ -13,7 +14,6 @@ import { NamingPanel } from "./autoSetup/NamingPanel";
 import { ProjectTypeBar } from "./autoSetup/ProjectTypeBar";
 import { BlockStackEditor } from "./autoSetup/BlockStackEditor";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
@@ -512,6 +512,7 @@ const PlotBlockBrowser: React.FC<{
   blockName: string;
   onDeleteUnit: (unit: PlotUnit) => void;
 }> = ({ blockId, blockName, onDeleteUnit }) => {
+  const ask = useSheetAsk();
   const [plots, setPlots] = useState<PlotUnit[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -528,7 +529,7 @@ const PlotBlockBrowser: React.FC<{
   }, [blockId, plots]);
 
   const handleDelete = async (u: PlotUnit) => {
-    if (!window.confirm(`Delete plot "${u.UnitName}"?`)) return;
+    if (!(await ask.confirm(`Delete plot "${u.UnitName}"?`, { okLabel: "Delete", danger: true }))) return;
     setDeletingId(u.Id);
     try {
       const res = await fetchWithAuth(`${API}/plots/${u.Id}`, { method: "DELETE" });
@@ -542,6 +543,7 @@ const PlotBlockBrowser: React.FC<{
 
   return (
     <div className="ml-6 pl-3 border-l border-border pb-1.5">
+      {ask.node}
       {loading ? (
         <div className="text-[0.6875rem] text-muted-foreground py-1">Loading plots…</div>
       ) : !plots?.length ? (
@@ -602,6 +604,7 @@ const PlotBlockBrowser: React.FC<{
 };
 
 const CrmProjectAutoSetup: React.FC = () => {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const rights = usePageRights("crm-auto-project-setup");
   // Top-level toggle between this page's Block/Floor/Unit wizard and the
@@ -970,7 +973,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   // crmHierarchyLocks.js — surfaced here as a toast, same pattern as
   // booking/hold errors elsewhere in this app.
   const handleDeleteBlock = async (b: any) => {
-    if (!window.confirm(`Delete block "${b.BlockName}"?`)) return;
+    if (!(await ask.confirm(`Delete block "${b.BlockName}"?`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`${API}/blocks/${b.Id}`, { method: "DELETE" });
       const data = await res.json();
@@ -984,7 +987,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   };
 
   const handleDeleteFloor = async (f: any) => {
-    if (!window.confirm(`Delete floor "${f.FloorLabel}"?`)) return;
+    if (!(await ask.confirm(`Delete floor "${f.FloorLabel}"?`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`${API}/floors/${f.Id}`, { method: "DELETE" });
       const data = await res.json();
@@ -1022,7 +1025,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   // enforces the (now Application-aware) Unit-level lock check, so nothing
   // is duplicated here.
   const handleDeleteUnit = async (floorId: number, unit: any) => {
-    if (!window.confirm(`Delete unit "${unit.UnitName}"?`)) return;
+    if (!(await ask.confirm(`Delete unit "${unit.UnitName}"?`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`/api/unit-master/${unit.Id}`, { method: "DELETE" });
       const data = await res.json();

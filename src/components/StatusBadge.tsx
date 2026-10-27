@@ -1,4 +1,5 @@
 import { cn } from "../lib/utils";
+import { MARK_TEXT, MarkSquare, markInk, type MarkTone } from "./sheet/Sheet";
 import {
   CheckCircle2,
   Clock,
@@ -674,9 +675,21 @@ export function getStatusClasses(status: string | null | undefined): string {
   return ((status && ALL_STATUS_CONFIG[status]) || FALLBACK).classes;
 }
 
+// The colour each status was given is what it means — green settled, amber / yellow / orange waiting on someone, blue /
+// violet under way, red stopped, slate a draft — so the sheet mark is read off it and every entry keeps its meaning.
+export function statusBadgeTone(status: string | null | undefined): MarkTone {
+  const classes = ((status && ALL_STATUS_CONFIG[status]) || FALLBACK).classes;
+  if (/\b(?:bg|text)-(?:emerald|green|teal)-/.test(classes)) return "done";
+  if (/\b(?:bg|text)-(?:red|rose)-/.test(classes)) return "stopped";
+  if (/\b(?:bg|text)-(?:blue|sky|indigo|violet|purple|cyan)-/.test(classes)) return "moving";
+  if (/\b(?:bg|text)-(?:slate|gray|zinc|neutral)-/.test(classes)) return "draft";
+  return "waiting";
+}
+
+/** A status as a sheet mark: a square and the word in capitals (components/sheet/Sheet.tsx). */
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const config = (status && ALL_STATUS_CONFIG[status]) || FALLBACK;
-  const Icon = config.icon;
+  const tone = statusBadgeTone(status);
 
   // A page that prints its live DOM (window.print() on a preview modal, e.g.
   // ExpenseBookingPreviewModal.tsx) has no separate print HTML to intercept
@@ -687,14 +700,8 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
   const isPending = status === "Pending";
 
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium",
-        config.classes,
-        className,
-      )}
-    >
-      <Icon className="w-3 h-3 shrink-0" />
+    <span className={cn(MARK_TEXT, className)} style={{ color: markInk(tone) }}>
+      <MarkSquare tone={tone} />
       {isPending ? (
         <>
           <span className="print:hidden">{config.label}</span>

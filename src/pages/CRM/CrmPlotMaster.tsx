@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -78,6 +79,7 @@ const canConvert = (plot: Plot) => ["available", "booked"].includes(plotStatus(p
 const fieldCls = "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm";
 
 const CrmPlotMaster: React.FC = () => {
+  const ask = useSheetAsk();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -302,7 +304,7 @@ const CrmPlotMaster: React.FC = () => {
     } catch (e: any) { toast.error(e.message); } finally { setSavingPlot(false); }
   };
   const deletePlot = async (plot: Plot) => {
-    if (!window.confirm(`Delete ${plot.PlotName}? This cannot be undone.`)) return;
+    if (!(await ask.confirm(`Delete ${plot.PlotName}? This cannot be undone.`, { okLabel: "Delete", danger: true }))) return;
     try {
       const response = await fetchWithAuth(`${PLOT_API}/${plot.Id}`, { method: "DELETE" });
       const body = await response.json().catch(() => ({}));
@@ -406,7 +408,7 @@ const CrmPlotMaster: React.FC = () => {
   const setVillaTypeOnBuilt = async (plot: Plot) => {
     if (!plot.ConvertedUnitId || !builtVillaType) return;
     const type = detailVillaTypes.find((t) => String(t.Id) === builtVillaType);
-    if (!window.confirm(`Set ${plot.ConvertedUnitName || "this villa"} to ${type?.Code} — ${type?.Name}? Its rooms are rebuilt floor by floor from the type's plan.`)) return;
+    if (!(await ask.confirm(`Set ${plot.ConvertedUnitName || "this villa"} to ${type?.Code} — ${type?.Name}? Its rooms are rebuilt floor by floor from the type's plan.`, { okLabel: "Go ahead" }))) return;
     setSettingVillaType(true);
     try {
       const response = await fetchWithAuth(`${SETUP_API}/villas/${plot.ConvertedUnitId}/villa-type`, {
@@ -436,7 +438,7 @@ const CrmPlotMaster: React.FC = () => {
       if (!preview.ok) throw new Error(pb.error || "Could not check the plan");
       if (!pb.added) { toast.info(pb.message); return; }
       const steps = pb.withoutSteps?.length ? `\n\n${pb.withoutSteps.length} of them have no DPR step list yet (${pb.withoutSteps.slice(0, 6).join(", ")}${pb.withoutSteps.length > 6 ? "…" : ""}) — they get steps once their room type has one.` : "";
-      if (!window.confirm(`Add ${pb.added} room(s) from the ${plot.ConvertedVillaTypeCode} floor plan to ${plot.ConvertedUnitName}?\nExisting rooms and their DPR work stay exactly as they are.${steps}`)) return;
+      if (!(await ask.confirm(`Add ${pb.added} room(s) from the ${plot.ConvertedVillaTypeCode} floor plan to ${plot.ConvertedUnitName}?\nExisting rooms and their DPR work stay exactly as they are.${steps}`, { okLabel: "Go ahead" }))) return;
       const response = await fetchWithAuth(url, { method: "POST" });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Could not add the rooms");
@@ -449,7 +451,7 @@ const CrmPlotMaster: React.FC = () => {
   // booked or held, or any DPR work has started; nothing is deleted.
   const undoConversion = async (plot: Plot) => {
     if (!plot.ConvertedUnitId) return;
-    if (!window.confirm(`Undo the conversion of ${plot.PlotName}? The villa ${plot.ConvertedUnitName || ""} and its untouched DPR steps are retired and the plot can be converted again.`)) return;
+    if (!(await ask.confirm(`Undo the conversion of ${plot.PlotName}? The villa ${plot.ConvertedUnitName || ""} and its untouched DPR steps are retired and the plot can be converted again.`, { okLabel: "Go ahead" }))) return;
     try {
       const response = await fetchWithAuth(`${SETUP_API}/plots/unconvert`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ UnitId: plot.ConvertedUnitId }) });
       const body = await response.json().catch(() => ({}));
@@ -562,6 +564,7 @@ const CrmPlotMaster: React.FC = () => {
 
   return (
     <>
+      {ask.node}
       <Breadcrumbs items={[{ label: "CRM", path: "/crm/dashboard" }, { label: "Setup", path: "/crm/setup/auto-project-setup" }, { label: "Plot Master", path: "/crm/setup/plot-master" }]} />
       <CrmShell title="Plot Master" icon={MapIcon} action={
         <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -57,6 +58,7 @@ function ProxyFields({ methods, value, onChange, who }: { methods: string[]; val
 }
 
 export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { id: number; canEdit: boolean; initialTab?: Tab }) {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
   // ?tab= comes from links: only a real tab is taken (another value left the page with no tab open).
@@ -129,8 +131,8 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
     window.open(u, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(u), 60_000);
   };
-  const reject = (key: string, path: string, what: string) => {
-    const r = window.prompt(`${what} — say why (they see this):`) || "";
+  const reject = async (key: string, path: string, what: string) => {
+    const r = (await ask.prompt(`${what} — say why (they see this).`, { title: "Send back", okLabel: "Send back", danger: true })) || "";
     if (r.trim()) call(key, path, { remarks: r, decision: "Rejected" }, "Sent back");
   };
 
@@ -165,6 +167,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
 
   return (
     <div className="space-y-3">
+      {ask.node}
       <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && sendFile(e.target.files[0])} />
 
       <div className="bg-card p-3 space-y-3" style={{ border: RULE }}>
@@ -206,7 +209,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
             <SheetMark text={d.StatusLabel || d.Status} tone={d.Status === "Registered" ? "done" : d.Status === "Cancelled" ? "stopped" : "waiting"} />
             <Link to={`/crm/resales/${d.ResaleId}`} className={`${KEY_LINE} h-8 px-2.5`}>Case #{d.ResaleId} <ExternalLink size={10} /></Link>
             {canEdit && !["Executed"].includes(d.Status) && (
-              <button className={danger} onClick={() => { const r = window.prompt("Why is this deed cancelled?") || ""; if (r.trim()) call("cancel", "cancel", { remarks: r }, "Cancelled"); }}>Cancel</button>
+              <button className={danger} onClick={async () => { const r = (await ask.prompt("Why is this deed cancelled?", { title: "Cancel deed", okLabel: "Cancel deed", cancelLabel: "Keep it", danger: true })) || ""; if (r.trim()) call("cancel", "cancel", { remarks: r }, "Cancelled"); }}>Cancel</button>
             )}
           </div>
         </div>
@@ -323,7 +326,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
                       <ProxyFields methods={methods} who={p.toLowerCase()} value={P(pk)} onChange={(v) => setProxy({ ...proxy, [pk]: v })} />
                       <div className="flex flex-wrap gap-2">
                         <button className={primary} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={() => call(pk, `parties/${p}/respond`, { decision: "Approved", ...P(pk) }, `${p}'s approval recorded`)}>They approve</button>
-                        <button className={danger} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={() => { const r = window.prompt("What do they want checked?") || ""; if (r.trim()) call(pk, `parties/${p}/respond`, { decision: "Recheck", ...P(pk), Remarks: r }, "Sent back for a recheck"); }}>They ask for a recheck</button>
+                        <button className={danger} disabled={!P(pk).ProxyMethod || !P(pk).ProxyRemarks.trim() || !!busy} onClick={async () => { const r = (await ask.prompt("What do they want checked?", { title: "Recheck asked for", okLabel: "Send back" })) || ""; if (r.trim()) call(pk, `parties/${p}/respond`, { decision: "Recheck", ...P(pk), Remarks: r }, "Sent back for a recheck"); }}>They ask for a recheck</button>
                       </div>
                     </div>
                   )}
@@ -372,7 +375,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
           <div className={card}>
             <div className="flex items-center justify-between gap-2"><div className={head}>Execution (signing)</div><span className="text-[0.6875rem] text-muted-foreground">{d.ExecutedAt ? `Executed ${when(d.ExecutedAt)}` : "After the stamp duty is confirmed"}</span></div>
             {canEdit && d.Status === "DateApproved" && <button className={primary} disabled={busy === "x" || payment?.Status !== "Confirmed"} title={payment?.Status !== "Confirmed" ? "Confirm the stamp duty first" : undefined}
-              onClick={() => { if (window.confirm(`Every party signed ${d.DeedNo} on ${d.DeedDate}?`)) call("x", "execute", {}, "Marked executed"); }}>Mark executed</button>}
+              onClick={async () => { if (await ask.confirm(`Every party signed ${d.DeedNo} on ${d.DeedDate}?`, { okLabel: "Mark executed" })) call("x", "execute", {}, "Marked executed"); }}>Mark executed</button>}
           </div>
         </div>
       )}

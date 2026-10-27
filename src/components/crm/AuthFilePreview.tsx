@@ -33,8 +33,11 @@ export function AuthThumb({ url, alt, className }: { url: string; alt: string; c
   const { blobUrl } = useAuthBlobUrl(url);
   return blobUrl
     ? <img src={blobUrl} alt={alt} className={className} />
-    : <div className={`${className || ""} bg-muted animate-pulse`} />;
+    : <div className={`${className || ""} bg-muted/40`} />;
 }
+
+const RULE = "1px solid hsl(var(--foreground))";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center gap-1 h-7 px-2 border border-foreground text-foreground hover:bg-primary/10 transition-colors";
 
 /** A preview card on the page: PDF / image shown inline, anything else offered as a download. */
 export function FilePreviewCard({ url, fileName, mimeType, meta, onClose }: {
@@ -44,27 +47,25 @@ export function FilePreviewCard({ url, fileName, mimeType, meta, onClose }: {
   const isImage = !!mimeType?.startsWith("image/");
   const isPdf = mimeType === "application/pdf" || /\.pdf$/i.test(fileName);
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-muted/30">
+    <div className="bg-card overflow-hidden" style={{ border: RULE }}>
+      <div className="flex items-center justify-between gap-2 px-3 py-2" style={{ borderBottom: RULE }}>
         <div className="min-w-0 flex items-center gap-2">
-          <FileText size={14} className="text-muted-foreground shrink-0" />
-          <span className="text-xs font-medium truncate">{fileName}</span>
+          <FileText size={14} className="shrink-0" />
+          <span className="text-xs font-semibold truncate">{fileName}</span>
           {meta && <span className="text-[0.6875rem] text-muted-foreground shrink-0">{meta}</span>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {blobUrl && (
-            <a href={blobUrl} download={fileName}
-              className="text-xs px-2 py-1 rounded-md text-primary hover:bg-muted flex items-center gap-1">
-              <Download size={12} /> Download
+            <a href={blobUrl} download={fileName} className={KEY}>
+              <Download size={11} /> Download
             </a>
           )}
-          <button onClick={onClose} aria-label="Close preview"
-            className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-            <X size={14} />
+          <button onClick={onClose} aria-label="Close preview" className={`${KEY} w-7 justify-center px-0`}>
+            <X size={12} />
           </button>
         </div>
       </div>
-      <div className="flex items-center justify-center min-h-[200px] bg-muted/20">
+      <div className="flex items-center justify-center min-h-[200px] bg-muted/10">
         {failed ? (
           <p className="text-sm text-muted-foreground py-8">This file couldn't be loaded.</p>
         ) : !blobUrl ? (
@@ -76,7 +77,7 @@ export function FilePreviewCard({ url, fileName, mimeType, meta, onClose }: {
         ) : (
           <div className="py-8 text-sm text-muted-foreground flex flex-col items-center gap-2">
             No preview for this file type.
-            <a href={blobUrl} download={fileName} className="text-primary hover:underline flex items-center gap-1"><Download size={12} /> Download {fileName}</a>
+            <a href={blobUrl} download={fileName} className={KEY}><Download size={11} /> Download {fileName}</a>
           </div>
         )}
       </div>

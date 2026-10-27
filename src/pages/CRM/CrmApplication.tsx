@@ -12,7 +12,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { SearchableSelect } from "@/components/SearchableSelect";
@@ -966,9 +966,9 @@ const CrmApplication: React.FC = () => {
   const [cancellingApp, setCancellingApp] = useState<any | null>(null);
   const [cancelRemarks, setCancelRemarks] = useState("");
   const [cancelling, setCancelling] = useState(false);
-  // Replaces window.confirm
-  const [confirmDialog, setConfirmDialog] = useState<{ msg: string; onOk: () => void } | null>(null);
-  const requestConfirm = (msg: string, onOk: () => void) => setConfirmDialog({ msg, onOk });
+  // Asked on the sheet (components/sheet/SheetAsk), in place of window.confirm.
+  const ask = useSheetAsk();
+  const requestConfirm = (msg: string, onOk: () => void) => { void ask.confirm(msg, { okLabel: "Delete", danger: true }).then((yes) => { if (yes) onOk(); }); };
   const handleCancelApplication = async () => {
     if (!cancellingApp) return;
     setCancelling(true);
@@ -2640,18 +2640,7 @@ const CrmApplication: React.FC = () => {
           onClose={() => setPdfDialogApp(null)}
         />
       )}
-      <AlertDialog open={confirmDialog !== null} onOpenChange={(o) => !o && setConfirmDialog(null)}>
-        <AlertDialogContent className="rounded-none" style={{ border: RULE }}>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="font-heading">Confirm</AlertDialogTitle>
-            <AlertDialogDescription>{confirmDialog?.msg}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className={`${KEY_LINE} h-9 px-4 rounded-none`}>Cancel</AlertDialogCancel>
-            <AlertDialogAction className={`${KEY_INK} h-9 px-4 rounded-none`} onClick={() => { confirmDialog?.onOk(); setConfirmDialog(null); }}>Confirm</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {ask.node}
     </SheetShell>
     </>
   );

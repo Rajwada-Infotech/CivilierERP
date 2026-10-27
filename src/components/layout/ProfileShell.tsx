@@ -86,7 +86,8 @@ export function ProfileShell({
         {/* ── Title block ──────────────────────────────────────────────────── */}
         <div style={{ padding: "20px 22px 18px" }}>
           <p className="label">CivilierERP · Profile</p>
-          <div className="flex flex-col sm:flex-row sm:items-end gap-5 mt-3">
+          <div className="flex flex-col xl:flex-row xl:items-end gap-5 mt-3">
+            <div className="flex items-end gap-4 sm:gap-5 flex-1 min-w-0">
             <span
               className="pf-avatar"
               onClick={onAvatarClick}
@@ -105,19 +106,20 @@ export function ProfileShell({
             </span>
 
             <div className="flex-1 min-w-0">
-              <h1 className="title" style={{ fontSize: "clamp(24px, 2.8vw, 34px)", margin: 0, lineHeight: 1.08 }}>{name}</h1>
-              <div className="flex flex-wrap items-center gap-2 mt-2">
-                {roleBadge}
-                <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{email}</span>
+              <h1 className="title" style={{ fontSize: "clamp(22px, 2.8vw, 34px)", margin: 0, lineHeight: 1.08, overflowWrap: "anywhere" }}>{name}</h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2 min-w-0">
+                <span className="shrink-0 whitespace-nowrap">{roleBadge}</span>
+                <span className="min-w-0 max-w-full truncate" title={email} style={{ fontSize: 13, color: "var(--ink-2)" }}>{email}</span>
               </div>
+            </div>
             </div>
 
             {stats.length > 0 && (
-              <div className={`statrow ${stats.length >= 4 ? "four" : ""} shrink-0`} style={{ minWidth: 0 }}>
+              <div className={`statrow ${stats.length >= 4 ? "four" : ""} w-full xl:w-auto xl:shrink-0`} style={{ minWidth: 0 }}>
                 {stats.map((s) => (
                   <div key={s.label}>
                     <p className="label">{s.label}</p>
-                    <p className="pf-figure" style={{ marginTop: 6, textTransform: "capitalize" }}>{typeof s.value === "string" ? s.value.replace(/_/g, " ") : s.value}</p>
+                    <p className="pf-figure" style={{ marginTop: 6, textTransform: "capitalize", overflowWrap: "anywhere" }}>{typeof s.value === "string" ? s.value.replace(/_/g, " ") : s.value}</p>
                   </div>
                 ))}
               </div>

@@ -1,4 +1,5 @@
 // One booking's welcome call: log (or edit) the call and work through the rest of the checklist.
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useRef, useEffect } from "react";
@@ -22,6 +23,7 @@ import { InlineVerify, useVerificationChecklist, ChecklistProgressBar, Checklist
 
 // ─── Intake dialog: log the call + work through the rest of the checklist ──
 export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelEdit?: () => void; onClose: () => void }> = ({ booking, editingCall, onCancelEdit, onClose }) => {
+  const ask = useSheetAsk();
   const rights = usePageRights("crm-welcome-calls");
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -404,7 +406,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
       // reason only when it's actually needed, so ask here rather than
       // always demanding one up front for the common (no legal work yet) case.
       if (!res.ok && /reason is required/i.test(data.error || "")) {
-        const reason = window.prompt("Legal documents already exist for this booking — describe why this co-applicant should be removed:");
+        const reason = await ask.prompt("Legal documents already exist for this booking — describe why this co-applicant should be removed.", { title: "Remove co-applicant", okLabel: "Remove", danger: true });
         if (!reason?.trim()) return;
         res = await fetchWithAuth(`${CO_API}/${id}`, {
           method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ Reason: reason.trim() }),
@@ -480,6 +482,7 @@ export const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; on
 
   return (
     <>
+      {ask.node}
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto thin-scroll rounded-none" style={{ border: RULE }}>
         <DialogHeader>

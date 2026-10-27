@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -93,6 +94,7 @@ function NewDialog({ open, onClose, onCreated }: { open: boolean; onClose: () =>
 }
 
 function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onChanged: () => void }) {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const { data: o, isLoading } = useQuery<any>({ queryKey: ["crm-ownership-change", id], queryFn: () => send("GET", `${API}/${id}`) });
   const { data: customers = [] } = useQuery<any[]>({ queryKey: ["crm-customers-dropdown"], queryFn: () => send("GET", "/api/crm/customers"), staleTime: 60_000 });
@@ -150,6 +152,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
   return (
     <div className="space-y-4">
       <div className="bg-card p-4" style={{ border: RULE }}>
+      {ask.node}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <span className={`block ${LBL}`}>Ownership change</span>
@@ -249,7 +252,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
                   <button disabled={!!busy || !note.trim()} onClick={() => run("reject", () => send("PUT", `${API}/${id}/reject`, { note }), "Sent back")} className={`${KEY_LINE} flex-1 h-9`}>Send back</button>
                 </div>
               )}
-              <button disabled={!!busy || !note.trim()} onClick={() => { if (window.confirm(`Cancel ${o.ChangeNo}?`)) run("cancel", () => send("PUT", `${API}/${id}/cancel`, { note }), "Cancelled"); }} className={`${KEY_RED} w-full h-8`}>Cancel this record</button>
+              <button disabled={!!busy || !note.trim()} onClick={async () => { if (await ask.confirm(`Cancel ${o.ChangeNo}?`, { okLabel: "Cancel record", cancelLabel: "Keep it", danger: true })) run("cancel", () => send("PUT", `${API}/${id}/cancel`, { note }), "Cancelled"); }} className={`${KEY_RED} w-full h-8`}>Cancel this record</button>
               </div>
             </div>
           )}

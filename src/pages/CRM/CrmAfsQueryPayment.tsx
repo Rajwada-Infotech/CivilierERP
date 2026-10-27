@@ -1,3 +1,4 @@
+import { AuthThumb, FilePreviewCard } from "@/components/crm/AuthFilePreview";
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -303,15 +304,19 @@ function fmtSize(bytes: number) {
 
 function AttachmentList({ attachments, apiBase }: { attachments: any[]; apiBase: string }) {
   const isImage = (mime: string) => mime?.startsWith("image/");
+  const [openId, setOpenId] = useState<number | null>(null);
   return (
     <ul className="space-y-2">
       {attachments.map((a) => {
         const url = `${apiBase}/attachment/${a.AttachmentId}`;
+        const open = openId === a.AttachmentId;
         return (
-          <li key={a.AttachmentId} className="flex items-center gap-2.5 border border-border bg-muted/20 px-3 py-2 hover:bg-primary/5 transition-colors group">
+          <li key={a.AttachmentId} className="space-y-2">
+          <button type="button" onClick={() => setOpenId(open ? null : a.AttachmentId)}
+            className={`w-full text-left flex items-center gap-2.5 border px-3 py-2 transition-colors group ${open ? "border-foreground bg-primary/5" : "border-border bg-muted/20 hover:bg-primary/5"}`}>
             {isImage(a.MimeType) ? (
               <div className="w-9 h-9 shrink-0 overflow-hidden border border-border bg-muted">
-                <img src={url} alt={a.FileName} className="w-full h-full object-cover" />
+                <AuthThumb url={url} alt={a.FileName} className="w-full h-full object-cover" />
               </div>
             ) : (
               <div className="w-9 h-9 shrink-0 bg-card border border-foreground/30 flex items-center justify-center">
@@ -325,14 +330,14 @@ function AttachmentList({ attachments, apiBase }: { attachments: any[]; apiBase:
                 {a.UploadedAt ? ` · ${String(a.UploadedAt).slice(0, 10)}` : ""}
               </p>
             </div>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 flex items-center gap-1 text-[0.6875rem] font-medium text-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:underline"
-            >
-              Open <ChevronRight size={11} />
-            </a>
+            <span className={`shrink-0 flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground transition-opacity ${open ? "" : "opacity-0 group-hover:opacity-100"}`}>
+              {open ? "Close" : "Preview"} <ChevronRight size={11} className={open ? "rotate-90" : ""} />
+            </span>
+          </button>
+          {open && (
+            <FilePreviewCard url={url} fileName={a.FileName} mimeType={a.MimeType}
+              meta={a.FileSize ? fmtSize(a.FileSize) : undefined} onClose={() => setOpenId(null)} />
+          )}
           </li>
         );
       })}

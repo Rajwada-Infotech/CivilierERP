@@ -1,3 +1,4 @@
+import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -53,6 +54,7 @@ const CRM_MUTATION_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "
 const emptyStart = () => ({ ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
 
 const CrmMutation: React.FC = () => {
+  const ask = useSheetAsk();
   const qc = useQueryClient();
   const rights = usePageRights("crm-mutation");
   const { currentUser, canDoAction } = useAuth();
@@ -242,7 +244,7 @@ const CrmMutation: React.FC = () => {
     if (detailId == null) return;
     let remarks: string | undefined;
     if (!verify) {
-      remarks = window.prompt("Describe what's wrong with this document (required):")?.trim();
+      remarks = (await ask.prompt("Describe what's wrong with this document. The uploader sees this.", { title: "Reject document", okLabel: "Reject", danger: true })) ?? undefined;
       if (!remarks) return;
     }
     try {
@@ -292,6 +294,7 @@ const CrmMutation: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Property Mutation"]} />
+      {ask.node}
       <SheetShell
         eyebrow="CivilierERP · CRM · Sale deed"
         title="Property Mutation"
