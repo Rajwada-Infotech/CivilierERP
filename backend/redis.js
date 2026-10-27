@@ -532,9 +532,16 @@ const USER_VALID_PREFIX = "user-valid:";
 const invalidateUserSession = (userId) =>
   redisDel(`${USER_VALID_PREFIX}${userId}`);
 
+// The client's connection state ("ready", "connecting", "reconnecting", "end"…) without touching Redis: a ping on a
+// down server logs a warning each time, too noisy for something sampled every second (the terminal monitor).
+function redisStatus() {
+  return client ? client.status : "not-connected";
+}
+
 module.exports = {
   getRedis,
   isRedisReady,
+  redisStatus,
   redisGetStrict,
   USER_VALID_PREFIX,
   invalidateUserSession,

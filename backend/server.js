@@ -417,6 +417,10 @@ async function createApp() {
   app.set("trust proxy", Math.max(1, parseInt(process.env.TRUST_PROXY_HOPS || "1", 10) || 1));
 
   app.disable("x-powered-by");
+  // The terminal monitor (npm run monitor): its local-only feed, mounted ahead of the request logger, timeout and
+  // compression so the live stream is neither cut off nor buffered; then the tap that hands it every request.
+  app.use("/internal/monitor", require("./routes/internalMonitor"));
+  app.use(require("./middleware/activityTap"));
   app.use(requestLogger);
   app.use(addRequestTiming);
   app.use(requestTimeout());
@@ -675,6 +679,17 @@ async function createApp() {
     }
 
     res.err = err; // Let pino-http surface the real error
+    require("./services/activityFeed").recordError({
+      source: "handler",
+      level: "error",
+      msg: err.message,
+      stack: String(err.stack || "").split("\n").slice(1, 4).map((l) => l.trim()).join(" | "),
+      status: statusCode,
+      method: req.method,
+      path: (req.originalUrl || req.url || "").split("?")[0],
+      user: req.user?.email || null,
+      id: req.id,
+    });
 
     res.status(statusCode).json({
       success: false,
