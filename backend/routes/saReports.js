@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -52,7 +53,7 @@ router.get("/campaign-performance", requirePageRight("sa-campaigns", "view"), as
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
         GROUP BY a.CampaignId
       ),
@@ -105,7 +106,7 @@ router.get("/ad-performance", requirePageRight("sa-ads", "view"), async (req, re
         FROM dbo.SaMarketingInvoice
         WHERE IsActive = 1
           AND AdId IS NOT NULL
-          AND PaymentStatus <> 'Cancelled'
+          AND ${countedInvoiceSql()}
         GROUP BY AdId
       )
       SELECT a.Id, a.Name, a.Status, a.Budget,
@@ -181,7 +182,7 @@ router.get("/cost-per-lead", requirePageRight("sa-campaigns", "view"), async (re
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
         GROUP BY a.CampaignId
       ),
@@ -384,7 +385,7 @@ router.get("/marketing-roi", requirePageRight("sa-campaigns", "view"), async (re
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
         GROUP BY a.CampaignId
       ),

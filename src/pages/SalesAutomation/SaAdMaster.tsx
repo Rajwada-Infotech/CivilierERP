@@ -63,7 +63,8 @@ const fields: FieldDef[] = [
     options: ["Active", "Paused", "Completed", "Cancelled"],
     defaultValue: "Active",
   },
-  { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
+  // No "Active" switch: Status says whether the ad is live. IsActive is the
+  // delete flag, set by Delete — an edit sends back the value it loaded.
 
   { name: "_creative", label: "Creative", type: "section" },
   { name: "headline", label: "Headline", type: "text", placeholder: "The first line people read" },

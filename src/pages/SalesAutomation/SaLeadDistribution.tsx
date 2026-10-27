@@ -119,10 +119,13 @@ const SaLeadDistribution: React.FC = () => {
     }
   };
 
+  // Level 1 splits (Evenly / By share) go to team leads only; an admin can
+  // still be picked for a single lead in "Pick each".
   const eligibleUsers = useMemo(() => {
-    if (level === 1) return users.filter((u: any) => u.role === "sales_team_lead" || u.role === "admin" || u.role === "super_admin");
-    return users.filter((u: any) => u.role === "sales_person");
-  }, [users, level]);
+    if (level === 2) return users.filter((u: any) => u.role === "sales_person");
+    const roles = method === "Manual" ? ["sales_team_lead", "admin", "super_admin"] : ["sales_team_lead"];
+    return users.filter((u: any) => roles.includes(u.role));
+  }, [users, level, method]);
 
   const toggleLead = (id: number) => {
     setSelectedLeads((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);

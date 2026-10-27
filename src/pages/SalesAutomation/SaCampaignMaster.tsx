@@ -63,7 +63,9 @@ const fields: FieldDef[] = [
     options: ["Active", "Paused", "Completed", "Cancelled"],
     defaultValue: "Active",
   },
-  { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
+  // No "Active" switch: Status says whether the campaign is running.
+  // IsActive is the delete flag, set by Delete — an edit sends back the
+  // value it loaded.
   { name: "objective", label: "Objective", type: "textarea", fullWidth: true, placeholder: "What this campaign should achieve — e.g. 200 site-visit leads for 3BHK units by March" },
 ];
 

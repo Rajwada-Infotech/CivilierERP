@@ -48,4 +48,10 @@ const distributableStatus = (level) => (level === 1 ? "New" : "Assigned");
 const CLOSED_LEAD_STATUSES = [SA_LEAD_BOOKED, SA_LEAD_CONVERTED, "Lost"];
 const CLOSED_LEAD_SQL = `(${CLOSED_LEAD_STATUSES.map((s) => `'${s}'`).join(", ")})`;
 
-module.exports = { CLOSED_LEAD_STATUSES, CLOSED_LEAD_SQL, distributableStatus, STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };
+// Which marketing invoices count toward campaign/ad spend (and so CPL/ROI):
+// everything except cancelled payments and rejected approvals. `a` is the
+// table alias with its dot ("i.") or "" for an unaliased query.
+const countedInvoiceSql = (a = "") =>
+  `${a}PaymentStatus <> 'Cancelled' AND ${a}ApprovalStatus <> 'Rejected'`;
+
+module.exports = { countedInvoiceSql, CLOSED_LEAD_STATUSES, CLOSED_LEAD_SQL, distributableStatus, STATUS_TRANSITIONS, QUALIFIED_FOR_CONVERSION, SA_LEAD_BOOKED, SA_LEAD_CONVERTED, statusesThatCanMoveTo };

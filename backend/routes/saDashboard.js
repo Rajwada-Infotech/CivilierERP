@@ -5,7 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, isSaAdmin } = require("../services/saAccess");
-const { CLOSED_LEAD_SQL } = require("../constants/saStatuses");
+const { CLOSED_LEAD_SQL, countedInvoiceSql } = require("../constants/saStatuses");
 router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -40,7 +40,7 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
       ),
       booking_revenue AS (
