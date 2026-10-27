@@ -175,7 +175,7 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
     call(`${API}/blocks/${blockId}/unit-template`, "PUT", { Items: data.typical, PaymentPlanIds: next }, "Payment plans updated");
   };
   const saveFloorMix = async (f: FloorRow) => { if (await call(`${API}/floors/${f.Id}/mix`, "PUT", { Items: floorDraft }, `Floor ${f.FloorLabel} saved`)) setEditingFloor(null); };
-  const useTypical = (f: FloorRow) => call(`${API}/floors/${f.Id}/mix`, "PUT", { Items: null }, `Floor ${f.FloorLabel} follows the typical floor`);
+  const followTypical = (f: FloorRow) => call(`${API}/floors/${f.Id}/mix`, "PUT", { Items: null }, `Floor ${f.FloorLabel} follows the typical floor`);
   const toggleUnits = (f: FloorRow, on: boolean) => call(`${API}/floors/${f.Id}`, "PUT", { HasUnits: on }, on ? `Floor ${f.FloorLabel} has units` : `Floor ${f.FloorLabel}: no units`);
 
   if (isError) return <p className="text-xs text-destructive">{(error as Error)?.message}</p>;
@@ -313,7 +313,7 @@ export function BlockStackEditor({ blockId, blockName, kinds, layoutTypes, canEd
                               {canEdit && (
                                 <span className="ml-auto flex gap-2">
                                   {f.ownMix && (
-                                    <button type="button" onClick={() => useTypical(f)} disabled={busy} className={`${KEY_LINE} h-8 px-3`}>Use typical floor</button>
+                                    <button type="button" onClick={() => followTypical(f)} disabled={busy} className={`${KEY_LINE} h-8 px-3`}>Use typical floor</button>
                                   )}
                                   <button type="button"
                                     onClick={() => {
