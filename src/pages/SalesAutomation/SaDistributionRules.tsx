@@ -20,11 +20,11 @@ async function fetchRules(): Promise<any[]> {
   if (!r.ok) throw new Error("Failed to fetch rules");
   return r.json().catch(() => ({}));
 }
-async function fetchUserOptions(): Promise<{ value: string; label: string }[]> {
+async function fetchUserOptions(): Promise<{ value: string; label: string; role: string }[]> {
   const r = await fetchWithAuth("/api/sa/leads/users");
   if (!r.ok) return [];
   const data: any[] = await r.json().catch(() => ({}));
-  return data.map((u) => ({ value: String(u.Id), label: `${u.Name} (${u.role.replace(/_/g, " ")})` }));
+  return data.map((u) => ({ value: String(u.Id), label: `${u.Name} (${u.role.replace(/_/g, " ")})`, role: u.role }));
 }
 async function fetchCampaignOptions(): Promise<{ value: string; label: string }[]> {
   const r = await fetchWithAuth("/api/sa/campaigns/dropdown");
@@ -33,21 +33,27 @@ async function fetchCampaignOptions(): Promise<{ value: string; label: string }[
   return data.map((c) => ({ value: String(c.Id), label: `${c.CampaignCode} - ${c.Name}` }));
 }
 
-const METHODS = ["RoundRobin", "Weighted", "Manual"];
-const SCOPE_TYPES = ["Global", "Campaign", "TeamLead"];
-const LEVELS = [
-  { value: 1, label: "Level 1 — Admin → Team Lead" },
-  { value: 2, label: "Level 2 — Team Lead → Salesperson" },
-];
-
-const methodBadge = (m: string) => {
-  const colors: Record<string, string> = {
-    RoundRobin: "bg-blue-500/10 text-blue-600",
-    Weighted: "bg-purple-500/10 text-purple-600",
-    Manual: "bg-muted text-muted-foreground",
-  };
-  return <span className={`px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${colors[m] ?? "bg-muted text-muted-foreground"}`}>{m}</span>;
+// Codes are what the backend stores; label/hint are what staff read.
+const METHODS: Record<string, { label: string; hint: string; cls: string }> = {
+  RoundRobin: { label: "Take turns", hint: "Each new lead goes to the next member in order.", cls: "bg-blue-500/10 text-blue-600" },
+  Weighted: { label: "Weighted", hint: "Members get leads in proportion to their weight (2 gets twice as many as 1).", cls: "bg-purple-500/10 text-purple-600" },
+  Manual: { label: "Manual", hint: "Nothing is assigned automatically — leads wait on the Distribution page.", cls: "bg-muted text-muted-foreground" },
 };
+const SCOPE_TYPES: Record<string, string> = { Global: "All leads", Campaign: "Leads from one campaign", TeamLead: "One team lead's leads" };
+const LEVELS = [
+  { value: 1, label: "Level 1 — New leads to team leads", hint: "Who receives each new lead first." },
+  { value: 2, label: "Level 2 — Team lead to salesperson", hint: "How a team lead's leads are passed to their salespeople." },
+];
+const TEAM_LEAD_ROLE = "sales_team_lead";
+// Which scopes the engine actually reads at each level
+// (backend/services/saDistributionEngine.js findApplicableRule): level 1
+// tries the lead's campaign rule, then the all-leads rule; level 2 only
+// ever uses the team lead's own rule.
+const SCOPES_BY_LEVEL: Record<number, string[]> = { 1: ["Global", "Campaign"], 2: ["TeamLead"] };
+const scopeKey = (r: any) => `${r.Level}|${r.ScopeType}|${r.ScopeId ?? ""}`;
+
+const methodBadge = (m: string) =>
+  <span title={METHODS[m]?.hint} className={`px-2 py-0.5 rounded-full text-[0.625rem] font-semibold ${METHODS[m]?.cls ?? "bg-muted text-muted-foreground"}`}>{METHODS[m]?.label ?? m}</span>;
 
 const EMPTY_FORM = { Level: 1, ScopeType: "Global", ScopeId: "", Method: "RoundRobin" };
 
@@ -63,7 +69,7 @@ const SaDistributionRules: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [runningLevel, setRunningLevel] = useState<number | null>(null);
 
-  const { data: rules = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-distribution-rules"], queryFn: fetchRules, staleTime: 30_000 });
+  const { data: rules = [], isLoading, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-distribution-rules"], queryFn: fetchRules, staleTime: 30_000 });
   const { data: userOptions = [] } = useQuery({ queryKey: ["sa-user-options"], queryFn: fetchUserOptions, staleTime: 5 * 60_000 });
   const { data: campaignOptions = [] } = useQuery({ queryKey: ["sa-campaign-options"], queryFn: fetchCampaignOptions, staleTime: 5 * 60_000 });
 
@@ -80,16 +86,6 @@ const SaDistributionRules: React.FC = () => {
       });
       if (!r.ok) throw new Error((await r.json()).error);
       toast.success(rule.IsActive ? "Rule deactivated" : "Rule activated");
-      await invalidate();
-    } catch (e: any) { toast.error(translateError(e.message)); }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!confirm("Deactivate this rule?")) return;
-    try {
-      const r = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
-      if (!r.ok) throw new Error((await r.json()).error);
-      toast.success("Rule deactivated");
       await invalidate();
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
@@ -139,6 +135,8 @@ const SaDistributionRules: React.FC = () => {
     finally { setSaving(false); }
   };
 
+  const activeByScope = (rules as any[]).filter((r: any) => r.IsActive)
+    .reduce((m: Record<string, number>, r: any) => ({ ...m, [scopeKey(r)]: (m[scopeKey(r)] ?? 0) + 1 }), {});
   const level1Rules = (rules as any[]).filter((r: any) => r.Level === 1);
   const level2Rules = (rules as any[]).filter((r: any) => r.Level === 2);
 
@@ -151,21 +149,27 @@ const SaDistributionRules: React.FC = () => {
       cell: (i) => <span className="text-muted-foreground">{i.row.index + 1}</span> },
   ];
 
-  const RuleGroup = ({ title, groupRules, level }: { title: string; groupRules: any[]; level: number }) => (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <button
-          onClick={() => handleRunNow(level)}
-          disabled={runningLevel === level}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 border border-emerald-500/30 disabled:opacity-40 transition-colors"
-        >
-          <Play size={11} /> {runningLevel === level ? "Running..." : "Run Auto-Distribute Now"}
-        </button>
+  const RuleGroup = ({ title, hint, groupRules, level }: { title: string; hint: string; groupRules: any[]; level: number }) => (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="text-xs text-muted-foreground">{hint} {groupRules.filter((r) => r.IsActive).length} of {groupRules.length} rule{groupRules.length === 1 ? "" : "s"} on.</p>
+        </div>
+        {canManage && (
+          <button
+            onClick={() => handleRunNow(level)}
+            disabled={runningLevel === level}
+            title="Assign every waiting lead at this level now, using the rules that are on"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 border border-emerald-500/30 disabled:opacity-40 transition-colors"
+          >
+            <Play size={11} /> {runningLevel === level ? "Assigning…" : "Assign waiting leads now"}
+          </button>
+        )}
       </div>
       {groupRules.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
-          No rules configured for this level
+          No rules at this level yet — leads wait on the Distribution page until someone assigns them.
         </div>
       ) : groupRules.map((rule: any) => (
         <div key={rule.Id} className={`rounded-lg border overflow-hidden ${rule.IsActive ? "border-border" : "border-border/50 opacity-60"}`}>
@@ -178,25 +182,33 @@ const SaDistributionRules: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-foreground">
-                    {rule.ScopeType === "Global" ? "Global"
+                    {rule.ScopeType === "Global" ? "All leads"
                       : rule.ScopeType === "Campaign" ? `Campaign: ${rule.ScopeCampaignName || rule.ScopeId}`
-                      : `Team Lead: ${rule.ScopeTeamLeadName || rule.ScopeId}`}
+                      : `Team lead: ${rule.ScopeTeamLeadName || rule.ScopeId}`}
                   </span>
                   {methodBadge(rule.Method)}
-                  {!rule.IsActive && <span className="text-[0.625rem] text-muted-foreground italic">inactive</span>}
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{rule.members.length} member{rule.members.length !== 1 ? "s" : ""}</p>
+                {!SCOPES_BY_LEVEL[level].includes(rule.ScopeType) && (
+                  <p className="text-xs text-amber-600 mt-0.5">Never used — at this level only {SCOPES_BY_LEVEL[level].map((s) => SCOPE_TYPES[s].toLowerCase()).join(" or ")} rules apply.</p>
+                )}
+                {rule.IsActive && activeByScope[scopeKey(rule)] > 1 && (
+                  <p className="text-xs text-amber-600 mt-0.5">Another rule for the same leads is also on — only one of them is used. Turn one off.</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {rule.members.length
+                    ? rule.members.slice(0, 4).map((m: any) => m.UserName).join(", ") + (rule.members.length > 4 ? ` +${rule.members.length - 4} more` : "")
+                    : "No members"}
+                </p>
               </div>
             </div>
-            {canManage && (
-              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => handleToggleActive(rule)} className="text-muted-foreground hover:text-foreground transition-colors" title={rule.IsActive ? "Deactivate" : "Activate"}>
-                  {rule.IsActive ? <ToggleRight size={18} className="text-emerald-500" /> : <ToggleLeft size={18} />}
-                </button>
-                <button onClick={() => handleDelete(rule.Id)} className="p-1 text-muted-foreground hover:text-red-500 transition-colors" title="Delete">
-                  <Trash2 size={14} />
-                </button>
-              </div>
+            {canManage ? (
+              <button onClick={(e) => { e.stopPropagation(); handleToggleActive(rule); }}
+                className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors ${rule.IsActive ? "text-emerald-600 hover:bg-emerald-50" : "text-muted-foreground hover:bg-muted"}`}
+                title={rule.IsActive ? "Turn this rule off" : "Turn this rule on"}>
+                {rule.IsActive ? <ToggleRight size={18} /> : <ToggleLeft size={18} />} {rule.IsActive ? "On" : "Off"}
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground">{rule.IsActive ? "On" : "Off"}</span>
             )}
           </div>
           {expanded.has(rule.Id) && (
@@ -216,13 +228,19 @@ const SaDistributionRules: React.FC = () => {
           )}
         </div>
       ))}
-    </div>
+    </section>
   );
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading distribution rules...</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Setup", "Distribution Rules"]} title="Distribution Rules">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load distribution rules. Refresh the page to try again." : "Loading distribution rules…"}
+      </div>
+    </SalesAutoShell>
+  );
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Distribution Rules"]} title="Distribution Rules" subtitle="Configure how leads are automatically assigned to team leads and salespersons"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Setup", "Distribution Rules"]} title="Distribution Rules" subtitle="Who gets each new lead automatically. Level 1 uses the lead's campaign rule if there is one, otherwise the all-leads rule; level 2 uses each team lead's own rule."
       action={
         <div className="flex items-center gap-2">
           <Link to="/sales-automation/distribution"
@@ -233,19 +251,17 @@ const SaDistributionRules: React.FC = () => {
         </div>
       }>
       <div className="space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          {canManage && (
-            <button
-              onClick={() => { setAddOpen(true); setForm({ ...EMPTY_FORM }); setMembers([{ UserId: "", Weight: "1" }]); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-module text-white transition-colors"
-            >
-              <Plus size={13} /> Add Rule
-            </button>
-          )}
-        </div>
+        {canManage && (
+          <button
+            onClick={() => { setAddOpen(true); setForm({ ...EMPTY_FORM }); setMembers([{ UserId: "", Weight: "1" }]); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-module text-white transition-colors"
+          >
+            <Plus size={13} /> Add rule
+          </button>
+        )}
 
-        <RuleGroup title="Level 1 — Admin → Team Lead" groupRules={level1Rules} level={1} />
-        <RuleGroup title="Level 2 — Team Lead → Salesperson" groupRules={level2Rules} level={2} />
+        <RuleGroup title={LEVELS[0].label} hint={LEVELS[0].hint} groupRules={level1Rules} level={1} />
+        <RuleGroup title={LEVELS[1].label} hint={LEVELS[1].hint} groupRules={level2Rules} level={2} />
       </div>
 
       {/* Add Rule Dialog */}
@@ -258,25 +274,26 @@ const SaDistributionRules: React.FC = () => {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1.5">Level <span className="text-destructive">*</span></label>
-                <select value={form.Level} onChange={(e) => setForm((f) => ({ ...f, Level: parseInt(e.target.value) }))}
+                <select value={form.Level} onChange={(e) => { const Level = parseInt(e.target.value); setForm((f) => ({ ...f, Level, ScopeType: SCOPES_BY_LEVEL[Level][0], ScopeId: "" })); }}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                   {LEVELS.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1.5">Method <span className="text-destructive">*</span></label>
+                <label className="text-xs text-muted-foreground block mb-1.5">How to share <span className="text-destructive">*</span></label>
                 <select value={form.Method} onChange={(e) => setForm((f) => ({ ...f, Method: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
-                  {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  {Object.entries(METHODS).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1.5">Scope Type</label>
+                <label className="text-xs text-muted-foreground block mb-1.5">Applies to</label>
                 <select value={form.ScopeType} onChange={(e) => setForm((f) => ({ ...f, ScopeType: e.target.value, ScopeId: "" }))}
                   className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
-                  {SCOPE_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {SCOPES_BY_LEVEL[form.Level].map((k) => <option key={k} value={k}>{SCOPE_TYPES[k]}</option>)}
                 </select>
               </div>
+              <p className="col-span-2 -mt-1 text-[0.6875rem] text-muted-foreground">{METHODS[form.Method]?.hint}</p>
               {form.ScopeType === "Campaign" && (
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1.5">Campaign</label>
@@ -293,7 +310,7 @@ const SaDistributionRules: React.FC = () => {
                   <SearchableNativeSelect value={form.ScopeId} onChange={(e) => setForm((f) => ({ ...f, ScopeId: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
                     <option value="">Select team lead...</option>
-                    {(userOptions as any[]).filter((u: any) => u.label.includes("team lead")).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
+                    {userOptions.filter((u) => u.role === TEAM_LEAD_ROLE).map((u: any) => <option key={u.value} value={u.value}>{u.label}</option>)}
                   </SearchableNativeSelect>
                 </div>
               )}
@@ -325,16 +342,16 @@ const SaDistributionRules: React.FC = () => {
                   </div>
                 ))}
               </div>
-              {form.Method === "Weighted" && (
-                <p className="text-[0.625rem] text-muted-foreground mt-1.5">Weight determines relative share of leads (e.g. 2 gets twice as many as 1)</p>
-              )}
+              <p className="text-[0.625rem] text-muted-foreground mt-1.5">
+                {form.Method === "Weighted" ? "The number beside each member is their weight." : "Members take turns in this order."}
+              </p>
             </div>
 
             <div className="flex justify-end gap-2 pt-1 border-t border-border">
               <button onClick={() => setAddOpen(false)} className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
               <button onClick={handleSave} disabled={saving}
                 className="px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors">
-                {saving ? "Saving..." : "Create Rule"}
+                {saving ? "Saving…" : "Create rule"}
               </button>
             </div>
           </div>
