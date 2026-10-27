@@ -24,7 +24,7 @@ import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
-import { LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
+import { LEAD_CLASSIFICATIONS, LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
 const API = "/api/sa/leads";
@@ -113,7 +113,7 @@ const fields: FieldDef[] = [
   { name: "AssignedTeamLeadId", label: "Assigned Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
   { name: "AssignedSalespersonId", label: "Assigned Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
   { name: "Status", label: "Lead Status", type: "select", options: LEAD_STATUS_KEYS, defaultValue: "New" },
-  { name: "Classification", label: "Classification", type: "select", options: ["Hot","Warm","Cold","NotInterested","CallBackLater"] },
+  { name: "Classification", label: "Classification", type: "select", options: LEAD_CLASSIFICATIONS },
   { name: "BudgetMin", label: "Budget Min", type: "number" },
   { name: "BudgetMax", label: "Budget Max", type: "number" },
   // From the masters: unit kinds (Unit Master › Unit kinds) and layouts (Unit Composition).

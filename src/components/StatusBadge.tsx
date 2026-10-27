@@ -675,6 +675,11 @@ export function getStatusClasses(status: string | null | undefined): string {
   return ((status && ALL_STATUS_CONFIG[status]) || FALLBACK).classes;
 }
 
+/** Human label for a status code (e.g. "NotInterested" -> "Not Interested"). */
+export function getStatusLabel(status: string | null | undefined): string {
+  return (status && ALL_STATUS_CONFIG[status]?.label) || status || "";
+}
+
 // The colour each status was given is what it means — green settled, amber / yellow / orange waiting on someone, blue /
 // violet under way, red stopped, slate a draft — so the sheet mark is read off it and every entry keeps its meaning.
 export function statusBadgeTone(status: string | null | undefined): MarkTone {

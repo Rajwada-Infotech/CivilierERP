@@ -7,10 +7,11 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Phone, MapPin, Clock, AlertTriangle } from "lucide-react";
+import { Phone, MapPin, Clock, AlertTriangle, Search } from "lucide-react";
+import { LEAD_CLASSIFICATIONS } from "@/components/sa/leadStages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DateInput } from "@/components/ui/date-input";
-import { StatusBadge, getStatusClasses } from "@/components/StatusBadge";
+import { StatusBadge, getStatusClasses, getStatusLabel } from "@/components/StatusBadge";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
@@ -18,7 +19,20 @@ const ACTIVITIES_API = "/api/sa/lead-activities";
 const LEADS_API = "/api/sa/leads";
 const VISITS_API = "/api/sa/site-visits";
 
-const CLASSIFICATIONS = ["Hot", "Warm", "Cold", "NotInterested", "CallBackLater"];
+const DAY = 24 * 60 * 60 * 1000;
+const startOfToday = () => new Date(new Date().toDateString()).getTime();
+/** Whole days from today to the reminder (negative = overdue), or null. */
+const dueIn = (d: unknown) => (d ? Math.round((new Date(String(d).slice(0, 10)).setHours(0, 0, 0, 0) - startOfToday()) / DAY) : null);
+const fmtDay = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+const QUEUE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "overdue", label: "Overdue" },
+  { key: "today", label: "Due today" },
+  { key: "new", label: "Never contacted" },
+] as const;
+type QueueFilter = (typeof QUEUE_FILTERS)[number]["key"];
 
 async function fetchPendingFollowups(): Promise<any[]> {
   const res = await fetchWithAuth(`${ACTIVITIES_API}/pending-followups`);
@@ -65,16 +79,30 @@ const SaFollowups: React.FC = () => {
     for (const p of pending as any[]) {
       if (seen.has(p.LeadId)) continue;
       seen.add(p.LeadId);
-      const overdue = p.NextFollowupDate && new Date(p.NextFollowupDate) < new Date(new Date().toDateString());
-      rows.push({ ...p, overdue, hasReminder: true });
+      const days = dueIn(p.NextFollowupDate);
+      rows.push({ ...p, days, overdue: days !== null && days < 0, hasReminder: true });
     }
     for (const l of untouched as any[]) {
       if (seen.has(l.Id)) continue;
       seen.add(l.Id);
-      rows.push({ LeadId: l.Id, LeadUid: l.LeadUid, CustomerName: l.CustomerName, Mobile: l.Mobile, Status: l.Status, Classification: l.Classification, overdue: true, hasReminder: false });
+      rows.push({ LeadId: l.Id, LeadUid: l.LeadUid, CustomerName: l.CustomerName, Mobile: l.Mobile, Status: l.Status, Classification: l.Classification, days: null, overdue: true, hasReminder: false });
     }
-    return rows.sort((a, b) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1));
+    // Never-contacted first, then most overdue, then soonest due.
+    const rank = (r: any) => (r.hasReminder ? r.days ?? 0 : -100000);
+    return rows.sort((a, b) => rank(a) - rank(b));
   }, [pending, untouched]);
+
+  const [filter, setFilter] = useState<QueueFilter>("all");
+  const [search, setSearch] = useState("");
+  const matches: Record<QueueFilter, (r: any) => boolean> = {
+    all: () => true,
+    overdue: (r) => r.hasReminder && r.days !== null && r.days < 0,
+    today: (r) => r.hasReminder && r.days === 0,
+    new: (r) => !r.hasReminder,
+  };
+  const q = search.trim().toLowerCase();
+  const shownQueue = queue.filter((r) => matches[filter](r)
+    && (!q || [r.CustomerName, r.Mobile, r.LeadUid].some((v) => String(v ?? "").toLowerCase().includes(q))));
 
   const selected = queue.find((q) => q.LeadId === selectedLeadId);
 
@@ -95,7 +123,7 @@ const SaFollowups: React.FC = () => {
         body: JSON.stringify({ Classification: classification }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Failed to update interest");
-      toast.success(`Marked as ${classification}`);
+      toast.success(`Marked as ${getStatusLabel(classification)}`);
       invalidateAll();
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -132,40 +160,70 @@ const SaFollowups: React.FC = () => {
   };
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Follow-Ups"]} title="Follow-Up" subtitle="Leads due for their next touch — reminders, interest, and the next step onward to a site visit"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Engagement", "Follow-Up"]} title="Follow-Up"
+      subtitle={`${queue.length} lead${queue.length === 1 ? "" : "s"} need a call — ${queue.filter(matches.overdue).length} overdue, ${queue.filter(matches.today).length} due today, ${queue.filter(matches.new).length} never contacted`}
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <div className="flex gap-4 h-[calc(100vh-200px)]">
-        <div className="w-80 shrink-0 flex flex-col gap-2">
-          <div className="text-xs text-muted-foreground px-1">{queue.length} lead(s) need attention</div>
-          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+      <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] lg:h-[calc(100vh-200px)]">
+        <div className={`flex flex-col gap-2 min-h-0 ${selected ? "hidden lg:flex" : ""}`}>
+          <div className="flex flex-wrap gap-1">
+            {QUEUE_FILTERS.map((f) => {
+              const n = queue.filter(matches[f.key]).length;
+              return (
+                <button key={f.key} onClick={() => setFilter(f.key)}
+                  className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${filter === f.key ? "bg-primary/10 border-primary/30 text-primary font-medium" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                  {f.label} <span className="tabular-nums opacity-70">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 bg-background">
+            <Search size={13} className="text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, mobile or lead ID"
+              className="flex-1 bg-transparent text-xs outline-none" />
+          </label>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1 max-h-[70vh] lg:max-h-none">
             {loadingPending ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
+              <div className="p-4 text-center text-muted-foreground text-sm">Loading…</div>
             ) : queue.length === 0 ? (
-              <div className="p-4 text-center text-muted-foreground text-sm">No follow-ups due — you're all caught up</div>
-            ) : queue.map((q) => (
-              <button key={q.LeadId} onClick={() => setSelectedLeadId(q.LeadId)}
-                className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedLeadId === q.LeadId ? "border-primary bg-primary/5" : "border-border hover:bg-accent"}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-foreground truncate">{q.CustomerName}</span>
-                  {q.overdue && <AlertTriangle size={12} className="text-red-500 shrink-0" />}
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">{q.Mobile}</div>
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock size={10} />
-                  {q.hasReminder ? (q.NextFollowupDate ? String(q.NextFollowupDate).slice(0, 10) : "—") : "Never followed up"}
-                </div>
-              </button>
-            ))}
+              <div className="p-6 text-center text-muted-foreground text-sm">No follow-ups due — you're all caught up.</div>
+            ) : shownQueue.length === 0 ? (
+              <div className="p-6 text-center text-muted-foreground text-sm">No leads match.</div>
+            ) : shownQueue.map((r) => {
+              const when = !r.hasReminder ? "Never contacted"
+                : r.days === null ? "No date set"
+                : r.days < 0 ? `${-r.days} day${r.days === -1 ? "" : "s"} overdue`
+                : r.days === 0 ? "Due today" : r.days === 1 ? "Due tomorrow" : `Due ${fmtDay(r.NextFollowupDate)}`;
+              const tone = !r.hasReminder || (r.days ?? 0) < 0 ? "text-red-600" : r.days === 0 ? "text-amber-600" : "text-muted-foreground";
+              return (
+                <button key={r.LeadId} onClick={() => setSelectedLeadId(r.LeadId)}
+                  className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedLeadId === r.LeadId ? "border-primary bg-primary/5" : "border-border hover:bg-accent"}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-foreground truncate">{r.CustomerName}</span>
+                    {r.Classification && <StatusBadge status={r.Classification} />}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{r.LeadUid} · {r.Mobile}</div>
+                  <div className={`text-xs flex items-center gap-1 mt-0.5 font-medium ${tone}`}>
+                    {(!r.hasReminder || (r.days ?? 0) < 0) ? <AlertTriangle size={11} /> : <Clock size={11} />} {when}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-4">
+        <div className="min-h-0 overflow-y-auto space-y-4">
           {!selected ? (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Select a lead to follow up</div>
+            <div className="hidden lg:flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground text-sm rounded-xl border border-dashed border-border">
+              <Phone size={18} className="opacity-50" />
+              Pick a lead on the left to call, log the conversation and set the next reminder.
+            </div>
           ) : (
             <>
+              <button onClick={() => setSelectedLeadId(null)} className="lg:hidden inline-flex items-center gap-1 text-xs text-primary">
+                ← Back to the list
+              </button>
               <div className="rounded-lg border border-border p-4 space-y-3">
-                <div className="flex items-start justify-between">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-bold text-foreground">{selected.CustomerName}</h2>
                     <p className="text-xs text-muted-foreground font-mono">{selected.LeadUid} · {selected.Mobile}</p>
@@ -184,14 +242,14 @@ const SaFollowups: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1.5">Interest Level</label>
+                  <label className="text-xs text-muted-foreground block mb-1.5">How interested are they?</label>
                   <div className="flex gap-1.5 flex-wrap">
-                    {CLASSIFICATIONS.map((c) => (
+                    {LEAD_CLASSIFICATIONS.map((c) => (
                       <button key={c} onClick={() => handleSetInterest(c)}
                         className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
                           selected.Classification === c ? getStatusClasses(c) + " border-transparent" : "border-border text-muted-foreground hover:bg-muted"
                         }`}>
-                        {c}
+                        {getStatusLabel(c)}
                       </button>
                     ))}
                   </div>
@@ -216,7 +274,7 @@ const SaFollowups: React.FC = () => {
                       <span className="text-xs text-muted-foreground">{h.CreatedAt ? fmtIstIso(h.CreatedAt) : "—"}</span>
                     </div>
                     {h.Summary && <p className="text-xs text-muted-foreground mt-1">{h.Summary}</p>}
-                    {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {String(h.NextFollowupDate).slice(0, 10)}</p>}
+                    {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {fmtDay(h.NextFollowupDate)}</p>}
                   </div>
                 ))}
               </div>

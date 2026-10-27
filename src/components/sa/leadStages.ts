@@ -28,3 +28,7 @@ export const LEAD_STAGES: LeadStage[] = [
 ];
 
 export const LEAD_STATUS_KEYS = LEAD_STAGES.map((s) => s.key);
+
+// SaLead.Classification values — how interested the customer is. Labels and
+// colours come from StatusBadge (getStatusLabel / getStatusClasses).
+export const LEAD_CLASSIFICATIONS = ["Hot", "Warm", "Cold", "NotInterested", "CallBackLater"];
