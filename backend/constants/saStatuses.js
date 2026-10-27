@@ -12,7 +12,7 @@ const STATUS_TRANSITIONS = {
   Contacted: ["Contacted", "FollowUp", "VisitScheduled", "Lost"],
   FollowUp: ["FollowUp", "VisitScheduled", "Lost"],
   VisitScheduled: ["VisitScheduled", "Visited", "Lost"],
-  Visited: ["Visited", "FollowUp", "Booking", "Lost"],
+  Visited: ["Visited", "FollowUp", "Lost"],
   Converted: ["Converted"],
   Booking: ["Booking"],
   Lost: ["Lost"],
@@ -29,7 +29,7 @@ const SA_LEAD_CONVERTED = "Converted";
 
 // The statuses a lead must have reached before it's qualified enough for
 // SA -> CRM handoff (used by saHandoff.js's convertLead).
-const QUALIFIED_FOR_CONVERSION = ["Visited", "Booking"];
+const QUALIFIED_FOR_CONVERSION = ["Visited"];
 
 // Statuses that may move forward to `to` (excluding `to` itself). Used by
 // side-effect status changes (e.g. site visits) so they follow the same

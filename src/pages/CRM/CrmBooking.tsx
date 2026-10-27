@@ -141,7 +141,12 @@ async function fetchBookingsList(filters: BookingListFilters, page: number): Pro
   if (filters.projectId) params.set("projectId", filters.projectId);
   if (filters.blockId) params.set("blockId", filters.blockId);
   const res = await fetchWithAuth(`${API}?${params}`);
-  if (!res.ok) return { rows: [], total: 0 };
+  // Throw rather than return an empty list — a server error must not look
+  // like "No bookings found".
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Could not load bookings (HTTP ${res.status})`);
+  }
   const data = await res.json();
   return { rows: data.rows || [], total: data.total || 0 };
 }
@@ -273,7 +278,7 @@ const CrmBooking: React.FC = () => {
   // fetching "the booking(s) for this one application," not a page of the
   // main list. Only the main list (no appFilter) goes through the new
   // server-side search/status/Company/Project/Block + pagination path.
-  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch, error: listError } = useQuery({
     queryKey: ["crm-bookings", appFilter, listFilters, page],
     queryFn: async () => {
       if (appFilter) return { rows: await fetchBookings(appFilter), total: 0 };
@@ -901,7 +906,7 @@ const CrmBooking: React.FC = () => {
           columns={bookingColumns}
           searchable={false}
           loading={isLoading}
-          emptyMessage="No bookings found"
+          emptyMessage={listError ? (listError as Error).message : "No bookings found"}
           className="border-0"
         />
         {!appFilter && <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}

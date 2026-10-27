@@ -8,7 +8,6 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { isSaAdmin, actorId } = require("../services/saAccess");
 const { CLOSED_LEAD_SQL, distributableStatus } = require("../constants/saStatuses");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

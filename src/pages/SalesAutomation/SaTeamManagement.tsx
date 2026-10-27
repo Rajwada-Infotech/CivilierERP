@@ -264,7 +264,9 @@ const SaTeamManagement: React.FC = () => {
       // Add Team stays available like on every other master page; when no
       // lead is free, the form says so here instead of the button vanishing.
       disabledWhen: (form) => !isAdmin || (!form.teamLeadUserId && leads.every((l) => !!l.TeamId)),
-      disabledPlaceholder: "No free team lead — give a user the Sales Team Lead role in Users first",
+      disabledPlaceholder: isAdmin
+        ? "No free team lead — give a user the Sales Team Lead role in Users first"
+        : "Only an SA admin can change the team lead",
     },
     {
       name: "memberIds",
@@ -330,13 +332,13 @@ const SaTeamManagement: React.FC = () => {
     <SalesAutoShell
       breadcrumbs={["Sales Automation", "Teams"]}
       title="Teams"
-      subtitle={`${rows.length} teams · ${salespeople.length - notInTeam} of ${salespeople.length} salespeople in a team${notInTeam ? ` · ${notInTeam} not in any team` : ""}`}
+      subtitle={`${rows.length} team${rows.length === 1 ? "" : "s"} · ${salespeople.length - notInTeam} of ${salespeople.length} salespeople in a team${notInTeam ? ` · ${notInTeam} not in any team` : ""}`}
     >
       {isAdmin && freeLeads === 0 && (
         <div role="note" className="flex gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3">
           <Info size={16} className="text-muted-foreground shrink-0 mt-0.5" aria-hidden />
           <p className="text-sm text-muted-foreground">
-            Every team lead already heads a team. To add another team, give a user the <span className="text-foreground font-medium">Sales Team Lead</span> role in Users.
+            Every team lead already heads a team, so a new team can't be saved yet. Give another user the <span className="text-foreground font-medium">Sales Team Lead</span> role in Users, then add the team here.
           </p>
         </div>
       )}

@@ -2019,9 +2019,14 @@ const CrmApplication: React.FC = () => {
                 <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
               </span>
             )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && (
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && a.Stage !== "Converted" && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
+              </span>
+            )}
+            {activeStage === "InProcess" && a.Stage === "Converted" && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+                <Clock size={10} /> Booking {a.BookingNo || ""} — {a.BookingStatus || "awaiting approval"}
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (

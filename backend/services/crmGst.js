@@ -61,7 +61,7 @@ async function checkGstExemption(pool, bookingId) {
       SELECT MIN(ReceivedDate) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
         AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held', N'Void', N'Cancelled', N'Refunded')
       UNION ALL
-      SELECT ReceiptDate FROM dbo.CrmMoneyReceipt 
+      SELECT MIN(ReceivedDate) FROM dbo.CrmMoneyReceipt
       WHERE BookingId = @bid AND Status NOT IN (N'Cancelled', N'Bounced')
     ) x
   `);
