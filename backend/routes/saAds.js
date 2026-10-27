@@ -5,6 +5,7 @@ const fs = require("fs");
 const multer = require("multer");
 const express = require("express");
 const { getPool, sql } = require("../db");
+const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -83,7 +84,7 @@ router.get(
           FROM dbo.SaMarketingInvoice i
           WHERE i.IsActive = 1
             AND i.AdId IS NOT NULL
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
           GROUP BY i.AdId
         )
         SELECT

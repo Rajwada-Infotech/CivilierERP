@@ -5,7 +5,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, isSaAdmin } = require("../services/saAccess");
-const { CLOSED_LEAD_SQL } = require("../constants/saStatuses");
+const { CLOSED_LEAD_SQL, countedInvoiceSql } = require("../constants/saStatuses");
 router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -40,7 +40,7 @@ router.get("/marketing", requirePageRight("sa-campaigns", "view"), async (req, r
           FROM dbo.SaMarketingInvoice i
           WHERE i.AdId = a.Id
             AND i.IsActive = 1
-            AND i.PaymentStatus <> 'Cancelled'
+            AND ${countedInvoiceSql("i.")}
         ) inv
       ),
       booking_revenue AS (
@@ -156,6 +156,9 @@ router.get("/sales", requirePageRight("sa-leads", "view"), async (req, res) => {
       hotLeads: classMap["Hot"] || 0,
       warmLeads: classMap["Warm"] || 0,
       coldLeads: classMap["Cold"] || 0,
+      // Every classification, so the dashboard can show the ones beyond
+      // Hot/Warm/Cold (Not Interested, Call Back Later) without new fields.
+      classCounts: classMap,
       siteVisitsScheduled: visits.recordset[0].Scheduled || 0,
       siteVisitsCompleted: visits.recordset[0].Completed || 0,
       bookingsGenerated: bookingCount,

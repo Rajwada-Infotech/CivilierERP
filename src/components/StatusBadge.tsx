@@ -8,6 +8,7 @@ import {
   XCircle,
   PackageCheck,
   PackageSearch,
+  AlertTriangle,
 } from "lucide-react";
 
 // ─── Status config ────────────────────────────────────────────────────────────
@@ -169,6 +170,25 @@ const STATUS_CONFIG: Record<
     icon: FileEdit,
     classes:
       "bg-slate-500/10 text-slate-400 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  // Task priorities (SaLeadTask.Priority) — Normal is above.
+  Low: {
+    label: "Low",
+    icon: Clock,
+    classes:
+      "bg-slate-500/10 text-slate-500 border-slate-500/25 dark:bg-slate-500/10 dark:text-slate-400 dark:border-slate-500/25",
+  },
+  High: {
+    label: "High",
+    icon: AlertTriangle,
+    classes:
+      "bg-orange-500/10 text-orange-600 border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/25",
+  },
+  Urgent: {
+    label: "Urgent",
+    icon: AlertTriangle,
+    classes:
+      "bg-red-500/10 text-red-600 border-red-500/25 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/25",
   },
   // Unit Master / Unit Matrix domain statuses — mirrors unitMatrix.js's
   // live-derived Status (Blocked/Booked/OnHold/Available) exactly.
@@ -673,6 +693,11 @@ interface StatusBadgeProps {
 // display badge), which still shouldn't invent its own color-per-status map.
 export function getStatusClasses(status: string | null | undefined): string {
   return ((status && ALL_STATUS_CONFIG[status]) || FALLBACK).classes;
+}
+
+/** Human label for a status code (e.g. "NotInterested" -> "Not Interested"). */
+export function getStatusLabel(status: string | null | undefined): string {
+  return (status && ALL_STATUS_CONFIG[status]?.label) || status || "";
 }
 
 // The colour each status was given is what it means — green settled, amber / yellow / orange waiting on someone, blue /

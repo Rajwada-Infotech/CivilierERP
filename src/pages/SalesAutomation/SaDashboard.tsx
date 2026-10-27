@@ -5,7 +5,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SHEET_CSS, Detail, Dimension, Skel, n0, fmtInt, money, share } from "@/components/sheet/Sheet";
-import { LEAD_STAGES } from "@/components/sa/leadStages";
+import { LEAD_CLASSIFICATIONS, LEAD_STAGES } from "@/components/sa/leadStages";
+import { getStatusLabel } from "@/components/StatusBadge";
 
 // Sales Automation dashboard, drawn on the same sheet as the CRM and Admin
 // dashboards: one read-only overview of the whole module — pipeline, lead
@@ -85,7 +86,8 @@ const SaDashboard: React.FC = () => {
   const t = team.data ?? {};
   const months: { month: string; count: number }[] = Array.isArray(trend.data) ? trend.data : [];
   const counts: Record<string, number> = s.statusCounts ?? {};
-  const total = n0(s.totalLeads);
+  // totalLeads includes Lost; "Active" is everything still in the flow.
+  const total = n0(s.totalLeads) - n0(counts.Lost);
   const stageMax = Math.max(1, ...FLOW.map((st) => n0(counts[st.key])));
   const monthMax = Math.max(1, ...months.map((x) => n0(x.count)));
   const hot = n0(s.hotLeads), warm = n0(s.warmLeads), cold = n0(s.coldLeads);
@@ -207,6 +209,16 @@ const SaDashboard: React.FC = () => {
                     <Figure small label="Warm" value={fmtInt(warm)} tone={warm ? "var(--ink)" : "var(--graphite)"} />
                     <Figure small label="Cold" value={fmtInt(cold)} tone={cold ? "var(--ink)" : "var(--graphite)"} />
                   </div>
+                  {(() => {
+                    const others = LEAD_CLASSIFICATIONS.filter((c) => !["Hot", "Warm", "Cold"].includes(c));
+                    const cc: Record<string, number> = s.classCounts ?? {};
+                    const unset = Math.max(0, n0(s.totalLeads) - Object.values(cc).reduce((a, b) => a + n0(b), 0));
+                    return (
+                      <p style={{ marginTop: 12, fontSize: 12, color: "var(--graphite)" }}>
+                        {others.map((c) => `${fmtInt(cc[c])} ${getStatusLabel(c).toLowerCase()}`).join(" · ")} · {fmtInt(unset)} not yet rated
+                      </p>
+                    );
+                  })()}
                 </>
               )}
             </Detail>
@@ -302,7 +314,7 @@ const SaDashboard: React.FC = () => {
           </Detail>
 
           <Detail tag="G" title="Leads per month" note="Last six months">
-            {trend.isLoading ? <Skel h={150} /> : months.length === 0 ? (
+            {trend.isLoading ? <Skel h={150} /> : !trend.data ? <NoAccess /> : months.length === 0 ? (
               <p style={{ fontSize: 13, color: "var(--graphite)" }}>No leads in the last six months.</p>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: `repeat(${months.length}, minmax(0, 1fr))`, gap: 10, alignItems: "end", height: 160 }}>

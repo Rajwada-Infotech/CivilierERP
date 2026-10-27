@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshButton } from "@/components/ui/RefreshButton";
-import { MessageCircle, Phone, Search } from "lucide-react";
+import { MessageCircle, Phone, Search, Plus, X, Users, Mail } from "lucide-react";
+import { TitleCell } from "@/components/sa/saCells";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -24,6 +25,12 @@ async function fetchLeads(): Promise<any[]> {
   return res.json().catch(() => []);
 }
 
+const TYPE_ICONS: Record<string, React.ElementType> = { Call: Phone, Meeting: Users, Email: Mail, WhatsApp: MessageCircle, SMS: MessageCircle };
+const fmtDay = (d: unknown) =>
+  new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+const fmtWhen = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+
 const SaLeadActivities: React.FC = () => {
   usePageRights("sa-lead-activities");
   const { canDoAction } = useAuth();
@@ -32,55 +39,100 @@ const SaLeadActivities: React.FC = () => {
   const { data: activities = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-lead-activities"], queryFn: fetchActivities, staleTime: 30_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-options"], queryFn: fetchLeads, staleTime: 60_000 });
 
+  const [type, setType] = useState("All");
+  const [formOpen, setFormOpen] = useState(false);
+  // Types come from the data itself, so a new activity type shows up here
+  // without a code change.
+  const types = useMemo(() => Array.from(new Set(activities.map((a) => a.ActivityType).filter(Boolean))).sort(), [activities]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return activities;
-    return activities.filter((a) => [a.LeadUid, a.CustomerName, a.Mobile, a.ActivityType, a.Outcome, a.Summary]
-      .some((v) => String(v ?? "").toLowerCase().includes(q)));
-  }, [activities, query]);
+    return activities.filter((a) => (type === "All" || a.ActivityType === type)
+      && (!q || [a.LeadUid, a.CustomerName, a.Mobile, a.ActivityType, a.Outcome, a.Summary, a.CreatedByName]
+        .some((v) => String(v ?? "").toLowerCase().includes(q))));
+  }, [activities, query, type]);
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading activities...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load activities.</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Engagement", "Activities"]} title="Lead Activities">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load activities. Refresh the page to try again." : "Loading activities…"}
+      </div>
+    </SalesAutoShell>
+  );
+
+  const todayStr = new Date().toDateString();
+  const loggedToday = activities.filter((a) => a.CreatedAt && new Date(a.CreatedAt).toDateString() === todayStr).length;
+  const startToday = new Date(todayStr).getTime();
 
   const columns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "LeadUid", header: "Lead", size: 100, cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.row.original.LeadUid}</span> },
-    { accessorKey: "CustomerName", header: "Customer", size: 140,
-      cell: (i) => (<><div className="font-medium">{i.row.original.CustomerName}</div><div className="text-xs text-muted-foreground">{i.row.original.Mobile}</div></>) },
-    { accessorKey: "ActivityType", header: "Activity", size: 110,
-      cell: (i) => <span className="inline-flex items-center gap-1.5">{i.row.original.ActivityType === "Call" ? <Phone size={13} /> : <MessageCircle size={13} />}{i.row.original.ActivityType}</span> },
-    { accessorKey: "Outcome", header: "Outcome", size: 100, cell: (i) => <span className="text-xs">{i.row.original.Outcome || "-"}</span> },
-    { accessorKey: "Summary", header: "Summary", size: 220, cell: (i) => <span>{i.row.original.Summary}</span> },
-    { accessorKey: "NextFollowupDate", header: "Next Follow-up", size: 130,
-      cell: (i) => <span className="whitespace-nowrap">{i.row.original.NextFollowupDate ? String(i.row.original.NextFollowupDate).slice(0, 10) : "-"}</span> },
-    { accessorKey: "CreatedByName", header: "Logged By", size: 110, cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CreatedByName || "System"}</span> },
-    { accessorKey: "CreatedAt", header: "Created", size: 140,
-      cell: (i) => <span className="text-xs text-muted-foreground whitespace-nowrap">{i.row.original.CreatedAt ? new Date(i.row.original.CreatedAt).toLocaleString() : "-"}</span> },
+    { accessorKey: "CreatedAt", header: "When", size: 120,
+      cell: (i) => <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtWhen(i.row.original.CreatedAt)}</span> },
+    { accessorKey: "CustomerName", header: "Lead", size: 150,
+      cell: (i) => TitleCell(i.row.original.CustomerName, [i.row.original.LeadUid, i.row.original.Mobile].filter(Boolean).join(" · ")) },
+    { accessorKey: "ActivityType", header: "Activity", size: 120,
+      cell: (i) => {
+        const Icon = TYPE_ICONS[i.row.original.ActivityType] ?? MessageCircle;
+        return <span className="inline-flex items-center gap-1.5 text-sm"><Icon size={13} className="text-muted-foreground" />{i.row.original.ActivityType}</span>;
+      } },
+    { accessorKey: "Outcome", header: "Outcome", size: 110,
+      cell: (i) => (i.row.original.Outcome ? <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-foreground whitespace-nowrap">{i.row.original.Outcome}</span> : <span className="text-muted-foreground text-xs">—</span>) },
+    { accessorKey: "Summary", header: "What was said", size: 240, cell: (i) => <span className="text-sm">{i.row.original.Summary || "—"}</span> },
+    { accessorKey: "NextFollowupDate", header: "Next follow-up", size: 120,
+      cell: (i) => {
+        const d = i.row.original.NextFollowupDate;
+        const late = d && new Date(String(d).slice(0, 10)).getTime() < startToday;
+        return <span className={`whitespace-nowrap text-sm ${late ? "text-red-600 font-medium" : ""}`}>{d ? fmtDay(d) : "—"}</span>;
+      } },
+    { accessorKey: "CreatedByName", header: "By", size: 100, cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CreatedByName || "System"}</span> },
   ];
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Activities"]} title="Lead Activities" subtitle="Log calls, WhatsApp, meetings and next follow-up dates against leads"
-      action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <div className="space-y-5">
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Engagement", "Activities"]} title="Lead Activities"
+      subtitle={`Every call, message and meeting logged against a lead — ${loggedToday} logged today, ${activities.length} in all`}
+      action={<div className="flex items-center gap-2">
         {canDoAction("sa-lead-activities", "create") && (
-          <div className="space-y-3 rounded-lg border border-border p-4 bg-background">
-            <SearchableNativeSelect value={selectedLeadId} onChange={(e) => setSelectedLeadId(e.target.value)} className="max-w-sm border border-border rounded-md bg-background px-3 py-2 text-sm">
-              <option value="">Select lead</option>
-              {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
-            </SearchableNativeSelect>
-            <LeadInteractionForm leadId={selectedLeadId ? parseInt(selectedLeadId) : null} />
+          <button onClick={() => setFormOpen((v) => !v)}
+            className={`inline-flex items-center gap-1.5 h-9 rounded-md px-3 text-sm font-medium ${formOpen ? "border border-border text-muted-foreground hover:bg-muted" : "btn-module text-white shadow-sm"}`}>
+            {formOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Log activity</>}
+          </button>
+        )}
+        <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+      </div>}>
+      <div className="space-y-5">
+        {formOpen && canDoAction("sa-lead-activities", "create") && (
+          <div className="space-y-3 rounded-xl border border-border p-4 bg-card">
+            <label className="block space-y-1 max-w-sm">
+              <span className="text-[0.6875rem] uppercase tracking-widest text-muted-foreground">Lead<span className="text-destructive ml-0.5">*</span></span>
+              <SearchableNativeSelect value={selectedLeadId} onChange={(e) => setSelectedLeadId(e.target.value)} className="w-full border border-border rounded-md bg-background px-3 py-2 text-sm">
+                <option value="">Select a lead</option>
+                {leads.map((l: any) => <option key={l.Id} value={l.Id}>{l.LeadUid} - {l.CustomerName}</option>)}
+              </SearchableNativeSelect>
+            </label>
+            {selectedLeadId
+              ? <LeadInteractionForm leadId={parseInt(selectedLeadId)} />
+              : <p className="text-xs text-muted-foreground">Pick the lead first, then log what happened.</p>}
           </div>
         )}
 
-        <div className="flex items-center gap-2 max-w-md">
-          <Search size={16} className="text-muted-foreground" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search activity timeline" className="w-full border border-border rounded-md bg-background px-3 py-2 text-sm" />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-1">
+            {["All", ...types].map((t) => (
+              <button key={t} onClick={() => setType(t)}
+                className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${type === t ? "bg-primary/10 border-primary/30 text-primary font-medium" : "border-border text-muted-foreground hover:bg-muted"}`}>
+                {t} <span className="tabular-nums opacity-70">{t === "All" ? activities.length : activities.filter((a) => a.ActivityType === t).length}</span>
+              </button>
+            ))}
+          </div>
+          <label className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 bg-background w-full sm:w-72">
+            <Search size={14} className="text-muted-foreground" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Lead, mobile, outcome or note" className="flex-1 bg-transparent text-sm outline-none" />
+          </label>
         </div>
 
         <DataTable
           data={filtered}
           columns={columns}
           searchable={false}
-          emptyMessage="No activities yet"
+          emptyMessage={query || type !== "All" ? "Nothing matches." : "No activities logged yet."}
           className="rounded-xl border border-border overflow-hidden bg-card"
         />
       </div>

@@ -1,5 +1,6 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
+const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -37,7 +38,7 @@ router.get(
             FROM dbo.SaMarketingInvoice i
             WHERE i.AdId = a.Id
               AND i.IsActive = 1
-              AND i.PaymentStatus <> 'Cancelled'
+              AND ${countedInvoiceSql("i.")}
           ) inv
           GROUP BY a.CampaignId
         ),

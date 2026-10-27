@@ -10,6 +10,9 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, ArrowRightLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { StatusBadge } from "@/components/StatusBadge";
+import { SaTabs } from "@/components/sa/SaTabs";
+import { LEAD_STAGES } from "@/components/sa/leadStages";
 
 const API = "/api/sa/lead-transfers";
 
@@ -24,11 +27,9 @@ async function fetchItems(requestId: number): Promise<any[]> {
   return r.json().catch(() => ({}));
 }
 
-const statusBadge = (status: string) => {
-  if (status === "Approved") return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold bg-emerald-500/10 text-emerald-600">Approved</span>;
-  if (status === "Rejected") return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold bg-red-500/10 text-red-500">Rejected</span>;
-  return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold bg-[#ffe2021a] text-amber-600">Pending</span>;
-};
+const FILTERS = ["Pending", "Approved", "Rejected", "All"];
+const fmtDay = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 const SaLeadTransfers: React.FC = () => {
   usePageRights("sa-lead-transfers");
@@ -43,7 +44,7 @@ const SaLeadTransfers: React.FC = () => {
   const [adminNotes, setAdminNotes] = useState("");
   const [acting, setActing] = useState(false);
 
-  const { data: requests = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-lead-transfers"], queryFn: fetchRequests, staleTime: 30_000 });
+  const { data: requests = [], isLoading, error, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-lead-transfers"], queryFn: fetchRequests, staleTime: 30_000 });
 
   const filtered = (requests as any[]).filter((r: any) => filterStatus === "All" || r.Status === filterStatus);
 
@@ -94,9 +95,17 @@ const SaLeadTransfers: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading transfer requests...</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Pipeline", "Transfers"]} title="Lead Transfers">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load transfer requests. Refresh the page to try again." : "Loading transfer requests…"}
+      </div>
+    </SalesAutoShell>
+  );
 
-  const pendingCount = (requests as any[]).filter((r: any) => r.Status === "Pending").length;
+  const countOf = (s: string) => (requests as any[]).filter((r: any) => s === "All" || r.Status === s).length;
+  const pendingCount = countOf("Pending");
+  const pendingLeads = (requests as any[]).filter((r: any) => r.Status === "Pending").reduce((s: number, r: any) => s + Number(r.TotalLeads || 0), 0);
 
   const itemColumns: ColumnDef<any, unknown>[] = [
     { accessorKey: "LeadUid", header: "Lead ID", size: 100,
@@ -105,55 +114,37 @@ const SaLeadTransfers: React.FC = () => {
       cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
     { accessorKey: "Mobile", header: "Mobile", size: 110,
       cell: (i) => <span className="text-muted-foreground text-xs">{i.getValue() as string}</span> },
-    { accessorKey: "LeadStatus", header: "Status", size: 100,
-      cell: (i) => <span className="text-xs">{i.getValue() as string}</span> },
-    { accessorKey: "Classification", header: "Classification", size: 110,
-      cell: (i) => (
-        i.row.original.Classification ? (
-          <span className={`px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold ${
-            i.row.original.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
-            i.row.original.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
-            "bg-blue-500/10 text-blue-500"
-          }`}>{i.row.original.Classification}</span>
-        ) : null
-      ) },
-    { accessorKey: "CurrentSalesperson", header: "Current Assignee", size: 130,
+    { accessorKey: "LeadStatus", header: "Stage", size: 100,
+      cell: (i) => <span className="text-xs">{LEAD_STAGES.find((s) => s.key === i.getValue())?.label ?? String(i.getValue() ?? "—")}</span> },
+    { accessorKey: "Classification", header: "Interest", size: 110,
+      cell: (i) => (i.row.original.Classification ? <StatusBadge status={i.row.original.Classification} /> : <span className="text-muted-foreground text-xs">—</span>) },
+    { accessorKey: "CurrentSalesperson", header: "With", size: 130,
       cell: (i) => <span className="text-xs text-muted-foreground">{i.row.original.CurrentSalesperson || "—"}</span> },
-    { accessorKey: "Transferred", header: "Transferred", size: 100, enableSorting: false,
+    { accessorKey: "Transferred", header: "Moved", size: 100, enableSorting: false,
       cell: (i) => (
         i.row.original.Transferred
-          ? <span className="text-emerald-600 font-semibold text-xs">✓ Yes</span>
-          : <span className="text-muted-foreground text-xs">—</span>
+          ? <span className="inline-flex items-center gap-1 text-emerald-600 font-medium text-xs"><CheckCircle2 size={12} /> Moved</span>
+          : <span className="text-muted-foreground text-xs">Not yet</span>
       ) },
   ];
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Transfers"]} title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Pipeline", "Transfers"]} title="Lead Transfers"
+      subtitle={pendingCount
+        ? `${pendingCount} request${pendingCount === 1 ? "" : "s"} waiting — ${pendingLeads} lead${pendingLeads === 1 ? "" : "s"} to move between team leads`
+        : "Team leads ask to move leads to another team; approving moves them."}
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <div className="space-y-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="flex items-center gap-2">
-              {pendingCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-600">{pendingCount} pending</span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-0.5">Review and approve lead transfer requests from team leads</p>
-          </div>
-          <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
-            {["Pending", "Approved", "Rejected", "All"].map((s) => (
-              <button key={s} onClick={() => setFilterStatus(s)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${filterStatus === s ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
+      <div className="space-y-5">
+        <SaTabs
+          tabs={FILTERS.map((s) => ({ key: s, label: `${s} (${countOf(s)})` }))}
+          active={filterStatus}
+          onChange={(key) => setFilterStatus(key)}
+        />
 
         {filtered.length === 0 ? (
           <div className="rounded-lg border border-border p-8 text-center text-muted-foreground text-sm flex flex-col items-center gap-2">
             <ArrowRightLeft size={24} className="text-muted-foreground/40" />
-            No {filterStatus === "All" ? "" : filterStatus.toLowerCase()} transfer requests
+            {filterStatus === "Pending" ? "Nothing waiting for approval." : `No ${filterStatus === "All" ? "" : filterStatus.toLowerCase() + " "}transfer requests.`}
           </div>
         ) : (
           <div className="space-y-3">
@@ -175,10 +166,10 @@ const SaLeadTransfers: React.FC = () => {
                           <span className="text-sm font-semibold text-foreground">{req.FromTeamLeadName}</span>
                           <ArrowRightLeft size={12} className="text-muted-foreground" />
                           <span className="text-sm font-semibold text-foreground">{req.ToTeamLeadName}</span>
-                          {statusBadge(req.Status)}
+                          <StatusBadge status={req.Status} />
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
-                          <span><Clock size={10} className="inline mr-1" />{String(req.CreatedAt).slice(0, 10)}</span>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-muted-foreground">
+                          <span><Clock size={10} className="inline mr-1" />{fmtDay(req.CreatedAt)}</span>
                           <span>{req.TotalLeads} lead{req.TotalLeads !== 1 ? "s" : ""}</span>
                           {req.RequestNotes && <span className="truncate max-w-[200px]">"{req.RequestNotes}"</span>}
                         </div>
@@ -267,7 +258,7 @@ const SaLeadTransfers: React.FC = () => {
                   onClick={handleAction}
                   disabled={acting}
                   className={`px-4 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-40 transition-colors ${actionDialog.action === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"}`}
-                >{acting ? "..." : actionDialog.action === "approve" ? "Approve & Transfer" : "Reject"}</button>
+                >{acting ? "Saving…" : actionDialog.action === "approve" ? "Approve & move leads" : "Reject"}</button>
               </div>
             </div>
           )}

@@ -11,6 +11,7 @@ import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { Link } from "react-router-dom";
 import { Settings2 } from "lucide-react";
 import { SaTabs } from "@/components/sa/SaTabs";
+import { TitleCell } from "@/components/sa/saCells";
 
 const API = "/api/sa/lead-distribution";
 const RULES_API = "/api/sa/distribution-rules";
@@ -31,13 +32,62 @@ async function fetchHistory(): Promise<any[]> {
   return res.json().catch(() => ({}));
 }
 
+type Method = "Equal" | "Percentage" | "Manual";
+const METHOD_HINTS: Record<Method, string> = {
+  Equal: "Splits the ticked leads evenly, in list order.",
+  Percentage: "Give each person a share; shares must add up to 100%.",
+  Manual: "Pick who gets each ticked lead in the last column.",
+};
+const LEVEL_LABELS: Record<1 | 2, string> = { 1: "Level 1 — to team leads", 2: "Level 2 — to salespeople" };
+const fmtDay = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+/**
+ * Who gets which of the ticked leads. One function for both the preview and
+ * the request, so what you see is what is sent. Percentage uses
+ * largest-remainder rounding so every ticked lead is assigned exactly once
+ * (rounding each share on its own could drop or double-count leads).
+ */
+function computeAssignments(
+  method: Method, leadIds: number[], users: any[],
+  percentages: Record<number, number>, manual: Record<number, number>,
+): { userId: number; leadIdList: number[] }[] {
+  if (!leadIds.length) return [];
+  if (method === "Manual") {
+    const byUser = new Map<number, number[]>();
+    leadIds.forEach((id) => {
+      const uid = manual[id];
+      if (uid) byUser.set(uid, [...(byUser.get(uid) ?? []), id]);
+    });
+    return [...byUser].map(([userId, leadIdList]) => ({ userId, leadIdList }));
+  }
+  let counts: number[];
+  if (method === "Equal") {
+    if (!users.length) return [];
+    const per = Math.floor(leadIds.length / users.length), extra = leadIds.length % users.length;
+    counts = users.map((_, i) => per + (i < extra ? 1 : 0));
+  } else {
+    const exact = users.map((u) => ((percentages[u.Id] || 0) / 100) * leadIds.length);
+    counts = exact.map(Math.floor);
+    let left = leadIds.length - counts.reduce((s, n) => s + n, 0);
+    exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r)
+      .forEach(({ i }) => { if (left > 0 && (percentages[users[i].Id] || 0) > 0) { counts[i]++; left--; } });
+  }
+  const out: { userId: number; leadIdList: number[] }[] = [];
+  let idx = 0;
+  users.forEach((u, i) => {
+    if (counts[i] > 0) { out.push({ userId: u.Id, leadIdList: leadIds.slice(idx, idx + counts[i]) }); idx += counts[i]; }
+  });
+  return out;
+}
+
 const SaLeadDistribution: React.FC = () => {
   usePageRights("sa-lead-distribution");
   const { canDoAction } = useAuth();
   const canAutoDistribute = canDoAction("sa-lead-distribution", "edit");
   const queryClient = useQueryClient();
   const [level, setLevel] = useState<1 | 2>(1);
-  const [method, setMethod] = useState<"Equal" | "Percentage" | "Manual">("Equal");
+  const [method, setMethod] = useState<Method>("Equal");
   const [selectedLeads, setSelectedLeads] = useState<number[]>([]);
   const [assignments, setAssignments] = useState<Record<number, number>>({});
   const [percentages, setPercentages] = useState<Record<number, number>>({});
@@ -69,62 +119,41 @@ const SaLeadDistribution: React.FC = () => {
     }
   };
 
+  // Level 1 splits (Evenly / By share) go to team leads only; an admin can
+  // still be picked for a single lead in "Pick each".
   const eligibleUsers = useMemo(() => {
-    if (level === 1) return users.filter((u: any) => u.role === "sales_team_lead" || u.role === "admin" || u.role === "super_admin");
-    return users.filter((u: any) => u.role === "sales_person");
-  }, [users, level]);
+    if (level === 2) return users.filter((u: any) => u.role === "sales_person");
+    const roles = method === "Manual" ? ["sales_team_lead", "admin", "super_admin"] : ["sales_team_lead"];
+    return users.filter((u: any) => roles.includes(u.role));
+  }, [users, level, method]);
 
   const toggleLead = (id: number) => {
     setSelectedLeads((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
+  const pctTotal = eligibleUsers.reduce((s: number, u: any) => s + (percentages[u.Id] || 0), 0);
+  const plan = useMemo(
+    () => computeAssignments(method, selectedLeads, eligibleUsers, percentages, assignments),
+    [method, selectedLeads, eligibleUsers, percentages, assignments],
+  );
+  const planned = plan.reduce((s, a) => s + a.leadIdList.length, 0);
+  const unassigned = selectedLeads.length - planned;
+  const nameOf = (id: number) => eligibleUsers.find((u: any) => u.Id === id)?.Name ?? `User ${id}`;
+  const blocker = !selectedLeads.length ? "Tick the leads to hand out."
+    : !eligibleUsers.length ? "Nobody can receive leads at this level."
+    : method === "Percentage" && pctTotal !== 100 ? `Shares add up to ${pctTotal}% — they must total 100%.`
+    : method === "Manual" && unassigned > 0 ? `Pick who gets ${unassigned} more ticked lead${unassigned === 1 ? "" : "s"}.`
+    : null;
+
   const handleDistribute = async () => {
-    if (!selectedLeads.length) return toast.error("Select at least one lead");
-    if (!eligibleUsers.length) return toast.error("No eligible users found");
-    if (method === "Percentage") {
-      const pctTotal = eligibleUsers.reduce((s: number, u: any) => s + (percentages[u.Id] || 0), 0);
-      if (pctTotal !== 100) return toast.error(`Percentages must sum to 100% (currently ${pctTotal}%)`);
-    }
-
-    let assignmentList: { userId: number; leadIdList: number[] }[] = [];
-
-    if (method === "Equal") {
-      const perUser = Math.floor(selectedLeads.length / eligibleUsers.length);
-      const remainder = selectedLeads.length % eligibleUsers.length;
-      let idx = 0;
-      for (let i = 0; i < eligibleUsers.length; i++) {
-        const count = perUser + (i < remainder ? 1 : 0);
-        if (count > 0) {
-          assignmentList.push({ userId: eligibleUsers[i].Id, leadIdList: selectedLeads.slice(idx, idx + count) });
-          idx += count;
-        }
-      }
-    } else if (method === "Percentage") {
-      let idx = 0;
-      for (const u of eligibleUsers) {
-        const pct = percentages[u.Id] || 0;
-        const count = Math.round((pct / 100) * selectedLeads.length);
-        if (count > 0) {
-          assignmentList.push({ userId: u.Id, leadIdList: selectedLeads.slice(idx, idx + count) });
-          idx += count;
-        }
-      }
-    } else {
-      for (const [leadId, userIdStr] of Object.entries(assignments)) {
-        const uid = Number(userIdStr);
-        const existing = assignmentList.find((a) => a.userId === uid);
-        if (existing) existing.leadIdList.push(parseInt(leadId));
-        else assignmentList.push({ userId: uid, leadIdList: [parseInt(leadId)] });
-      }
-    }
-
-    if (!assignmentList.length) return toast.error("No valid assignments computed");
-
+    if (blocker) return toast.error(blocker);
+    // Only the leads actually in the plan are sent.
+    const leadIds = plan.flatMap((a) => a.leadIdList);
     try {
       const res = await fetchWithAuth(`${API}/distribute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadIds: selectedLeads, assignments: assignmentList, method, level }),
+        body: JSON.stringify({ leadIds, assignments: plan, method, level }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Distribution failed");
@@ -147,19 +176,22 @@ const SaLeadDistribution: React.FC = () => {
           onChange={(e) => setSelectedLeads(e.target.checked ? pending.map((l: any) => l.Id) : [])} />
       ), size: 40, enableSorting: false,
       cell: (i) => <input type="checkbox" checked={selectedLeads.includes(i.row.original.Id)} onChange={() => toggleLead(i.row.original.Id)} /> },
-    { accessorKey: "CustomerName", header: "Customer", size: 150,
-      cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "Mobile", header: "Mobile", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "PlatformName", header: "Source", size: 110,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.PlatformName || "—"}</span> },
-    { accessorKey: "CampaignName", header: "Campaign", size: 130,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.CampaignName || "—"}</span> },
-    { accessorKey: "DateGenerated", header: "Date", size: 100,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.DateGenerated ? String(i.row.original.DateGenerated).slice(0, 10) : "—"}</span> },
+    { accessorKey: "CustomerName", header: "Lead", size: 160,
+      cell: (i) => TitleCell(i.row.original.CustomerName, i.row.original.Mobile) },
+    { accessorKey: "CampaignName", header: "Came from", size: 160,
+      cell: (i) => TitleCell(i.row.original.CampaignName || "—", i.row.original.PlatformName) },
+    { accessorKey: "DateGenerated", header: "Received", size: 110,
+      cell: (i) => <span className="text-muted-foreground whitespace-nowrap">{fmtDay(i.row.original.DateGenerated)}</span> },
     ...(method === "Manual" ? [{
-      id: "assignTo", header: "Assign To", size: 130, enableSorting: false,
+      id: "assignTo", header: "Give to", size: 140, enableSorting: false,
       cell: (i: any) => (
-        <SearchableNativeSelect value={assignments[i.row.original.Id] || ""} onChange={(e) => setAssignments((a) => ({ ...a, [i.row.original.Id]: parseInt(e.target.value) }))}
+        <SearchableNativeSelect value={assignments[i.row.original.Id] || ""}
+          onChange={(e) => {
+            const id = i.row.original.Id;
+            setAssignments((a) => ({ ...a, [id]: parseInt(e.target.value) }));
+            // Picking someone for a lead means you want it handed out.
+            if (e.target.value) setSelectedLeads((s) => (s.includes(id) ? s : [...s, id]));
+          }}
           className="text-xs border border-border rounded px-2 py-1 bg-background">
           <option value="">Select</option>
           {eligibleUsers.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
@@ -169,23 +201,20 @@ const SaLeadDistribution: React.FC = () => {
   ];
 
   const historyColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "LeadUid", header: "Lead", size: 100,
-      cell: (i) => <span className="text-xs text-muted-foreground font-mono">{i.getValue() as string}</span> },
-    { accessorKey: "CustomerName", header: "Customer", size: 150,
-      cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "FromUserName", header: "From", size: 120,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.FromUserName || "—"}</span> },
-    { accessorKey: "ToUserName", header: "To", size: 120,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.ToUserName || "—"}</span> },
-    { accessorKey: "Level", header: "Level", size: 80,
-      cell: (i) => <span className="text-muted-foreground">L{i.row.original.Level}</span> },
-    { accessorKey: "Method", header: "Method", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "DistributedAt", header: "Date", size: 140,
-      cell: (i) => <span className="text-muted-foreground">{i.row.original.DistributedAt ? fmtIstIso(i.row.original.DistributedAt) : "—"}</span> },
+    { accessorKey: "DistributedAt", header: "When", size: 140,
+      cell: (i) => <span className="text-muted-foreground whitespace-nowrap">{i.row.original.DistributedAt ? fmtIstIso(i.row.original.DistributedAt) : "—"}</span> },
+    { accessorKey: "CustomerName", header: "Lead", size: 160,
+      cell: (i) => TitleCell(i.row.original.CustomerName, i.row.original.LeadUid) },
+    { accessorKey: "ToUserName", header: "Given to", size: 150,
+      cell: (i) => TitleCell(i.row.original.ToUserName || "—", i.row.original.FromUserName ? `by ${i.row.original.FromUserName}` : "") },
+    { accessorKey: "Level", header: "Level", size: 120,
+      cell: (i) => <span className="text-muted-foreground text-xs">{LEVEL_LABELS[i.row.original.Level as 1 | 2] ?? `Level ${i.row.original.Level}`}</span> },
+    { accessorKey: "Method", header: "How", size: 110, cell: (i) => <span className="text-muted-foreground">{i.getValue() as string}</span> },
   ];
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Distribution"]} title="Lead Distribution" subtitle="Manually distribute pending leads right now, or see what's already been distributed"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Leads", "Distribution"]} title="Lead Distribution"
+      subtitle={`${pending.length} lead${pending.length === 1 ? "" : "s"} waiting at ${LEVEL_LABELS[level].toLowerCase()}. Hand them out now, or let the standing rules do it.`}
       action={
         <Link to="/sales-automation/distribution-rules"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors">
@@ -204,8 +233,8 @@ const SaLeadDistribution: React.FC = () => {
             history. */}
         <SaTabs
           tabs={[
-            { key: "distribute", label: "Distribute Leads" },
-            { key: "history", label: "Distribution History" },
+            { key: "distribute", label: `Waiting (${pending.length})` },
+            { key: "history", label: "History" },
           ]}
           active={tab}
           onChange={(key) => setTab(key)}
@@ -216,42 +245,55 @@ const SaLeadDistribution: React.FC = () => {
             {/* Controls */}
             <div className="flex flex-wrap gap-4 items-end">
               <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Distribution Level</label>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">Level</label>
                 <div className="flex gap-2">
                   {([1, 2] as const).map((l) => (
-                    <button key={l} onClick={() => { setLevel(l); setSelectedLeads([]); }}
+                    <button key={l} onClick={() => { setLevel(l); setSelectedLeads([]); setAssignments({}); setPercentages({}); }}
                       className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${level === l ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
-                      Level {l} {l === 1 ? "(Admin ? TL)" : "(TL ? SP)"}
+                      {LEVEL_LABELS[l]}
                     </button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Method</label>
+                <label className="text-xs font-medium text-muted-foreground block mb-1">How to split</label>
                 <div className="flex gap-2">
-                  {(["Equal", "Percentage", "Manual"] as const).map((m) => (
-                    <button key={m} onClick={() => setMethod(m)}
+                  {(Object.keys(METHOD_HINTS) as Method[]).map((m) => (
+                    <button key={m} onClick={() => setMethod(m)} title={METHOD_HINTS[m]}
                       className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${method === m ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
-                      {m}
+                      {m === "Percentage" ? "By share" : m === "Equal" ? "Evenly" : "Pick each"}
                     </button>
                   ))}
                 </div>
               </div>
-              <button onClick={handleDistribute} disabled={!selectedLeads.length}
-                className="px-4 py-2 rounded-md btn-module text-white text-sm font-medium disabled:opacity-40 transition-colors">
-                Distribute {selectedLeads.length ? `(${selectedLeads.length})` : ""}
-              </button>
               {canAutoDistribute && (
                 <button onClick={() => handleRunAuto(level)} disabled={runningAuto}
-                  className="px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors">
-                  {runningAuto ? "Running..." : `Auto-Distribute L${level}`}
+                  title="Hand out every waiting lead at this level using the standing rules"
+                  className="ml-auto px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:bg-accent disabled:opacity-40 transition-colors">
+                  {runningAuto ? "Assigning…" : "Use standing rules"}
                 </button>
               )}
+            </div>
+            <p className="text-xs text-muted-foreground -mt-2">{METHOD_HINTS[method]}</p>
+
+            {/* What will happen — the same plan that is sent */}
+            <div className={`rounded-lg border p-3 flex flex-wrap items-center gap-3 ${blocker ? "border-border bg-muted/20" : "border-emerald-300 bg-emerald-500/5"}`}>
+              <div className="flex-1 min-w-[14rem] text-sm">
+                {blocker ? <span className="text-muted-foreground">{blocker}</span> : (
+                  <span>
+                    <span className="font-medium">{planned} lead{planned === 1 ? "" : "s"}:</span>{" "}
+                    {plan.map((a) => `${nameOf(a.userId)} ${a.leadIdList.length}`).join(" · ")}
+                  </span>
+                )}
+              </div>
+              <button onClick={handleDistribute} disabled={!!blocker}
+                className="px-4 py-2 rounded-md btn-module text-white text-sm font-medium disabled:opacity-40 transition-colors">
+                Hand out {planned ? planned : ""} lead{planned === 1 ? "" : "s"}
+              </button>
             </div>
 
             {/* Percentage inputs */}
             {method === "Percentage" && (() => {
-              const pctTotal = eligibleUsers.reduce((s: number, u: any) => s + (percentages[u.Id] || 0), 0);
               const pctOk = pctTotal === 100;
               return (
                 <div className="p-3 bg-muted/30 rounded-lg space-y-2">
@@ -267,7 +309,7 @@ const SaLeadDistribution: React.FC = () => {
                     ))}
                   </div>
                   <p className={`text-xs font-medium ${pctOk ? "text-emerald-600" : "text-amber-500"}`}>
-                    Total: {pctTotal}% {pctOk ? "✓" : `— must equal 100%`}
+                    Total: {pctTotal}%{pctOk ? "" : " — must equal 100%"}
                   </p>
                 </div>
               );
@@ -279,7 +321,7 @@ const SaLeadDistribution: React.FC = () => {
               columns={pendingColumns}
               searchable={false}
               loading={loadingPending}
-              emptyMessage={`No pending leads for Level ${level}`}
+              emptyMessage={`Nothing waiting at ${LEVEL_LABELS[level].toLowerCase()}.`}
               className="rounded-lg border border-border overflow-hidden bg-card"
             />
           </div>
