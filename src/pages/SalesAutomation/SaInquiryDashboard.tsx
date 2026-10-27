@@ -6,9 +6,10 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { MapPin, Phone } from "lucide-react";
+import { MapPin, Phone, Search } from "lucide-react";
+import { StatusBadge, getStatusLabel } from "@/components/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
+import { LEAD_CLASSIFICATIONS, LEAD_STAGES, LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/inquiry";
@@ -35,15 +36,14 @@ async function fetchUserOptions(): Promise<{ value: string; label: string }[]> {
 }
 
 const OUTCOMES = ["Answered", "Not Answered", "Busy", "Switched Off", "Call Back Later", "Not Interested", "Interested"];
-const CLASSIFICATIONS = ["Hot", "Warm", "Cold", "NotInterested", "CallBackLater"];
+const CLASSIFICATIONS = LEAD_CLASSIFICATIONS;
 const STATUSES = LEAD_STATUS_KEYS;
 
-const classColor = (c: string) => {
-  if (c === "Hot") return "text-red-500 bg-red-500/10";
-  if (c === "Warm") return "text-orange-500 bg-orange-500/10";
-  if (c === "Cold") return "text-blue-500 bg-blue-500/10";
-  return "text-muted-foreground bg-muted/30";
-};
+const stageLabel = (s: unknown) => LEAD_STAGES.find((x) => x.key === s)?.label ?? String(s ?? "—");
+const fmtDay = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const fmtWhen = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
 
 const EMPTY_VISIT_FORM = {
   ProjectName: "",
@@ -75,7 +75,7 @@ const SaInquiryDashboard: React.FC = () => {
   });
 
   const { data: leads = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["sa-leads"], queryFn: fetchLeads, staleTime: 30_000 });
-  const { data: detail, isLoading: loadingDetail } = useQuery({
+  const { data: detail, isLoading: loadingDetail, error: detailError } = useQuery({
     queryKey: ["sa-inquiry-detail", selectedLeadId],
     queryFn: () => fetchLeadDetail(selectedLeadId!),
     enabled: !!selectedLeadId,
@@ -84,7 +84,8 @@ const SaInquiryDashboard: React.FC = () => {
 
   const filteredLeads = useMemo(() => {
     return (leads as any[]).filter((l: any) => {
-      const matchSearch = !search || l.CustomerName?.toLowerCase().includes(search.toLowerCase()) || l.Mobile?.includes(search) || l.LeadUid?.includes(search);
+      const q = search.trim().toLowerCase();
+      const matchSearch = !q || [l.CustomerName, l.Mobile, l.LeadUid].some((v) => String(v ?? "").toLowerCase().includes(q));
       const matchStatus = statusFilter === "All" || l.Status === statusFilter;
       return matchSearch && matchStatus;
     });
@@ -154,33 +155,40 @@ const SaInquiryDashboard: React.FC = () => {
   };
 
   const alreadyScheduled = selectedLead?.Status === "VisitScheduled" || selectedLead?.Status === "Visited";
+  const countFor = (s: string) => (leads as any[]).filter((l: any) => s === "All" || l.Status === s).length;
+  const newCount = countFor("New") + countFor("Assigned");
+  const callEmpty = !callForm.Outcome && !callForm.Remarks.trim() && !callForm.Classification;
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Inquiry Dashboard"]} title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Leads", "Inquiries"]} title="Inquiries"
+      subtitle={`${(leads as any[]).length} leads · ${newCount} not called yet. Pick one to call, log what they said and book a visit.`}
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <div className="flex gap-4 h-[calc(100vh-200px)]">
+      <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] lg:h-[calc(100vh-200px)]">
 
         {/* Lead list panel */}
-        <div className="w-80 shrink-0 flex flex-col gap-2">
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, mobile, ID..."
-            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        <div className={`flex flex-col gap-2 min-h-0 ${selectedLeadId ? "hidden lg:flex" : ""}`}>
+          <label className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 bg-background">
+            <Search size={14} className="text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, mobile or lead ID"
+              className="flex-1 bg-transparent text-sm outline-none" />
+          </label>
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background">
-            <option value="All">All Statuses</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            <option value="All">All stages ({countFor("All")})</option>
+            {STATUSES.map((s) => <option key={s} value={s}>{stageLabel(s)} ({countFor(s)})</option>)}
           </select>
-          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
-            {isLoading ? <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div> :
-              filteredLeads.length === 0 ? <div className="p-4 text-center text-muted-foreground text-sm">No leads found</div> :
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1 max-h-[70vh] lg:max-h-none">
+            {isLoading ? <div className="p-4 text-center text-muted-foreground text-sm">Loading…</div> :
+              filteredLeads.length === 0 ? <div className="p-6 text-center text-muted-foreground text-sm">{search || statusFilter !== "All" ? "No leads match." : "No inquiries yet."}</div> :
               filteredLeads.map((l: any) => (
                 <button key={l._id || l.Id} onClick={() => setSelectedLeadId(l.Id || parseInt(l._id))}
                   className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedLeadId === (l.Id || parseInt(l._id)) ? "border-primary bg-primary/5" : "border-border hover:bg-accent"}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-foreground truncate">{l.CustomerName}</span>
-                    {l.Classification && <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full ${classColor(l.Classification)}`}>{l.Classification}</span>}
+                    {l.Classification && <StatusBadge status={l.Classification} />}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{l.Mobile}</div>
-                  <div className="text-xs text-muted-foreground">{l.Status} · {l.CampaignName || l.PlatformName || "—"}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{l.LeadUid} · {l.Mobile}</div>
+                  <div className="text-xs text-muted-foreground">{stageLabel(l.Status)} · {l.CampaignName || l.PlatformName || "no source"}</div>
                 </button>
               ))
             }
@@ -188,24 +196,32 @@ const SaInquiryDashboard: React.FC = () => {
         </div>
 
         {/* Detail panel */}
-        <div className="flex-1 overflow-y-auto space-y-4">
+        <div className="min-h-0 overflow-y-auto space-y-4">
           {!selectedLeadId ? (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Select a lead to view inquiry details</div>
+            <div className="hidden lg:flex h-full flex-col items-center justify-center gap-1 text-center text-muted-foreground text-sm rounded-xl border border-dashed border-border">
+              <Phone size={18} className="opacity-50" />
+              Pick a lead on the left to see their details and call history.
+            </div>
           ) : loadingDetail ? (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>
-          ) : detail ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">Loading…</div>
+          ) : detailError || !detail ? (
+            <div className="p-8 text-center text-red-500 text-sm">
+              Couldn't load this lead. <button onClick={() => setSelectedLeadId(null)} className="underline">Back to the list</button>
+            </div>
+          ) : (
             <>
+              <button onClick={() => setSelectedLeadId(null)} className="lg:hidden inline-flex items-center gap-1 text-xs text-primary">
+                ← Back to the list
+              </button>
               {/* Customer info card */}
               <div className="rounded-lg border border-border p-4 space-y-3">
-                <div className="flex items-start justify-between">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-bold text-foreground">{detail.lead?.CustomerName}</h2>
                     <p className="text-xs text-muted-foreground font-mono">{detail.lead?.LeadUid}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    {detail.lead?.Classification && (
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${classColor(detail.lead.Classification)}`}>{detail.lead.Classification}</span>
-                    )}
+                    {detail.lead?.Classification && <StatusBadge status={detail.lead.Classification} />}
                     {detail.lead?.Mobile && (
                       <a href={`tel:${detail.lead.Mobile}`}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 border border-primary/30 transition-colors">
@@ -227,20 +243,22 @@ const SaInquiryDashboard: React.FC = () => {
                     )}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   {[
-                    ["Mobile", detail.lead?.Mobile],
-                    ["Alt Mobile", detail.lead?.AltMobile || "—"],
+                    ["Mobile", detail.lead?.Mobile || "—"],
+                    ["Other mobile", detail.lead?.AltMobile || "—"],
                     ["Email", detail.lead?.Email || "—"],
-                    ["Source", detail.lead?.PlatformName || "—"],
-                    ["Campaign", detail.lead?.CampaignName || "—"],
-                    ["Status", detail.lead?.LeadStatus || detail.lead?.Status],
-                    ["Date Generated", detail.lead?.DateGenerated ? String(detail.lead.DateGenerated).slice(0, 10) : "—"],
-                    ["Salesperson", detail.lead?.SalespersonName || "—"],
+                    ["Stage", stageLabel(detail.lead?.LeadStatus || detail.lead?.Status)],
+                    ["Came from", [detail.lead?.CampaignName, detail.lead?.PlatformName].filter(Boolean).join(" · ") || "—"],
+                    ["Received", fmtDay(detail.lead?.DateGenerated)],
+                    ["Salesperson", detail.lead?.SalespersonName || "Not assigned"],
                   ].map(([k, v]) => (
-                    <div key={k}><span className="text-muted-foreground text-xs">{k}: </span><span className="text-foreground font-medium">{v}</span></div>
+                    <div key={k} className="min-w-0">
+                      <dt className="text-[0.6875rem] uppercase tracking-widest text-muted-foreground">{k}</dt>
+                      <dd className="text-foreground font-medium break-words">{v}</dd>
+                    </div>
                   ))}
-                </div>
+                </dl>
                 {detail.lead?.CustomerRemarks && (
                   <div className="text-xs text-muted-foreground bg-muted/30 rounded p-2">{detail.lead.CustomerRemarks}</div>
                 )}
@@ -248,8 +266,8 @@ const SaInquiryDashboard: React.FC = () => {
 
               {/* Log call form */}
               <div className="rounded-lg border border-border p-4 space-y-3">
-                <h3 className="text-sm font-semibold text-foreground">Log Call</h3>
-                <div className="grid grid-cols-2 gap-3">
+                <h3 className="text-sm font-semibold text-foreground">Log a call</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Outcome</label>
                     <select value={callForm.Outcome} onChange={(e) => setCallForm((f) => ({ ...f, Outcome: e.target.value }))}
@@ -259,11 +277,11 @@ const SaInquiryDashboard: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Classification</label>
+                    <label className="text-xs text-muted-foreground block mb-1">How interested?</label>
                     <select value={callForm.Classification} onChange={(e) => setCallForm((f) => ({ ...f, Classification: e.target.value }))}
                       className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                       <option value="">No change</option>
-                      {CLASSIFICATIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {CLASSIFICATIONS.map((c) => <option key={c} value={c}>{getStatusLabel(c)}</option>)}
                     </select>
                   </div>
                   <div>
@@ -271,16 +289,19 @@ const SaInquiryDashboard: React.FC = () => {
                     <input type="number" value={callForm.DurationSeconds} onChange={(e) => setCallForm((f) => ({ ...f, DurationSeconds: e.target.value }))}
                       className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" placeholder="e.g. 120" />
                   </div>
-                  <div className="col-span-2">
-                    <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
+                  <div className="sm:col-span-2">
+                    <label className="text-xs text-muted-foreground block mb-1">What they said</label>
                     <textarea value={callForm.Remarks} onChange={(e) => setCallForm((f) => ({ ...f, Remarks: e.target.value }))}
                       rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" placeholder="Customer response..." />
                   </div>
                 </div>
-                <button onClick={handleLogCall} disabled={submitting}
-                  className="px-4 py-2 btn-module text-white text-sm font-medium rounded-lg disabled:opacity-40 transition-colors">
-                  {submitting ? "Logging..." : "Log Call"}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button onClick={handleLogCall} disabled={submitting || callEmpty}
+                    className="px-4 py-2 btn-module text-white text-sm font-medium rounded-lg disabled:opacity-40 transition-colors">
+                    {submitting ? "Saving…" : "Log call"}
+                  </button>
+                  {callEmpty && <span className="text-xs text-muted-foreground">Choose an outcome or add a note first.</span>}
+                </div>
               </div>
 
               {/* Call history */}
@@ -292,18 +313,22 @@ const SaInquiryDashboard: React.FC = () => {
                   <div className="p-4 text-center text-muted-foreground text-sm">No calls logged yet</div>
                 ) : detail.calls.map((c: any) => (
                   <div key={c.Id} className="px-4 py-3 border-b border-border last:border-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-foreground">{c.Outcome || "—"}</span>
-                      {c.Classification && <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full ${classColor(c.Classification)}`}>{c.Classification}</span>}
-                      <span className="text-xs text-muted-foreground">{c.CallTime ? String(c.CallTime).slice(0, 16).replace("T", " ") : "—"}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-foreground">{c.Outcome || "No outcome"}</span>
+                        {c.Classification && <StatusBadge status={c.Classification} />}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{fmtWhen(c.CallTime)}</span>
                     </div>
                     {c.Remarks && <p className="text-xs text-muted-foreground mt-1">{c.Remarks}</p>}
-                    {c.DurationSeconds && <p className="text-xs text-muted-foreground">{Math.floor(c.DurationSeconds / 60)}m {c.DurationSeconds % 60}s · {c.SalespersonName || "—"}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      {c.DurationSeconds ? `${Math.floor(c.DurationSeconds / 60)}m ${c.DurationSeconds % 60}s · ` : ""}{c.SalespersonName || "—"}
+                    </p>
                   </div>
                 ))}
               </div>
             </>
-          ) : null}
+          )}
         </div>
       </div>
 

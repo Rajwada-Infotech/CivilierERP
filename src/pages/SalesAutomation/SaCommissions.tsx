@@ -1,14 +1,16 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CheckCircle2, IndianRupee } from "lucide-react";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { CheckCircle2, IndianRupee, Clock } from "lucide-react";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
+import { SaTabs } from "@/components/sa/SaTabs";
+import { MoneyCell, MoneyView, moneyText, StatusCell, TitleCell } from "@/components/sa/saCells";
+import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
-import { StatusBadge } from "@/components/StatusBadge";
 
 const API = "/api/sa/commissions";
 
@@ -39,39 +41,46 @@ async function fetchTeamLeadOptions(): Promise<{ value: string; label: string }[
   return (users as any[]).filter((u) => u.role === "sales_team_lead").map((u) => ({ value: String(u.Id), label: u.Name }));
 }
 
-function money(value: any) {
-  const n = Number(value || 0);
-  return n ? n.toLocaleString("en-IN", { maximumFractionDigits: 2 }) : "-";
-}
-
 // Same field set the old inline form captured — this page only ever created
 // commissions (no edit/delete existed before this migration either); status
 // moves forward only via the Approve/Paid row actions below.
 const fields: FieldDef[] = [
-  { name: "LeadId", label: "Lead (optional)", type: "select", asyncOptions: fetchLeadOptions },
-  { name: "BookingId", label: "Booking ID", type: "text" },
-  { name: "BookingValue", label: "Booking Value", type: "number", required: true },
+  { name: "BookingValue", label: "Booking Value", type: "number", required: true, prefix: "₹" },
+  { name: "LeadId", label: "Lead", type: "select", asyncOptions: fetchLeadOptions, placeholder: "Optional" },
+  { name: "BookingId", label: "Booking ID", type: "text", placeholder: "Optional" },
   { name: "SalespersonId", label: "Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
+  { name: "SpRate", label: "Salesperson Rate (%)", type: "number", placeholder: "e.g. 0.5" },
   { name: "TeamLeadId", label: "Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
-  { name: "SpRate", label: "SP %", type: "number" },
-  { name: "TlRate", label: "TL %", type: "number" },
-  { name: "Notes", label: "Notes", type: "text", fullWidth: true },
+  { name: "TlRate", label: "Team Lead Rate (%)", type: "number", placeholder: "e.g. 0.25" },
+  { name: "Notes", label: "Notes", type: "textarea", fullWidth: true },
 ];
 
 const columns = [
   { key: "leadDisplay", label: "Lead" },
-  { key: "bookingValue", label: "Booking Value" },
-  { key: "salespersonName", label: "Salesperson" },
-  { key: "teamLeadName", label: "Team Lead" },
-  { key: "amounts", label: "Amounts", sortable: false },
-  { key: "externalPayout", label: "External Payout", sortable: false },
+  { key: "BookingValue", label: "Booking Value" },
+  { key: "spAmount", label: "Salesperson" },
+  { key: "tlAmount", label: "Team Lead", hideOnMobile: true },
+  { key: "externalPayout", label: "Channel Partner", sortable: false, hideOnMobile: true },
   { key: "status", label: "Status" },
 ];
+
+const STATUSES = ["All", "Pending", "Approved", "Paid"] as const;
+
+/** Payee name over their ₹ amount and rate. */
+const PayeeCell = (name: unknown, amount: unknown, rate: unknown) => (
+  <div className="min-w-0">
+    <div className="text-sm text-foreground truncate">{name && name !== "-" ? String(name) : "—"}</div>
+    <div className="text-xs text-muted-foreground tabular-nums">
+      {moneyText(amount)}{Number(rate) ? ` · ${Number(rate)}%` : ""}
+    </div>
+  </div>
+);
 
 const SaCommissions: React.FC = () => {
   usePageRights("sa-commissions");
   const { canDoAction } = useAuth();
   const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<(typeof STATUSES)[number]>("All");
   const { data: commissions = [], isLoading, isFetching, dataUpdatedAt, refetch, error } = useQuery({ queryKey: ["sa-commissions"], queryFn: fetchCommissions, staleTime: 30_000 });
 
   const mappedData: RecordWithId[] = useMemo(() => commissions.map((c) => ({
@@ -79,10 +88,9 @@ const SaCommissions: React.FC = () => {
     LeadId: String(c.LeadId ?? ""),
     leadUid: c.LeadUid ?? "",
     customerName: c.CustomerName ?? "",
-    leadDisplay: c.LeadUid || c.CustomerName ? `${c.LeadUid || "-"} — ${c.CustomerName || "-"}` : "-",
+    leadDisplay: c.CustomerName || c.LeadUid || "",
     BookingId: c.BookingId ?? "",
     BookingValue: c.BookingValue ?? "",
-    bookingValue: `Rs ${money(c.BookingValue)}`,
     SalespersonId: String(c.SalespersonId ?? ""),
     salespersonName: c.SalespersonName ?? "-",
     TeamLeadId: String(c.TeamLeadId ?? ""),
@@ -137,30 +145,56 @@ const SaCommissions: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading commissions...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load commissions.</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Finance", "Commissions"]} title="Commissions">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load commissions. Refresh the page to try again." : "Loading commissions…"}
+      </div>
+    </SalesAutoShell>
+  );
+
+  const payout = (r: RecordWithId) => Number(r.spAmount || 0) + Number(r.tlAmount || 0);
+  const totals = Object.fromEntries(STATUSES.slice(1).map((s) => {
+    const rows = mappedData.filter((r) => r.status === s);
+    return [s, { count: rows.length, amount: rows.reduce((sum, r) => sum + payout(r), 0) }];
+  })) as Record<string, { count: number; amount: number }>;
+  const shown = statusFilter === "All" ? mappedData : mappedData.filter((r) => r.status === statusFilter);
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Commissions"]} title="Commission Tracking" subtitle="Track internal sales and team-lead commissions from bookings"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Finance", "Commissions"]} title="Commissions"
+      subtitle="Salesperson and team-lead commission on each booking: Pending → Approved → Paid. Channel-partner payouts are handled in CRM Brokerage."
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <div className="space-y-8">
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <SalesAutoGlassCard label="Waiting for approval" value={formatINR(totals.Pending.amount)} sub={`${totals.Pending.count} commission${totals.Pending.count === 1 ? "" : "s"}`} icon={Clock} accentColor="#d97706" onClick={() => setStatusFilter("Pending")} />
+          <SalesAutoGlassCard label="Approved, not paid" value={formatINR(totals.Approved.amount)} sub={`${totals.Approved.count} to pay out`} icon={CheckCircle2} accentColor="#2563eb" onClick={() => setStatusFilter("Approved")} />
+          <SalesAutoGlassCard label="Paid" value={formatINR(totals.Paid.amount)} sub={`${totals.Paid.count} settled`} icon={IndianRupee} accentColor="#059669" onClick={() => setStatusFilter("Paid")} />
+        </div>
+        <SaTabs
+          tabs={STATUSES.map((s) => ({ key: s, label: s === "All" ? `All (${mappedData.length})` : `${s} (${totals[s].count})` }))}
+          active={statusFilter}
+          onChange={(key) => setStatusFilter(key as (typeof STATUSES)[number])}
+        />
         <MasterPage
           title="Commission"
           fields={fields}
           columns={columns}
+          collapsibleAddForm
+          gridCols={3}
           canCreate={canDoAction("sa-commissions", "create")}
           canEdit={false}
           canDelete={false}
-          initialData={mappedData}
+          initialData={shown}
           onDataEvent={createCommission}
           columnRenderers={{
-            status: (value) => <StatusBadge status={String(value)} />,
-            amounts: (_value, row) => (
-              <span className="text-xs text-muted-foreground">SP Rs {money(row.spAmount)} | TL Rs {money(row.tlAmount)}</span>
-            ),
+            leadDisplay: (v, row) => TitleCell(v || "No lead linked", row.leadUid || (row.BookingId ? `Booking ${row.BookingId}` : "")),
+            BookingValue: MoneyCell,
+            spAmount: (v, row) => PayeeCell(row.salespersonName, v, row.SpRate),
+            tlAmount: (v, row) => PayeeCell(row.teamLeadName, v, row.TlRate),
+            status: (value) => StatusCell(value),
             externalPayout: (_value, row) => {
-              if (!row.channelPartnerName && !Number(row.cpAmount || 0)) return <span className="text-muted-foreground">CRM Brokerage</span>;
-              return <span className="text-xs text-amber-600">Legacy CP Rs {money(row.cpAmount)} — use CRM Brokerage</span>;
+              if (!row.channelPartnerName && !Number(row.cpAmount || 0)) return <span className="text-xs text-muted-foreground">—</span>;
+              return <span className="text-xs text-amber-600">{moneyText(row.cpAmount)} (old record) — pay via CRM Brokerage</span>;
             },
           }}
           rowActions={(row) => {
@@ -177,7 +211,7 @@ const SaCommissions: React.FC = () => {
                 )}
                 {canDoAction("sa-commissions", "edit") && row.status === "Approved" && (
                   <button type="button" onClick={() => updateStatus(row, "Paid")} className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
-                    <IndianRupee size={13} /> Paid
+                    <IndianRupee size={13} /> Mark paid
                   </button>
                 )}
               </>
@@ -186,14 +220,15 @@ const SaCommissions: React.FC = () => {
           viewConfig={{
             title: "Commission Details",
             fields: [
-              { key: "leadDisplay", label: "Lead" },
+              { key: "leadDisplay", label: "Customer" },
+              { key: "leadUid", label: "Lead ID" },
               { key: "BookingId", label: "Booking ID" },
-              { key: "bookingValue", label: "Booking Value" },
+              { key: "BookingValue", label: "Booking Value", render: MoneyView },
               { key: "salespersonName", label: "Salesperson" },
-              { key: "SpRate", label: "SP %" },
+              { key: "spAmount", label: "Salesperson Commission", render: (v, row) => <p className="text-sm tabular-nums">{moneyText(v)}{Number(row.SpRate) ? ` (${row.SpRate}%)` : ""}</p> },
               { key: "teamLeadName", label: "Team Lead" },
-              { key: "TlRate", label: "TL %" },
-              { key: "status", label: "Status" },
+              { key: "tlAmount", label: "Team Lead Commission", render: (v, row) => <p className="text-sm tabular-nums">{moneyText(v)}{Number(row.TlRate) ? ` (${row.TlRate}%)` : ""}</p> },
+              { key: "status", label: "Status", render: (v) => StatusCell(v) },
               { key: "Notes", label: "Notes" },
             ],
           }}

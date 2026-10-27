@@ -9,13 +9,17 @@ const day = (v?: string | null) =>
   v ? new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const e = (v: unknown) => escapeHtml(v == null || v === "" ? "—" : String(v));
 const money = (n?: number | null) => (n ? fmt(n) : "—");
+// Basic = labour + materials; tax = the activity's HSN / SAC GST on that basic; total = basic + tax.
+const basicOf = (a: WorkOrderActivityDetail) => (a.LabourAmount || 0) + (a.MaterialAmount || 0);
+const taxOf = (a: WorkOrderActivityDetail) => (basicOf(a) * (Number(a.HsnGstRate) || 0)) / 100;
 
 function activityRows(act: WorkOrderActivityDetail, no: string, supplierName: string) {
   const hsn = act.HsnCode ? `${act.HsnCode}${act.HsnGstRate != null ? ` · ${act.HsnGstRate}%` : ""}` : "—";
   let html = `<tr class="act">
     <td class="n">${no}</td><td><b>${e(act.ActivityName)}</b></td><td>${e(hsn)}</td><td>${e(act.UOMName)}</td>
     <td class="r">${money(act.Rate)}</td><td class="r">${act.Area != null ? fmtQ(Number(act.Area)) : "—"}</td>
-    <td class="r">${money(act.LabourAmount)}</td><td class="r">${money(act.MaterialAmount)}</td><td class="r"><b>${fmt(act.GrandTotal || 0)}</b></td>
+    <td class="r">${money(act.LabourAmount)}</td><td class="r">${money(act.MaterialAmount)}</td>
+    <td class="r">${fmt(basicOf(act))}</td><td class="r">${money(taxOf(act))}</td><td class="r"><b>${fmt(basicOf(act) + taxOf(act))}</b></td>
   </tr>`;
   if (act.materials?.length) {
     const lines = act.materials.map((m, i) => {
@@ -29,7 +33,7 @@ function activityRows(act: WorkOrderActivityDetail, no: string, supplierName: st
         <td class="r">${amount > 0 ? fmt(amount) : "—"}</td>
       </tr>`;
     }).join("");
-    html += `<tr class="mats"><td></td><td colspan="8">
+    html += `<tr class="mats"><td></td><td colspan="10">
       <table class="sub">
         <thead><tr><th class="n">#</th><th>Material</th><th class="r">Ratio</th><th class="r">Qty</th><th>Unit</th><th class="r">Rate</th><th class="r">GST</th><th>Supplier</th><th class="r">Amount</th></tr></thead>
         <tbody>${lines}</tbody>
@@ -37,7 +41,7 @@ function activityRows(act: WorkOrderActivityDetail, no: string, supplierName: st
       </table>
     </td></tr>`;
   }
-  if (act.Remarks) html += `<tr class="rem"><td></td><td colspan="8">Remarks: ${e(act.Remarks)}</td></tr>`;
+  if (act.Remarks) html += `<tr class="rem"><td></td><td colspan="10">Remarks: ${e(act.Remarks)}</td></tr>`;
   return html;
 }
 
@@ -51,14 +55,17 @@ export function printWorkOrder(d: WorkOrderDetail) {
   }
   const labour = acts.reduce((s, a) => s + (a.LabourAmount || 0), 0);
   const materials = acts.reduce((s, a) => s + (a.MaterialAmount || 0), 0);
+  const basic = labour + materials;
+  const totalTax = acts.reduce((s, a) => s + taxOf(a), 0);
 
   const body = [...groups.entries()].map(([name, list], gi) => {
     const gLabour = list.reduce((s, a) => s + (a.LabourAmount || 0), 0);
     const gMats = list.reduce((s, a) => s + (a.MaterialAmount || 0), 0);
+    const gTax = list.reduce((s, a) => s + taxOf(a), 0);
     return `<tbody class="group">
-      <tr class="grp"><td class="n">${String(gi + 1).padStart(2, "0")}</td><td colspan="8">${e(name)} <span class="muted">· ${list.length} ${list.length === 1 ? "activity" : "activities"}</span></td></tr>
+      <tr class="grp"><td class="n">${String(gi + 1).padStart(2, "0")}</td><td colspan="10">${e(name)} <span class="muted">· ${list.length} ${list.length === 1 ? "activity" : "activities"}</span></td></tr>
       ${list.map((a, ai) => activityRows(a, `${gi + 1}.${ai + 1}`, d.SupplierName)).join("")}
-      <tr class="gtot"><td></td><td colspan="5">${e(name)} total</td><td class="r">${fmt(gLabour)}</td><td class="r">${fmt(gMats)}</td><td class="r">${fmt(gLabour + gMats)}</td></tr>
+      <tr class="gtot"><td></td><td colspan="5">${e(name)} total</td><td class="r">${fmt(gLabour)}</td><td class="r">${fmt(gMats)}</td><td class="r">${fmt(gLabour + gMats)}</td><td class="r">${fmt(gTax)}</td><td class="r">${fmt(gLabour + gMats + gTax)}</td></tr>
     </tbody>`;
   }).join("");
 
@@ -109,6 +116,7 @@ export function printWorkOrder(d: WorkOrderDetail) {
   .thanks { font-size: 13px; font-weight: 900; margin-top: 18px; }
   .totals { width: 260px; flex-shrink: 0; }
   .totals .line { display: flex; justify-content: space-between; padding: 4px 0; }
+  .totals .line.sum { border-top: 1px solid #d9d9de; font-weight: 700; }
   .totals .total { background: #f28c1a; color: #fff; font-weight: 900; display: flex; justify-content: space-between; padding: 8px 10px; margin-top: 6px; font-size: 13px; }
   .sign { width: 190px; margin: 34px 0 0 auto; text-align: center; border-top: 1px solid #bbb; padding-top: 4px; font-weight: 800; }
   tbody.group, tr { page-break-inside: avoid; }
@@ -132,8 +140,8 @@ export function printWorkOrder(d: WorkOrderDetail) {
 
     <h2>Activities · ${acts.length} activit${acts.length === 1 ? "y" : "ies"}</h2>
     <table>
-      <thead><tr><th class="n">No.</th><th>Activity</th><th>HSN / GST</th><th>Unit</th><th class="r">Rate / unit</th><th class="r">Area</th><th class="r">Labour</th><th class="r">Materials</th><th class="r">Total</th></tr></thead>
-      ${body || `<tbody><tr><td colspan="9" class="muted">No activities.</td></tr></tbody>`}
+      <thead><tr><th class="n">No.</th><th>Activity</th><th>HSN / GST</th><th>Unit</th><th class="r">Rate / unit</th><th class="r">Area</th><th class="r">Labour</th><th class="r">Materials</th><th class="r">Basic</th><th class="r">Tax</th><th class="r">Total</th></tr></thead>
+      ${body || `<tbody><tr><td colspan="11" class="muted">No activities.</td></tr></tbody>`}
     </table>
 
     <div class="lower">
@@ -144,7 +152,10 @@ export function printWorkOrder(d: WorkOrderDetail) {
       <div class="totals">
         <div class="line"><span>Raw materials</span><span>${fmt(materials)}</span></div>
         <div class="line"><span>Labour</span><span>${fmt(labour)}</span></div>
-        <div class="total"><span>Grand total</span><span>${fmt(d.TotalAmount || 0)}</span></div>
+        <div class="line sum"><span>Basic</span><span>${fmt(basic)}</span></div>
+        <div class="line"><span>+ Total tax</span><span>${fmt(totalTax)}</span></div>
+        <div class="line sum"><span>Basic + tax</span><span>${fmt(basic + totalTax)}</span></div>
+        <div class="total"><span>Grand total</span><span>${fmt(d.TotalAmount || basic + totalTax)}</span></div>
       </div>
     </div>
     <div class="sign">Authorised sign</div>

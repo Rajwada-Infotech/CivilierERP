@@ -3,7 +3,10 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
+import { CodeCell, CountCell, fmtPct, MoneyCell, MoneyView, PctView, StatusCell, TitleCell } from "@/components/sa/saCells";
+import { formatINR } from "@/utils/formatCurrency";
+import { Megaphone, Wallet, Receipt, Users } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   MasterPage,
@@ -40,43 +43,49 @@ async function fetchManagerOptions(): Promise<{ value: string; label: string }[]
 }
 
 const fields: FieldDef[] = [
-  { name: "campaignCode", label: "Campaign Code (auto-assigned if left blank)", type: "text", uppercase: true },
-  { name: "name", label: "Campaign Name", type: "text", required: true },
+  { name: "name", label: "Campaign Name", type: "text", required: true, placeholder: "e.g. Diwali Launch – Silver Woods" },
   {
     name: "platformId",
-    label: "Social Media Platform",
+    label: "Platform",
     type: "select",
     required: true,
     asyncOptions: fetchPlatformOptions,
   },
-  { name: "objective", label: "Campaign Objective", type: "textarea", fullWidth: true },
-  { name: "startDate", label: "Start Date", type: "date" },
-  { name: "endDate", label: "End Date", type: "date" },
-  { name: "budget", label: "Budget (Rs)", type: "number" },
+  { name: "campaignCode", label: "Code", type: "text", uppercase: true, placeholder: "Leave blank to auto-assign" },
+  { name: "marketingManagerId", label: "Marketing Manager", type: "select", asyncOptions: fetchManagerOptions },
+  { name: "startDate", label: "Starts On", type: "date" },
+  { name: "endDate", label: "Ends On", type: "date" },
+  { name: "budget", label: "Budget", type: "number", prefix: "₹" },
   {
     name: "status",
-    label: "Campaign Status",
+    label: "Status",
     type: "select",
     options: ["Active", "Paused", "Completed", "Cancelled"],
     defaultValue: "Active",
   },
-  { name: "marketingManagerId", label: "Marketing Manager", type: "select", asyncOptions: fetchManagerOptions },
-  { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
+  // No "Active" switch: Status says whether the campaign is running.
+  // IsActive is the delete flag, set by Delete — an edit sends back the
+  // value it loaded.
+  { name: "objective", label: "Objective", type: "textarea", fullWidth: true, placeholder: "What this campaign should achieve — e.g. 200 site-visit leads for 3BHK units by March" },
 ];
 
 const columns = [
   { key: "campaignCode", label: "Code" },
-  { key: "name", label: "Campaign Name" },
-  { key: "platformName", label: "Platform" },
-  { key: "budget", label: "Budget (Rs)", hideOnMobile: true },
+  { key: "name", label: "Campaign" },
+  { key: "platformName", label: "Platform", hideOnMobile: true },
+  { key: "budget", label: "Budget", hideOnMobile: true },
+  { key: "costSpent", label: "Spent", hideOnMobile: true },
   { key: "totalAds", label: "Ads", hideOnMobile: true },
-  { key: "totalLeads", label: "Leads", hideOnMobile: true },
-  { key: "costSpent", label: "Spent (Rs)", hideOnMobile: true },
-  { key: "costPerLead", label: "CPL (Rs)", hideOnMobile: true },
-  { key: "marketingManagerName", label: "Manager", hideOnMobile: true },
+  { key: "totalLeads", label: "Leads" },
+  { key: "costPerLead", label: "Cost / Lead", hideOnMobile: true },
   { key: "status", label: "Status" },
-  { key: "isActive", label: "Active" },
 ];
+
+const dateRange = (row: RecordWithId) => {
+  const fmt = (d: unknown) => (d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "");
+  const s = fmt(row.startDate), e = fmt(row.endDate);
+  return s || e ? `${s || "…"} – ${e || "ongoing"}` : "";
+};
 
 const exportColumns: ExportColumn[] = [
   { header: "Code", accessor: "campaignCode" },
@@ -181,12 +190,33 @@ const SaCampaignMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["sa-campaigns"] });
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading campaigns...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load campaigns.</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Campaigns"]} title="Campaigns">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load campaigns. Refresh the page to try again." : "Loading campaigns…"}
+      </div>
+    </SalesAutoShell>
+  );
+
+  const live = mappedData.filter((c) => c.status === "Active" && c.isActive !== false);
+  const totalBudget = mappedData.reduce((s, c) => s + Number(c.budget ?? 0), 0);
+  const totalSpent = mappedData.reduce((s, c) => s + Number(c.costSpent ?? 0), 0);
+  const totalLeads = mappedData.reduce((s, c) => s + Number(c.totalLeads ?? 0), 0);
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Campaign Master"]} title="Campaign Master" subtitle={platformFilter ? `Showing campaigns for the selected platform — ${mappedData[0]?.platformName || ""}` : "Manage marketing campaigns across all social media platforms"}>
-      <div className="space-y-8">
+    <SalesAutoShell
+      breadcrumbs={["Sales Automation", "Campaigns"]}
+      title="Campaigns"
+      subtitle={platformFilter ? `Campaigns on ${mappedData[0]?.platformName || "the selected platform"}`
+        : `${mappedData.length} campaign${mappedData.length === 1 ? "" : "s"}, ${live.length} running — each holds the ads you run on one platform`}
+    >
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <SalesAutoGlassCard label="Running" value={live.length} sub={`of ${mappedData.length} campaigns`} icon={Megaphone} accentColor="#2563eb" />
+          <SalesAutoGlassCard label="Budget" value={formatINR(totalBudget)} icon={Wallet} accentColor="#0891b2" />
+          <SalesAutoGlassCard label="Spent" value={formatINR(totalSpent)} sub={totalBudget ? `${fmtPct((totalSpent / totalBudget) * 100)} of budget` : undefined} icon={Receipt} accentColor="#ea580c" />
+          <SalesAutoGlassCard label="Leads" value={totalLeads} sub={totalLeads ? `${formatINR(totalSpent / totalLeads)} per lead` : undefined} icon={Users} accentColor="#7c3aed" />
+        </div>
         {platformFilter && (
           <Link to="/sales-automation/campaigns" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
             ← Clear platform filter, show all campaigns
@@ -196,10 +226,19 @@ const SaCampaignMaster: React.FC = () => {
           title="Campaign"
           fields={fields}
           columns={columns}
+          collapsibleAddForm
+          gridCols={3}
           columnRenderers={{
+            campaignCode: CodeCell,
+            name: (v, row) => TitleCell(v, dateRange(row) || row.marketingManagerName),
+            budget: MoneyCell,
+            costSpent: MoneyCell,
+            costPerLead: MoneyCell,
+            totalLeads: CountCell,
+            status: StatusCell,
             totalAds: (value, row) => (
-              <Link to={`/sales-automation/ads?campaignId=${row._id}`} className="text-primary hover:underline">
-                {String(value)} ad{value === 1 ? "" : "s"} →
+              <Link to={`/sales-automation/ads?campaignId=${row._id}`} className="text-primary hover:underline whitespace-nowrap">
+                {String(value)} ad{Number(value) === 1 ? "" : "s"} →
               </Link>
             ),
           }}
@@ -209,28 +248,28 @@ const SaCampaignMaster: React.FC = () => {
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           exportConfig={{
-            title: "Campaign Master",
+            title: "Campaigns",
             filename: "campaign-master",
             columns: exportColumns,
           }}
           viewConfig={{
             title: "Campaign Details",
             fields: [
-              { key: "campaignCode", label: "Campaign Code" },
-              { key: "name", label: "Campaign Name" },
+              { key: "campaignCode", label: "Code" },
+              { key: "name", label: "Campaign" },
               { key: "platformName", label: "Platform" },
-              { key: "objective", label: "Objective" },
-              { key: "startDate", label: "Start Date" },
-              { key: "endDate", label: "End Date" },
-              { key: "budget", label: "Budget (Rs)" },
-              { key: "totalAds", label: "Total Ads" },
-              { key: "totalLeads", label: "Total Leads" },
-              { key: "costSpent", label: "Cost Spent (Rs)" },
-              { key: "costPerLead", label: "Cost Per Lead (Rs)" },
-              { key: "conversionPct", label: "Conversion %" },
-              { key: "activeDays", label: "Active Days" },
               { key: "marketingManagerName", label: "Marketing Manager" },
-              { key: "status", label: "Status" },
+              { key: "startDate", label: "Starts On" },
+              { key: "endDate", label: "Ends On" },
+              { key: "activeDays", label: "Days Running" },
+              { key: "budget", label: "Budget", render: MoneyView },
+              { key: "costSpent", label: "Spent", render: MoneyView },
+              { key: "totalAds", label: "Ads" },
+              { key: "totalLeads", label: "Leads" },
+              { key: "costPerLead", label: "Cost / Lead", render: MoneyView },
+              { key: "conversionPct", label: "Conversion", render: PctView },
+              { key: "objective", label: "Objective" },
+              { key: "status", label: "Status", render: (v) => StatusCell(v) },
               { key: "isActive", label: "Active" },
             ],
           }}
