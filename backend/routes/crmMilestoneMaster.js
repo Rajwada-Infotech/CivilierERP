@@ -17,9 +17,11 @@ router.get("/", requireAnyPageRight(["crm-milestone-master", "crm-payment-plans"
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, Name, SortOrder, IsActive, CreatedAt, UpdatedAt
-      FROM dbo.CrmMilestoneMaster
-      ORDER BY SortOrder, Name
+      SELECT m.Id, m.Name, m.SortOrder, m.IsActive, m.CreatedAt, m.UpdatedAt,
+        -- How many payment plans use it: those can't delete it (deactivate instead), so the page says so up front.
+        (SELECT COUNT(DISTINCT i.PlanTemplateId) FROM dbo.CrmPaymentPlanTemplateItem i WHERE i.MilestoneMasterId = m.Id) AS PlanCount
+      FROM dbo.CrmMilestoneMaster m
+      ORDER BY m.SortOrder, m.Name
     `);
     res.json(result.recordset);
   } catch (e) {
@@ -37,11 +39,13 @@ router.post("/", requirePageRight("crm-milestone-master", "create"), async (req,
     const result = await pool.request()
       .input("name", sql.NVarChar(200), b.Name.trim())
       .input("sort", sql.Int,           b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder) : 0)
+      // The form's status was ignored: a milestone created inactive came out active.
+      .input("active", sql.Bit,        b.IsActive === false || b.IsActive === 0 ? 0 : 1)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmMilestoneMaster (Name, SortOrder, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@name, @sort, 1, @cb, SYSDATETIME())
+        VALUES (@name, @sort, @active, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -58,7 +62,7 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
-    await pool.request()
+    const upd = await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.Name || null)
       .input("sort", sql.Int,           b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder) : null)
@@ -71,6 +75,7 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    if (!upd.rowsAffected[0]) return res.status(404).json({ error: "Milestone not found" });
     res.json({ success: true });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
