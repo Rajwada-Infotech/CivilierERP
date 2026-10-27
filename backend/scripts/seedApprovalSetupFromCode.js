@@ -18,8 +18,13 @@
 //   node scripts/seedApprovalSetupFromCode.js --apply   write
 const { connectDB, getPool, closeDB, sql } = require("../db");
 const {
-  MODULE_MAP, getWorkflow, APPROVER_ROLES, MODULE_APPROVER_ROLE_OVERRIDES,
+  MODULE_MAP, getWorkflow, APPROVER_ROLES, MODULE_APPROVER_ROLE_OVERRIDES, WORKFLOW_ID_MAP,
 } = require("../services/approvalService");
+// The id Approval Setup and getWorkflow() use for a module (e.g. boq -> BOQ).
+const setupId = (module) => WORKFLOW_ID_MAP[module] || module;
+// Every approval gate the code knows: engine modules plus the CRM gates that
+// only have a role list (registry, mutation, query payment...).
+const ALL_MODULES = [...new Set([...Object.keys(MODULE_MAP), ...Object.keys(MODULE_APPROVER_ROLE_OVERRIDES)])].sort();
 const { userHasEffectivePageRight } = require("../middleware/permissions");
 const { bumpCacheVersion } = require("../redis");
 
@@ -34,11 +39,31 @@ const CREATED_BY = "seedApprovalSetupFromCode";
   const roleRows = await q(`SELECT RId, RName FROM dbo.Role`);
   const roleByLower = new Map(roleRows.map((r) => [r.RName.toLowerCase(), r.RName]));
 
+  // 0. Repair rows an earlier run of this script wrote under the code's
+  //    module name instead of the Approval Setup id (boq instead of BOQ).
+  const seeded = await q(`SELECT Id, modules FROM dbo.ApprovalWorkflows WHERE CreatedBy = '${CREATED_BY}'`);
+  const repairs = [];
+  for (const row of seeded) {
+    const mods = JSON.parse(row.modules || "[]");
+    const fixed = [...new Set(mods.map(setupId))];
+    if (JSON.stringify(fixed) !== JSON.stringify(mods)) repairs.push({ Id: row.Id, From: mods.join(", "), To: fixed.join(", "), fixed });
+  }
+  console.log(`\n== Earlier seeded workflows with wrong module ids (${repairs.length})`);
+  if (repairs.length) console.table(repairs.map(({ fixed, ...r }) => r));
+  if (APPLY && repairs.length) {
+    for (const r of repairs) {
+      await pool.request().input("id", sql.Int, r.Id).input("m", sql.NVarChar(sql.MAX), JSON.stringify(r.fixed))
+        .input("first", sql.NVarChar(100), r.fixed[0])
+        .query(`UPDATE dbo.ApprovalWorkflows SET modules = @m, Module = @first WHERE Id = @id`);
+    }
+    console.log(`Repaired ${repairs.length}.`);
+  }
+
   // 1. Modules with no workflow -> grouped by today's role set.
   const groups = new Map();
   const missingRoles = new Set();
   const withWorkflow = [];
-  for (const module of Object.keys(MODULE_MAP).sort()) {
+  for (const module of ALL_MODULES) {
     const wf = await getWorkflow(module).catch(() => null);
     if (wf?.LevelDefs?.length) { withWorkflow.push({ module, wf }); continue; }
     const codeRoles = MODULE_APPROVER_ROLE_OVERRIDES[module] ?? APPROVER_ROLES;
@@ -49,7 +74,8 @@ const CREATED_BY = "seedApprovalSetupFromCode";
     }
     const key = roles.map((r) => r.toLowerCase()).sort().join("|");
     if (!groups.has(key)) groups.set(key, { roles, modules: [] });
-    groups.get(key).modules.push(module);
+    const id = setupId(module);
+    if (!groups.get(key).modules.includes(id)) groups.get(key).modules.push(id);
   }
 
   console.log(`\n${APPLY ? "APPLY" : "DRY RUN"} — workflows to create (one level each, roles as the code allows today)`);
