@@ -7,7 +7,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -1483,7 +1483,8 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
 // Booking Details tab to show "customer has ₹X sitting on account" instead
 // of that money just disappearing into a milestone it wasn't actually
 // meant for yet.
-router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
+// The Invoices page reads it to invoice an on-account payment.
+router.get("/booking/:bookingId/on-account", requireAnyPageRight(["crm-payments", "crm-invoices"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
