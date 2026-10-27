@@ -4,14 +4,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
+import { SaTabs } from "@/components/sa/SaTabs";
+import { MoneyView, moneyText, StatusCell, TitleCell } from "@/components/sa/saCells";
+import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Wallet, AlertTriangle, Receipt } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { StatusBadge } from "@/components/StatusBadge";
 
 const API = "/api/sa/marketing-invoices";
 
@@ -41,30 +43,42 @@ async function fetchAdOptions(): Promise<{ value: string; label: string }[]> {
 }
 
 const fields: FieldDef[] = [
-  { name: "InvoiceNumber", label: "Invoice Number", type: "text", required: true },
-  { name: "VendorName", label: "Vendor", type: "text" },
-  { name: "CampaignId", label: "Campaign", type: "select", asyncOptions: fetchCampaignOptions },
-  { name: "AdId", label: "Advertisement", type: "select", asyncOptions: fetchAdOptions },
+  { name: "InvoiceNumber", label: "Invoice Number", type: "text", required: true, placeholder: "As printed on the vendor's bill" },
+  { name: "VendorName", label: "Vendor", type: "text", placeholder: "Agency, Meta, Google…" },
   { name: "InvoiceDate", label: "Invoice Date", type: "date" },
-  { name: "Amount", label: "Amount", type: "number" },
-  { name: "GstAmount", label: "GST Amount", type: "number" },
+  { name: "CampaignId", label: "Campaign", type: "select", asyncOptions: fetchCampaignOptions },
+  { name: "AdId", label: "Ad", type: "select", asyncOptions: fetchAdOptions },
   { name: "DueDate", label: "Due Date", type: "date" },
+  { name: "Amount", label: "Amount (before GST)", type: "number", prefix: "₹" },
+  { name: "GstAmount", label: "GST", type: "number", prefix: "₹" },
   { name: "PaymentStatus", label: "Payment Status", type: "select", options: ["Pending", "Paid", "Partial", "Cancelled"], defaultValue: "Pending" },
   { name: "Notes", label: "Notes", type: "textarea", fullWidth: true },
 ];
 
 const columns = [
-  { key: "InvoiceNumber", label: "Invoice #" },
-  { key: "VendorName", label: "Vendor" },
-  { key: "CampaignName", label: "Campaign", hideOnMobile: true },
-  { key: "AdName", label: "Ad", hideOnMobile: true },
-  { key: "Amount", label: "Amount" },
-  { key: "GstAmount", label: "GST", hideOnMobile: true },
+  { key: "InvoiceNumber", label: "Invoice" },
+  { key: "CampaignName", label: "For", hideOnMobile: true },
   { key: "TotalAmount", label: "Total" },
+  { key: "DueDate", label: "Due", hideOnMobile: true },
   { key: "PaymentStatus", label: "Payment" },
-  { key: "ApprovalStatus", label: "Approval" },
-  { key: "DueDate", label: "Due Date", hideOnMobile: true },
+  { key: "ApprovalStatus", label: "Approval", hideOnMobile: true },
 ];
+
+const OPEN_PAYMENT = ["Pending", "Partial"];
+const todayYmd = () => new Date().toISOString().slice(0, 10);
+const isOverdue = (r: RecordWithId) =>
+  !!r.DueDate && String(r.DueDate) < todayYmd() && OPEN_PAYMENT.includes(String(r.PaymentStatus)) && r.ApprovalStatus !== "Rejected";
+const fmtDay = (d: unknown) =>
+  d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+const FILTERS = [
+  { key: "all", label: "All", test: (_: RecordWithId) => true },
+  { key: "approval", label: "Awaiting approval", test: (r: RecordWithId) => r.ApprovalStatus === "Pending" },
+  { key: "unpaid", label: "Approved, unpaid", test: (r: RecordWithId) => r.ApprovalStatus === "Approved" && OPEN_PAYMENT.includes(String(r.PaymentStatus)) },
+  { key: "overdue", label: "Overdue", test: isOverdue },
+  { key: "paid", label: "Paid", test: (r: RecordWithId) => r.PaymentStatus === "Paid" },
+] as const;
+type FilterKey = (typeof FILTERS)[number]["key"];
 
 const exportColumns: ExportColumn[] = [
   { header: "Invoice #", accessor: "InvoiceNumber" },
@@ -87,6 +101,7 @@ const SaMarketingInvoices: React.FC = () => {
   const [approvalDialog, setApprovalDialog] = useState<{ id: string; action: "approve" | "reject"; invoiceNumber: string } | null>(null);
   const [approvalNotes, setApprovalNotes] = useState("");
   const [approvalLoading, setApprovalLoading] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>("all");
 
   const handleApproval = async () => {
     if (!approvalDialog) return;
@@ -168,34 +183,69 @@ const SaMarketingInvoices: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["sa-marketing-invoices"] });
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading invoices...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load invoices.</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Finance", "Invoices"]} title="Marketing Invoices">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load invoices. Refresh the page to try again." : "Loading invoices…"}
+      </div>
+    </SalesAutoShell>
+  );
+
+  const sumOf = (rows: RecordWithId[]) => rows.reduce((s, r) => s + Number(r.TotalAmount || 0), 0);
+  const counts = Object.fromEntries(FILTERS.map((f) => [f.key, mappedData.filter(f.test)])) as Record<FilterKey, RecordWithId[]>;
+  const shown = counts[filter];
+  const monthKey = todayYmd().slice(0, 7);
+  const thisMonth = mappedData.filter((r) => String(r.InvoiceDate).startsWith(monthKey) && r.ApprovalStatus !== "Rejected" && r.PaymentStatus !== "Cancelled");
 
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Marketing Invoices"]} title="Marketing Invoices" subtitle="Track marketing expenses and invoice payments for campaigns and advertisements"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Finance", "Invoices"]} title="Marketing Invoices"
+      subtitle="Bills from agencies and ad platforms. Every invoice that isn't cancelled counts toward its campaign's and ad's spend."
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <div className="space-y-8">
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <SalesAutoGlassCard label="Awaiting approval" value={formatINR(sumOf(counts.approval))} sub={`${counts.approval.length} invoice${counts.approval.length === 1 ? "" : "s"}`} icon={Clock} accentColor="#d97706" onClick={() => setFilter("approval")} />
+          <SalesAutoGlassCard label="Approved, unpaid" value={formatINR(sumOf(counts.unpaid))} sub={`${counts.unpaid.length} to pay`} icon={Wallet} accentColor="#2563eb" onClick={() => setFilter("unpaid")} />
+          <SalesAutoGlassCard label="Overdue" value={formatINR(sumOf(counts.overdue))} sub={counts.overdue.length ? `${counts.overdue.length} past due date` : "nothing overdue"} icon={AlertTriangle} accentColor={counts.overdue.length ? "#dc2626" : "#64748b"} onClick={() => setFilter("overdue")} />
+          <SalesAutoGlassCard label="Billed this month" value={formatINR(sumOf(thisMonth))} sub={`${thisMonth.length} invoice${thisMonth.length === 1 ? "" : "s"}`} icon={Receipt} accentColor="#7c3aed" />
+        </div>
+        <SaTabs
+          tabs={FILTERS.map((f) => ({ key: f.key, label: `${f.label} (${counts[f.key].length})` }))}
+          active={filter}
+          onChange={(key) => setFilter(key as FilterKey)}
+        />
         <MasterPage
           title="Invoice"
           fields={fields}
           columns={columns}
+          collapsibleAddForm
+          gridCols={3}
           canCreate={canDoAction("sa-marketing-invoices", "create")}
           canEdit={canDoAction("sa-marketing-invoices", "edit")}
           canDelete={canDoAction("sa-marketing-invoices", "delete")}
-          initialData={mappedData}
+          initialData={shown}
           onDataEvent={handleDataEvent}
           columnRenderers={{
-            PaymentStatus: (value) => <StatusBadge status={String(value)} />,
+            InvoiceNumber: (v, row) => TitleCell(v, [row.VendorName, row.InvoiceDate ? fmtDay(row.InvoiceDate) : ""].filter(Boolean).join(" · ")),
+            CampaignName: (v, row) => (v || row.AdName ? TitleCell(v || "—", row.AdName) : <span className="text-muted-foreground">—</span>),
+            TotalAmount: (v, row) => (
+              <div className="tabular-nums">
+                <div className="font-medium">{moneyText(v)}</div>
+                {Number(row.GstAmount) > 0 && <div className="text-xs text-muted-foreground">incl. {moneyText(row.GstAmount)} GST</div>}
+              </div>
+            ),
+            DueDate: (v, row) => (
+              <span className={`text-sm whitespace-nowrap ${isOverdue(row) ? "text-red-600 font-medium" : ""}`}>
+                {fmtDay(v)}{isOverdue(row) ? " · overdue" : ""}
+              </span>
+            ),
+            PaymentStatus: (value) => StatusCell(value),
+            ApprovalStatus: (value) => StatusCell(value),
           }}
           exportConfig={{ title: "Marketing Invoices", filename: "marketing-invoices", columns: exportColumns }}
           rowActions={(row) => {
             const status = String(row.ApprovalStatus ?? "Pending");
-            if (status === "Approved" || status === "Rejected") {
-              return <StatusBadge status={status} />;
-            }
-            if (!canDoAction("sa-marketing-invoices", "edit")) {
-              return <StatusBadge status="Pending" />;
-            }
+            // The Approval column already shows the status — only offer actions.
+            if (status !== "Pending" || !canDoAction("sa-marketing-invoices", "edit")) return null;
             return (
               <>
                 <button
@@ -224,13 +274,13 @@ const SaMarketingInvoices: React.FC = () => {
               { key: "VendorName", label: "Vendor" },
               { key: "CampaignName", label: "Campaign" },
               { key: "AdName", label: "Advertisement" },
-              { key: "InvoiceDate", label: "Invoice Date" },
-              { key: "Amount", label: "Amount" },
-              { key: "GstAmount", label: "GST" },
-              { key: "TotalAmount", label: "Total" },
-              { key: "DueDate", label: "Due Date" },
-              { key: "PaymentStatus", label: "Payment Status" },
-              { key: "ApprovalStatus", label: "Approval Status" },
+              { key: "InvoiceDate", label: "Invoice Date", render: (v) => <p className="text-sm">{fmtDay(v)}</p> },
+              { key: "Amount", label: "Amount (before GST)", render: MoneyView },
+              { key: "GstAmount", label: "GST", render: MoneyView },
+              { key: "TotalAmount", label: "Total", render: MoneyView },
+              { key: "DueDate", label: "Due Date", render: (v) => <p className="text-sm">{fmtDay(v)}</p> },
+              { key: "PaymentStatus", label: "Payment Status", render: (v) => StatusCell(v) },
+              { key: "ApprovalStatus", label: "Approval Status", render: (v) => StatusCell(v) },
               { key: "ApproverName", label: "Approved By" },
               { key: "ApprovedAt", label: "Approved At" },
               { key: "ApprovalNotes", label: "Approval Notes" },
@@ -269,7 +319,7 @@ const SaMarketingInvoices: React.FC = () => {
                   onClick={handleApproval}
                   disabled={approvalLoading}
                   className={`px-4 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-40 transition-colors ${approvalDialog?.action === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"}`}
-                >{approvalLoading ? "..." : approvalDialog?.action === "approve" ? "Approve" : "Reject"}</button>
+                >{approvalLoading ? "Saving…" : approvalDialog?.action === "approve" ? "Approve" : "Reject"}</button>
               </div>
             </div>
           </DialogContent>
