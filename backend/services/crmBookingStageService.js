@@ -46,6 +46,9 @@ const WORKFLOW_STAGES = [STAGE_REVIEW, STAGE_MARKETING, STAGE_DIRECTOR, STAGE_CO
 // These role sets are only the fallback for a database with no workflow
 // configured (or a level with neither roles nor people set).
 const STAGE_LEVEL = { MarketingHeadApproval: 1, DirectorApproval: 2 };
+// The booking flow has two approval stages, so Approval Setup must define
+// at least that many levels (a structural need of this flow, not a setting).
+const MIN_APPROVAL_LEVELS = Object.keys(STAGE_LEVEL).length;
 const STAGE_ROLES = {
   [STAGE_MARKETING]: ["admin", "super_admin", "marketing_head"],
   [STAGE_DIRECTOR]: ["admin", "super_admin", "director"],
@@ -272,15 +275,28 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     throw e;
   }
 
+  // Refuse BEFORE anything is recorded when Approval Setup has fewer levels
+  // than the booking flow needs. approvalTransition treats a missing
+  // workflow as one level and would flip Status to Approved on the first
+  // click (how production bookings 1/4/5 were approved on 22-25 Sep 2026,
+  // before the crm-bookings workflow existed).
+  const workflow = await require("./approvalService").getWorkflow("crm-bookings").catch(() => null);
+  const configuredLevels = workflow ? (workflow.Levels || workflow.LevelDefs?.length || 0) : 0;
+  if (configuredLevels < MIN_APPROVAL_LEVELS) {
+    const e = new Error(
+      `Booking approval needs ${MIN_APPROVAL_LEVELS} levels in Approval Setup (Marketing Head, then Director); `
+      + `it has ${configuredLevels}. Ask an admin to set it up before approving.`,
+    );
+    e.status = 409;
+    throw e;
+  }
+
   // Let the generic engine advance the ApprovalAuditLog level (level 1 for
   // Marketing Head, level 2 for Director) and enforce the seeded
   // ApprovalWorkflows LevelData. On the final level it flips Status to
   // Approved — which is exactly our "Confirmed".
   const result = await approvalTransition("crm-bookings", bookingId, "Approved", userEmail, userRole, null, userId);
 
-  // Require at least 2 approval levels (Marketing Head + Director) before confirming.
-  // A misconfigured 1-level workflow must never bypass Director approval.
-  const MIN_APPROVAL_LEVELS = 2;
   const confirmedNow = result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
   // nextStage is derived from the level approvalTransition ACTUALLY just
   // recorded (result.level), never from the `stage` parameter this request
