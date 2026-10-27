@@ -8,6 +8,9 @@ export interface ApprovalLevel {
   id: number;
   label: string;
   userIds: number[];
+  /** Role names (Role.RName) whose holders may approve at this step, besides
+   *  the people named in userIds. */
+  roles?: string[];
   // "any" (default) — the step is done as soon as one assigned person
   // approves. "all" — every assigned person must approve before the step
   // moves on (e.g. Director 1 AND Director 2, not just one of them).

@@ -2,6 +2,8 @@
 import React, { useState, useRef } from "react";
 import { toast } from "sonner";
 import { type User } from "@/api/userApi";
+import { getRolesList } from "@/api/roleApi";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, X, Loader2, Users, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,6 +71,9 @@ export function ConfigForm({
   const [addingLevel, setAddingLevel] = useState(false);
   const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
   const nextId = useRef(Date.now());
+  // Role Master's roles, for "everyone with these roles" on each step.
+  const { data: roleRows = [] } = useQuery({ queryKey: ["roles-list"], queryFn: getRolesList, staleTime: 5 * 60_000 });
+  const roleNames = (Array.isArray(roleRows) ? roleRows : []).map((r) => r.RName).filter(Boolean).sort((a, b) => a.localeCompare(b));
 
   function toggleModule(id: string) {
     setSelectedModules((prev) =>
@@ -195,9 +200,10 @@ export function ConfigForm({
                 Who needs to approve, and in what order?
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                Add approval steps in order. Assign one or more people to
-                each — if you assign more than one, choose whether any one of
-                them can approve, or all of them must.
+                Add approval steps in order. Name the people who approve each
+                step, tick roles whose holders may approve it, or both — if you
+                name more than one person, choose whether any one of them can
+                approve, or all of them must.
               </div>
             </div>
 
@@ -226,7 +232,8 @@ export function ConfigForm({
                     key={lv.id}
                     users={users}
                     levelNumber={idx + 1}
-                    initial={{ label: lv.label, userIds: lv.userIds, mode: lv.mode }}
+                    roleNames={roleNames}
+                    initial={{ label: lv.label, userIds: lv.userIds, roles: lv.roles ?? [], mode: lv.mode }}
                     onConfirm={(patch) => updateLevel(lv.id, patch)}
                     onCancel={() => setEditingLevelId(null)}
                   />
@@ -257,6 +264,7 @@ export function ConfigForm({
               {addingLevel ? (
                 <AddLevelRow
                   users={users}
+                  roleNames={roleNames}
                   levelNumber={levels.length + 1}
                   onConfirm={addLevel}
                   onCancel={() => setAddingLevel(false)}
