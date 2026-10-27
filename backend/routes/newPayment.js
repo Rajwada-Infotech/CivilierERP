@@ -1317,6 +1317,15 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 
+    // A CRM refund payout may already have been paid and settled in CRM.
+    // Editing it could change the voucher while leaving that settlement in
+    // place, so corrections must use the authorized reversal workflow.
+    if (wasApproved && beforeSnapshot?.SourceCrmRefundId) {
+      return res.status(409).json({
+        error: "An approved CRM refund payout cannot be edited because its cash may already have moved and its refund may already be settled. Use the authorized reversal and reconciliation workflow.",
+      });
+    }
+
     // Editing an already-Approved payment must go back through approval —
     // this UPDATE never touched Status before, so an edited-Approved
     // payment silently stayed Approved with no re-approval and no GL
@@ -1406,7 +1415,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     // always tracks the payment's own PDate, same as on create.
     const pFinYearIdUpdate = await resolveFinYearId(pool, PDate);
 
-    await pool
+    const paymentUpdate = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
@@ -1444,6 +1453,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PCardId", sql.Int, PCardId || null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply === undefined ? null : (oaSkipAutoApply ? 1 : 0))
       .input("PUpdatedBy", sql.NVarChar(100), userEmail)
+      .input("ExpectedStatus", sql.NVarChar(20), beforeSnapshot?.Status || null)
       .input("TDSId", sql.Int, tdsSnapshotPut.tdsId)
       .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.tdsNature)
       .input("TDSName", sql.NVarChar(200), tdsSnapshotPut.tdsName)
@@ -1479,8 +1489,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PCardId              = @PCardId,
           OASkipAutoApply      = ISNULL(@OASkipAutoApply, OASkipAutoApply),
           TDSId = @TDSId, TDSNature = @TDSNature, TDSName = @TDSName, TDSPercentage = @TDSPercentage, TDSAmount = @TDSAmount
-        WHERE PPaymentID = @PPaymentID
+        WHERE PPaymentID = @PPaymentID AND Status = @ExpectedStatus
       `);
+
+    if (!paymentUpdate?.rowsAffected?.[0]) {
+      return res.status(409).json({ error: "Payment status changed while it was being edited. Reload the payment and try again." });
+    }
 
     await replaceAllocations(() => pool.request(), sql, "NewPayment", parseInt(id, 10), expenseHeadAllocationsPut);
 
@@ -1584,7 +1598,7 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     // Brokerage needs nothing: its totals are read live from Payments.
     const crmSrc = (await pool.request().input("PPaymentID", sql.Int, id)
       .query("SELECT Status, SourceCrmRefundId, SourceCrmResaleId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID")).recordset[0];
-    const sendBackToCrm = crmSrc && crmSrc.Status !== "Approved" && (crmSrc.SourceCrmRefundId || crmSrc.SourceCrmResaleId);
+    let sendBackToCrm = crmSrc && crmSrc.Status !== "Approved" && (crmSrc.SourceCrmRefundId || crmSrc.SourceCrmResaleId);
 
     const refRow = await pool.request().input("PPaymentID", sql.Int, id)
       .query("SELECT PExpenseRef, PLinkedOAId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID");
@@ -1606,6 +1620,24 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
     await tx.begin();
     let result;
     try {
+    // Serialize deletion with approval and decide CRM recovery from the live,
+    // locked row rather than the earlier preflight snapshot.
+    const lockedPayment = (await tx.request().input("pid", sql.Int, id).query(`
+      SELECT Status, SourceCrmRefundId, SourceCrmResaleId
+      FROM dbo.NewPayment WITH (UPDLOCK, HOLDLOCK) WHERE PPaymentID = @pid
+    `)).recordset[0];
+    if (!lockedPayment) {
+      await tx.rollback();
+      return res.status(404).json({ error: "Payment not found" });
+    }
+    if (lockedPayment.SourceCrmRefundId && lockedPayment.Status === "Approved") {
+      await tx.rollback();
+      return res.status(409).json({
+        error: "An approved CRM refund payout cannot be hard-deleted because the cash may have left and its accounting or CRM settlement may already be recorded. Use the authorized reversal and reconciliation workflow.",
+      });
+    }
+    sendBackToCrm = lockedPayment.Status !== "Approved" && (lockedPayment.SourceCrmRefundId || lockedPayment.SourceCrmResaleId);
+
     if (linkedOAId) {
       const ledgerRow = await tx.request().input("OAId", sql.Int, linkedOAId)
         .query("SELECT PartyId, Amount FROM dbo.OnAccountLedger WHERE OAId = @OAId");
@@ -1786,9 +1818,9 @@ router.put("/:id/approve", async (req, res) => {
         });
       }
       const netAmount = Number(refundRow.NetAmount) || 0;
-      if (netAmount > 0 && Number(refundRow.PAmount || 0) > netAmount + 0.01) {
+      if (netAmount > 0 && Math.abs(Number(refundRow.PAmount || 0) - netAmount) > 0.01) {
         return res.status(400).json({
-          error: `Refund payment exceeds the refund's net amount of ₹${netAmount.toLocaleString("en-IN")}`,
+          error: `Refund payment must equal the refund's net amount of ₹${netAmount.toLocaleString("en-IN")}`,
         });
       }
     }
@@ -1806,7 +1838,32 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
       null,
       req.user?.userId ?? req.user?.id ?? null,
+      refundRow?.SourceCrmRefundId
+        ? async (approvalTx) => {
+            const live = (await approvalTx.request().input("PPaymentID", sql.Int, id).query(`
+              SELECT np.PAmount, np.PDate, np.PMode, np.PBankID,
+                     r.NetAmount, r.RefundNo, r.CustomerAccountNo
+              FROM dbo.NewPayment np
+              JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
+              WHERE np.PPaymentID = @PPaymentID
+            `)).recordset[0];
+            if (!live) throw Object.assign(new Error("The linked CRM refund payout no longer exists."), { status: 409 });
+            if (!live.PDate || !String(live.PMode || "").trim() || !normalizeBankId(live.PBankID)) {
+              throw Object.assign(new Error("Complete refund payment date, payment mode, and bank before approval."), { status: 400 });
+            }
+            if (["NEFT", "RTGS", "IMPS", "UPI"].includes(String(live.PMode).trim()) && !String(live.CustomerAccountNo || "").trim()) {
+              throw Object.assign(new Error(`A ${live.PMode} refund needs the customer's bank account, or pay by Cheque.`), { status: 400 });
+            }
+            const liveNet = Number(live.NetAmount) || 0;
+            if (!(liveNet > 0) || Math.abs(Number(live.PAmount || 0) - liveNet) > 0.01) {
+              throw Object.assign(new Error(`Refund payment must equal the refund's net amount of ₹${liveNet.toLocaleString("en-IN")}.`), { status: 400 });
+            }
+          }
+        : null,
     );
+    const manualPayoutNotice = refundRow?.SourceCrmRefundId
+      ? "Approval records staff confirmation that the customer was paid manually. CivilierERP did not move funds."
+      : null;
 
     // Sync EMI installment if this payment is for an EMI ref
     try {
@@ -1875,6 +1932,7 @@ router.put("/:id/approve", async (req, res) => {
     ]);
 
     // Sync bill status on approval — fetch full payment record and recalculate
+    let crmRefundSyncIssue = null;
     try {
       const approvedPayRec = await pool
         .request()
@@ -1948,15 +2006,20 @@ router.put("/:id/approve", async (req, res) => {
       if (isFinalApproval && approvedRow?.SourceCrmRefundId) {
         try {
           const { markCrmRefundPaid } = require("./crmRefunds");
-          await markCrmRefundPaid(
+          const syncResult = await markCrmRefundPaid(
             pool,
             approvedRow.SourceCrmRefundId,
             id,
             req.user?.email || req.user?.name || null,
           );
-          await bumpCacheVersion("crm-refunds");
+          if (syncResult?.ok === false) {
+            crmRefundSyncIssue = syncResult.reason || "CRM refund settlement did not complete";
+          } else {
+            await bumpCacheVersion("crm-refunds");
+          }
         } catch (refundErr) {
           console.warn("[new-payment] CRM refund paid-sync failed (non-fatal):", refundErr.message);
+          crmRefundSyncIssue = refundErr.message;
         }
       }
 
@@ -2120,7 +2183,23 @@ router.put("/:id/approve", async (req, res) => {
       console.warn("Bill status sync after approve failed:", syncErr.message);
     }
 
-    res.json({ message: "Payment approved", ...result });
+    if (crmRefundSyncIssue) {
+      await bumpCacheVersion("crm-refunds");
+      return res.status(202).json({
+        message: "The payout voucher was approved, but the linked CRM refund settlement did not complete. Review the refund and reconcile the already-approved payout before retrying.",
+        partialFailure: true,
+        manualPayoutNotice,
+        crmRefundSyncIssue,
+        ...result,
+      });
+    }
+    res.json({
+      message: refundRow?.SourceCrmRefundId
+        ? "Payout voucher approved; CRM records the refund as paid based on staff confirmation. CivilierERP did not move funds."
+        : "Payment approved",
+      ...(manualPayoutNotice ? { manualPayoutNotice } : {}),
+      ...result,
+    });
   } catch (err) {
     console.error("Payment approve error:", err.message);
     const status = err.message.includes("not authorized") ? 403 : 400;

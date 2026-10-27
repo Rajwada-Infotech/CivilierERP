@@ -350,7 +350,14 @@ const CrmLoanTracking: React.FC = () => {
                 {!locked && (
                   <div>
                     <label className={`block mb-1 ${LBL}`}>Sanction status</label>
-                    <select value={form.SanctionStatus} onChange={(e) => setForm((f) => ({ ...f, SanctionStatus: e.target.value as LoanStatus }))} className={INP}>
+                    <select value={form.SanctionStatus} onChange={(e) => {
+                      const next = e.target.value as LoanStatus;
+                      if (next === "NotApplied" && (Number(editingRow?.DisbursedAmount) > 0 || editingRow?.SanctionStatus === "Disbursed")) {
+                        toast.error("A disbursed loan can't go back to Not Applied");
+                        return;
+                      }
+                      setForm((f) => ({ ...f, SanctionStatus: next }));
+                    }} className={INP}>
                       {SANCTION_STATUSES.map((s) => <option key={s} value={s}>{statusText(s)}</option>)}
                     </select>
                   </div>

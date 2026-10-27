@@ -20,12 +20,27 @@
 const { sql } = require("../db");
 
 async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUserId = null) {
-  const rp = (await pool.request().input("id", sql.Int, receivedPaymentId)
-    .query("SELECT RPPaymentID, RPDocNo, CrmBookingId FROM dbo.ReceivedPayment WHERE RPPaymentID = @id")).recordset[0];
-  if (!rp || rp.CrmBookingId == null) return { crm: false };
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+  // Serialize bounce retries on the source receipt before reading deposits or
+  // allocations. Concurrent requests then observe the first transaction's
+  // Bounced statuses instead of inserting a second set of reversal rows.
+  const rp = (await tx.request().input("id", sql.Int, receivedPaymentId)
+    .query("SELECT RPPaymentID, RPDocNo, CrmBookingId FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK) WHERE RPPaymentID = @id")).recordset[0];
+  if (!rp || rp.CrmBookingId == null) {
+    await tx.commit();
+    return { crm: false };
+  }
   const bookingId = rp.CrmBookingId;
-  const deposits = (await pool.request().input("rp", sql.Int, receivedPaymentId)
-    .query("SELECT Id, Amount, Status FROM dbo.CrmOnAccountPayment WHERE SourceReceivedPaymentId = @rp")).recordset;
+  // Use the same booking-level mutex as on-account application. This unwind
+  // reverses allocations across the whole booking, including deposits other
+  // than the one that bounced.
+  await tx.request().input("bid", sql.Int, bookingId).query(`
+    SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+  `);
+  const deposits = (await tx.request().input("rp", sql.Int, receivedPaymentId)
+    .query("SELECT Id, Amount, Status FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE SourceReceivedPaymentId = @rp")).recordset;
   const live = deposits.filter((d) => d.Status !== "Bounced");
   // The deposit's own GL entry (Dr bank / Cr customer, SourceType
   // 'CrmOnAccountPayment') is what put the cash in the books — BRS's own
@@ -40,13 +55,13 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
     }
     return n;
   };
-  if (!live.length) return { crm: true, bookingId, already: deposits.length > 0, reversed: 0, glReversed: await reverseGl() };
+  if (!live.length) {
+    await tx.commit();
+    return { crm: true, bookingId, already: deposits.length > 0, reversed: 0, glReversed: await reverseGl() };
+  }
 
   const note = `Reversed — payment ${rp.RPDocNo || receivedPaymentId} bounced${reason ? `: ${reason}` : ""}`.slice(0, 200);
-  const tx = pool.transaction();
-  await tx.begin();
   let reversed = 0;
-  try {
     // Every live allocation on the booking (the hold: no part of the price
     // stays settled once the full price is no longer in).
     const allocs = (await tx.request().input("bid", sql.Int, bookingId).query(`
@@ -101,10 +116,6 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
       .query(`UPDATE dbo.CrmMoneyReceipt SET Status = 'Bounced', BouncedReason = @r, BouncedBy = @by, BouncedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
               WHERE ReceivedPaymentId = @rp AND Status <> 'Bounced'`);
     await tx.commit();
-  } catch (e) {
-    try { await tx.rollback(); } catch { /* rolled back */ }
-    throw e;
-  }
   const glReversed = await reverseGl();
   // Issued invoices stay as they are: a bounced payment doesn't cancel the
   // sale — the customer still owes it, so no credit note (GST s.34 needs a
@@ -113,6 +124,10 @@ async function unwindBouncedCrmPayment(pool, receivedPaymentId, reason, actorUse
   const invoices = (await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void'")).recordset.map((r) => r.InvoiceNo);
   return { crm: true, bookingId, reversed: Math.round(reversed * 100) / 100, invoices, glReversed };
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* rolled back or already committed */ }
+    throw e;
+  }
 }
 
 module.exports = { unwindBouncedCrmPayment };

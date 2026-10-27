@@ -10,13 +10,14 @@ const MODULE_ALIASES: Record<string, Record<string, string>> = {
   crm: { "Follow-Up": "CRM" },
 };
 
-export const Breadcrumbs: React.FC<{ items: BreadcrumbItem[] }> = ({
+export const Breadcrumbs: React.FC<{ items: BreadcrumbItem[]; className?: string }> = ({
   items,
+  className = "mb-4",
 }) => {
   const { activeModule } = useModule();
   const aliases = (activeModule && MODULE_ALIASES[activeModule]) || {};
   return (
-  <nav className="flex items-center gap-1 text-xs text-muted-foreground mb-4 font-heading">
+  <nav className={`flex items-center gap-1 text-xs text-muted-foreground font-heading ${className}`}>
     {items.map((item, i) => {
       const raw = typeof item === "string" ? item : item.label;
       const label = aliases[raw] ?? raw;

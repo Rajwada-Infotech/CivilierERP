@@ -5,10 +5,10 @@ import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MapPin, Phone } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/sa/inquiry";
@@ -36,7 +36,7 @@ async function fetchUserOptions(): Promise<{ value: string; label: string }[]> {
 
 const OUTCOMES = ["Answered", "Not Answered", "Busy", "Switched Off", "Call Back Later", "Not Interested", "Interested"];
 const CLASSIFICATIONS = ["Hot", "Warm", "Cold", "NotInterested", "CallBackLater"];
-const STATUSES = ["New", "Assigned", "Contacted", "FollowUp", "VisitScheduled", "Visited", "Booking", "Lost"];
+const STATUSES = LEAD_STATUS_KEYS;
 
 const classColor = (c: string) => {
   if (c === "Hot") return "text-red-500 bg-red-500/10";
@@ -156,9 +156,8 @@ const SaInquiryDashboard: React.FC = () => {
   const alreadyScheduled = selectedLead?.Status === "VisitScheduled" || selectedLead?.Status === "Visited";
 
   return (
-    <SalesAutoShell title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Inquiry Dashboard"]} title="Inquiry Dashboard" subtitle="Review and manage all incoming lead inquiries"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Inquiry Dashboard"]} />
       <div className="flex gap-4 h-[calc(100vh-200px)]">
 
         {/* Lead list panel */}

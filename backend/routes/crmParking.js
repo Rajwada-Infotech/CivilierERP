@@ -8,13 +8,14 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const { actorId } = require("../services/saAccess");
 const { logCrmAudit } = require("../services/crmAudit");
 const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../services/crmHoldService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
@@ -121,7 +122,8 @@ const ALLOTMENT_SELECT = `
          -- holds in On Account until an explicit sweep" rule, AmountPaid
          -- alone would under-report real cash received against the booking.
          ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
-           + ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS BookingTotalPaid
+           + ISNULL((SELECT SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount,0)
+               THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
   LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId
@@ -144,6 +146,13 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
 
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) throw parkingError(activeErr);
+  const midApprovalAdd = await requireNotMidApproval(pool, bookingId);
+  if (midApprovalAdd) throw parkingError(midApprovalAdd);
+  const checklistLockAdd = await assertWelcomeChecklistUnlocked(pool, bookingId);
+  if (checklistLockAdd) throw parkingError(checklistLockAdd);
+  if (await isSaleDeedRegistered(pool, bookingId)) {
+    throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+  }
 
   const booking = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT Id, BookingNo, ApplicationId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
@@ -278,6 +287,13 @@ async function applyEditParking(pool, id, b) {
   if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw parkingError(activeErr);
+    const midApprovalEdit = await requireNotMidApproval(pool, BookingId);
+    if (midApprovalEdit) throw parkingError(midApprovalEdit);
+    const checklistLockEdit = await assertWelcomeChecklistUnlocked(pool, BookingId);
+    if (checklistLockEdit) throw parkingError(checklistLockEdit);
+    if (await isSaleDeedRegistered(pool, BookingId)) {
+      throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+    }
   }
 
   const milestone = BookingId != null
@@ -377,6 +393,13 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null, 
 
   const activeErr = await requireActiveBooking(pool, BookingId);
   if (activeErr) throw parkingError(activeErr);
+  const midApprovalRelease = await requireNotMidApproval(pool, BookingId);
+  if (midApprovalRelease) throw parkingError(midApprovalRelease);
+  const checklistLockRelease = await assertWelcomeChecklistUnlocked(pool, BookingId);
+  if (checklistLockRelease) throw parkingError(checklistLockRelease);
+  if (await isSaleDeedRegistered(pool, BookingId)) {
+    throw parkingError("The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office.", 409);
+  }
 
   // Legacy shape: a dedicated milestone still exists for this sale — keep
   // using its own Status, same as before. New-shape sales (no linked
@@ -802,7 +825,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 
       const hold = await placeHoldIfNeeded(pool, {
         entityType: "Parking", entityId: parkingSlotId, applicationId: parseInt(b.ApplicationId),
-        holdDays: 3, reason: "Application — parking slot selected", userId: actorId(req),
+        reason: "Application — parking slot selected", userId: actorId(req),
       });
 
       // placeHold's own INSERT is shared with Unit holds (no rate concept
@@ -1049,7 +1072,7 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // Reason is required only when routing through the amendment queue (agreement
 // Executed/Registered). For direct releases (normal booking workflow) it is
 // optional — recorded in the audit trail when supplied, silent when not.
-router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
+router.delete("/:id", allowRoles("super_admin"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);

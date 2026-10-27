@@ -123,7 +123,10 @@ const CrmServiceTickets: React.FC = () => {
     }
   };
 
+  const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
   const runAction = async (id: number, action: string, body?: object): Promise<boolean> => {
+    if (busyIds.has(id)) return false;
+    setBusyIds((s) => new Set(s).add(id));
     try {
       const res = await fetchWithAuth(`${API}/${id}/${action}`, {
         method: "PUT",
@@ -138,6 +141,8 @@ const CrmServiceTickets: React.FC = () => {
     } catch (e: any) {
       toast.error(translateError(e.message));
       return false;
+    } finally {
+      setBusyIds((s) => { const next = new Set(s); next.delete(id); return next; });
     }
   };
 
@@ -292,15 +297,15 @@ const CrmServiceTickets: React.FC = () => {
                             <div className="flex items-center gap-1.5 flex-wrap">
                               {t.Status === CrmStatus.OPEN && assignSelect(t, "Assign to…")}
                               {t.Status === "Assigned" && <>
-                                <button onClick={() => runAction(t.Id, "mark-in-progress")} className={`${KEY_INK} h-7 px-2`}>Start</button>
+                                <button onClick={() => runAction(t.Id, "mark-in-progress")} disabled={busyIds.has(t.Id)} className={`${KEY_INK} h-7 px-2`}>Start</button>
                                 {assignSelect(t, "Reassign…")}
                               </>}
                               {t.Status === CrmStatus.IN_PROGRESS && assignSelect(t, "Reassign…")}
                               {["Assigned", "InProgress", "Reopened"].includes(t.Status) && (
                                 <button onClick={() => { setResolveFor(t); setResolveNotes(""); }} className={`${KEY_INK} h-7 px-2`}>Resolve</button>
                               )}
-                              {t.Status === "Reopened" && <button onClick={() => runAction(t.Id, "mark-in-progress")} className={`${KEY_LINE} h-7 px-2`}>Start work</button>}
-                              {t.Status === CrmStatus.RESOLVED && <button onClick={() => runAction(t.Id, "close")} className={`${KEY_LINE} h-7 px-2`}>Close</button>}
+                              {t.Status === "Reopened" && <button onClick={() => runAction(t.Id, "mark-in-progress")} disabled={busyIds.has(t.Id)} className={`${KEY_LINE} h-7 px-2`}>Start work</button>}
+                              {t.Status === CrmStatus.RESOLVED && <button onClick={() => runAction(t.Id, "close")} disabled={busyIds.has(t.Id)} className={`${KEY_LINE} h-7 px-2`}>Close</button>}
                               {(t.Status === CrmStatus.RESOLVED || t.Status === CrmStatus.CLOSED) && (
                                 <button onClick={() => { setReopenFor(t); setReopenReason(""); }} className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}>Reopen</button>
                               )}

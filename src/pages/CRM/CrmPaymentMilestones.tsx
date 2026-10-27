@@ -69,12 +69,26 @@ const CrmPaymentMilestones: React.FC = () => {
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
-  // On Account Adjustment is a full-booking hold — it won't sweep any milestone until the on-account pool covers
-  // the booking's ENTIRE GrandTotal (matches applyOnAccountToMilestone in crmPayments.js).
-  const bookingGrandTotal = Number(booking?.GrandTotal ?? booking?.TotalValue ?? 0);
-  const bookingOnAccountReceived = Number(booking?.OnAccountTotalReceived || 0);
-  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
-  const fullPaymentShortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
+  // Funded = what's settled on milestones plus the on-account money still usable, against the dues that aren't
+  // waived (the GrandTotal when there's no schedule yet) — the backend's gate in applyOnAccountToMilestone. Applied
+  // deposits are already in totalPaid, so only their unapplied remainder counts on top.
+  const bookingRequiredAmount = milestones.length > 0
+    ? Number(summary.totalDue || 0)
+    : Number(booking?.GrandTotal ?? booking?.TotalValue ?? 0);
+  const bookingFundsOnHand = Number(summary.totalPaid || 0) + Number(onAccountBalance || 0);
+  const notFullyPaid = bookingRequiredAmount > 0 && bookingFundsOnHand + 0.005 < bookingRequiredAmount;
+  const fullPaymentShortfall = Math.max(0, Math.round((bookingRequiredAmount - bookingFundsOnHand) * 100) / 100);
+  // Manual apply goes to the next unpaid milestone only, and only once its Demand is raised (the sweep's order).
+  const nextOutstandingMilestone = [...milestones]
+    .sort((a: any, b: any) => Number(a.MilestoneNo) - Number(b.MilestoneNo))
+    .find((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived");
+  const nextMilestoneBalance = nextOutstandingMilestone
+    ? Math.max(0, Number(nextOutstandingMilestone.AmountDue) - Number(nextOutstandingMilestone.AmountPaid || 0))
+    : 0;
+  const canManuallyApplyOnAccount = !!(
+    !notFullyPaid && nextOutstandingMilestone && nextMilestoneBalance > 0 &&
+    nextOutstandingMilestone.DemandStatus !== CrmStatus.PENDING
+  );
   const totalPendingVerification = milestones.reduce((s: number, m: any) => s + Number(m.PendingVerificationAmount || 0), 0);
 
   const { data: projectBanks = [] } = useQuery({
@@ -83,8 +97,9 @@ const CrmPaymentMilestones: React.FC = () => {
     enabled: booking?.ProjectId != null,
   });
 
-  const milestone1 = milestones.find((m) => m.MilestoneNo === 1);
-  const needsResync = !!(booking?.BookingAmount && milestone1 && Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1);
+  // The core Booking Amount row: a parking / extra-charge row can also be numbered 1.
+  const milestone1 = milestones.find((m) => m.MilestoneNo === 1 && !m.ParkingAllotmentId && !m.ExtraChargeId);
+  const needsResync = !!booking?.BookingAmount && (!milestone1 || Math.abs(Number(milestone1.AmountDue) - Number(booking.BookingAmount)) >= 1);
 
   // Live preview for the Record Payment dialog
   const editingMilestone = milestones.find((m) => m.Id === editingId) || null;
@@ -171,6 +186,11 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleAddMilestone = async () => {
     if (!selectedBookingId || !addForm.MilestoneName.trim()) return;
+    const amountDue = Number(addForm.AmountDue);
+    if (!Number.isFinite(amountDue) || amountDue <= 0) {
+      toast.error("Enter an Amount Due greater than zero");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}`, {
@@ -178,7 +198,7 @@ const CrmPaymentMilestones: React.FC = () => {
         body: JSON.stringify({
           MilestoneName: addForm.MilestoneName,
           DueDate: addForm.DueDate || null,
-          AmountDue: addForm.AmountDue ? parseFloat(addForm.AmountDue) : 0,
+          AmountDue: amountDue,
           ResponsibleDepartment: addForm.ResponsibleDepartment || null,
           RequiredDocuments: addForm.RequiredDocuments || null,
         }),
@@ -241,6 +261,8 @@ const CrmPaymentMilestones: React.FC = () => {
       setApplyDialog(null);
       reloadMilestones();
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-money-receipts", selectedBookingId] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", Number(selectedBookingId)] });
     } catch (e: any) { toast.error(translateError(e.message)); }
     finally { setSaving(false); }
   };
@@ -318,7 +340,9 @@ const CrmPaymentMilestones: React.FC = () => {
           {needsResync && (
             <div className="bg-card px-4 py-3 text-sm flex items-start gap-2" style={{ border: RULE_SOFT, borderLeft: "3px solid hsl(var(--destructive))" }}>
               <AlertTriangle size={15} className="shrink-0 mt-0.5 text-destructive" />
-              <span>Milestone 1 ({fmt(milestone1.AmountDue)}) doesn't match this booking's booking amount ({fmt(booking.BookingAmount)}). Resync the schedule to fix it and redistribute the remaining milestones.</span>
+              <span>{!milestone1
+                ? "This booking has no Booking Amount milestone. Resync the schedule to generate it; schedule rows that already exist are kept for review."
+                : <>Milestone 1 ({fmt(milestone1.AmountDue)}) doesn't match this booking's booking amount ({fmt(booking.BookingAmount)}). Resync the schedule to fix it and redistribute the remaining milestones.</>}</span>
             </div>
           )}
 
@@ -348,11 +372,13 @@ const CrmPaymentMilestones: React.FC = () => {
               {booking && <BookingSummary booking={booking} summary={summary} onAccountBalance={onAccountBalance} totalPendingVerification={totalPendingVerification} moneyReceipts={moneyReceipts as any[]} />}
               {onAccountData && onAccountData.payments?.length > 0 && (
                 <OnAccountPanel onAccountData={onAccountData} onAccountBalance={onAccountBalance} notFullyPaid={notFullyPaid}
-                  bookingOnAccountReceived={bookingOnAccountReceived} bookingGrandTotal={bookingGrandTotal} fullPaymentShortfall={fullPaymentShortfall}
+                  fundsOnHand={bookingFundsOnHand} requiredAmount={bookingRequiredAmount} fullPaymentShortfall={fullPaymentShortfall}
+                  milestones={milestones} canManuallyApply={canManuallyApplyOnAccount}
                   canEdit={rights.canEdit} onApply={(p) => openApplyDialog(p, null)} />
               )}
               <MilestoneTable milestones={milestones} canEdit={rights.canEdit} onAccountData={onAccountData} onAccountBalance={onAccountBalance}
                 notFullyPaid={notFullyPaid} fullPaymentShortfall={fullPaymentShortfall}
+                nextMilestone={nextOutstandingMilestone} canManuallyApply={canManuallyApplyOnAccount}
                 onPay={handleOpenPayment} onApply={openApplyDialog} onWaive={(m) => setWaiveDialog({ milestone: m, reason: "" })} onRemarks={(m) => setRemarksDialog({ milestone: m })} />
             </>
           )}
@@ -514,9 +540,10 @@ const CrmPaymentMilestones: React.FC = () => {
             <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} /> Apply on-account to a milestone</DialogTitle></DialogHeader>
             {applyDialog && (() => {
               const remaining = Number(applyDialog.payment.Amount) - Number(applyDialog.payment.AppliedAmount || 0);
-              const unpaid = milestones.filter((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived" && Number(m.AmountDue) - Number(m.AmountPaid || 0) > 0);
+              const unpaid = canManuallyApplyOnAccount && nextOutstandingMilestone ? [nextOutstandingMilestone] : [];
               const chosenMil = applyDialog.milestone ?? milestones.find((m: any) => m.Id === parseInt(applyMilestoneId));
               const milBalance = chosenMil ? Number(chosenMil.AmountDue) - Number(chosenMil.AmountPaid || 0) : 0;
+              const chosenTargetEligible = canManuallyApplyOnAccount && !!chosenMil && chosenMil.Id === nextOutstandingMilestone?.Id;
               return (
                 <>
                   <div className="p-3 text-sm" style={{ border: RULE_SOFT }}>
@@ -556,9 +583,16 @@ const CrmPaymentMilestones: React.FC = () => {
                       </p>
                     )}
                   </div>
+                  {chosenMil && !chosenTargetEligible && (
+                    <p className="text-xs text-destructive">
+                      {notFullyPaid ? `${fmt(fullPaymentShortfall)} more in valid payments is needed before anything settles.`
+                        : nextOutstandingMilestone?.DemandStatus === CrmStatus.PENDING ? `Raise the Demand for ${nextOutstandingMilestone.MilestoneName} first.`
+                        : "Only the next outstanding milestone can take on-account money."}
+                    </p>
+                  )}
                   <DialogFooter className="gap-2">
                     <button onClick={() => setApplyDialog(null)} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
-                    <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || (!applyDialog.milestone && !applyMilestoneId)} className={`${KEY_INK} h-9 px-4`}>
+                    <button onClick={handleConfirmApply} disabled={saving || !applyDialog.amount || (!applyDialog.milestone && !applyMilestoneId) || !chosenTargetEligible} className={`${KEY_INK} h-9 px-4`}>
                       {saving ? "Applying…" : `Apply ${applyDialog.amount ? fmt(parseFloat(applyDialog.amount)) : ""}`}
                     </button>
                   </DialogFooter>

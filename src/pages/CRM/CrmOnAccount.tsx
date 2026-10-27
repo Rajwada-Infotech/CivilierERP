@@ -19,7 +19,7 @@ import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config
 const API = "/api/crm/payments";
 const PAGE_SIZE = 50;
 
-type DepositStatus = "Unapplied" | "PartiallyApplied" | "Applied";
+type DepositStatus = "Unapplied" | "PartiallyApplied" | "Applied" | "Bounced";
 
 interface Deposit {
   Id: number; ReceiptNo: string | null; BookingId: number; Amount: number; AppliedAmount: number; AvailableBalance: number;
@@ -31,15 +31,16 @@ interface Deposit {
 interface Summary {
   TotalCount: number; TotalReceived: number; TotalAvailable: number; TotalApplied: number;
   UnappliedCount: number; PartialCount: number; AppliedCount: number; UnappliedBalance: number; PartialBalance: number;
+  BouncedCount?: number;
 }
 interface Milestone {
   Id: number; MilestoneNo: number; MilestoneName: string; AmountDue: number; AmountPaid: number; Status: string; DueDate: string | null;
-  VirtuallyCovered?: boolean;
+  VirtuallyCovered?: boolean; DemandStatus?: string;
 }
 interface BookingDetail {
-  booking: { BookingNo: string; ApplicantName: string; ProjectName: string; UnitNo: string; GrandTotal: number; OnAccountTotalReceived?: number };
+  booking: { BookingNo: string; ApplicantName: string; ProjectName: string; UnitNo: string; GrandTotal: number; OnAccountTotalReceived?: number; OnAccountAvailable?: number };
   milestones: Milestone[];
-  summary: { totalDue: number; totalPaid: number; balance: number; overdue: number };
+  summary: { totalDue: number; totalPaid: number; balance: number; overdue: number; waivedDue?: number; waivedCount?: number };
 }
 interface Filters { search: string; status: string; mode: string; dateFrom: string; dateTo: string }
 const EMPTY: Filters = { search: "", status: "", mode: "", dateFrom: "", dateTo: "" };
@@ -49,7 +50,10 @@ const STATUS_TABS: { value: string; label: string }[] = [
   { value: "Unapplied", label: "Unapplied" },
   { value: "PartiallyApplied", label: "Partly applied" },
   { value: "Applied", label: "Applied" },
+  { value: "Bounced", label: "Bounced" },
 ];
+// Money that isn't usable on account: never counted, never applied.
+const UNAVAILABLE = ["Bounced", "Held", "Void", "Cancelled", "Refunded"];
 
 const fmt = (v?: number | null) => (v == null ? "—" : fmtRupees(Number(v)));
 const fd = (d?: string | null) =>
@@ -57,6 +61,7 @@ const fd = (d?: string | null) =>
 const DIALOG = "rounded-none p-5 gap-4";
 
 function DepositMark({ s }: { s: DepositStatus }) {
+  if (s === "Bounced") return <SheetMark text="Bounced" tone="stopped" />;
   return <SheetMark text={s === "Applied" ? "Applied" : s === "PartiallyApplied" ? "Partly applied" : "Unapplied"}
     tone={s === "Applied" ? "done" : "waiting"} />;
 }
@@ -89,22 +94,34 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
     staleTime: 30_000,
   });
 
-  const outstanding = useMemo(() =>
-    (bk?.milestones || []).filter((m) => m.Status !== "Paid" && m.Status !== "Waived" && Number(m.AmountDue) - Number(m.AmountPaid) > 0),
+  // Only the next unpaid milestone, and only once its Demand is raised — the order the automatic sweep settles in
+  // (the server's gate in applyOnAccountToMilestone).
+  const nextMilestone = useMemo(() =>
+    [...(bk?.milestones || [])].sort((a, b) => Number(a.MilestoneNo) - Number(b.MilestoneNo))
+      .find((m) => m.Status !== "Paid" && m.Status !== "Waived"),
   [bk]);
+  const outstanding = useMemo(() =>
+    nextMilestone && Number(nextMilestone.AmountDue) - Number(nextMilestone.AmountPaid) > 0 && nextMilestone.DemandStatus !== "Pending"
+      ? [nextMilestone] : [],
+  [nextMilestone]);
 
-  // A full-booking hold: nothing settles until the on-account money covers the whole booking (the server's
-  // gate in applyOnAccountToMilestone), so manual apply is only offered once it does.
-  const bookingGrandTotal = Number(bk?.booking?.GrandTotal) || 0;
-  const bookingOnAccountReceived = Number(bk?.booking?.OnAccountTotalReceived) || 0;
-  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
-  const shortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
+  // Funded = what's settled on milestones plus the on-account money still usable, against the dues that aren't
+  // waived (the GrandTotal when there's no schedule yet). Nothing settles until the booking is funded.
+  const bookingRequired = bk?.milestones?.length ? Number(bk.summary.totalDue || 0) : Number(bk?.booking?.GrandTotal) || 0;
+  const bookingFunded = Number(bk?.summary?.totalPaid || 0) + Number(bk?.booking?.OnAccountAvailable || 0);
+  const notFullyPaid = bookingRequired > 0 && bookingFunded + 0.005 < bookingRequired;
+  const shortfall = Math.max(0, Math.round((bookingRequired - bookingFunded) * 100) / 100);
+  const bounced = deposit.Status === "Bounced";
 
   const sel = outstanding.find((m) => m.Id === selId);
-  const maxAmt = sel ? Math.min(Number(deposit.AvailableBalance), Number(sel.AmountDue) - Number(sel.AmountPaid)) : Number(deposit.AvailableBalance);
+  const maxAmt = sel ? Math.max(0, Math.min(Number(deposit.AvailableBalance), Number(sel.AmountDue) - Number(sel.AmountPaid))) : Number(deposit.AvailableBalance);
 
   async function apply() {
+    if (bounced) { toast.error("This deposit was bounced and cannot be applied"); return; }
+    if (notFullyPaid) { toast.error(`${fmt(shortfall)} more must be received before adjustment`); return; }
+    if (!outstanding.length) { toast.error("The next milestone must be eligible and have its Demand raised before adjustment"); return; }
     if (selId == null) { toast.error("Select a milestone first"); return; }
+    if (!sel) { toast.error("The selected milestone is no longer eligible. Refresh and select the next outstanding milestone."); return; }
     const n = amt ? parseFloat(amt) : undefined;
     if (n !== undefined && (isNaN(n) || n <= 0)) { toast.error("Enter a valid amount"); return; }
     if (n && n > maxAmt) { toast.error(`At most ${fmt(maxAmt)}`); return; }
@@ -150,11 +167,17 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           <div className="px-3 py-2.5 space-y-2" style={{ border: RULE_SOFT, borderLeft: "3px solid hsl(var(--foreground))" }}>
             <div className="flex items-center justify-between gap-3 text-xs">
               <span className="font-medium">Held on account — settles itself once the booking is fully funded</span>
-              <span className="text-muted-foreground tabular-nums shrink-0">{fmt(bookingOnAccountReceived)} of {fmt(bookingGrandTotal)}</span>
+              <span className="text-muted-foreground tabular-nums shrink-0">{fmt(bookingFunded)} of {fmt(bookingRequired)}</span>
             </div>
-            <div className="h-1.5" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} /></div>
-            <p className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmt(shortfall)} more on account settles every eligible milestone, in order. Manual apply is only a fallback.</p>
+            <div className="h-1.5" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${bookingRequired > 0 ? Math.min(100, (bookingFunded / bookingRequired) * 100) : 0}%` }} /></div>
+            <p className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmt(shortfall)} more in valid payments funds the remaining dues; eligible milestones then settle in order. Manual apply is only a fallback.</p>
           </div>
+        )}
+        {bounced && (
+          <p className="px-3 py-2.5 text-xs text-destructive" style={{ border: RULE_SOFT, borderLeft: "3px solid hsl(var(--destructive))" }}>This deposit bounced — it can't be applied.</p>
+        )}
+        {!notFullyPaid && !bounced && nextMilestone?.DemandStatus === "Pending" && (
+          <p className="px-3 py-2.5 text-xs" style={{ border: RULE_SOFT, borderLeft: "3px solid hsl(var(--foreground))" }}>Raise the Demand for {nextMilestone.MilestoneName} before applying on-account money.</p>
         )}
 
         <div>
@@ -164,15 +187,15 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           ) : isLoading ? (
             <p className="py-5 text-center text-sm text-muted-foreground" style={{ border: RULE_SOFT }}>Loading…</p>
           ) : outstanding.length === 0 ? (
-            <p className="py-5 text-center text-sm text-muted-foreground" style={{ border: RULE_SOFT }}>No outstanding milestones on this booking.</p>
+            <p className="py-5 text-center text-sm text-muted-foreground" style={{ border: RULE_SOFT }}>{nextMilestone ? "The next milestone isn't open to adjustment yet." : "No outstanding milestones on this booking."}</p>
           ) : (
             <div className="max-h-52 overflow-y-auto thin-scroll" style={{ border: RULE_SOFT }}>
               {outstanding.map((m) => {
                 const due = Number(m.AmountDue) - Number(m.AmountPaid);
                 const on = selId === m.Id;
                 return (
-                  <button key={m.Id} onClick={() => { setSelId(m.Id); setAmt(String(Math.min(deposit.AvailableBalance, due))); }}
-                    className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors ${on ? "bg-primary/10" : "hover:bg-primary/5"}`}
+                  <button key={m.Id} disabled={notFullyPaid || bounced} onClick={() => { setSelId(m.Id); setAmt(String(Math.min(deposit.AvailableBalance, due))); }}
+                    className={`w-full text-left px-3 py-2.5 flex items-center gap-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${on ? "bg-primary/10" : "hover:bg-primary/5"}`}
                     style={{ borderBottom: RULE_SOFT, borderLeft: on ? "3px solid hsl(var(--foreground))" : "3px solid transparent" }}>
                     <span className="font-heading text-xs tabular-nums text-muted-foreground w-6">{m.MilestoneNo}</span>
                     <div className="flex-1 min-w-0">
@@ -190,7 +213,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           )}
         </div>
 
-        {selId !== null && !notFullyPaid && (
+        {selId !== null && !notFullyPaid && !bounced && (
           <div>
             <label className={`block mb-1 ${LBL}`}>Amount to apply <span className="normal-case tracking-normal">(blank = {fmt(maxAmt)})</span></label>
             <input type="number" value={amt} onChange={(e) => setAmt(e.target.value)} min={0} max={maxAmt} step={0.01} className={`${INP} tabular-nums`} />
@@ -202,7 +225,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           {notFullyPaid ? (
             <span className={`${KEY_LINE} h-9 px-4 opacity-60 cursor-not-allowed`} title={`${fmt(shortfall)} more on account settles this by itself`}>Settles once fully funded</span>
           ) : (
-            <button onClick={apply} disabled={selId == null || busy} className={`${KEY_INK} h-9 px-4`}
+            <button onClick={apply} disabled={selId == null || !sel || busy || bounced || outstanding.length === 0} className={`${KEY_INK} h-9 px-4`}
               title="The booking is fully funded and should settle by itself — this is a manual fallback">
               <ArrowRightLeft size={13} /> {busy ? "Applying…" : "Apply manually"}
             </button>
@@ -328,8 +351,8 @@ export default function CrmOnAccount() {
 
   const deposits = data?.deposits || [];
   const total = data?.total || 0;
-  const pageCR = deposits.reduce((s, d) => s + Number(d.Amount), 0);
-  const pageDR = deposits.reduce((s, d) => s + Number(d.AppliedAmount), 0);
+  const pageCR = deposits.reduce((s, d) => s + (UNAVAILABLE.includes(d.Status) ? 0 : Number(d.Amount)), 0);
+  const pageDR = deposits.reduce((s, d) => s + (UNAVAILABLE.includes(d.Status) ? 0 : Number(d.AppliedAmount)), 0);
   const pageBAL = deposits.reduce((s, d) => s + Number(d.AvailableBalance), 0);
   const util = summary && summary.TotalReceived > 0 ? Math.round((summary.TotalApplied / summary.TotalReceived) * 100) : 0;
 
@@ -341,7 +364,7 @@ export default function CrmOnAccount() {
   }
 
   const figures = [
-    { label: "Received", value: fmt(summary?.TotalReceived), note: `${summary?.TotalCount ?? 0} deposits`, status: "" },
+    { label: "Received", value: fmt(summary?.TotalReceived), note: `${summary?.TotalCount ?? 0} deposits${summary?.BouncedCount ? ` · ${summary.BouncedCount} bounced` : ""}`, status: "" },
     { label: "Applied", value: fmt(summary?.TotalApplied), note: `${summary?.AppliedCount ?? 0} fully applied`, status: "Applied" },
     { label: "Available", value: fmt(summary?.TotalAvailable), note: `${(summary?.UnappliedCount ?? 0) + (summary?.PartialCount ?? 0)} open · ${fmt(summary?.UnappliedBalance ?? 0)} unapplied`, status: "Unapplied" },
     { label: "Utilisation", value: `${util}%`, note: `${fmt(summary?.PartialBalance ?? 0)} left on partly applied`, status: "PartiallyApplied" },
@@ -442,14 +465,14 @@ export default function CrmOnAccount() {
                             </div>
                           </td>
                           <td className={`${td} text-xs`}>{d.PaymentMode || "—"}</td>
-                          <td className={`${td} text-right font-heading tabular-nums text-foreground`}>{fmt(d.Amount)}</td>
+                          <td className={`${td} text-right font-heading tabular-nums ${d.Status === "Bounced" ? "text-destructive line-through" : "text-foreground"}`}>{fmt(d.Amount)}</td>
                           <td className={`${td} text-right font-heading tabular-nums`}>{d.AppliedAmount > 0 ? fmt(d.AppliedAmount) : "—"}</td>
                           <td className={`${td} text-right font-heading font-semibold tabular-nums text-foreground`}>{d.AvailableBalance > 0 ? fmt(d.AvailableBalance) : "—"}</td>
                           <td className={td}><DepositMark s={d.Status} /></td>
                           <td className={`${td} text-right`} onClick={(e) => e.stopPropagation()}>
                             <div className="inline-flex items-center gap-1.5">
-                              {canEdit && d.Status !== "Applied" && <button onClick={() => setAdjusting(d)} className={`${KEY_LINE} h-8 px-3`}>Adjust</button>}
-                              <button onClick={() => navigate(`/crm/booking/${d.BookingId}`)} title="Open booking" className={`${KEY_LINE} h-8 w-8`}><ExternalLink size={12} /></button>
+                              {canEdit && d.Status !== "Applied" && d.Status !== "Bounced" && d.AvailableBalance > 0 && <button onClick={() => setAdjusting(d)} className={`${KEY_LINE} h-8 px-3`}>Adjust</button>}
+                              <button onClick={() => navigate(`/crm/bookings?view=${d.BookingId}`)} title="Open booking" className={`${KEY_LINE} h-8 w-8`}><ExternalLink size={12} /></button>
                             </div>
                           </td>
                         </tr>

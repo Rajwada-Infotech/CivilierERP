@@ -200,6 +200,22 @@ export const SheetShell: React.FC<{ eyebrow: string; title: string; subtitle?: s
 );
 
 
+// ── Number formatting for sheet dashboards ──────────────────────────────────
+export const n0 = (v: unknown) => Number(v) || 0;
+export const fmtInt = (v: unknown) => n0(v).toLocaleString("en-IN");
+export const fmtMoney = (v: unknown) => {
+  const n = n0(v);
+  if (n >= 1_00_00_000) return { num: (n / 1_00_00_000).toFixed(2), unit: "Cr" };
+  if (n >= 1_00_000) return { num: (n / 1_00_000).toFixed(1), unit: "L" };
+  if (n >= 1_000) return { num: (n / 1_000).toFixed(0), unit: "K" };
+  return { num: n.toFixed(0), unit: "" };
+};
+export const money = (v: unknown) => {
+  const m = fmtMoney(v);
+  return `₹${m.num}${m.unit ? ` ${m.unit}` : ""}`;
+};
+export const share = (part: unknown, whole: unknown) => (n0(whole) > 0 ? Math.min(100, Math.max(0, (n0(part) / n0(whole)) * 100)) : 0);
+
 // ── Small drawing parts ─────────────────────────────────────────────────────
 export const Detail: React.FC<{ tag: string; title: string; note?: string; children: React.ReactNode; className?: string }> = ({ tag, title, note, children, className }) => (
   <section className={`cell ${className || ""}`}>

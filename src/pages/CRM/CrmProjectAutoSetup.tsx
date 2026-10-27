@@ -13,6 +13,7 @@ import { NamingPanel } from "./autoSetup/NamingPanel";
 import { ProjectTypeBar } from "./autoSetup/ProjectTypeBar";
 import { BlockStackEditor } from "./autoSetup/BlockStackEditor";
 import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";

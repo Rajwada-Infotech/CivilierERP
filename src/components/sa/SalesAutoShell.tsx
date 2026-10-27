@@ -1,132 +1,40 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { Megaphone } from "lucide-react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
-const ACCENT = "#e6195d"; // sales-automation — see the module palette in index.css
-const ACCENT_DARK_BG = "rgba(15, 12, 3, 0.45)";
-const ACCENT_LIGHT_BG = "rgba(255,255,255,0.72)";
+export const ACCENT = "#e6195d"; // sales-automation — see the module palette in index.css
 
 interface SalesAutoShellProps {
   title: string;
   subtitle?: string;
-  icon?: React.ElementType;
+  breadcrumbs?: string[];
   action?: React.ReactNode;
   children: React.ReactNode;
 }
 
+// Plain page header — breadcrumb, title, subtitle, action — on the app's own
+// surface. The module accent stays for links/primary buttons only; it no
+// longer tints the whole page.
 export const SalesAutoShell: React.FC<SalesAutoShellProps> = ({
   title,
   subtitle,
-  icon: PageIcon,
+  breadcrumbs,
   action,
   children,
-}) => {
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
-
-  const glassCard = isDark
-    ? {
-        background: ACCENT_DARK_BG,
-        border: `1px solid ${ACCENT}28`,
-        backdropFilter: "blur(20px) saturate(160%)",
-        WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
-      }
-    : {
-        background: ACCENT_LIGHT_BG,
-        border: `1px solid ${ACCENT}28`,
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow: `0 8px 32px ${ACCENT}12, inset 0 1px 0 rgba(255,255,255,0.9)`,
-      };
-
-  return (
-    <div className="relative min-h-full p-4 space-y-5">
-      {/* Ambient background orbs */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
-        <div
-          className="absolute -top-24 -left-24 w-96 h-96 rounded-full"
-          style={{
-            background: isDark
-              ? `radial-gradient(circle, ${ACCENT}14 0%, transparent 70%)`
-              : `radial-gradient(circle, ${ACCENT}0a 0%, transparent 70%)`,
-          }}
-        />
-        <div
-          className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full"
-          style={{
-            background: isDark
-              ? `radial-gradient(circle, ${ACCENT}0c 0%, transparent 70%)`
-              : `radial-gradient(circle, ${ACCENT}08 0%, transparent 70%)`,
-          }}
-        />
-        <div
-          className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-48 rounded-full"
-          style={{
-            background: isDark
-              ? `radial-gradient(ellipse, ${ACCENT}06 0%, transparent 70%)`
-              : `radial-gradient(ellipse, ${ACCENT}04 0%, transparent 70%)`,
-          }}
-        />
+}) => (
+  <div className="min-h-full px-4 py-5 lg:px-6 space-y-6">
+    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-4 border-b border-border">
+      <div className="min-w-0">
+        {breadcrumbs && <Breadcrumbs items={breadcrumbs} className="mb-1.5" />}
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
+        {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
       </div>
-
-      {/* Glass page header */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: "easeOut" }}
-        className="relative z-30 rounded-2xl px-5 py-4"
-        style={glassCard}
-      >
-        <div
-          className="absolute inset-0 pointer-events-none rounded-2xl"
-          style={{
-            background: `linear-gradient(135deg, ${ACCENT}12 0%, transparent 60%)`,
-          }}
-        />
-        <div
-          className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l-2xl"
-          style={{
-            background: `linear-gradient(to bottom, transparent 10%, ${ACCENT} 30%, ${ACCENT} 70%, transparent 90%)`,
-          }}
-        />
-
-        <div className="relative z-10 shell-head flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-              style={{
-                background: `${ACCENT}20`,
-                border: `1px solid ${ACCENT}40`,
-                boxShadow: `0 0 12px ${ACCENT}28`,
-              }}
-            >
-              {PageIcon
-                ? <PageIcon size={16} style={{ color: ACCENT }} />
-                : <Megaphone size={16} style={{ color: ACCENT }} />}
-            </div>
-            <div>
-              <h1
-                className="text-base font-heading font-bold"
-                style={{ color: isDark ? "#fef3c7" : "#78350f" }}
-              >
-                {title}
-              </h1>
-              {subtitle && (
-                <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
-              )}
-            </div>
-          </div>
-          {action && <div className="shrink-0">{action}</div>}
-        </div>
-      </motion.div>
-
-      {/* Page content */}
-      <div className="relative z-10 space-y-5">{children}</div>
-    </div>
-  );
-};
+      {action && <div className="shrink-0">{action}</div>}
+    </header>
+    <div className="space-y-6">{children}</div>
+  </div>
+);
 
 export const SalesAutoGlassCard: React.FC<{
   label: string;

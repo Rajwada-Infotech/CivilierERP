@@ -662,7 +662,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5" ref={rootRef}>
       {/* ── FORM CARD ── */}
-      {(canCreate || canEdit) && <div
+      {/* A collapsible form on a page that can't create shows only while a row
+          is being edited — otherwise it would offer "New Entry" with a Save
+          that can never be clicked. */}
+      {(canCreate || canEdit) && !(collapsibleAddForm && !canCreate && editingId === null) && <div
         className={sx("rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden", "bg-card")}
         style={sheet ? { border: RULE } : undefined}
         // Enter inside a text/number/date/select field must not act like a
@@ -804,7 +807,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         onChange={(e) =>
                           updateField(field.name, e.target.value, field)
                         }
-                        className={`${inputBase} ${field.prefix ? "pl-7" : ""} ${bd(!!errors[field.name])}`}
+                        placeholder={field.placeholder}
+                        disabled={field.disabledWhen?.(form) ?? false}
+                        className={`${inputBase} ${field.prefix ? "pl-7" : ""} ${bd(!!errors[field.name])} disabled:opacity-50 disabled:cursor-not-allowed`}
                       />
                     </div>
                   ) : field.type === "date" ? (
@@ -837,7 +842,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                             <option value="">
                               {isDisabled ? (field.disabledPlaceholder ?? "Select...") : "Select..."}
                             </option>
-                            {!isDisabled && (() => {
+                            {/* A locked field that already has a value (e.g. a
+                                read-only field while editing) still shows that
+                                value, not the empty placeholder. */}
+                            {(!isDisabled || !!form[field.name]) && (() => {
                               let opts: { value: string; label: string }[] = [];
                               const editingRow = editingId
                                 ? data.find((r) => r._id === editingId)
@@ -877,7 +885,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         updateField(field.name, e.target.value, field)
                       }
                       rows={3}
-                      className={`${inputBase} ${bd(!!errors[field.name])}`}
+                      placeholder={field.placeholder}
+                      disabled={field.disabledWhen?.(form) ?? false}
+                      className={`${inputBase} ${bd(!!errors[field.name])} disabled:opacity-50 disabled:cursor-not-allowed`}
                     />
                   ) : field.type === "toggle" ? (
                     <div className="flex items-center gap-3 pt-7">

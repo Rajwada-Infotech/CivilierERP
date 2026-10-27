@@ -15,10 +15,10 @@ const { crmMutationCreateSchema, crmMutationApproveSchema } = require("../valida
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { canPerformCrmGatedAction } = require("../services/approvalService");
 const { logCrmAudit } = require("../services/crmAudit");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
-const { applyPagination } = require("../services/crmListPagination");
 const multer = require("multer");
 
 router.use(authMiddleware);
@@ -77,49 +77,85 @@ async function logMutationHistory(mutationId, action, remarks, actorIdVal, actor
             VALUES (@mid, @act, @rem, @atype, @aid, SYSDATETIME())`);
 }
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmPossessionNotice / CrmPrePossession:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Applied, QueryRaised, Approved } }
+// `counts` honours search + company/project/block but NOT status, so the tabs
+// always show what each status would contain. Without `page` the legacy
+// full-array response is returned so existing callers keep working.
+const MUT_STATUSES = ["Applied", "QueryRaised", "Approved"];
+const MUT_SORT = {
+  MutationNo: "m.MutationNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  Status: "m.Status",
+  ApplicationDate: "m.ApplicationDate",
+  ApprovedDate: "m.ApprovedDate",
+  CreatedAt: "m.CreatedAt",
+};
+function buildMutWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR m.MutationNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
+  }
+  if (includeStatus && MUT_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(20), query.status);
+    conds.push("m.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 router.get("/", requirePageRight("crm-mutation", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    const reqs = [pool.request(), pool.request(), pool.request()];
-    const req0 = reqs[0];
-    const bind = (name, type, value) => reqs.forEach((r) => r.input(name, type, value));
-    const where = [];
-    if (companyId) { bind("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
-    if (projectId) { bind("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) where.push(projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { bind("blockId", sql.Int, blockId); where.push("b.BlockId = @blockId"); }
-    if (search) {
-      bind("search", sql.NVarChar(200), `%${search}%`);
-      where.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    const countsWhere = where.length ? "WHERE " + where.join(" AND ") : "";
-    if (status) { bind("st", sql.NVarChar(20), status); where.push("m.Status = @st"); }
-    const whereClause = where.length ? "WHERE " + where.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${MUT_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY m.CreatedAt DESC`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildMutWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const FROM = `FROM dbo.CrmMutation m
-          JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const [result, countResult, statusResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY m.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${whereClause}`),
-      reqs[2].query(`SELECT m.Status, COUNT(*) AS n ${FROM} ${countsWhere} GROUP BY m.Status`),
-    ]);
-    const statusCounts = Object.fromEntries(statusResult.recordset.map((r) => [r.Status, r.n]));
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(MUT_SORT, req.query.sortKey) ? MUT_SORT[req.query.sortKey] : MUT_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildMutWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT m.Status, COUNT(*) AS C FROM dbo.CrmMutation m
+       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${countWhere} GROUP BY m.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = MUT_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildMutWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, m.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    // statusCounts (no All) for the sheet page's tabs; counts kept for other callers.
+    const { All: _all, ...statusCounts } = counts;
+    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, page, pageSize });
   } catch (e) {
     console.error("[crm-mutation] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -145,6 +181,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-mutation", "view"), asyn
 router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const result = await pool.request().query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
              reg.RegNo, sd.DeedNo
@@ -154,7 +191,8 @@ router.get("/eligible-bookings", requirePageRight("crm-mutation", "view"), async
       JOIN dbo.CrmRegistry reg ON reg.BookingId = b.Id AND reg.Status = 'Completed'
       LEFT JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND ISNULL(sd.Status, '') <> 'Cancelled'
       WHERE b.Status <> 'Cancelled'
-        AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)${projectPredicate(req.projectScope, "b.ProjectId")}
+        ${scope}
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmMutation WHERE BookingId = b.Id)
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -201,6 +239,9 @@ router.post("/", requirePageRight("crm-mutation", "create"), validateBody(crmMut
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     const bookingId = parseInt(b.BookingId, 10);
     if (!(await assertBookingAllowed(req, res, bookingId))) return;
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

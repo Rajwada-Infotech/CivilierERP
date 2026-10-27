@@ -31,10 +31,17 @@ router.use(apiRateLimit);
 //     permanent fields on every write (see POST/PUT below), so any
 //     consumer reading Current* directly always gets a real value instead
 //     of having to fall back to Permanent* itself.
+// Masked PAN/Aadhaar — for the list/search view only. GET /:id (used to
+// pre-fill the Edit form) must NOT use this: the form round-trips whatever
+// it receives back on save, so a masked value here would silently overwrite
+// the real PAN/Aadhaar on file (and would usually fail the frontend's PAN
+// format check first, blocking the save entirely either way).
 const CUSTOMER_SELECT = `
   SELECT
     c.Id, c.CustomerNo, c.LeadId, c.CustomerName, c.Mobile, c.AltMobile, c.Email,
-    c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome, c.GstNo,
+    CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,
+    CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,
+    c.Occupation, c.AnnualIncome, c.GstNo,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
     c.DateOfBirth, c.InvoiceMode,
@@ -52,6 +59,33 @@ const CUSTOMER_SELECT = `
   LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
   LEFT JOIN dbo.SaLead l ON l.Id = c.LeadId
 `;
+
+// Real (unmasked) PAN/Aadhaar — for GET /:id only, see note above.
+const CUSTOMER_SELECT_DETAIL = CUSTOMER_SELECT.replace(
+  "CASE WHEN LEN(c.PanNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.PanNo) - 4), RIGHT(c.PanNo, 4)) ELSE c.PanNo END AS PanNo,",
+  "c.PanNo,",
+).replace(
+  "CASE WHEN LEN(c.AadhaarNo) >= 4 THEN CONCAT(REPLICATE(N'X', LEN(c.AadhaarNo) - 4), RIGHT(c.AadhaarNo, 4)) ELSE c.AadhaarNo END AS AadhaarNo,",
+  "c.AadhaarNo,",
+);
+
+// Customer identity can span projects, but project restricted staff should
+// only see the application count and project names associated with projects
+// they can access. The scope is resolved by attachProjectScope and contains
+// integer IDs only (projectPredicate emits an SQL-safe integer list).
+function customerSelectForScope(select, projectScope) {
+  if (!projectScope) return select;
+  const projectPredicate = require("../services/projectScope").projectPredicate;
+  return select
+    .replace(
+      "(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id)",
+      `(SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id${projectPredicate(projectScope, "a.ProjectId")})`,
+    )
+    .replace(
+      "WHERE pa.CustomerId = c.Id) px)",
+      `WHERE pa.CustomerId = c.Id${projectPredicate(projectScope, "pa.ProjectId")}) px)`,
+    );
+}
 
 function normalizeEmail(value) {
   const trimmed = String(value || "").trim().toLowerCase();
@@ -112,7 +146,7 @@ router.get("/", requireAnyPageRight(["crm-customers", "crm-resales", "crm-owners
     const where = `WHERE ${conds.join(" AND ")}`;
 
     if (!req.query.page) {
-      const result = await req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      const result = await req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
@@ -120,7 +154,7 @@ router.get("/", requireAnyPageRight(["crm-customers", "crm-resales", "crm-owners
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
     const [result, countResult] = await Promise.all([
-      req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      req0.query(`${customerSelectForScope(CUSTOMER_SELECT, req.projectScope)} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       // The same WHERE as the rows (it used to repeat the filters without the project scope, so a restricted
       // user's total counted customers they can't see).
       countReq.query(`SELECT COUNT(*) AS total FROM dbo.CrmCustomer c ${where}`),
@@ -267,24 +301,33 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
+      pool.request().input("id", sql.Int, id).query(`${customerSelectForScope(CUSTOMER_SELECT_DETAIL, req.projectScope)} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
         SELECT a.Id, a.ApplicationNo, a.Status, a.InterestedProject, a.CreatedAt,
                b.Id AS BookingId, b.BookingNo, b.Status AS BookingStatus
         FROM dbo.CrmApplication a
         OUTER APPLY (SELECT TOP 1 Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = a.Id ORDER BY CreatedAt DESC) b
-        WHERE a.CustomerId = @id
+        WHERE a.CustomerId = @id ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "a.ProjectId") : ""}
         ORDER BY a.CreatedAt DESC
       `),
       pool.request().input("id", sql.Int, id).query(`
         SELECT
           ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0) AS TotalOutstanding,
-          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) AS TotalPaid,
-          ISNULL(SUM(m.AmountDue), 0) AS TotalDue
+          ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0) + ISNULL((
+            SELECT SUM(CASE WHEN ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded')
+              AND oa.Amount > ISNULL(oa.AppliedAmount, 0) THEN oa.Amount - ISNULL(oa.AppliedAmount, 0) ELSE 0 END)
+            FROM dbo.CrmOnAccountPayment oa
+            JOIN dbo.CrmBooking ob ON ob.Id = oa.BookingId
+            JOIN dbo.CrmApplication oapp ON oapp.Id = ob.ApplicationId
+            WHERE oapp.CustomerId = @id AND ob.IsActive = 1 AND ob.Status NOT IN ${DEAD_BOOKING_SQL}
+              ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "ob.ProjectId") : ""}
+          ), 0) AS TotalPaid,
+          ISNULL(SUM(CASE WHEN m.Status <> 'Waived' THEN m.AmountDue ELSE 0 END), 0) AS TotalDue
         FROM dbo.CrmPaymentMilestone m
         JOIN dbo.CrmBooking b ON b.Id = m.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         WHERE a.CustomerId = @id AND b.IsActive = 1 AND b.Status NOT IN ${DEAD_BOOKING_SQL}
+          ${req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : ""}
       `),
     ]);
     if (!custRes.recordset.length) return res.status(404).json({ error: "Customer not found" });
@@ -337,6 +380,13 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const pool = getPool();
     const b = req.body;
 
+    // Full input validation via Zod schema (replaces the manual CustomerName check below)
+    const { customerCreateSchema } = require("../validation/crmBookingSchemas");
+    const parsed = customerCreateSchema.safeParse(b || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+    }
+
     // Server-side requiredness for Customer Name — the frontend already
     // enforces this, but relying on that alone left this endpoint creating
     // nameless customers whenever it was hit directly, which then crashed
@@ -346,6 +396,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     // and CrmCustomer.Mobile / CrmApplication.Mobile are both nullable to
     // match (migrations 425 and 445).
     if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+
 
     if (b.Mobile?.trim()) {
       const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())

@@ -1,9 +1,10 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
+const { SA_LEAD_BOOKED } = require("../constants/saStatuses");
 const router = express.Router();
 // Project access: a restricted user gets 403 on applications outside their projects.
-const { projectParamGuard, projectPredicate } = require("../services/projectScope");
+const { projectParamGuard, projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmApplication WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -17,7 +18,7 @@ const { advanceApplicationStatus, logStatusChange } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection, reallocateBookingLines, rebuildLandSchedule, generateMilestonesForBooking } = require("../services/crmEntityCreation");
 const { recalculateBookingGst } = require("../services/crmGst");
 const { assertVillaBuyerOwnsLand, VillaLandError } = require("../services/villaLand");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
@@ -102,7 +103,7 @@ const APP_SELECT = `
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
-    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
+    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.WorkflowStage AS BookingWorkflowStage, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     (SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = bk.Id ORDER BY CreatedAt DESC) AS DeedStatus,
     -- Stage drives the Converted/In Process/Not Converted split every
@@ -161,7 +162,7 @@ const APP_SELECT = `
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
   LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
   OUTER APPLY (
-    SELECT TOP 1 Id, BookingNo, Status, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
+    SELECT TOP 1 Id, BookingNo, Status, WorkflowStage, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
     ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred') THEN 0 ELSE 1 END, CreatedAt DESC
@@ -273,7 +274,7 @@ router.get("/", requireAnyPageRight(["crm-applications", "crm-parking-booking"],
     `);
 
     const countReq = pool.request();
-    const countWhere = buildApplicationFilters(countReq, req.query);
+    const countWhere = buildApplicationFilters(countReq, req.query, req.projectScope);
     let countDisplayStageWhere = "";
     if (req.query.displayStage) {
       countReq.input("dstage", sql.NVarChar(20), req.query.displayStage);
@@ -408,6 +409,22 @@ router.post("/", requirePageRight("crm-applications", "create"), async (req, res
   try {
     const pool = getPool();
     const actor = actorId(req);
+    let projectId = req.body?.ProjectId != null && req.body?.ProjectId !== "" ? parseInt(req.body.ProjectId, 10) : null;
+    if (projectId === null && req.body?.PreferredUnitId) {
+      const uRow = await pool.request().input("uid", sql.Int, parseInt(req.body.PreferredUnitId, 10))
+        .query("SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @uid");
+      if (uRow.recordset.length) projectId = uRow.recordset[0].ProjectId;
+    }
+    if (projectId === null && Array.isArray(req.body?.PreferredPlotIds) && req.body.PreferredPlotIds.length > 0) {
+      const pRow = await pool.request().input("pid", sql.Int, parseInt(req.body.PreferredPlotIds[0], 10))
+        .query("SELECT ProjectId FROM dbo.PlotMaster WHERE Id = @pid");
+      if (pRow.recordset.length) projectId = pRow.recordset[0].ProjectId;
+    }
+    if (req.projectScope && (projectId === null || !assertProjectAllowed(req, res, projectId))) {
+      if (projectId === null) res.status(403).json({ error: "You don't have access to this project." });
+      return;
+    }
+    if (projectId !== null && !assertProjectAllowed(req, res, projectId)) return;
     // The human-filed Application form never lets AssignedTo/AssignedBy be
     // picked — the filer becomes the assignee, permanently recorded as the
     // filer too. (saHandoff.js, the other caller of this shared service,
@@ -563,7 +580,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     if (unitIsChanging && newUnitId !== null) {
       try {
         await placeHoldIfNeeded(pool, {
-          entityType: "Unit", entityId: newUnitId, applicationId: id, holdDays: 3,
+          entityType: "Unit", entityId: newUnitId, applicationId: id,
           reason: "Application unit changed — auto-hold", userId: actor,
           // Same effectiveProjectId pattern as the deposit-bank check below —
           // b.ProjectId is what's about to be saved by the UPDATE further
@@ -769,9 +786,36 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       const hasBooking = (await pool0.request().input("aid", sql.Int, id)
         .query("SELECT TOP 1 1 AS x FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset.length > 0;
       const ap = (await pool0.request().input("id", sql.Int, id)
-        .query("SELECT PreferredUnitId, RatePerSqFt FROM dbo.CrmApplication WHERE Id = @id")).recordset[0];
+        .query("SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId FROM dbo.CrmApplication WHERE Id = @id")).recordset[0];
+      const plotIds0 = await getApplicationPlotIds(pool0, id);
+      if (hasBooking && ap && !plotIds0.length) {
+        const existing = (await pool0.request().input("aid", sql.Int, id)
+          .query("SELECT TOP 1 Id, UnitId, PaymentPlanId, TotalValue FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset[0];
+        const planChanged = Number(ap.PaymentPlanId ?? -1) !== Number(existing?.PaymentPlanId ?? -1);
+        if (existing && planChanged) {
+          if (ap.PaymentPlanId == null) {
+            return res.status(400).json({ error: "A unit booking must keep a payment plan. Select a valid plan before resubmitting." });
+          }
+          try {
+            await resolveApplicationPaymentPlan(pool0, { preferredUnitId: existing.UnitId, paymentPlanId: ap.PaymentPlanId });
+          } catch (e) {
+            return res.status(e.status || 400).json({ error: e.message });
+          }
+          const newPlanAmount = (await pool0.request().input("pid", sql.Int, ap.PaymentPlanId)
+            .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount;
+          if (newPlanAmount != null && Number(newPlanAmount) > Number(existing.TotalValue || 0)) {
+            return res.status(400).json({ error: "The selected plan's Booking Amount is greater than this booking's value. Correct the plan amount before resubmitting." });
+          }
+          const history = (await pool0.request().input("bid", sql.Int, existing.Id).query(`
+            SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+            WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))
+          `)).recordset[0]?.Cnt || 0;
+          if (history > 0) {
+            return res.status(400).json({ error: "The payment plan cannot be changed after a milestone payment or waiver. Update the Application without changing its plan, or use the Booking payment-plan workflow before any payment is recorded." });
+          }
+        }
+      }
       if (!hasBooking && ap) {
-        const plotIds0 = await getApplicationPlotIds(pool0, id);
         const unitIds0 = plotIds0.length ? [] : await getApplicationUnitIds(pool0, id, ap.PreferredUnitId);
         const ids0 = plotIds0.length ? plotIds0 : unitIds0;
         if (ids0.length) {
@@ -845,7 +889,28 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         await tx.begin();
         try {
           const before = (await tx.request().input("bid", sql.Int, booking.id)
-            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+            .query("SELECT RatePerSqFt, AreaSqFt, TotalValue, BookingAmount, UnitId, PaymentPlanId FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+          const paymentPlanChanged = Number(a.PaymentPlanId ?? -1) !== Number(before?.PaymentPlanId ?? -1);
+          let planBookingAmount = null;
+          if (paymentPlanChanged && a.PaymentPlanId != null) {
+            planBookingAmount = (await tx.request().input("pid", sql.Int, a.PaymentPlanId)
+              .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid")).recordset[0]?.BookingAmount ?? null;
+          }
+          const newRateForValidation = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
+          const prospectiveTotal = newRateForValidation != null
+            && Number(before?.RatePerSqFt) !== newRateForValidation && Number(before?.AreaSqFt) > 0
+            ? Math.round(Number(before.AreaSqFt) * newRateForValidation * 100) / 100
+            : Number(before?.TotalValue || 0);
+          const effectiveBookingAmount = planBookingAmount != null
+            ? Number(planBookingAmount)
+            : a.BookingAmount != null ? Number(a.BookingAmount)
+              : before?.BookingAmount != null ? Number(before.BookingAmount) : null;
+          if (effectiveBookingAmount != null && (!Number.isFinite(effectiveBookingAmount) || effectiveBookingAmount < 0)) {
+            throw Object.assign(new Error("Booking Amount must be a valid non-negative number"), { status: 400 });
+          }
+          if (effectiveBookingAmount != null && effectiveBookingAmount > prospectiveTotal) {
+            throw Object.assign(new Error("Booking Amount cannot exceed the booking value"), { status: 400 });
+          }
           await tx.request()
             .input("bid", sql.Int, booking.id)
             .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
@@ -853,7 +918,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
             .input("BookingDate", sql.Date, a.DateOfApply)
             .input("TokenType", sql.NVarChar(50), a.TokenType)
             .input("TokenValue", sql.Decimal(18, 2), a.TokenValue)
-            .input("BookingAmount", sql.Decimal(18, 2), a.BookingAmount)
+            .input("BookingAmount", sql.Decimal(18, 2), effectiveBookingAmount)
             .input("PaymentMode", sql.NVarChar(50), a.PaymentMode)
             .input("DepositBankId", sql.Int, a.DepositBankId)
             .input("AssignedTo", sql.Int, a.AssignedTo)
@@ -868,7 +933,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
                   BookingDate = COALESCE(@BookingDate, BookingDate),
                   TokenType = @TokenType,
                   TokenValue = @TokenValue,
-                  BookingAmount = @BookingAmount,
+                  BookingAmount = COALESCE(@BookingAmount, BookingAmount),
                   PaymentMode = @PaymentMode,
                   AssignedTo = @AssignedTo,
                   Notes = @Notes,
@@ -896,13 +961,26 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           // value and Booking Amount instead of patching Milestone 1.
           const land = await rebuildLandSchedule(tx, booking.id, actor);
 
+          if (paymentPlanChanged && land.reason === "not a plot sale") {
+            const bookingAmount = effectiveBookingAmount;
+            await tx.request().input("bid", sql.Int, booking.id).input("bamt", sql.Decimal(18, 2), bookingAmount).query(`
+              UPDATE dbo.CrmBooking SET BookingAmount = @bamt, UpdatedAt = SYSDATETIME() WHERE Id = @bid
+            `);
+            await tx.request().input("bid", sql.Int, booking.id)
+              .query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+            const currentBooking = (await tx.request().input("bid", sql.Int, booking.id)
+              .query("SELECT TotalValue, BookingDate FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0];
+            await generateMilestonesForBooking(tx, booking.id, Number(currentBooking?.TotalValue || 0), a.PaymentPlanId,
+              currentBooking?.BookingDate, actor, bookingAmount);
+          }
+
           // Resync Milestone #1 (Booking Amount) to match the updated
           // BookingAmount. Without this, editing the application's
           // token/booking amount and re-submitting would update the
           // CrmBooking row but leave the milestone's AmountDue stale.
-          if (land.reason === "not a plot sale" && a.BookingAmount) {
+          if (!paymentPlanChanged && land.reason === "not a plot sale" && a.BookingAmount != null) {
             const m1Res = await tx.request().input("bid", sql.Int, booking.id)
-              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
             const m1 = m1Res.recordset[0];
             if (m1 && m1.Status !== "Waived") {
               const newAmountDue = Math.max(parseFloat(a.BookingAmount), Number(m1.AmountPaid || 0));
@@ -916,6 +994,12 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
                 .input("pct", sql.Decimal(5, 2), newPercent)
                 .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct,
                   Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  DemandStatus = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  DemandNo = CASE WHEN AmountPaid >= @amt THEN DemandNo ELSE NULL END,
+                  DemandRaisedOn = CASE WHEN AmountPaid >= @amt THEN DemandRaisedOn ELSE NULL END,
+                  DemandNotes = CASE WHEN AmountPaid >= @amt THEN DemandNotes ELSE NULL END,
+                  DemandRaisedAt = CASE WHEN AmountPaid >= @amt THEN DemandRaisedAt ELSE NULL END,
+                  PaidDate = CASE WHEN AmountPaid >= @amt THEN PaidDate ELSE NULL END,
                   UpdatedAt = SYSDATETIME() WHERE Id = @id`);
               await recalculateRemainingMilestones(tx, booking.id, { fixedMilestoneId: m1.Id });
             }
@@ -986,7 +1070,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         const unitIds = await getApplicationUnitIds(pool, id, unitId);
         for (const selectedUnitId of unitIds) {
           await placeHoldIfNeeded(pool, {
-            entityType: "Unit", entityId: selectedUnitId, applicationId: id, holdDays: 3,
+            entityType: "Unit", entityId: selectedUnitId, applicationId: id,
             reason: "Application submitted — auto-hold", userId: actor,
           });
         }
@@ -1019,7 +1103,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           booking = { id: created.id, BookingNo: created.BookingNo };
           // Sync SA Lead to Booked now that a Booking exists
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id)
-            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
+            .query(`UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${SA_LEAD_BOOKED}', UpdatedAt = SYSDATETIME()
                     WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @aid)`);
           await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`
             UPDATE dbo.CrmBookingDocument
@@ -1094,7 +1178,7 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     // place a Booking gets created from, just moved here.
     await pool.request().input("bid", sql.Int, created.id).input("id", sql.Int, id)
       .query(`
-        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${CrmStatus.BOOKED}', UpdatedAt = SYSDATETIME()
+        UPDATE dbo.SaLead SET CrmBookingId = @bid, Status = '${SA_LEAD_BOOKED}', UpdatedAt = SYSDATETIME()
         WHERE Id = (SELECT LeadId FROM dbo.CrmApplication WHERE Id = @id)
       `);
     await pool.request().input("bid", sql.Int, created.id).input("aid", sql.Int, id).query(`

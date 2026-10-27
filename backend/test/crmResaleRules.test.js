@@ -5,7 +5,7 @@ jest.mock("../db", () => ({ sql: { Int: "Int", NVarChar: () => "NVarChar" }, get
 const { conveyedReason } = require("../services/crmResaleTransfer");
 const { isIndividualPan } = require("../services/crmResaleCase");
 
-const dbAnswering = (rowsFor) => ({ request: () => ({ query: async (q) => ({ recordset: rowsFor(q) }) }) });
+const dbAnswering = (rowsFor) => ({ request: () => ({ input: function () { return this; }, query: async (q) => ({ recordset: rowsFor(q) }) }) });
 
 describe("conveyed — what stops a booking changing hands", () => {
   test("a handover alone does not: the check never looks at handovers", async () => {

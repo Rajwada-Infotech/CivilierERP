@@ -2,6 +2,8 @@
 // their permissions, and the handlers that change and save them.
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
+import { PRIVILEGED_ROLES } from "@/contexts/auth.utils";
 import { toast } from "sonner";
 import { getUsersForRights, getUserPermissions, saveUserPermissions, PagePermission } from "@/api/userApi";
 import { getRolesList, getRolePermissions, saveRolePermissions } from "@/api/roleApi";
@@ -26,8 +28,13 @@ export function useMenuRights() {
   }, []);
 
   // ── Subject mode: edit a Role's baseline, or a specific user's overrides ────
+  // The per-user override endpoints (backend/routes/userRights.js) are hard-restricted to admin/super_admin/dba, with
+  // no page-scoping, so a non-admin-tier menu-rights grant (marketing_head's, which replaced the retired SA Role
+  // Master) covers only the Role-wise baseline — that one is page-scoped (backend/routes/roles.js checkPermission).
   type Subject = "user" | "role";
-  const [subject, setSubject] = useState<Subject>("user");
+  const { currentUser } = useAuth();
+  const isAdminTier = currentUser ? PRIVILEGED_ROLES.includes(currentUser.role) : false;
+  const [subject, setSubject] = useState<Subject>(isAdminTier ? "user" : "role");
 
   const [users, setUsers] = useState<
     { id: number; name: string; role: string }[]
@@ -50,13 +57,14 @@ export function useMenuRights() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  // Load users
+  // Load users — not for a non-admin-tier user: GET /api/user-rights/users refuses them whatever their page rights.
   useEffect(() => {
+    if (!isAdminTier) { setLoadingUsers(false); return; }
     getUsersForRights()
       .then(setUsers)
       .catch(() => toast.error("Failed to load users"))
       .finally(() => setLoadingUsers(false));
-  }, []);
+  }, [isAdminTier]);
 
   // Load roles
   useEffect(() => {
@@ -334,6 +342,7 @@ export function useMenuRights() {
 
   return {
     rights,
+    isAdminTier,
     pageDefs,
     setPageDefs,
     loadingDefs,

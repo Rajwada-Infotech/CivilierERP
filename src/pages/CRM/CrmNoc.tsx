@@ -176,7 +176,7 @@ const CrmNoc: React.FC = () => {
   useEffect(() => {
     if (!deepLinkBookingId || deepLinkResolved) return;
     setDeepLinkResolved(true);
-    setSp({}, { replace: true });
+    setSp((prev) => { prev.delete("bookingId"); prev.delete("nocType"); return prev; }, { replace: true });
     fetchNocByBooking(deepLinkBookingId, deepLinkNocType).then((existing) => {
       if (existing) setOpenNoc(existing);
       else if (rights.canCreate) { setForm({ ...EMPTY_FORM, BookingId: deepLinkBookingId }); setDialogOpen(true); }

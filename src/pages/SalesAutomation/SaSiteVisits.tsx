@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -143,9 +142,8 @@ const SaSiteVisits: React.FC = () => {
   });
 
   return (
-    <SalesAutoShell title="Site Visitation" subtitle="Schedule and track customer site visits for interested leads"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Site Visits"]} title="Site Visitation" subtitle="Schedule and track customer site visits for interested leads"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Site Visits"]} />
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">

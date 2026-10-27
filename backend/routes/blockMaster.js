@@ -461,6 +461,7 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
   if (!Array.isArray(specs)) return res.status(400).json({ error: "Expected an array" });
   try {
     const pool = getPool();
+    const skippedUnits = [];
     // Full replace — delete existing then re-insert, same pattern as payment plan tag sync.
     await pool.request().input("blockId", sql.Int, blockId)
       .query("DELETE FROM dbo.BlockUnitTypeSpec WHERE BlockId = @blockId");
@@ -497,6 +498,14 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
       // same unit type. The spec is the single source of truth — individual
       // unit rows must always reflect whatever the block-level spec says.
       // AreaSqFt is the legacy single-field kept in sync with SBU.
+      //
+      // Excludes any unit getUnitLockReason would refuse to edit (booked,
+      // held, or a live Application pointing at it) — unitMaster.js's own
+      // PUT /:id already blocks changing a locked unit's area/rate one at a
+      // time for exactly this reason ("letting staff silently change a sold
+      // unit's area/rate underneath a live booking is exactly the kind of
+      // drift that caused the A1-1001 mess"); this cascade was bypassing
+      // that same rule in bulk.
       await pool.request()
         .input("blockId",  sql.Int, blockId)
         .input("unitType", sql.NVarChar(50),   s.UnitType.trim())
@@ -506,7 +515,7 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
         .input("openTerr", sql.Decimal(18, 2), openTerr)
         .input("rate",     sql.Decimal(18, 2), rate)
         .query(`
-          UPDATE dbo.UnitMaster SET
+          UPDATE u SET
             CarpetAreaSqFt       = @carpet,
             BuiltUpAreaSqFt      = @builtUp,
             SuperBuiltUpAreaSqFt = @sbu,
@@ -514,13 +523,35 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
             OpenTerraceAreaSqFt  = @openTerr,
             RatePerSqFt          = @rate,
             UpdatedAt            = SYSDATETIME()
-          WHERE BlockId = @blockId AND UnitType = @unitType AND IsActive = 1
+          FROM dbo.UnitMaster u
+          WHERE u.BlockId = @blockId AND u.UnitType = @unitType AND u.IsActive = 1
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred'))
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME())
+            AND NOT EXISTS (SELECT 1 FROM dbo.CrmApplication app WHERE app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted'))
         `);
+      const skippedCount = await pool.request()
+        .input("blockId",  sql.Int, blockId)
+        .input("unitType", sql.NVarChar(50), s.UnitType.trim())
+        .query(`SELECT COUNT(*) AS n FROM dbo.UnitMaster u
+          WHERE u.BlockId = @blockId AND u.UnitType = @unitType AND u.IsActive = 1
+            AND (
+              EXISTS (SELECT 1 FROM dbo.CrmBooking bk WHERE bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred'))
+              OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold h WHERE h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME())
+              OR EXISTS (SELECT 1 FROM dbo.CrmApplication app WHERE app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Converted'))
+            )`);
+      if (skippedCount.recordset[0].n > 0) {
+        skippedUnits.push({ unitType: s.UnitType.trim(), count: skippedCount.recordset[0].n });
+      }
     }
     await bumpCacheVersion("block-master");
     await bumpFlatMasterCaches();
     await bumpCacheVersion("unit-master");
-    res.json({ message: "Unit type specs saved" });
+    res.json({
+      message: skippedUnits.length
+        ? `Unit type specs saved — ${skippedUnits.map((s) => `${s.count} ${s.unitType} unit(s)`).join(", ")} kept their original area/rate (booked, held, or applied for)`
+        : "Unit type specs saved",
+      skippedUnits,
+    });
   } catch (err) {
     console.error("[block-master] PUT unit-type-specs error:", err.message);
     res.status(500).json({ error: err.message });

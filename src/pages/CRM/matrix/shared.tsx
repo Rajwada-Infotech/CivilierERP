@@ -1,9 +1,9 @@
-// Shared by the Unit and Parking Matrix: the tile, its legend, the hold countdown, the customer list a hold or sale is
-// made for, the Place hold dialog and the hold / release / extend calls, and the sheet styles.
+// Shared by the Unit and Parking Matrix: the tile, its legend, the customer list a hold or sale is made for, the Place
+// hold dialog and the hold / release calls, and the sheet styles. A hold has no end date: it lasts until it is released,
+// the application is rejected or cancelled, or it turns into a booking / allotment.
 import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Clock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -23,16 +23,6 @@ export async function fetchOptions<T>(url: string): Promise<T[]> {
   const data = await res.json().catch(() => []);
   if (!res.ok) throw new Error((data as any)?.error || `Could not load (${res.status}).`);
   return Array.isArray(data) ? data : [];
-}
-
-/** "2d 4h left", "5h left", "expiring" — from a hold's end. */
-export function holdLeft(until: string | null | undefined): string | null {
-  if (!until) return null;
-  const ms = new Date(until).getTime() - Date.now();
-  if (!Number.isFinite(ms)) return null;
-  if (ms <= 0) return "expiring";
-  const h = Math.floor(ms / 3_600_000);
-  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h left` : h > 0 ? `${h}h left` : "under 1h left";
 }
 
 // Tile faces: free is open (ruled), held is hatched, taken is solid ink, blocked is dashed and faint. The same marks
@@ -62,11 +52,10 @@ export const Legend: React.FC<{ counts: Record<TileStatus, number>; bookedLabel?
 );
 
 export const Tile: React.FC<{
-  name: string; status: TileStatus; tag?: string | null; line: React.ReactNode; holdUntil?: string | null;
+  name: string; status: TileStatus; tag?: string | null; line: React.ReactNode;
   title?: string; disabled?: boolean; onClick?: () => void;
-}> = ({ name, status, tag, line, holdUntil, title, disabled, onClick }) => {
+}> = ({ name, status, tag, line, title, disabled, onClick }) => {
   const t = tileStyle(status);
-  const left = status === "OnHold" ? holdLeft(holdUntil) : null;
   return (
     <button onClick={onClick} disabled={disabled} title={title}
       className={`text-left px-3 py-2.5 min-w-0 transition-colors ${t.className} ${disabled ? "cursor-default" : "cursor-pointer"}`} style={t.style}>
@@ -75,7 +64,6 @@ export const Tile: React.FC<{
         {tag && <span className="shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] opacity-80">{tag}</span>}
       </div>
       <div className={`mt-1 text-[0.6875rem] truncate ${status === "Booked" ? "opacity-80" : "text-muted-foreground"}`}>{line}</div>
-      {left && <div className="mt-0.5 flex items-center gap-1 text-[0.625rem] font-semibold"><Clock size={10} /> {left}</div>}
     </button>
   );
 };
@@ -121,24 +109,21 @@ export const Field: React.FC<{ label: string; children: React.ReactNode; hint?: 
 );
 export const INP = "w-full h-9 border border-foreground/40 focus:border-foreground bg-card px-2.5 text-sm text-foreground outline-none";
 
-/** Hold a unit or parking slot for a customer of the same project for N days. */
+/** Hold a unit or parking slot for a customer of the same project, until it is released or booked. */
 export function PlaceHoldDialog({ entityType, entityId, label, projectId, canPlace, onDone, onClose }: {
   entityType: "Unit" | "Parking"; entityId: number; label: string; projectId: string; canPlace: boolean; onDone: () => void; onClose: () => void;
 }) {
   const [applicationId, setApplicationId] = useState("");
-  const [holdDays, setHoldDays] = useState("3");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const { data: customers = [], isLoading } = useMatrixCustomers(projectId);
 
   const place = async () => {
     if (!applicationId) return void toast.error("Select a customer.");
-    const days = parseInt(holdDays, 10);
-    if (!Number.isFinite(days) || days < 1 || days > 90) return void toast.error("Hold for 1 to 90 days.");
     setSaving(true);
     try {
-      await holdCall(HOLDS_API, "POST", { EntityType: entityType, EntityId: entityId, ApplicationId: parseInt(applicationId, 10), HoldDays: days, Reason: reason || null });
-      toast.success(`${label} held for ${days} day${days > 1 ? "s" : ""}`);
+      await holdCall(HOLDS_API, "POST", { EntityType: entityType, EntityId: entityId, ApplicationId: parseInt(applicationId, 10), Reason: reason || null });
+      toast.success(`${label} is on hold`);
       onDone();
       onClose();
     } catch (e: any) {
@@ -158,9 +143,7 @@ export function PlaceHoldDialog({ entityType, entityId, label, projectId, canPla
           <SearchableSelect value={applicationId} onChange={setApplicationId} placeholder={isLoading ? "Loading customers…" : "Select customer"}
             searchPlaceholder="Search name, mobile or application…" options={customerOptions(customers)} />
         </Field>
-        <Field label="Hold for (days) *" hint="It frees itself when the time runs out; a daily reminder goes out until then.">
-          <input type="number" min={1} max={90} value={holdDays} onChange={(e) => setHoldDays(e.target.value)} className={INP} />
-        </Field>
+        <p className="text-[0.6875rem] text-muted-foreground">It stays held until it is released here, the application ends, or it is booked.</p>
         <Field label="Reason">
           <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className={`${INP} h-auto py-2 resize-none`} />
         </Field>
@@ -187,29 +170,3 @@ export const Facts: React.FC<{ title: string; rows: [string, React.ReactNode][] 
     </dl>
   </div>
 );
-
-/** Extend an active hold by N days. */
-export const ExtendRow: React.FC<{ holdId: number; onDone: () => void }> = ({ holdId, onDone }) => {
-  const [days, setDays] = useState("3");
-  const [saving, setSaving] = useState(false);
-  const go = async () => {
-    const d = parseInt(days, 10);
-    if (!Number.isFinite(d) || d < 1 || d > 90) return void toast.error("Extend by 1 to 90 days.");
-    setSaving(true);
-    try {
-      await holdCall(`${HOLDS_API}/${holdId}/extend`, "PUT", { AdditionalDays: d });
-      toast.success(`Hold extended by ${d} day${d > 1 ? "s" : ""}`);
-      onDone();
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <div className="flex items-end gap-2 px-3 py-2.5" style={{ border: RULE_SOFT }}>
-      <Field label="Extend by (days)"><input type="number" min={1} max={90} value={days} onChange={(e) => setDays(e.target.value)} className={INP} /></Field>
-      <button onClick={go} disabled={saving} className={`${KEY_INK} h-9 px-4 shrink-0`}>{saving ? "Extending…" : "Extend"}</button>
-    </div>
-  );
-};

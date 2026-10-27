@@ -9,8 +9,12 @@ export function ReviewFooter({ r }: { r: ApprovalReviewState }) {
     <>
       {/* Footer — the action bar, spanning full width */}
       <div className="shrink-0 border-t border-foreground px-5 sm:px-6 py-4 flex items-center justify-between gap-3">
-        <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
-          {item.Status === "Pending" ? "Review the details above before taking action." : `This record is ${item.Status.toLowerCase()}.`}
+        <p className={`text-[0.6875rem] text-muted-foreground max-w-2xl ${["fund-transfer", "crm-refund-payment"].includes(item.Module) && item.Status === "Pending" ? "" : "hidden sm:block"}`}>
+          {item.Module === "fund-transfer" && item.Status === "Pending"
+            ? "Confirm the bank transfer was completed manually before approving. CivilierERP does not move the funds; approval posts the accounting entries and applies any linked CRM credit."
+            : item.Module === "crm-refund-payment" && item.Status === "Pending"
+              ? "Confirm the customer was paid manually outside CivilierERP before approving. Approval records the refund as paid and posts accounting; CivilierERP does not move funds."
+              : item.Status === "Pending" ? "Review the details above before taking action." : `This record is ${item.Status.toLowerCase()}.`}
         </p>
         <ApprovalActions
           status={item.Status}

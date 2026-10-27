@@ -42,7 +42,7 @@ const CrmBooking: React.FC = () => {
   const canRequestCancellation = canDoAction("crm-cancellations", "create");
   const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const appFilter = sp.get("applicationId") || "";
   const viewFilter = sp.get("view") || "";
 
@@ -66,7 +66,10 @@ const CrmBooking: React.FC = () => {
   // The URL carries the open booking (?view=<id>), so a refresh or a shared link reopens it.
   const openBooking = (id: number) => {
     setViewingBookingId(id);
-    navigate(`/crm/bookings?view=${id}`, { replace: true });
+    setSp((prev) => {
+      prev.set("view", String(id));
+      return prev;
+    }, { replace: true });
   };
 
   const listFilters: BookingListFilters = useMemo(

@@ -9,6 +9,7 @@
 // CrmApplication/CrmBooking's real constraints (Unit Master mandatory,
 // milestones required, etc.).
 const { sql } = require("../db");
+const { CrmStatus } = require("../constants/crmStatuses");
 const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("./docNumber");
 const { validateSourceChain } = require("./sourceChain");
@@ -60,9 +61,12 @@ async function assertCommercialGst(pool, unitIds) {
 
 async function assertConnectedPlotGroup(pool, plotIds) {
   if (plotIds.length < 2) return;
-  const pairs = await pool.request().query(`
+  const req = pool.request();
+  plotIds.forEach((id, i) => req.input(`cpid${i}`, sql.Int, id));
+  const inList = plotIds.map((_, i) => `@cpid${i}`).join(",");
+  const pairs = await req.query(`
     SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
-    WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+    WHERE PlotId IN (${inList}) AND AdjacentPlotId IN (${inList})
   `);
   const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
   pairs.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
@@ -85,12 +89,13 @@ async function assertConnectedPlotGroup(pool, plotIds) {
 async function validatePlotSelection(pool, plotIds, { projectId = null, applicationId = null, requireAdjacent = true } = {}) {
   if (!plotIds.length) return [];
   const requestedProjectId = projectId != null && projectId !== "" ? Number(projectId) : null;
-  const result = await pool.request()
-    .input("applicationId", sql.Int, applicationId)
-    .query(`
+  const pReq = pool.request().input("applicationId", sql.Int, applicationId);
+  plotIds.forEach((id, i) => pReq.input(`ppid${i}`, sql.Int, id));
+  const plotInList = plotIds.map((_, i) => `@ppid${i}`).join(",");
+  const result = await pReq.query(`
       SELECT p.Id, p.PlotName, p.ProjectId, p.BlockId
       FROM dbo.PlotMaster p
-      WHERE p.Id IN (${plotIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+      WHERE p.Id IN (${plotInList}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmBookingPlot bp
           JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
@@ -516,7 +521,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   if (preferredUnitId) {
     try {
       await placeHoldIfNeeded(pool, {
-        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId, holdDays: 3,
+        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId,
         reason: "Application created — auto-hold", userId: actorUserId,
       });
     } catch (holdErr) {
@@ -682,17 +687,13 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
       dueDate = runningDue;
     }
     const isFirst = m.no === 1;
-    // Nothing is due by default. Until a real Booking Amount is entered
-    // (bookingAmt > 0), every milestone — including #1 — is inserted at 0,
-    // not the plan's fixed percentage of TotalValue; staff would otherwise
-    // see a scary pre-filled "Due" figure the customer never agreed to.
-    // Once the Booking Amount is actually set (via the Payment tab's
-    // resync-schedule call), Milestone #1 takes that real amount and every
-    // other milestone gets redistributed across what's left, preserving the
-    // plan's relative weighting (recalculateRemainingMilestones falls back to
-    // the plan's own %s whenever a milestone's stored Percent is 0/unset).
-    const amt = bookingAmt > 0 ? (isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100) : 0;
-    const pct = bookingAmt > 0 ? (isFirst ? Math.round((bookingAmt / totalValue) * 10000) / 100 : m.pct) : 0;
+    // Milestone 1 is the plan's fixed Booking Amount. A zero Booking Amount
+    // means that step is already satisfied with no payment; later milestones
+    // still need real due amounts or the schedule would be all zero and block
+    // every subsequent payment forever.
+    const amt = isFirst ? bookingAmt : Math.round(totalValue * m.pct) / 100;
+    const pct = isFirst ? (totalValue > 0 ? Math.round((bookingAmt / totalValue) * 10000) / 100 : 0) : m.pct;
+    const zeroBookingStep = isFirst && bookingAmt === 0;
 
     const ins = await poolOrTx.request()
       .input("bid",  sql.Int,           bookingId)
@@ -704,15 +705,18 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
       .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
       .input("dept", sql.NVarChar(100), m.dept || null)
       .input("cb",   sql.Int,           actorUserId)
+      .input("status", sql.NVarChar(30), zeroBookingStep ? CrmStatus.PAID : CrmStatus.PENDING)
+      .input("demandStatus", sql.NVarChar(30), zeroBookingStep ? CrmStatus.PAID : CrmStatus.PENDING)
+      .input("paidDate", sql.Date, null)
       .query(`
-        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+        INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, DemandStatus, PaidDate, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, @status, @demandStatus, @paidDate, @cb, SYSDATETIME())
       `);
     if (isFirst) milestone1Id = ins.recordset[0].Id;
   }
 
-  if (bookingAmt > 0 && milestone1Id && milestones.length > 1) {
+  if (milestone1Id && milestones.length > 1) {
     await recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilestoneId: milestone1Id });
   }
 }
@@ -858,14 +862,17 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     await assertCommercialGst(pool, unitIds);
   }
 
-  // Fetch all selected units
-  const unitsRes = await pool.request().query(isPlotBooking ? `
+  // Fetch all selected units — parameterized IN list to avoid SQL injection
+  const uReq = pool.request();
+  unitIds.forEach((id, i) => uReq.input(`ubid${i}`, sql.Int, id));
+  const unitInList = unitIds.map((_, i) => `@ubid${i}`).join(",");
+  const unitsRes = await uReq.query(isPlotBooking ? `
     SELECT p.Id, p.PlotName AS UnitName, p.ProjectId, p.BlockId, CAST(NULL AS NVARCHAR(50)) AS UnitType,
            p.AreaSqFt, p.RatePerSqFt, proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
     FROM dbo.PlotMaster p
     LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
-    WHERE p.Id IN (${unitIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+    WHERE p.Id IN (${unitInList}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
   ` : `
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.UnitKind, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
@@ -874,7 +881,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     FROM dbo.UnitMaster u
     LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-    WHERE u.Id IN (${unitIds.join(",")}) AND u.IsActive = 1
+    WHERE u.Id IN (${unitInList}) AND u.IsActive = 1
   `);
   if (unitsRes.recordset.length !== unitIds.length) {
     throw new CrmCreationError("One or more selected units do not exist or are inactive");
@@ -895,16 +902,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     if (why) throw new CrmCreationError(why);
   }
 
-  // A customer can't actually get their Booking approved/paid against an
-  // unapproved Application, so the real "confirm within N days" clock only
-  // makes sense starting now — a fresh 3 days from Booking creation, not
-  // whatever was left on the original pick-time hold (which may have
-  // already burned most of its window sitting in the admin approval
-  // queue). This Booking still isn't a confirmed sale (Status stays
-  // 'Pending' until Approved AND Milestone #1 is Paid — see
-  // unitMatrix.js/parkingMatrix.js's Status derivation), so the deadline
-  // below is what the Matrix keeps counting down against in the meantime.
-  const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  // No auto-expiry — a Booking stays "to be confirmed" (Pending, not yet
+  // Approved + Milestone #1 Paid) indefinitely until staff acts on it or
+  // cancels it. Every "is this unit/parking taken" query already treats a
+  // NULL ConfirmDeadline as not-yet-expired, so leaving it unset here is
+  // all that's needed — no sentinel required, unlike CrmInventoryHold's
+  // NOT NULL HoldUntil column.
+  const confirmDeadline = null;
   const application = appRow.recordset[0];
   const bookingBridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && application.BrokerId == null && application.ChannelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, application.ChannelPartnerId, actorUserId)
@@ -989,6 +993,12 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     }
     bookingAmount = Number(planRow.BookingAmount);
   }
+  if (!Number.isFinite(bookingAmount) || bookingAmount < 0) {
+    throw new CrmCreationError("Booking Amount must be a valid non-negative number");
+  }
+  if (bookingAmount > total) {
+    throw new CrmCreationError("Booking Amount cannot be more than the booking value");
+  }
 
   // getNextDocNumber uses its own internal sp_getapplock transaction and must
   // always run on pool (not on tx) — see crmPayments.js comment at line ~121.
@@ -1013,6 +1023,15 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     const taken = await tx.request()
       .query(`SELECT Id FROM dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"} WITH (UPDLOCK, ROWLOCK) WHERE ${isPlotBooking ? "PlotId" : "UnitId"} IN (${unitIds.join(",")}) AND Status = N'Active'`);
     if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
+
+    // Re-check villa land ownership inside this same transaction, right
+    // before the insert — the first assertVillaBuyer check above ran on the
+    // plain pool, well before this lock, so a concurrent resale/transfer of
+    // the underlying plot could complete in between and leave this booking
+    // going through for a buyer who no longer owns the land.
+    if (!isPlotBooking) {
+      await assertVillaBuyer(tx, unitIds, appRow.recordset[0].CustomerId);
+    }
 
     const result = await tx.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
@@ -1262,7 +1281,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
   if (!bookingAmount) return null;
   const m1 = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+    .query("SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL ORDER BY Id");
   const firstMilestoneAmount = m1.recordset[0]?.AmountDue;
   if (firstMilestoneAmount == null) return null;
   if (Math.abs(Number(firstMilestoneAmount) - Number(bookingAmount)) < 1) return null;

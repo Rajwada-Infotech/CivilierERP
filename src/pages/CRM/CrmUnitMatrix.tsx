@@ -16,8 +16,8 @@ import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  ExtendRow, Facts, HOLDS_API, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
-  fetchOptions, fmtMoney, holdCall, holdLeft, type Option, type TileStatus,
+  Facts, HOLDS_API, KEY_INK, KEY_LINE, KEY_RED, LBL, Legend, PlaceHoldDialog, RULE, RULE_SOFT, Section, TILE_GRID, Tile,
+  fetchOptions, fmtMoney, holdCall, type Option, type TileStatus,
 } from "./matrix/shared";
 
 const API = "/api/unit-matrix";
@@ -89,15 +89,14 @@ async function fetchPlotMatrix(projectId: string, blockId: string): Promise<Matr
 const kindOf = (u: MatrixUnit) => (u.IsPlot ? "Plot" : u.IsVilla ? "Villa" : "Unit");
 
 // A held or booked tile, opened: who, through which record, and what can be done from here. A hold with a booking
-// behind it (booking amount not yet paid) offers Extend and, while the booking is still Pending, Cancel booking;
-// a pure application-stage hold offers Release.
+// behind it (booking amount not yet paid) offers, while the booking is still Pending, Cancel booking; a pure
+// application-stage hold offers Release.
 function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => void }) {
   const rights = usePageRights("crm-unit-matrix");
   const { canDoAction } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
-  const [showExtend, setShowExtend] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const isHold = unit.Status === "OnHold";
   const hasUnpaidBooking = isHold && unit.BookingId != null;
@@ -131,7 +130,6 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
   };
 
   const pick = <T,>(hold: T, own: T) => (isHold && hold) || own;
-  const left = isHold ? holdLeft(unit.HoldUntil) : null;
   const where = [unit.BlockName, unit.IsVilla ? "Villa" : unit.FloorNo != null ? `Floor ${unit.FloorNo}` : null, unit.AreaSqFt ? `${unit.AreaSqFt} sq ft` : null].filter(Boolean).join(" · ");
   const state = isHold ? (hasUnpaidBooking ? "Booked, payment pending" : "On hold") : "Booked";
   const openBooking = () => navigate(unit.BookingId != null ? `/crm/bookings?view=${unit.BookingId}` : `/crm/bookings?applicationId=${unit.ApplicationId}`);
@@ -171,11 +169,8 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
         {isHold && (
           <p className="text-xs px-3 py-2" style={{ border: RULE_SOFT }}>
             {hasUnpaidBooking ? "The booking amount isn't paid yet; the tile turns Booked once it is." : "Held through the application, before any booking."}
-            {left && <span className="font-semibold"> Hold: {left}.</span>}
           </p>
         )}
-
-        {showExtend && unit.HoldId != null && <ExtendRow holdId={unit.HoldId} onDone={() => { refresh(); onClose(); }} />}
 
         <div className="flex flex-wrap justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
           <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>Close</button>
@@ -185,9 +180,6 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
             ) : (
               <button onClick={() => setConfirmCancel(true)} className={`${KEY_LINE} h-9 px-3 !text-destructive !border-destructive`}>Cancel booking</button>
             )
-          )}
-          {isHold && rights.canEdit && unit.HoldId != null && hasUnpaidBooking && (
-            <button onClick={() => setShowExtend((s) => !s)} className={`${KEY_LINE} h-9 px-3`}>Extend hold</button>
           )}
           {isHold && !hasUnpaidBooking ? (
             rights.canEdit && unit.HoldId != null && (
@@ -222,9 +214,6 @@ export function UnitMatrixPage() {
     sock.on("matrix:update", onUpdate);
     return () => { sock.off("matrix:update", onUpdate); };
   }, [projectId, qc]);
-  // Re-render every minute so the hold countdowns tick.
-  const [, setTick] = useState(0);
-  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 60_000); return () => clearInterval(t); }, []);
 
   const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["unit-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
   // One project only: open it straight away.
@@ -273,7 +262,6 @@ export function UnitMatrixPage() {
     return c;
   }, [units]);
   const sold = units.length - counts.Blocked > 0 ? Math.round((counts.Booked / (units.length - counts.Blocked)) * 100) : 0;
-  const expiringSoon = units.filter((u) => u.Status === "OnHold" && u.HoldUntil && new Date(u.HoldUntil).getTime() - Date.now() < 86_400_000).length;
 
   const onTile = (u: MatrixUnit) => {
     if (u.Status === "OnHold" || u.Status === "Booked") return setInfoTarget(u);
@@ -330,7 +318,7 @@ export function UnitMatrixPage() {
                 <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
                   {[
                     { label: "Free", value: counts.Available, note: `of ${units.length} in this view` },
-                    { label: "On hold", value: counts.OnHold, note: expiringSoon ? `${expiringSoon} end within a day` : "None ending within a day" },
+                    { label: "On hold", value: counts.OnHold, note: "Until released or booked" },
                     { label: "Booked", value: counts.Booked, note: `${sold}% of what is for sale` },
                     { label: "Blocked", value: counts.Blocked, note: "Not for sale" },
                   ].map((x) => (
@@ -357,7 +345,7 @@ export function UnitMatrixPage() {
                           {list.map((u) => (
                             <Tile key={`${u.IsPlot ? "p" : "u"}${u.Id}`} name={u.UnitName} status={u.Status}
                               tag={u.IsVilla ? u.VillaTypeCode : u.IsCommercial ? u.KindName : u.IsPlot && u.IsCornerPlot ? "Corner" : null}
-                              line={tileLine(u)} holdUntil={u.HoldUntil} title={tileTitle(u)}
+                              line={tileLine(u)} title={tileTitle(u)}
                               disabled={u.Status === "Blocked" || (u.Status === "Available" && (u.IsPlot || !rights.canCreate))}
                               onClick={() => onTile(u)} />
                           ))}

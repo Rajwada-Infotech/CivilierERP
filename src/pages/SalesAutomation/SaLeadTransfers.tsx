@@ -6,7 +6,6 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { CheckCircle2, XCircle, ChevronDown, ChevronRight, Clock, ArrowRightLeft } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -129,9 +128,8 @@ const SaLeadTransfers: React.FC = () => {
   ];
 
   return (
-    <SalesAutoShell title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Transfers"]} title="Lead Transfer Requests" subtitle="Review and approve lead transfer requests from team leads"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Lead Transfers"]} />
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>

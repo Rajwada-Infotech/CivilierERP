@@ -3,7 +3,7 @@ import type { MenuRightsState } from "./useMenuRights";
 
 // Choosing whose rights are being edited: a role's baseline, or one user's own.
 export function SubjectPicker({ m }: { m: MenuRightsState }) {
-  const { subject, users, selectedUserId, setSelectedUserId, dropdownOpen, setDropdownOpen, userSearch, setUserSearch, roles, selectedRoleId, setSelectedRoleId, roleDropdownOpen, setRoleDropdownOpen, roleSearch, setRoleSearch, loadingRoles, loadingUsers, selectedUser, selectedRole, switchSubject, dropdownRef, roleDropdownRef, filteredUsers, filteredRoles } = m;
+  const { subject, isAdminTier, users, selectedUserId, setSelectedUserId, dropdownOpen, setDropdownOpen, userSearch, setUserSearch, roles, selectedRoleId, setSelectedRoleId, roleDropdownOpen, setRoleDropdownOpen, roleSearch, setRoleSearch, loadingRoles, loadingUsers, selectedUser, selectedRole, switchSubject, dropdownRef, roleDropdownRef, filteredUsers, filteredRoles } = m;
   return (
     <>
       {/* ── Subject Selector Card ────────────────────────────────────────── */}
@@ -24,14 +24,16 @@ export function SubjectPicker({ m }: { m: MenuRightsState }) {
             >
               Role-wise
             </button>
-            <button
-              onClick={() => switchSubject("user")}
-              className={`h-8 px-3 border-l border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                subject === "user" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Custom user-wise
-            </button>
+            {isAdminTier && (
+              <button
+                onClick={() => switchSubject("user")}
+                className={`h-8 px-3 border-l border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  subject === "user" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Custom user-wise
+              </button>
+            )}
           </div>
         </div>
         {subject === "role" && (

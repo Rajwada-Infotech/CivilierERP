@@ -15,7 +15,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
-const { applyPagination } = require("../services/crmListPagination");
+const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -32,55 +32,97 @@ const NOC_SELECT = `
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
 `;
 
+// ── List: server-side paging / search / sort / status counts ─────────────────
+// Same contract as CrmPossessionNotice / CrmMutation:
+//   GET /?page=1&pageSize=25&search=&status=&sortKey=&sortDir=&type=&companyId=&projectId=&blockId=
+//   → { rows, total, counts: { All, Pending, Approved, Issued, Rejected } }
+// `counts` honours type + search + company/project/block but NOT status, so
+// the tabs always show what each status would contain. Without `page` the
+// legacy full-array response is returned so existing callers keep working.
+const NOC_STATUSES = ["Pending", "Approved", "Issued", "Rejected"];
+const NOC_SORT = {
+  NocNo: "n.NocNo",
+  ApplicantName: "a.ApplicantName",
+  BookingNo: "b.BookingNo",
+  NocType: "n.NocType",
+  Status: "n.Status",
+  IssuedDate: "n.IssuedDate",
+  CreatedAt: "n.CreatedAt",
+};
+function buildNocWhere(request, query, includeStatus, projectScope = null) {
+  const conds = [];
+  if (projectScope) conds.push(require("../services/projectScope").projectPredicate(projectScope, "b.ProjectId", "").trim());
+  const intOf = (v) => { const x = parseInt(v, 10); return Number.isInteger(x) ? x : null; };
+  const companyId = intOf(query.companyId);
+  const projectId = intOf(query.projectId);
+  const blockId = intOf(query.blockId);
+  if (companyId) { request.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+  if (projectId) { request.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+  if (blockId)   { request.input("blockId", sql.Int, blockId);     conds.push("b.BlockId = @blockId"); }
+  if (NOC_TYPES.includes(query.type)) { request.input("type", sql.NVarChar(30), query.type); conds.push("n.NocType = @type"); }
+  const search = String(query.search || "").trim().slice(0, 100);
+  if (search) {
+    request.input("search", sql.NVarChar(220), `%${search.replace(/[\[%_]/g, "[$&]")}%`);
+    conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR n.NocNo LIKE @search OR COALESCE(bn.UnitNo, b.UnitNo) LIKE @search)");
+  }
+  if (includeStatus && NOC_STATUSES.includes(query.status)) {
+    request.input("status", sql.NVarChar(30), query.status);
+    conds.push("n.Status = @status");
+  }
+  return conds.length ? "WHERE " + conds.join(" AND ") : "";
+}
+
 // GET / — all NOCs
 router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { type, status, search } = req.query;
-    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
-    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
-    // Rows, total and the status / type counts share one set of inputs and conditions (the total used to repeat the
-    // filters without the project scope, so a restricted user's pages didn't add up).
-    const reqs = [pool.request(), pool.request(), pool.request()];
-    const req0 = reqs[0];
-    const bind = (name, kind, value) => reqs.forEach((r) => r.input(name, kind, value));
-    const conds = [];
-    if (companyId) { bind("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { bind("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { bind("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      bind("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
-    }
-    // The counts cover every status and type under the other filters.
-    const countsWhere = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    if (type)   { bind("t",  sql.NVarChar(30), type);   conds.push("n.NocType = @t"); }
-    if (status) { bind("st", sql.NVarChar(30), status); conds.push("n.Status = @st"); }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${NOC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
-    if (!req.query.page) {
-      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
+    if (req.query.page === undefined) {
+      const r0 = pool.request();
+      const where = buildNocWhere(r0, req.query, true, req.projectScope);
+      const result = await r0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
       return res.json(result.recordset);
     }
 
-    const { page, pageSize, offset } = applyPagination(req);
-    req0.input("offset", sql.Int, offset);
-    req0.input("pageSize", sql.Int, pageSize);
-    const FROM = `FROM dbo.CrmNoc n JOIN dbo.CrmBooking b ON b.Id = n.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
-    const [result, countResult, groupResult] = await Promise.all([
-      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      reqs[1].query(`SELECT COUNT(*) AS total ${FROM} ${where}`),
-      reqs[2].query(`SELECT n.Status, n.NocType, COUNT(*) AS c ${FROM} ${countsWhere} GROUP BY n.Status, n.NocType`),
-    ]);
-    const statusCounts = {}, typeCounts = {};
-    for (const g of groupResult.recordset) {
-      statusCounts[g.Status] = (statusCounts[g.Status] || 0) + g.c;
-      typeCounts[g.NocType] = (typeCounts[g.NocType] || 0) + g.c;
-    }
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts, typeCounts });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
+    const sortCol = Object.hasOwn(NOC_SORT, req.query.sortKey) ? NOC_SORT[req.query.sortKey] : NOC_SORT.CreatedAt;
+    const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
+    const countReq = pool.request();
+    const countWhere = buildNocWhere(countReq, req.query, false, req.projectScope);
+    const countRes = await countReq.query(
+      `SELECT n.Status, COUNT(*) AS C FROM dbo.CrmNoc n
+       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${countWhere} GROUP BY n.Status`
+    );
+    const counts = { All: 0 };
+    for (const row of countRes.recordset) { counts[row.Status] = row.C; counts.All += row.C; }
+    const total = NOC_STATUSES.includes(req.query.status) ? (counts[req.query.status] || 0) : counts.All;
+
+    const pageReq = pool.request();
+    const pageWhere = buildNocWhere(pageReq, req.query, true, req.projectScope);
+    pageReq.input("offset", sql.Int, (page - 1) * pageSize);
+    pageReq.input("pageSize", sql.Int, pageSize);
+    const rowsRes = await pageReq.query(
+      `${SELECT_WITH_BLOCK} ${pageWhere} ORDER BY ${sortCol} ${dir}, n.Id DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+    // The sheet page's tabs: by status (as counts, no All) and by type across every type under the other filters.
+    const typeReq = pool.request();
+    const typeWhere = buildNocWhere(typeReq, { ...req.query, type: undefined }, false, req.projectScope);
+    const typeRes = await typeReq.query(
+      `SELECT n.NocType, COUNT(*) AS C FROM dbo.CrmNoc n
+       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+       ${typeWhere} GROUP BY n.NocType`
+    );
+    const typeCounts = Object.fromEntries(typeRes.recordset.map((r) => [r.NocType, r.C]));
+    const { All: _all, ...statusCounts } = counts;
+    res.json({ rows: rowsRes.recordset, total, counts, statusCounts, typeCounts, page, pageSize });
   } catch (e) {
     console.error("[crm-noc] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -184,6 +226,7 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
     const pool = getPool();
     const { type } = req.query; // "Bank" | "Organisation" | "" (= no filter)
     const typeFilter = NOC_TYPES.includes(type) ? type : null;
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "";
     const candidates = await pool.request().query(`
       SELECT b.Id, b.BookingNo,
              COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -200,7 +243,8 @@ router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       WHERE b.IsActive = 1
-        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId")}
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')
+        ${scope}
         -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
         -- for every booking regardless of project type — no exception.
         AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
@@ -233,6 +277,9 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     const bookingId = parseInt(b.BookingId);
     // The booking comes in the body, which the path guards don't see.
     if (!(await require("../services/projectScope").assertBookingAllowed(req, res, bookingId))) return;
+
+    const projectId = await assertBookingProjectScope(req, res, bookingId);
+    if (projectId === false) return;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });

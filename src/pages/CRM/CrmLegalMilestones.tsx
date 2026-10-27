@@ -542,7 +542,14 @@ const StageRow: React.FC<{
           <p className="text-xs text-muted-foreground mt-1">{stage.sublabel}</p>
         </div>
         {isAuto ? (
-          <span className="shrink-0 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground" title="Ticks itself from the agreement's own actions">Automatic</span>
+          <span className="shrink-0 flex items-center gap-2">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground" title="Ticks itself from the agreement's own actions">Automatic</span>
+            {!isDone && (
+              <button onClick={() => navigate(`/crm/agreements?bookingId=${bookingId}`)} className={`${KEY_LINE} h-8 px-3`}>
+                Open Agreement <ExternalLink size={10} />
+              </button>
+            )}
+          </span>
         ) : (isManual && !canEdit) || actionLabel === null ? null : (
           <button onClick={handleClick} className={`${KEY_INK} h-8 px-3 shrink-0`}>
             {actionLabel} {!isManual && <ExternalLink size={10} />}

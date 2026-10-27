@@ -97,6 +97,30 @@ const PHOTO_PHASES = new Set(["before", "after"]);
 
 const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
+
+// A chain's rungs are strictly linear (dependencyMaster.js's own header
+// comment) — a rung may be allocated or reported on only once every rung
+// before it (by SequenceNo, same DependencyMasterId) is done. "Done" means
+// Completed, Approved, or Cancelled (a cancelled predecessor can't block
+// the chain forever). Returns a user-facing error string, or null when
+// the rung is clear to proceed (no predecessor, or chain not found).
+const DONE_PREDECESSOR_STATUSES = ["COMPLETED", "APPROVED", "CANCELLED"];
+async function predecessorBlockReason(pool, rungId) {
+  const row = (await pool.request().input("rungId", sql.Int, rungId).query(`
+    SELECT dma.DependencyMasterId, dma.SequenceNo FROM dbo.DependencyMasterActivity dma WHERE dma.Id = @rungId
+  `)).recordset[0];
+  if (!row) return null;
+  const pred = (await pool.request().input("chainId", sql.Int, row.DependencyMasterId).input("seq", sql.Int, row.SequenceNo).query(`
+    SELECT TOP 1 pdma.Id, am.activity_name AS activityName, ISNULL(pdaa.Status, 'PENDING') AS status
+    FROM dbo.DependencyMasterActivity pdma
+    LEFT JOIN dbo.DependencyActivityAssignment pdaa ON pdaa.DependencyMasterActivityId = pdma.Id AND pdaa.IsCurrent = 1
+    LEFT JOIN dbo.ActivityMaster am ON am.Id = pdma.ActivityId
+    WHERE pdma.DependencyMasterId = @chainId AND pdma.SequenceNo < @seq AND pdma.SequenceNo >= 0
+    ORDER BY pdma.SequenceNo DESC
+  `)).recordset[0];
+  if (!pred || DONE_PREDECESSOR_STATUSES.includes(pred.status)) return null;
+  return `${pred.activityName || "The previous step"} must be completed first (currently ${pred.status})`;
+}
 // Activity Priority set on the Work Allocation form (dbo.DependencyActivityAssignment.Priority; NULL = none).
 const PRIORITY_VALUES = new Set(["Low", "High", "Urgent", "Very Urgent"]);
 
@@ -1628,6 +1652,15 @@ router.patch(
       if (!eng) return res.status(400).json({ error: "Assign an engineer to this step first — nobody has been given this work yet." });
     }
 
+    // Strictly linear chain: the FIRST report of actual work on a rung
+    // (current still PENDING/ALLOCATED) requires every earlier rung in the
+    // same chain to already be done. Once a rung has genuinely started,
+    // later progress/status edits on it aren't re-blocked by this check.
+    if ((hasProgress || (hasStatus && status !== "CANCELLED")) && (current === "PENDING" || current === "ALLOCATED")) {
+      const blockReason = await predecessorBlockReason(pool, rungId);
+      if (blockReason) return res.status(400).json({ error: blockReason });
+    }
+
     if (hasProgress) {
       if (current === "COMPLETED") {
         return res.status(400).json({ error: "Work Done is locked once an activity is Completed." });
@@ -2283,6 +2316,21 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     engineerIds, qcUserIds, approvalLevels, startDate, days, endDate, labourSource, materialSource,
     labourContractorId, materialContractorId, description, remarks, materials, checkpoints, priority,
   } = req.body;
+
+  // Only gate the moment this rung is actually being STARTED (still
+  // Pending and engineers are being put on it) — a later edit to an
+  // already-allocated/in-progress rung's materials/dates/remarks isn't
+  // re-blocked just because some earlier rung is now, separately, not done.
+  if (Array.isArray(engineerIds) && engineerIds.length) {
+    const poolForCheck = await getPool();
+    const curStatus = (await poolForCheck.request().input("rungId", sql.Int, rungId)
+      .query("SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1"))
+      .recordset[0]?.Status ?? "PENDING";
+    if (curStatus === "PENDING") {
+      const blockReason = await predecessorBlockReason(poolForCheck, rungId);
+      if (blockReason) return res.status(400).json({ error: blockReason });
+    }
+  }
 
   if (engineerIds != null && !Array.isArray(engineerIds)) {
     return res.status(400).json({ error: "engineerIds must be an array" });

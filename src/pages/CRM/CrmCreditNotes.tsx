@@ -293,7 +293,8 @@ const CrmCreditNotes: React.FC = () => {
         </div>
 
         {selectedId && (
-          <DetailDialog key={selectedId} id={selectedId} canEdit={rights.canEdit} onClose={() => setSelectedId(null)} onChanged={reload} onOpen={setSelectedId} />
+          <DetailDialog key={selectedId} id={selectedId} canEdit={rights.canEdit} onClose={() => { setSelectedId(null); setSp((p) => { p.delete("id"); return p; }, { replace: true }); }}
+            onChanged={reload} onOpen={(nid) => { setSelectedId(nid); setSp((p) => { p.set("id", String(nid)); return p; }, { replace: true }); }} />
         )}
         {creating && (
           <NewCreditNoteDialog

@@ -76,8 +76,8 @@ async function sellerFacts(db, r) {
   // Under the full-booking hold, money paid stays On Account (milestones only
   // settle once the whole price is in) — so a demand is covered when what
   // sits on account pays it, even though the milestone isn't marked Paid yet.
-  const onAccount = Number((await q(`SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount, 0)), 0) AS v FROM dbo.CrmOnAccountPayment
-    WHERE BookingId IN (${list}) AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held')`))[0].v) || 0;
+  const onAccount = Number((await q(`SELECT ISNULL(SUM(CASE WHEN Amount > ISNULL(AppliedAmount, 0) THEN Amount - ISNULL(AppliedAmount, 0) ELSE 0 END), 0) AS v FROM dbo.CrmOnAccountPayment
+    WHERE BookingId IN (${list}) AND ISNULL(Status, N'') NOT IN (N'Bounced', N'Held', N'Void', N'Cancelled', N'Refunded')`))[0].v) || 0;
   const demandedTotal = overdue.reduce((t, m) => t + Number(m.Balance || 0), 0);
   const uncovered = Math.max(0, Math.round((demandedTotal - onAccount) * 100) / 100);
   const openCancellation = (await q(`SELECT TOP 1 CancellationNo FROM dbo.CrmCancellation WHERE BookingId IN (${list}) AND Status NOT IN (N'Rejected', N'Withdrawn', N'Cancelled')`))[0] || null;

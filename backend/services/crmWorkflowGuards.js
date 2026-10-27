@@ -3,6 +3,7 @@ const { getNextDocNumber } = require("./docNumber");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
+const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
 
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
@@ -217,7 +218,9 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // is best-effort and can silently fail (missing bank, DB hiccup), so this
   // is checked independently rather than trusted from booking creation alone.
   const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND MilestoneNo = 1 AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+    ORDER BY Id
   `);
   // Real ledger settlement (Status='Paid') only happens via the automatic
   // full-booking sweep (autoApplyOnAccountIfFullyFunded in crmPayments.js) —
@@ -229,9 +232,11 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // full-booking auto-sweep to physically mark it Paid.
   if (!milestone1.recordset.length || (milestone1.recordset[0].Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
     const totalsRow = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT ISNULL(SUM(Amount), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+      SELECT ISNULL(SUM(oa.AvailableAmount), 0) AS TotalReceived FROM ${onAccountWithAvailableSql("oa")}
+      WHERE oa.BookingId = @bid
     `);
-    const totalReceived = Number(totalsRow.recordset[0]?.TotalReceived) || 0;
+    const totalReceived = (Number(milestone1.recordset[0]?.AmountPaid) || 0)
+      + (Number(totalsRow.recordset[0]?.TotalReceived) || 0);
     const m1Due = Number(milestone1.recordset[0]?.AmountDue) || 0;
     if (m1Due > 0 && totalReceived < m1Due) {
       const shortfall = Math.round((m1Due - totalReceived) * 100) / 100;
@@ -609,6 +614,13 @@ function agreementDateError(message, status) {
 // THEM to respond — never while waiting on the other side. Writes
 // CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
 async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
+  // Same guard crmTransferDeed.js's proposeDate already enforces for its
+  // sibling date-negotiation flow — this one never had it, so a backdated
+  // date could sail through to CrmAgreementDateHistory with only a human
+  // super_admin sign-off at finalizeAgreementDate left to catch it.
+  if (proposedDate && String(proposedDate).slice(0, 10) < new Date().toISOString().slice(0, 10)) {
+    throw agreementDateError("The agreement date can't be in the past", 400);
+  }
   // UPDLOCK+HOLDLOCK: this turn-taking check is reachable from at least
   // four independent entry points on the same agreement (staff propose/
   // accept, staff proxy-propose/proxy-accept, and the customer portal's own
@@ -1352,50 +1364,37 @@ async function resolveNocType(pool, bookingId) {
  * Returns { received, source: 'block'|'project'|null, receivedDate, certType, certRow }.
  */
 async function resolveOcCcGate(pool, bookingId, certType = null) {
-  const typeFilter = certType ? "AND oc.CertType = @ct" : "";
-  const req = () => {
-    const r = pool.request().input("bid", sql.Int, bookingId);
-    if (certType) r.input("ct", sql.NVarChar(20), certType);
-    return r;
-  };
+  // One rule, kept in the database (migration 577, vw_CrmBookingOcCc): the
+  // booking's own block(s) - the unit's block and any plot's block - must be
+  // covered by their own Received certificate or by a project-wide one that
+  // was received while the block existed; a booking with no block follows the
+  // project, which is complete when every active block is. certType is no
+  // longer used by any caller (any of OC / CC / OC+CC counts).
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT Received, ReceivedDate, Source FROM dbo.vw_CrmBookingOcCc WHERE BookingId = @bid");
+  const row = r.recordset[0];
+  if (!row || row.Received !== 1) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  return { received: true, source: row.Source, receivedDate: row.ReceivedDate, certType: null, certRow: null };
+}
 
-  // Booking -> Block, via the same UnitMaster join used everywhere else in
-  // this codebase to resolve a booking's real block.
-  const blockRow = await req().query(`
-    SELECT um.BlockId, b.ProjectId
-    FROM dbo.CrmBooking b
-    LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-    WHERE b.Id = @bid
-  `);
-  const { BlockId, ProjectId } = blockRow.recordset[0] || {};
-  if (ProjectId == null) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
-
-  if (BlockId != null) {
-    const blockCert = await req().input("bid2", sql.Int, BlockId).query(`
-      SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
-      WHERE oc.BlockId = @bid2 AND oc.Status = 'Received' ${typeFilter}
-      ORDER BY oc.ReceivedDate ASC
-    `);
-    if (blockCert.recordset.length) {
-      const row = blockCert.recordset[0];
-      return { received: true, source: "block", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
-    }
+// A locked Welcome Call checklist asserts specific facts were verified with
+// the customer — including, via its conditional items, that parking/extra
+// charges/co-applicant details are confirmed. Mutating any of those after
+// the checklist is Submitted/locked would leave it silently claiming
+// "verified" for a fact nobody re-checked. Shared by crmCoApplicant.js,
+// crmParking.js, and crmExtraCharges.js so every module with a dedicated
+// checklist item gets the same re-validation, not just the first one fixed.
+async function assertWelcomeChecklistUnlocked(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT IsLocked FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
+  if (r.recordset[0]?.IsLocked) {
+    return "The welcome call verification checklist for this booking is already submitted and locked. Reopen it on the Welcome Calls page before making this change.";
   }
-
-  const projectCert = await req().input("pid", sql.Int, ProjectId).query(`
-    SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
-    WHERE oc.ProjectId = @pid AND oc.BlockId IS NULL AND oc.Status = 'Received' ${typeFilter}
-    ORDER BY oc.ReceivedDate ASC
-  `);
-  if (projectCert.recordset.length) {
-    const row = projectCert.recordset[0];
-    return { received: true, source: "project", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
-  }
-
-  return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  return null;
 }
 
 module.exports = { requireNotMidApproval, releaseBookingInventoryLines,
+  assertWelcomeChecklistUnlocked,
   resolveNocType,
   resolveOcCcGate,
   validateAgreementPreparationPrerequisites,

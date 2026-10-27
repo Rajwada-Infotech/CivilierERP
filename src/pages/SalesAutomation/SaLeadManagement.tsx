@@ -5,7 +5,6 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -17,10 +16,16 @@ const fetchUnitOptions = () => {
     .catch(() => ({ kinds: [], layouts: [] }));
   return unitOptionsPromise;
 };
-import { CheckCircle2, IndianRupee, LayoutList, Kanban, GitMerge, ArrowRightLeft, Clock, Printer } from "lucide-react";
+import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
+import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Link } from "react-router-dom";
+import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
+import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
 const API = "/api/sa/leads";
 
@@ -107,7 +112,7 @@ const fields: FieldDef[] = [
   { name: "CapturedAt", label: "Captured At", type: "date" },
   { name: "AssignedTeamLeadId", label: "Assigned Team Lead", type: "select", asyncOptions: fetchTeamLeadOptions },
   { name: "AssignedSalespersonId", label: "Assigned Salesperson", type: "select", asyncOptions: fetchSalespersonOptions },
-  { name: "Status", label: "Lead Status", type: "select", options: ["New","Assigned","Contacted","FollowUp","VisitScheduled","Visited","Booking","Lost"], defaultValue: "New" },
+  { name: "Status", label: "Lead Status", type: "select", options: LEAD_STATUS_KEYS, defaultValue: "New" },
   { name: "Classification", label: "Classification", type: "select", options: ["Hot","Warm","Cold","NotInterested","CallBackLater"] },
   { name: "BudgetMin", label: "Budget Min", type: "number" },
   { name: "BudgetMax", label: "Budget Max", type: "number" },
@@ -174,8 +179,14 @@ const SaLeadManagement: React.FC = () => {
   usePageRights("sa-leads");
   const queryClient = useQueryClient();
   const [handoffLoading, setHandoffLoading] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"list" | "pipeline" | "tracking" | "audit">("list");
   const [auditLeadId, setAuditLeadId] = useState<string | null>(null);
+  // Lets staff log a call/WhatsApp/etc straight from a row instead of
+  // leaving this page for Lead Activities or Follow-Ups just to do that.
+  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string } | null>(null);
+  // Was a standalone "Tracking" tab with its own two hand-rolled tables —
+  // same information, now a one-click filter on the grid itself instead of
+  // a separate tab/page round-trip.
+  const [quickFilter, setQuickFilter] = useState<"all" | "inFollowup" | "booked">("all");
 
   // Transfer leads state
   const { currentUser, canDoAction } = useAuth();
@@ -196,6 +207,20 @@ const SaLeadManagement: React.FC = () => {
     staleTime: 5 * 60_000,
     enabled: isTL,
   });
+
+  // Was invisible from this page entirely — a TL submitting a transfer here
+  // had no way to see that its approval lives on a separate page/route.
+  const { data: myTransferRequests = [] } = useQuery({
+    queryKey: ["sa-my-transfer-requests"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/sa/lead-transfers");
+      if (!r.ok) return [];
+      return r.json().catch(() => []);
+    },
+    staleTime: 60_000,
+    enabled: isTL,
+  });
+  const pendingTransferCount = (myTransferRequests as any[]).filter((t) => t.Status === "Pending").length;
 
   const toggleTransferLead = (id: string) => {
     setTransferSelectedIds((prev) => {
@@ -358,8 +383,7 @@ const SaLeadManagement: React.FC = () => {
   const invalidateLeadFlow = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["sa-leads"] }),
-      queryClient.invalidateQueries({ queryKey: ["sa-dashboard-sales"] }),
-      queryClient.invalidateQueries({ queryKey: ["sa-dashboard-marketing"] }),
+      queryClient.invalidateQueries({ queryKey: ["sa-dashboard"] }),
       queryClient.invalidateQueries({ queryKey: ["sa-report"] }),
     ]);
   };
@@ -382,254 +406,85 @@ const SaLeadManagement: React.FC = () => {
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading leads...</div>;
   if (error) return <div className="p-6 text-red-500">Failed to load leads.</div>;
 
-  const PIPELINE_STAGES = [
-    { key: "New", label: "New", color: "border-slate-400 bg-slate-50 dark:bg-slate-900/30" },
-    { key: "Assigned", label: "Assigned", color: "border-blue-400 bg-blue-50 dark:bg-blue-900/20" },
-    { key: "Contacted", label: "Contacted", color: "border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20" },
-    { key: "FollowUp", label: "Follow Up", color: "border-orange-400 bg-orange-50 dark:bg-orange-900/20" },
-    { key: "VisitScheduled", label: "Visit Scheduled", color: "border-purple-400 bg-purple-50 dark:bg-purple-900/20" },
-    { key: "Visited", label: "Visited", color: "border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20" },
-    { key: "Booking", label: "Booking", color: "border-green-400 bg-green-50 dark:bg-green-900/20" },
-    { key: "Lost", label: "Lost", color: "border-red-400 bg-red-50 dark:bg-red-900/20" },
-  ];
-
-  const stageMap: Record<string, RecordWithId[]> = {};
-  PIPELINE_STAGES.forEach((s) => {
-    stageMap[s.key] = mappedData.filter((l) => l.Status === s.key);
-  });
-
   const inFollowup = mappedData.filter((l) => l.FollowupCustomerId);
   const booked = mappedData.filter((l) => l.BookingId);
+  const displayedData =
+    quickFilter === "inFollowup" ? inFollowup :
+    quickFilter === "booked" ? booked :
+    mappedData;
 
   return (
-    <SalesAutoShell title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Lead Management"]} title="Lead Management" subtitle="Track, assign and manage the complete lead lifecycle"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Lead Management"]} />
       <style>{`@media print { nav, header, aside, .print\\:hidden { display: none !important; } }`}</style>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            {/* Transfer Leads — Team Lead only */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Transfer Leads — Team Lead only. Used to have zero visibility
+                into its own approval status; now links straight to it. */}
             {isTL && (
-              <button
-                onClick={() => { setTransferOpen(true); setTransferSelectedIds(new Set()); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
-              >
-                <ArrowRightLeft size={13} /> Transfer Leads
-              </button>
+              <>
+                <button
+                  onClick={() => { setTransferOpen(true); setTransferSelectedIds(new Set()); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  <ArrowRightLeft size={13} /> Transfer Leads
+                </button>
+                <Link
+                  to="/sales-automation/lead-transfers"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  <Clock size={13} /> My Transfer Requests
+                  {pendingTransferCount > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold bg-amber-500/15 text-amber-600">{pendingTransferCount} pending</span>
+                  )}
+                </Link>
+              </>
             )}
-            {/* Tab switcher */}
-          <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
-            {([
-              { key: "list",     icon: LayoutList, label: "List" },
-              { key: "pipeline", icon: Kanban,     label: "Pipeline" },
-              { key: "tracking", icon: GitMerge,   label: "Tracking" },
-              { key: "audit",    icon: Clock,     label: "Audit" },
-            ] as const).map(({ key, icon: Icon, label }) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                <Icon size={13} /> {label}
-              </button>
-            ))}
-          </div>
-          {activeTab === "list" && (
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors print:hidden"
-              title="Print leads table"
+            {/* Was one of four tabs on this page — the Kanban board is its
+                own page now so this page is CRUD-grid-only. */}
+            <Link
+              to="/sales-automation/pipeline"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
             >
-              <Printer size={13} /> Print
-            </button>
-          )}
+              <Kanban size={13} /> View Pipeline
+            </Link>
+            {/* Was a standalone "Tracking" tab's two tables — same data,
+                now a one-click filter on this grid instead of a separate
+                tab round-trip. */}
+            <div className="flex gap-1 p-1 rounded-lg border border-border bg-muted/30">
+              {([
+                { key: "all", label: "All" },
+                { key: "inFollowup", label: `In CRM App (${inFollowup.length})` },
+                { key: "booked", label: `Booked (${booked.length})` },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setQuickFilter(key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${quickFilter === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {key === "all" && <Filter size={12} />} {label}
+                </button>
+              ))}
+            </div>
           </div>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors print:hidden"
+            title="Print leads table"
+          >
+            <Printer size={13} /> Print
+          </button>
         </div>
 
-        {/* ── PIPELINE TAB ── */}
-        {activeTab === "pipeline" && (
-          <div className="overflow-x-auto pb-4">
-            <div className="flex gap-3 min-w-max">
-              {PIPELINE_STAGES.map((stage) => {
-                const stageLeads = stageMap[stage.key] || [];
-                return (
-                  <div key={stage.key} className={`w-52 shrink-0 rounded-lg border-t-2 border border-border ${stage.color}`}>
-                    <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-                      <span className="text-xs font-semibold text-foreground">{stage.label}</span>
-                      <span className="text-xs font-bold text-muted-foreground bg-background rounded-full px-2 py-0.5 border border-border">{stageLeads.length}</span>
-                    </div>
-                    <div className="p-2 space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
-                      {stageLeads.length === 0 ? (
-                        <p className="text-[0.6875rem] text-muted-foreground text-center py-4">No leads</p>
-                      ) : stageLeads.map((l) => (
-                        <div key={l._id} className="bg-background rounded-md border border-border p-2 space-y-1">
-                          <p className="text-xs font-medium text-foreground truncate">{String(l.CustomerName)}</p>
-                          <p className="text-[0.625rem] text-muted-foreground">{String(l.Mobile)}</p>
-                          {l.Classification && (
-                            <span className={`text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full inline-block ${
-                              l.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
-                              l.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
-                              "bg-blue-500/10 text-blue-500"
-                            }`}>{String(l.Classification)}</span>
-                          )}
-                          {l.SalespersonName && <p className="text-[0.625rem] text-muted-foreground truncate">{String(l.SalespersonName)}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── TRACKING TAB ── */}
-        {activeTab === "tracking" && (
-          <div className="space-y-6">
-            {/* In Follow-up */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">Picked Into CRM Application ({inFollowup.length})</h3>
-                <span className="text-xs text-muted-foreground">Converted leads a CRM Application has already been started from</span>
-              </div>
-              {inFollowup.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground text-sm">No leads picked into an application yet</div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/20">
-                    <tr>
-                      {["Lead ID", "Customer", "Mobile", "Application ID", "Status", "Salesperson"].map((h) => (
-                        <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inFollowup.map((l) => (
-                      <tr key={l._id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                        <td className="p-3 text-xs font-mono text-muted-foreground">{String(l.LeadUid)}</td>
-                        <td className="p-3 font-medium text-foreground">{String(l.CustomerName)}</td>
-                        <td className="p-3 text-muted-foreground">{String(l.Mobile)}</td>
-                        <td className="p-3 text-xs font-mono text-emerald-600">{String(l.FollowupCustomerId)}</td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">{String(l.Status)}</span>
-                        </td>
-                        <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {/* Booked */}
-            <div className="rounded-lg border border-border overflow-hidden">
-              <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground">Booked ({booked.length})</h3>
-                <span className="text-xs text-muted-foreground">Leads confirmed into bookings</span>
-              </div>
-              {booked.length === 0 ? (
-                <div className="p-6 text-center text-muted-foreground text-sm">No bookings yet</div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/20">
-                    <tr>
-                      {["Lead ID", "Customer", "Mobile", "Booking ID", "Campaign", "Salesperson"].map((h) => (
-                        <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {booked.map((l) => (
-                      <tr key={l._id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                        <td className="p-3 text-xs font-mono text-muted-foreground">{String(l.LeadUid)}</td>
-                        <td className="p-3 font-medium text-foreground">{String(l.CustomerName)}</td>
-                        <td className="p-3 text-muted-foreground">{String(l.Mobile)}</td>
-                        <td className="p-3 text-xs font-mono text-amber-600">{String(l.BookingId)}</td>
-                        <td className="p-3 text-muted-foreground">{(l.CampaignName as string) || "—"}</td>
-                        <td className="p-3 text-muted-foreground">{(l.SalespersonName as string) || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── AUDIT TAB ── */}
-        {activeTab === "audit" && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <label className="text-xs text-muted-foreground shrink-0">Select Lead:</label>
-              <select
-                value={auditLeadId ?? ""}
-                onChange={(e) => setAuditLeadId(e.target.value || null)}
-                className="text-sm border border-border rounded-lg px-3 py-1.5 bg-background flex-1 max-w-xs"
-              >
-                <option value="">— choose a lead —</option>
-                {mappedData.map((l) => (
-                  <option key={l._id} value={l._id}>
-                    {String(l.LeadUid)} — {String(l.CustomerName)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {auditLeadId && (
-              <div className="rounded-lg border border-border overflow-hidden">
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Audit Trail — {String(mappedData.find((l) => l._id === auditLeadId)?.LeadUid ?? "")}
-                  </h3>
-                  <span className="text-xs text-muted-foreground">{auditLog.length} change{auditLog.length !== 1 ? "s" : ""}</span>
-                </div>
-                {auditLog.length === 0 ? (
-                  <div className="p-6 text-center text-sm text-muted-foreground">No changes recorded yet</div>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/20">
-                      <tr>
-                        {["Field", "Old Value", "New Value", "Changed By", "When"].map((h) => (
-                          <th key={h} className="p-3 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(auditLog as any[]).map((row: any) => (
-                        <tr key={row.Id} className="border-t border-border hover:bg-muted/10 transition-colors">
-                          <td className="p-3 font-medium text-foreground text-xs">{row.Field}</td>
-                          <td className="p-3 text-xs text-muted-foreground">{row.OldValue ?? <span className="italic opacity-50">—</span>}</td>
-                          <td className="p-3 text-xs text-foreground">{row.NewValue ?? <span className="italic opacity-50">—</span>}</td>
-                          <td className="p-3 text-xs text-muted-foreground">{row.ChangedByName ?? "System"}</td>
-                          <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(row.ChangedAt).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {!auditLeadId && (
-              <div className="p-10 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">
-                Select a lead above to view its change history
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── LIST TAB ── */}
-        {activeTab === "list" && <><MasterPage
+        <MasterPage
           title="Lead"
           fields={fields}
           columns={columns}
           canCreate={canDoAction("sa-leads", "create")}
           canEdit={canDoAction("sa-leads", "edit")}
           canDelete={false /* leads are a permanent record — can be edited, never deleted */}
-          initialData={mappedData}
+          initialData={displayedData}
           onDataEvent={handleDataEvent}
           exportConfig={{ title: "Lead Management", filename: "lead-management", columns: exportColumns }}
           rowActions={(row) => {
@@ -647,16 +502,27 @@ const SaLeadManagement: React.FC = () => {
             const auditBtn = (
               <button
                 type="button"
-                onClick={() => { setAuditLeadId(row._id); setActiveTab("audit"); }}
+                onClick={() => setAuditLeadId(row._id)}
                 className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
                 title="View audit trail"
               >
                 <Clock size={13} />
               </button>
             );
+            const interactionBtn = (
+              <button
+                type="button"
+                onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid) })}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                title="Log a call/WhatsApp/etc against this lead"
+              >
+                <MessageSquarePlus size={13} />
+              </button>
+            );
             if (hasBooking) {
               return (
                 <>
+                  {interactionBtn}
                   {auditBtn}
                   <span className="px-2 py-1 text-[0.625rem] font-medium rounded-full bg-emerald-500/10 text-emerald-600">
                     Booked
@@ -666,6 +532,7 @@ const SaLeadManagement: React.FC = () => {
             }
             return (
               <>
+                {interactionBtn}
                 {auditBtn}
                 {!isConverted && !hasFollowup && (
                   <button
@@ -740,8 +607,53 @@ const SaLeadManagement: React.FC = () => {
             ],
           }}
         />
-        </>}
       </div>
+
+      {/* Audit trail — was a whole separate tab with its own lead-picker;
+          now a per-row action opening a drawer, same data (GET /:id/audit). */}
+      <CrmSideDrawer
+        open={!!auditLeadId}
+        onClose={() => setAuditLeadId(null)}
+        title="Audit Trail"
+        subtitle={mappedData.find((l) => l._id === auditLeadId)?.LeadUid ? String(mappedData.find((l) => l._id === auditLeadId)?.LeadUid) : undefined}
+      >
+        {auditLog.length === 0 ? (
+          <div className="p-6 text-center text-sm text-muted-foreground">No changes recorded yet</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-muted/20">
+              <tr>
+                {["Field", "Old Value", "New Value", "Changed By", "When"].map((h) => (
+                  <th key={h} className="p-2 text-left text-xs font-medium text-muted-foreground">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(auditLog as any[]).map((row: any) => (
+                <tr key={row.Id} className="border-t border-border">
+                  <td className="p-2 font-medium text-foreground text-xs">{row.Field}</td>
+                  <td className="p-2 text-xs text-muted-foreground">{row.OldValue ?? <span className="italic opacity-50">—</span>}</td>
+                  <td className="p-2 text-xs text-foreground">{row.NewValue ?? <span className="italic opacity-50">—</span>}</td>
+                  <td className="p-2 text-xs text-muted-foreground">{row.ChangedByName ?? "System"}</td>
+                  <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">{new Date(row.ChangedAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CrmSideDrawer>
+
+      {/* Log interaction — same shared form/history Lead Activities and
+          Follow-Ups use (see useLeadActivities.ts), reachable in one click
+          from the row it's about instead of leaving this page. */}
+      <CrmSideDrawer
+        open={!!interactionLead}
+        onClose={() => setInteractionLead(null)}
+        title="Log Interaction"
+        subtitle={interactionLead?.uid}
+      >
+        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} />}
+      </CrmSideDrawer>
 
       {/* Transfer Leads Dialog */}
       <Dialog open={transferOpen} onOpenChange={(o) => { if (!o) { setTransferOpen(false); setTransferSelectedIds(new Set()); setTransferToTLId(""); setTransferNotes(""); } }}>
@@ -817,15 +729,9 @@ const SaLeadManagement: React.FC = () => {
                         <td className="px-3 py-2 text-xs font-mono text-muted-foreground">{String(l.LeadUid)}</td>
                         <td className="px-3 py-2 font-medium text-foreground">{String(l.CustomerName)}</td>
                         <td className="px-3 py-2 text-xs text-muted-foreground">{String(l.Mobile)}</td>
-                        <td className="px-3 py-2 text-xs">{String(l.Status)}</td>
+                        <td className="px-3 py-2 text-xs"><StatusBadge status={String(l.Status)} className="text-[0.625rem] px-1.5 py-0.5" /></td>
                         <td className="px-3 py-2 text-xs">
-                          {l.Classification && (
-                            <span className={`px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold ${
-                              l.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
-                              l.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
-                              "bg-blue-500/10 text-blue-500"
-                            }`}>{String(l.Classification)}</span>
-                          )}
+                          {l.Classification && <StatusBadge status={String(l.Classification)} className="text-[0.625rem] px-1.5 py-0.5" />}
                         </td>
                       </tr>
                     ))}
@@ -851,6 +757,36 @@ const SaLeadManagement: React.FC = () => {
         </DialogContent>
       </Dialog>
     </SalesAutoShell>
+  );
+};
+
+// Small history + form combo for the "Log Interaction" drawer above — not
+// hoisted into useLeadActivities.ts/LeadInteractionForm.tsx since this is
+// the only call site; if a second one shows up, promote it there instead
+// of copying this.
+const LeadInteractionPanelContent: React.FC<{ leadId: number }> = ({ leadId }) => {
+  const { data: history = [] } = useLeadActivityHistory(leadId);
+  return (
+    <div className="space-y-4">
+      <LeadInteractionForm leadId={leadId} variant="compact" />
+      <div className="rounded-lg border border-border overflow-hidden">
+        <div className="px-3 py-2 bg-muted/30 border-b border-border">
+          <h3 className="text-xs font-semibold text-foreground">History ({history.length})</h3>
+        </div>
+        {history.length === 0 ? (
+          <div className="p-4 text-center text-muted-foreground text-xs">No activity logged yet</div>
+        ) : (history as any[]).map((h) => (
+          <div key={h.Id} className="px-3 py-2.5 border-b border-border last:border-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">{h.ActivityType}</span>
+              <span className="text-xs text-muted-foreground">{h.CreatedAt ? new Date(h.CreatedAt).toLocaleString() : "—"}</span>
+            </div>
+            {h.Summary && <p className="text-xs text-muted-foreground mt-1">{h.Summary}</p>}
+            {h.NextFollowupDate && <p className="text-xs text-amber-600 mt-0.5">Next reminder: {String(h.NextFollowupDate).slice(0, 10)}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 };
 

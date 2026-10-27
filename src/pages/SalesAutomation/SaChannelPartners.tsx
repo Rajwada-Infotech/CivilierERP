@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type DataChangeEvent, type FieldDef, type RecordWithId } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -103,9 +102,8 @@ const SaChannelPartners: React.FC = () => {
   if (error) return <div className="p-6 text-red-500">Failed to load channel partners.</div>;
 
   return (
-    <SalesAutoShell title="Channel Partners" subtitle="Manage referral partners, broker leads and commission defaults"
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Channel Partners"]} title="Channel Partners" subtitle="Manage referral partners, broker leads and commission defaults"
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}>
-      <Breadcrumbs items={["Sales Automation", "Channel Partners"]} />
       <MasterPage
         title="Channel Partner"
         fields={fields}
