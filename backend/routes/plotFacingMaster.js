@@ -15,10 +15,12 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+// Managed from Plot Master, under its page (Auto Project Setup's rights; admins always pass). Writes used to be
+// admin-only while Plot Master offered them to anyone who could edit there, so everyone else got "Forbidden".
+const PAGE = "crm-auto-project-setup";
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -72,7 +74,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", adminOnly, async (req, res) => {
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const parsed = parseFacingBody(req.body || {});
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const { code, name } = parsed;
@@ -98,7 +100,7 @@ router.post("/", adminOnly, async (req, res) => {
   }
 });
 
-router.put("/:id", adminOnly, async (req, res) => {
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const b = req.body || {};
@@ -159,7 +161,7 @@ router.put("/:id", adminOnly, async (req, res) => {
 
 // Soft delete, refused while plots still carry the code — removing it would
 // leave those plots pointing at a vocabulary entry that no longer exists.
-router.delete("/:id", adminOnly, async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
