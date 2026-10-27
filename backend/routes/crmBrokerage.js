@@ -55,18 +55,23 @@ router.get("/", requirePageRight("crm-brokerage", "view"), async (req, res) => {
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // One filter definition for the rows, the count and the status counts — the count used to skip the
+    // project scope, so a restricted user's total counted other projects' brokerage.
+    const buildWhere = (rq, withStatus) => {
+      const conds = [];
+      if (withStatus && status) { rq.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
+      if (companyId) { rq.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+      if (projectId) { rq.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+      if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
+      if (blockId) { rq.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
+      if (search) {
+        rq.input("search", sql.NVarChar(200), `%${search}%`);
+        conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR ahm.LHeadName LIKE @search)");
+      }
+      return conds.length ? "WHERE " + conds.join(" AND ") : "";
+    };
     const req0 = pool.request();
-    const conds = [];
-    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("br.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (req.projectScope) conds.push(require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim());
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
-    if (search) {
-      req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR ahm.LHeadName LIKE @search)");
-    }
-    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const where = buildWhere(req0, true);
     const SELECT_WITH_BLOCK = `${BROKERAGE_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
 
     if (!req.query.page) {
@@ -77,29 +82,26 @@ router.get("/", requirePageRight("crm-brokerage", "view"), async (req, res) => {
     const { page, pageSize, offset } = applyPagination(req);
     req0.input("offset", sql.Int, offset);
     req0.input("pageSize", sql.Int, pageSize);
-    const [result, countResult] = await Promise.all([
+    const FROM = `
+      FROM dbo.CrmBrokerageMaster br
+      JOIN dbo.CrmBooking b ON b.Id = br.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId`;
+    const countReq = pool.request();
+    const countWhere = buildWhere(countReq, true);
+    const statusReq = pool.request();
+    const statusWhere = buildWhere(statusReq, false);
+    const [result, countResult, statusResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY br.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
-      pool.request()
-        .input("st2", sql.NVarChar(20), status || null)
-        .input("companyId2", sql.Int, companyId)
-        .input("projectId2", sql.Int, projectId)
-        .input("blockId2", sql.Int, blockId)
-        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
-        .query(`
-          SELECT COUNT(*) AS total
-          FROM dbo.CrmBrokerageMaster br
-          JOIN dbo.CrmBooking b ON b.Id = br.BookingId
-          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
-          LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = br.BrokerId
-          WHERE (@st2 IS NULL OR br.Status = @st2)
-            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
-            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR ahm.LHeadName LIKE @search2))
-        `),
+      countReq.query(`SELECT COUNT(*) AS total ${FROM} ${countWhere}`),
+      // Per status (locked tranches apart), for the page's figures and tabs.
+      statusReq.query(`SELECT CASE WHEN br.IsLocked = 1 THEN 'Locked' ELSE br.Status END AS S, COUNT(*) AS n,
+          SUM(COALESCE(br.NetPayable, br.ComputedAmount)) AS net
+        ${FROM} ${statusWhere} GROUP BY CASE WHEN br.IsLocked = 1 THEN 'Locked' ELSE br.Status END`),
     ]);
-    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+    const statusCounts = {};
+    for (const x of statusResult.recordset) statusCounts[x.S] = { count: x.n, net: Number(x.net) || 0 };
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize, statusCounts });
   } catch (e) {
     console.error("[crm-brokerage] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -322,6 +324,8 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
     if (!b.BrokerId) return res.status(400).json({ error: "Broker is required — select one from Broker Master" });
 
+    // The booking's project must be one the user may work in.
+    if (!(await require("../services/projectScope").assertBookingAllowed(req, res, parseInt(b.BookingId, 10)))) return;
     const activeErr = await requireActiveBooking(pool, parseInt(b.BookingId));
     if (activeErr) return res.status(400).json({ error: activeErr });
 
