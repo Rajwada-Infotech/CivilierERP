@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
-import { SalesAutoShell } from "@/components/sa/SalesAutoShell";
+import { SalesAutoShell, SalesAutoGlassCard } from "@/components/sa/SalesAutoShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   MasterPage,
@@ -14,7 +14,8 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { LayoutList, BarChart2, RefreshCw, Image as ImageIcon, Upload, Download, Trash2 } from "lucide-react";
+import { LayoutList, BarChart2, RefreshCw, Image as ImageIcon, Upload, Download, Trash2, Wallet, Receipt, Users, CheckCircle2, IndianRupee, TrendingUp } from "lucide-react";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SaTabs } from "@/components/sa/SaTabs";
 
@@ -35,7 +36,10 @@ async function fetchCampaignOptions(): Promise<{ value: string; label: string }[
   } catch { return []; }
 }
 
+// Grouped into sections so MasterPage shows the form as tabs (one concern
+// per tab) instead of one long scroll.
 const fields: FieldDef[] = [
+  { name: "_basics", label: "Basics", type: "section" },
   {
     name: "campaignId",
     label: "Campaign",
@@ -43,44 +47,14 @@ const fields: FieldDef[] = [
     required: true,
     asyncOptions: fetchCampaignOptions,
   },
-  { name: "name", label: "Ad Name", type: "text", required: true },
+  { name: "name", label: "Ad Name", type: "text", required: true, placeholder: "e.g. Diwali 3BHK – Carousel" },
   {
     name: "adType",
     label: "Ad Type",
     type: "select",
     options: ["Image", "Video", "Carousel", "Story", "Reel", "Search", "Display", "Other"],
   },
-  { name: "creativeRef", label: "Creative Reference", type: "text" },
-  { name: "headline", label: "Headline", type: "text" },
-  { name: "description", label: "Ad Copy / Description", type: "textarea", fullWidth: true },
-  { name: "ctaText", label: "CTA Text", type: "text" },
-  { name: "imageUrl", label: "Image URL", type: "text" },
-  { name: "videoUrl", label: "Video URL", type: "text" },
-  { name: "mediaUrls", label: "Media URLs", type: "textarea", fullWidth: true, placeholder: "Comma-separated or JSON array" },
-  { name: "keypoints", label: "Keypoints / Ad Copy Talking Points", type: "textarea", fullWidth: true, placeholder: "One per line — key selling points this ad should hit" },
-  { name: "targetAgeMin", label: "Age Min", type: "number" },
-  { name: "targetAgeMax", label: "Age Max", type: "number" },
-  { name: "targetGender", label: "Gender", type: "select", options: ["All", "Male", "Female", "Other"] },
-  { name: "targetLocations", label: "Target Locations", type: "textarea", fullWidth: true, placeholder: "Locations, pin codes, or JSON" },
-  { name: "targetRadiusKm", label: "Radius (Km)", type: "number" },
-  { name: "targetInterests", label: "Target Interests", type: "textarea", fullWidth: true },
-  { name: "targetBehaviors", label: "Target Behaviors", type: "textarea", fullWidth: true },
-  { name: "targetLanguages", label: "Target Languages", type: "text" },
-  { name: "scheduledStartAt", label: "Scheduled Start", type: "date" },
-  { name: "scheduledEndAt", label: "Scheduled End", type: "date" },
-  { name: "platformPlacement", label: "Placement", type: "text", placeholder: "Feed, Reels, Search, Display..." },
   { name: "objective", label: "Objective", type: "select", options: ["Lead Generation", "Traffic", "Reach", "Awareness", "Engagement", "Conversions", "Sales"] },
-  { name: "optimizationGoal", label: "Optimization Goal", type: "text" },
-  { name: "bidStrategy", label: "Bid Strategy", type: "text" },
-  { name: "destinationUrl", label: "Destination URL", type: "text" },
-  { name: "utmParameters", label: "UTM Parameters", type: "textarea", fullWidth: true, placeholder: "{\"utm_source\":\"google\",\"utm_medium\":\"cpc\"}" },
-  { name: "budget", label: "Budget (Rs)", type: "number" },
-  { name: "dailySpend", label: "Daily Spend (Rs)", type: "number" },
-  { name: "spent", label: "Fallback Spend (Rs)", type: "number" },
-  { name: "externalAdId", label: "External Ad ID", type: "text" },
-  { name: "externalAdSetId", label: "External Ad Set ID", type: "text" },
-  { name: "syncStatus", label: "Sync Status", type: "select", options: ["Pending", "Synced", "Failed"] },
-  { name: "runningSince", label: "Running Since", type: "date" },
   {
     name: "status",
     label: "Status",
@@ -89,25 +63,90 @@ const fields: FieldDef[] = [
     defaultValue: "Active",
   },
   { name: "isActive", label: "Active", type: "toggle", defaultValue: true },
+
+  { name: "_creative", label: "Creative", type: "section" },
+  { name: "headline", label: "Headline", type: "text", placeholder: "The first line people read" },
+  { name: "ctaText", label: "Call to Action", type: "text", placeholder: "Book a Site Visit, Call Now…" },
+  { name: "creativeRef", label: "Creative Reference", type: "text", placeholder: "Agency file name or code" },
+  { name: "description", label: "Ad Copy", type: "textarea", fullWidth: true, placeholder: "The body text shown with the ad" },
+  { name: "keypoints", label: "Talking Points", type: "textarea", fullWidth: true, placeholder: "One per line — key selling points this ad should hit" },
+  { name: "imageUrl", label: "Image URL", type: "text", placeholder: "https://…" },
+  { name: "videoUrl", label: "Video URL", type: "text", placeholder: "https://…" },
+  { name: "mediaUrls", label: "More Media URLs", type: "textarea", fullWidth: true, placeholder: "One URL per line or comma-separated. Upload files with the row's Creatives button." },
+
+  { name: "_audience", label: "Audience", type: "section" },
+  { name: "targetAgeMin", label: "Age From", type: "number", placeholder: "18" },
+  { name: "targetAgeMax", label: "Age To", type: "number", placeholder: "65" },
+  { name: "targetGender", label: "Gender", type: "select", options: ["All", "Male", "Female", "Other"] },
+  { name: "targetLanguages", label: "Languages", type: "text", placeholder: "Bengali, Hindi, English" },
+  { name: "targetRadiusKm", label: "Radius (km)", type: "number", placeholder: "Around each location" },
+  { name: "targetLocations", label: "Locations", type: "textarea", fullWidth: true, placeholder: "Cities, areas or pin codes — one per line" },
+  { name: "targetInterests", label: "Interests", type: "textarea", fullWidth: true, placeholder: "Real estate, home loans, interior design…" },
+  { name: "targetBehaviors", label: "Behaviours", type: "textarea", fullWidth: true, placeholder: "Likely to move, first-time buyers, NRIs…" },
+
+  { name: "_delivery", label: "Delivery", type: "section" },
+  { name: "platformPlacement", label: "Placement", type: "text", placeholder: "Feed, Reels, Search, Display…" },
+  { name: "scheduledStartAt", label: "Starts On", type: "date" },
+  { name: "scheduledEndAt", label: "Ends On", type: "date" },
+  { name: "runningSince", label: "Running Since", type: "date" },
+  { name: "optimizationGoal", label: "Optimisation Goal", type: "text", placeholder: "Leads, link clicks…" },
+  { name: "bidStrategy", label: "Bid Strategy", type: "text", placeholder: "Lowest cost, cost cap…" },
+  { name: "destinationUrl", label: "Landing Page URL", type: "text", fullWidth: true, placeholder: "https://…" },
+  { name: "utmParameters", label: "UTM Parameters", type: "textarea", fullWidth: true, placeholder: "{\"utm_source\":\"facebook\",\"utm_medium\":\"paid\"}" },
+
+  { name: "_budget", label: "Budget", type: "section" },
+  { name: "budget", label: "Total Budget", type: "number", prefix: "₹" },
+  { name: "dailySpend", label: "Daily Spend", type: "number", prefix: "₹" },
+  { name: "spent", label: "Manual Spend", type: "number", prefix: "₹", placeholder: "Used only when no invoices are linked" },
+
+  { name: "_sync", label: "Platform Sync", type: "section" },
+  { name: "externalAdId", label: "Platform Ad ID", type: "text", placeholder: "ID on Meta / Google" },
+  { name: "externalAdSetId", label: "Platform Ad Set ID", type: "text" },
+  { name: "syncStatus", label: "Sync Status", type: "select", options: ["Pending", "Synced", "Failed"] },
 ];
 
 const columns = [
-  { key: "adCode", label: "Ad Code" },
-  { key: "name", label: "Ad Name" },
-  { key: "campaignName", label: "Campaign" },
+  { key: "adCode", label: "Code" },
+  { key: "name", label: "Ad" },
+  { key: "campaignName", label: "Campaign", hideOnMobile: true },
   { key: "adType", label: "Type", hideOnMobile: true },
-  { key: "platformPlacement", label: "Placement", hideOnMobile: true },
-  { key: "targetRadiusKm", label: "Radius Km", hideOnMobile: true },
-  { key: "budget", label: "Budget (Rs)", hideOnMobile: true },
-  { key: "costSpent", label: "Cost Spent (Rs)", hideOnMobile: true },
-  { key: "totalLeadsGenerated", label: "Leads", hideOnMobile: true },
-  { key: "costPerLead", label: "CPL (Rs)", hideOnMobile: true },
-  { key: "conversionRate", label: "Conv. %", hideOnMobile: true },
-  { key: "roi", label: "ROI %", hideOnMobile: true },
-  { key: "syncStatus", label: "Sync", hideOnMobile: true },
+  { key: "budget", label: "Budget", hideOnMobile: true },
+  { key: "costSpent", label: "Spent", hideOnMobile: true },
+  { key: "totalLeadsGenerated", label: "Leads" },
+  { key: "costPerLead", label: "Cost / Lead", hideOnMobile: true },
+  { key: "roi", label: "ROI", hideOnMobile: true },
   { key: "status", label: "Status" },
-  { key: "isActive", label: "Active" },
 ];
+
+const fmtRs = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+const fmtPct = (n: number) => `${n.toFixed(1)}%`;
+const money = (v: unknown) => (Number(v) > 0 ? fmtRs(Number(v)) : "—");
+const roiText = (v: unknown) => {
+  const n = Number(v ?? 0);
+  return <span className={`font-semibold tabular-nums ${n > 0 ? "text-emerald-600" : n < 0 ? "text-red-500" : "text-muted-foreground"}`}>{n ? fmtPct(n) : "—"}</span>;
+};
+const viewMoney = (v: unknown) => <p className="text-sm tabular-nums">{money(v)}</p>;
+
+const columnRenderers: Record<string, (v: unknown, row: RecordWithId) => React.ReactNode> = {
+  adCode: (v) => <span className="font-mono text-xs text-muted-foreground">{String(v || "—")}</span>,
+  name: (v, row) => (
+    <div className="min-w-0">
+      <div className="font-medium text-foreground truncate">{String(v)}</div>
+      {row.headline ? <div className="text-xs text-muted-foreground truncate max-w-[16rem]">{String(row.headline)}</div> : null}
+    </div>
+  ),
+  budget: (v) => <span className="tabular-nums">{money(v)}</span>,
+  costSpent: (v) => <span className="tabular-nums">{money(v)}</span>,
+  costPerLead: (v) => <span className="tabular-nums">{money(v)}</span>,
+  totalLeadsGenerated: (v) => <span className="font-semibold tabular-nums">{Number(v ?? 0)}</span>,
+  roi: roiText,
+  status: (v, row) => (
+    <span className="inline-flex items-center gap-1.5">
+      <StatusBadge status={String(v || "Active")} />
+      {row.isActive === false && <span className="text-[0.6875rem] text-muted-foreground">Inactive</span>}
+    </span>
+  ),
+};
 
 const exportColumns: ExportColumn[] = [
   { header: "Ad Name", accessor: "name" },
@@ -215,9 +254,10 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <a href={`${API}/${adId}/creatives/file/${c.Id}`} target="_blank" rel="noreferrer"
-                      className="p-1.5 rounded-md hover:bg-muted text-muted-foreground"><Download size={14} /></a>
-                    <button onClick={() => handleDelete(c.Id)} className="p-1.5 rounded-md hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
-                      <Trash2 size={14} />
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs hover:bg-muted text-muted-foreground"><Download size={13} /> Open</a>
+                    <button onClick={() => handleDelete(c.Id)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs hover:bg-rose-50 text-muted-foreground hover:text-rose-600">
+                      <Trash2 size={13} /> Remove
                     </button>
                   </div>
                 </div>
@@ -392,8 +432,13 @@ const SaAdMaster: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ["sa-ads"] });
   };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading ads...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load ads.</div>;
+  if (isLoading || error) return (
+    <SalesAutoShell breadcrumbs={["Sales Automation", "Ads"]} title="Ads">
+      <div className={`p-6 text-sm ${error ? "text-red-500" : "text-muted-foreground"}`}>
+        {error ? "Couldn't load ads. Refresh the page to try again." : "Loading ads…"}
+      </div>
+    </SalesAutoShell>
+  );
 
   const totalBudget = mappedData.reduce((s, a) => s + Number(a.budget ?? 0), 0);
   const totalSpent = mappedData.reduce((s, a) => s + Number(a.costSpent ?? 0), 0);
@@ -404,11 +449,14 @@ const SaAdMaster: React.FC = () => {
     ? mappedData.reduce((s, a) => s + Number(a.roi ?? 0), 0) / mappedData.filter((a) => Number(a.roi) !== 0).length
     : 0;
 
-  const fmtRs = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
-  const fmtPct = (n: number) => `${n.toFixed(1)}%`;
-
   return (
-    <SalesAutoShell breadcrumbs={["Sales Automation", "Ad Master"]} title="Ad Master" subtitle={campaignFilter ? `Showing ads for the selected campaign — ${mappedData[0]?.campaignName || ""}` : platformFilter ? "Showing ads for the selected platform" : "Manage advertisements running under each campaign"}>
+    <SalesAutoShell
+      breadcrumbs={["Sales Automation", "Ads"]}
+      title="Ads"
+      subtitle={campaignFilter ? `Ads in ${mappedData[0]?.campaignName || "the selected campaign"}`
+        : platformFilter ? "Ads on the selected platform"
+        : `${mappedData.length} ad${mappedData.length === 1 ? "" : "s"} across your campaigns — creative, audience, budget and results`}
+    >
       <div className="space-y-6">
         {(campaignFilter || platformFilter) && (
           <Link to="/sales-automation/ads" className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
@@ -429,21 +477,13 @@ const SaAdMaster: React.FC = () => {
         {/* PERFORMANCE TAB */}
         {activeTab === "performance" && (
           <div className="space-y-6">
-            {/* Summary KPI cards */}
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-              {[
-                { label: "Total Budget", value: fmtRs(totalBudget), color: "text-blue-600" },
-                { label: "Total Spent", value: fmtRs(totalSpent), color: "text-orange-600" },
-                { label: "Total Leads", value: String(totalLeads), color: "text-purple-600" },
-                { label: "Total Bookings", value: String(totalBookings), color: "text-emerald-600" },
-                { label: "Revenue", value: fmtRs(totalRevenue), color: "text-green-600" },
-                { label: "Avg ROI", value: fmtPct(avgROI), color: avgROI >= 0 ? "text-emerald-600" : "text-red-500" },
-              ].map(({ label, value, color }) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-3 space-y-1">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className={`text-lg font-bold ${color}`}>{value}</p>
-                </div>
-              ))}
+              <SalesAutoGlassCard label="Budget" value={fmtRs(totalBudget)} icon={Wallet} accentColor="#2563eb" />
+              <SalesAutoGlassCard label="Spent" value={fmtRs(totalSpent)} sub={totalBudget ? `${fmtPct((totalSpent / totalBudget) * 100)} of budget` : undefined} icon={Receipt} accentColor="#ea580c" />
+              <SalesAutoGlassCard label="Leads" value={totalLeads} sub={totalLeads ? `${fmtRs(totalSpent / totalLeads)} per lead` : undefined} icon={Users} accentColor="#7c3aed" />
+              <SalesAutoGlassCard label="Bookings" value={totalBookings} icon={CheckCircle2} accentColor="#059669" />
+              <SalesAutoGlassCard label="Revenue" value={fmtRs(totalRevenue)} icon={IndianRupee} accentColor="#16a34a" />
+              <SalesAutoGlassCard label="Average ROI" value={fmtPct(avgROI)} icon={TrendingUp} accentColor={avgROI >= 0 ? "#059669" : "#dc2626"} />
             </div>
 
             {/* Per-ad performance table */}
@@ -455,14 +495,14 @@ const SaAdMaster: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/20">
                     <tr>
-                      {["Ad Name", "Campaign", "Budget", "Spent", "Leads", "CPL", "Conv %", "Bookings", "Revenue", "ROI %"].map((h) => (
+                      {["Ad", "Campaign", "Budget", "Spent", "Leads", "Cost / Lead", "Conversion", "Bookings", "Revenue", "ROI"].map((h) => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {mappedData.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground text-sm">No ads found</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground text-sm">No ads yet. Add one from the List tab to start tracking results.</td></tr>
                     ) : mappedData.map((ad) => {
                       const roi = Number(ad.roi ?? 0);
                       return (
@@ -483,6 +523,21 @@ const SaAdMaster: React.FC = () => {
                       );
                     })}
                   </tbody>
+                  {mappedData.length > 1 && (
+                    <tfoot className="border-t-2 border-border bg-muted/20 font-semibold text-xs">
+                      <tr>
+                        <td className="px-3 py-2.5" colSpan={2}>Total</td>
+                        <td className="px-3 py-2.5 tabular-nums">{fmtRs(totalBudget)}</td>
+                        <td className="px-3 py-2.5 tabular-nums text-orange-600">{fmtRs(totalSpent)}</td>
+                        <td className="px-3 py-2.5 text-center tabular-nums">{totalLeads}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{totalLeads ? fmtRs(totalSpent / totalLeads) : "—"}</td>
+                        <td className="px-3 py-2.5 tabular-nums">{totalLeads ? fmtPct((totalBookings / totalLeads) * 100) : "—"}</td>
+                        <td className="px-3 py-2.5 text-center tabular-nums text-emerald-600">{totalBookings}</td>
+                        <td className="px-3 py-2.5 tabular-nums text-green-600">{fmtRs(totalRevenue)}</td>
+                        <td className="px-3 py-2.5">{roiText(avgROI)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>
@@ -494,6 +549,9 @@ const SaAdMaster: React.FC = () => {
           title="Ad"
           fields={fields}
           columns={columns}
+          columnRenderers={columnRenderers}
+          collapsibleAddForm
+          gridCols={3}
           canCreate={canDoAction("sa-ads", "create")}
           canEdit={canDoAction("sa-ads", "edit")}
           canDelete={canDoAction("sa-ads", "delete")}
@@ -520,7 +578,7 @@ const SaAdMaster: React.FC = () => {
             </>
           )}
           exportConfig={{
-            title: "Ad Master",
+            title: "Ads",
             filename: "ad-master",
             columns: exportColumns,
           }}
@@ -556,19 +614,19 @@ const SaAdMaster: React.FC = () => {
               { key: "externalAdSetId", label: "External Ad Set ID" },
               { key: "syncStatus", label: "Sync Status" },
               { key: "lastSyncedAt", label: "Last Synced" },
-              { key: "budget", label: "Budget (Rs)" },
-              { key: "dailySpend", label: "Daily Spend (Rs)" },
-              { key: "spent", label: "Fallback Spend (Rs)" },
-              { key: "costSpent", label: "Cost Spent (Rs)" },
+              { key: "budget", label: "Total Budget", render: viewMoney },
+              { key: "dailySpend", label: "Daily Spend", render: viewMoney },
+              { key: "spent", label: "Manual Spend", render: viewMoney },
+              { key: "costSpent", label: "Spent", render: viewMoney },
               { key: "invoiceCount", label: "Linked Invoices" },
-              { key: "totalLeadsGenerated", label: "Total Leads Generated" },
-              { key: "costPerLead", label: "Cost Per Lead (Rs)" },
-              { key: "conversionRate", label: "Conversion Rate %" },
-              { key: "bookingCount", label: "Booking Count" },
-              { key: "revenueGenerated", label: "Revenue Generated (Rs)" },
-              { key: "roi", label: "ROI %" },
+              { key: "totalLeadsGenerated", label: "Leads" },
+              { key: "costPerLead", label: "Cost / Lead", render: viewMoney },
+              { key: "conversionRate", label: "Conversion", render: (v) => <p className="text-sm tabular-nums">{fmtPct(Number(v ?? 0))}</p> },
+              { key: "bookingCount", label: "Bookings" },
+              { key: "revenueGenerated", label: "Revenue", render: viewMoney },
+              { key: "roi", label: "ROI", render: (v) => roiText(v) },
               { key: "runningSince", label: "Running Since" },
-              { key: "status", label: "Status" },
+              { key: "status", label: "Status", render: (v) => <StatusBadge status={String(v || "Active")} /> },
               { key: "isActive", label: "Active" },
             ],
           }}
