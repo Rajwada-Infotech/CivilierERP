@@ -1,11 +1,13 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { logAudit } = require("../utils/auditLog");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+// A unit (by id) and any project / block given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/kinds", null], ["/", "unit"]] });
 const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
@@ -433,7 +435,8 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 });
 
 // PUT — update unit
-router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
+// Also edited from Auto Project Setup's unit lists.
+router.put("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-project-setup"], "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
@@ -652,7 +655,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
 //      sys.foreign_keys), so even a HISTORICAL/terminal reference (e.g. a
 //      long-Cancelled Application) still physically blocks a hard DELETE.
 // Only once both come back clear does the row actually get removed.
-router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["followup-unit-master", "crm-auto-project-setup"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
