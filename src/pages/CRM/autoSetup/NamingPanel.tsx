@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, GripVertical, Lock, Pencil, Tag, Undo2, Wand2 } from "lucide-react";
+import { CheckCircle2, GripVertical, Pencil, Undo2, Wand2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { KEY_INK, KEY_LINE, NUM, RULE, RULE_SOFT, TEXT_LINK } from "./config";
+
+const CARD = (on: boolean, dashed = false) =>
+  `relative h-full border p-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 ${dashed ? "border-dashed" : ""} ${on ? "border-foreground bg-primary/5 shadow-[inset_0_-3px_0_hsl(var(--foreground))]" : "border-foreground/25 hover:border-foreground"}`;
+const SEL = "h-7 px-1.5 text-xs border border-foreground/40 bg-card text-foreground outline-none focus:border-foreground";
 
 // Unit naming for Auto Project Setup. Pick a ready-made style (the ones real
 // projects actually use) or arrange the parts yourself. Under the hood it is
@@ -220,26 +226,25 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
   };
 
   return (
-    <div className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
+    <div className="bg-card p-3 sm:p-4 space-y-3" style={{ border: RULE }}>
       {/* Folded: one line saying what new units are called. */}
       <div className="flex flex-wrap items-center gap-2">
-        {isOpen ? <Tag size={13} className="text-sky-600" /> : <Lock size={12} className="text-muted-foreground" />}
-        <span className="text-sm font-semibold">{isOpen ? "How should units be named?" : "Unit names"}</span>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{isOpen ? "How should units be named?" : "Unit names"}</span>
         {!isOpen && (
           <>
-            <span className="font-mono text-xs text-muted-foreground">{example(saved, short, blockName)} …</span>
+            <span className={`${NUM} text-xs text-foreground`}>{example(saved, short, blockName)} …</span>
             <span className="text-xs text-muted-foreground">· {PRESETS.find((p) => sameAs({ ...p.b, skipIO: saved.skipIO, ground: saved.ground }, saved))?.title ?? "Your own"}</span>
           </>
         )}
         {canEdit && !isOpen && (
           <button type="button" onClick={() => setOpen(true)}
-            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+            className={`${KEY_LINE} h-7 px-2.5 ml-auto`}>
             <Pencil size={11} /> Edit
           </button>
         )}
         {isOpen && !firstTime && (
           <button type="button" onClick={() => { setOpen(false); setB(saved); setCustomOpen(false); }}
-            className="ml-auto px-2.5 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">
+            className={`${KEY_LINE} h-7 px-2.5 ml-auto`}>
             Cancel
           </button>
         )}
@@ -252,7 +257,7 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
             Apply to
             <select value={target} onChange={(e) => setTarget(e.target.value)}
-              className="px-2 py-1 rounded-lg border border-border bg-background text-foreground">
+              className={SEL}>
               <option value="project">All blocks</option>
               {blocks.map((x) => <option key={x.Id} value={String(x.Id)}>Block {x.BlockName} only</option>)}
             </select>
@@ -268,11 +273,11 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           const [first, ...rest] = example(pb, short, blockName).split(",  ");
           return (
             <button key={p.title} type="button" disabled={!canEdit} onClick={() => { setB(pb); setCustomOpen(false); }} aria-pressed={active}
-              className={`relative h-full rounded-xl border p-3 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${active ? "border-primary ring-2 ring-primary/30 bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/40"}`}>
-              {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+              className={CARD(active)}>
+              {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5" />}
               <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-60">· {p.hint}</span></div>
-              <div className="mt-1 font-mono text-sm font-semibold">{first}</div>
-              <div className="font-mono text-[11px] text-muted-foreground">{rest.join(", ")}</div>
+              <div className={`mt-1 ${NUM} text-sm font-semibold`}>{first}</div>
+              <div className={`${NUM} text-[11px] text-muted-foreground`}>{rest.join(", ")}</div>
             </button>
           );
         })}
@@ -280,10 +285,10 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           const isCustom = customOpen || !PRESETS.some((p) => sameAs({ ...p.b, skipIO: b.skipIO, ground: b.ground }, effective));
           return (
             <button type="button" disabled={!canEdit} onClick={() => setCustomOpen(true)} aria-pressed={isCustom}
-              className={`relative h-full rounded-xl border border-dashed p-3 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${isCustom ? "border-primary ring-2 ring-primary/30 bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/40"}`}>
-              {isCustom && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+              className={CARD(isCustom, true)}>
+              {isCustom && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5" />}
               <div className="text-[11px] text-muted-foreground flex items-center gap-1"><Wand2 size={11} /> Your own</div>
-              <div className="mt-1 text-sm font-semibold">{isCustom ? <span className="font-mono">{names.split(",  ")[0]}</span> : "Make your own"}</div>
+              <div className="mt-1 text-sm font-semibold">{isCustom ? <span className={NUM}>{names.split(",  ")[0]}</span> : "Make your own"}</div>
               <div className="text-[11px] text-muted-foreground">Arrange the parts yourself</div>
             </button>
           );
@@ -292,19 +297,19 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
 
       {/* Make your own: drag the boxes into order, pick a style in each. */}
       {customOpen && (
-        <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
+        <div className="space-y-2 p-3 border border-dashed border-foreground/40">
           <p className="text-[11px] text-muted-foreground">Drag the boxes to change the order, and pick how each part looks in its menu.</p>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="px-3 py-2 text-xs rounded-lg bg-muted text-muted-foreground">Project <b>{short}</b></span>
+            <span className="px-3 py-2 text-xs border border-foreground/20 text-muted-foreground">Project <b className="text-foreground">{short}</b></span>
             {b.order.map((p, i) => (
               <React.Fragment key={p}>
-                <span className="text-muted-foreground font-mono">{effective.joinFloorUnit && p === "unit" && b.order[i - 1] === "floor" ? "+" : b.sep}</span>
+                <span className={`text-muted-foreground ${NUM}`}>{effective.joinFloorUnit && p === "unit" && b.order[i - 1] === "floor" ? "+" : b.sep}</span>
                 <div draggable={canEdit} onDragStart={() => setDragIdx(i)} onDragOver={(e) => e.preventDefault()} onDrop={() => drop(i)} onDragEnd={() => setDragIdx(null)}
-                  className={`flex items-center gap-2 rounded-lg border border-primary/40 bg-background px-2 py-1.5 cursor-grab active:cursor-grabbing select-none ${dragIdx === i ? "opacity-40" : ""}`}>
+                  className={`flex items-center gap-2 border border-foreground bg-card px-2 py-1.5 cursor-grab active:cursor-grabbing select-none ${dragIdx === i ? "opacity-40" : ""}`}>
                   <GripVertical size={12} className="text-muted-foreground" />
                   <span className="text-xs font-medium">{LABEL[p]}</span>
                   <select disabled={!canEdit} value={b[p]} onChange={(e) => setB({ ...b, [p]: e.target.value } as Builder)}
-                    className="px-1.5 py-0.5 text-xs rounded border border-border bg-background">
+                    className={SEL}>
                     {STYLE_OPTIONS[p].map((o) => <option key={o.value} value={o.value}>{o.label(blockName)}</option>)}
                   </select>
                 </div>
@@ -313,7 +318,7 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
           </div>
           <div className="flex flex-wrap items-center gap-4 text-xs">
             <label className="flex items-center gap-1.5">Separator
-              <select disabled={!canEdit} value={b.sep} onChange={(e) => setB({ ...b, sep: e.target.value as "/" | "-" })} className="px-1.5 py-0.5 rounded border border-border bg-background">
+              <select disabled={!canEdit} value={b.sep} onChange={(e) => setB({ ...b, sep: e.target.value as "/" | "-" })} className={SEL}>
                 <option value="/">/</option><option value="-">-</option>
               </select>
             </label>
@@ -325,13 +330,13 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
       )}
 
       {/* Result bar — calm when saved, clearly asks to save when changed. */}
-      <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 transition-colors ${dirty ? "bg-amber-500/5 border-amber-500/30" : "bg-emerald-500/5 border-emerald-500/20"}`}>
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 ${dirty ? "bg-primary/5" : "bg-card"}`} style={{ border: dirty ? RULE : RULE_SOFT, boxShadow: dirty ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
         <span className="text-xs text-muted-foreground">{dirty ? "New units would be named" : "New units will be named"}</span>
-        <span className={`font-mono text-sm ${dirty ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>{names} …</span>
+        <span className={`${NUM} text-sm font-semibold text-foreground`}>{names} …</span>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           Ground floor as
           <select disabled={!canEdit} value={b.ground} onChange={(e) => setB({ ...b, ground: e.target.value as Builder["ground"] })}
-            className="px-1.5 py-0.5 rounded border border-border bg-background text-foreground">
+            className={SEL}>
             <option value="G">G (G01)</option><option value="GF">GF (GF01)</option><option value="0">0 (001)</option>
           </select>
         </label>
@@ -345,35 +350,35 @@ export function NamingPanel({ projectId, shortName, blocks, floorsByBlock, canEd
             canEdit && (
               <>
                 <button type="button" onClick={() => { setB(saved); setCustomOpen(false); }} disabled={saving}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-border hover:bg-muted/50">
+                  className={`${KEY_LINE} h-8 px-3`}>
                   <Undo2 size={11} /> Undo
                 </button>
                 <button type="button" onClick={save} disabled={saving}
-                  className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                  className={`${KEY_INK} h-8 px-3`}>
                   {saving ? "Saving…" : "Save naming"}
                 </button>
               </>
             )
           ) : (
-            <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400"><CheckCircle2 size={12} /> Saved</span>
+            <SheetMark text="Saved" tone="done" />
           )}
         </div>
       </div>
       {/* Honest consequences, checked against the real data. */}
       {clashes.length > 0 && (
-        <p className="text-[11px] text-red-600">
+        <p className="text-xs text-destructive">
           {clashes.length} of the next {pendingCount} name(s) already exist ({clashes.slice(0, 3).join(", ")}{clashes.length > 3 ? "…" : ""}) — those would be skipped. Pick a different style.
         </p>
       )}
       {anyGenerated && dirty && (
-        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+        <p className="text-xs text-foreground">
           Units already created keep their current names; only floors generated from now on use this — a block that is half done would end up with two styles.
         </p>
       )}
       <div className="flex flex-wrap items-center gap-3">
-        <p className="text-[10px] text-muted-foreground">Only units generated from now on use this. Units already created keep their names.</p>
+        <p className="text-[11px] text-muted-foreground">Only units generated from now on use this. Units already created keep their names.</p>
         {blockHasOwn && canEdit && (
-          <button type="button" onClick={useProjectNaming} className="ml-auto text-[11px] text-primary hover:underline">
+          <button type="button" onClick={useProjectNaming} className={`ml-auto ${TEXT_LINK}`}>
             Use the project&apos;s naming for this block instead
           </button>
         )}
@@ -456,25 +461,24 @@ export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
   };
 
   return (
-    <div className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
+    <div className="bg-card p-3 sm:p-4 space-y-3" style={{ border: RULE }}>
       <div className="flex flex-wrap items-center gap-2">
-        {isOpen ? <Tag size={13} className="text-sky-600" /> : <Lock size={12} className="text-muted-foreground" />}
-        <span className="text-sm font-semibold">{isOpen ? "How should parking slots be named?" : "Slot names"}</span>
+        <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{isOpen ? "How should parking slots be named?" : "Slot names"}</span>
         {!isOpen && (
           <>
-            <span className="font-mono text-xs text-muted-foreground">{parkingExample(savedTemplate, short, blockName)} …</span>
+            <span className={`${NUM} text-xs text-foreground`}>{parkingExample(savedTemplate, short, blockName)} …</span>
             <span className="text-xs text-muted-foreground">· {titleOf(savedTemplate)}</span>
           </>
         )}
         {canEdit && !isOpen && (
           <button type="button" onClick={() => setOpen(true)}
-            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-border text-primary hover:bg-primary/5">
+            className={`${KEY_LINE} h-7 px-2.5 ml-auto`}>
             <Pencil size={11} /> Edit
           </button>
         )}
         {isOpen && !firstTime && (
           <button type="button" onClick={() => { setOpen(false); setPick(null); }}
-            className="ml-auto px-2.5 py-1 text-xs rounded-lg border border-border text-muted-foreground hover:bg-muted/50">Cancel</button>
+            className={`${KEY_LINE} h-7 px-2.5 ml-auto`}>Cancel</button>
         )}
       </div>
       {isOpen && (
@@ -485,36 +489,36 @@ export function ParkingNamingPanel({ projectId, shortName, blocks, canEdit }: {
               const [first, ...rest] = parkingExample(p.template, short, blockName).split(",  ");
               return (
                 <button key={p.title} type="button" disabled={!canEdit} onClick={() => setPick(p.template)} aria-pressed={active}
-                  className={`relative h-full rounded-xl border p-3 text-left transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${active ? "border-primary ring-2 ring-primary/30 bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/40"}`}>
-                  {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-primary" />}
+                  className={CARD(active)}>
+                  {active && <CheckCircle2 size={14} className="absolute top-2.5 right-2.5" />}
                   <div className="text-[11px] text-muted-foreground pr-5">{p.title} <span className="opacity-60">· {p.hint}</span></div>
-                  <div className="mt-1 font-mono text-sm font-semibold">{first}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">{rest.join(", ")}</div>
+                  <div className={`mt-1 ${NUM} text-sm font-semibold`}>{first}</div>
+                  <div className={`${NUM} text-[11px] text-muted-foreground`}>{rest.join(", ")}</div>
                 </button>
               );
             })}
           </div>
-          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 ${dirty ? "bg-amber-500/5 border-amber-500/30" : "bg-emerald-500/5 border-emerald-500/20"}`}>
+          <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 ${dirty ? "bg-primary/5" : "bg-card"}`} style={{ border: dirty ? RULE : RULE_SOFT, boxShadow: dirty ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
             <span className="text-xs text-muted-foreground">{dirty ? "New slots would be named" : "New slots will be named"}</span>
-            <span className={`font-mono text-sm ${dirty ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>{parkingExample(chosen, short, blockName)} …</span>
+            <span className={`${NUM} text-sm font-semibold text-foreground`}>{parkingExample(chosen, short, blockName)} …</span>
             <div className="ml-auto flex items-center gap-2">
               {dirty || firstTime ? (canEdit && (
                 <>
                   {dirty && (
-                    <button type="button" onClick={() => setPick(null)} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border border-border hover:bg-muted/50">
+                    <button type="button" onClick={() => setPick(null)} className={`${KEY_LINE} h-8 px-3`}>
                       <Undo2 size={11} /> Undo
                     </button>
                   )}
-                  <button type="button" onClick={save} disabled={saving} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+                  <button type="button" onClick={save} disabled={saving} className={`${KEY_INK} h-8 px-3`}>
                     {saving ? "Saving…" : "Save naming"}
                   </button>
                 </>
               )) : (
-                <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400"><CheckCircle2 size={12} /> Saved</span>
+                <SheetMark text="Saved" tone="done" />
               )}
             </div>
           </div>
-          <p className="text-[10px] text-muted-foreground">Only slots generated from now on use this. Slots already created keep their names.</p>
+          <p className="text-[11px] text-muted-foreground">Only slots generated from now on use this. Slots already created keep their names.</p>
         </>
       )}
     </div>

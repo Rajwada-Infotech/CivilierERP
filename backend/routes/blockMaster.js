@@ -1,10 +1,15 @@
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+// A block (by id) and any project given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/", "block"]] });
+// Block Master's own rights (admins always pass). Writes used to be admin-only while the page offered them to anyone
+// holding these rights, so everyone else got "Forbidden".
+const PAGE = "followup-block-master";
 const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
@@ -94,6 +99,7 @@ router.get("/", cache("block-master", 300), async (req, res) => {
           ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
         WHERE s.BlockId = b.Id AND (pa.Id IS NOT NULL OR h.Id IS NOT NULL)
       ) parkLock
+      ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName
     `);
     res.json(result.recordset);
@@ -114,7 +120,7 @@ router.get(
       SELECT id AS Id, name AS Name
       FROM dbo.enterprise
       WHERE business_type = 'P'
-        AND ISNULL(discontinue, 0) = 0
+        AND ISNULL(discontinue, 0) = 0${require("../services/projectScope").projectPredicate(req.projectScope, "id")}
       ORDER BY name
     `);
       res.json(result.recordset);
@@ -143,7 +149,7 @@ router.get("/applicable-payment-plans", async (req, res) => {
 });
 
 // POST — add block
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const { ProjectId, BlockName, IsActive, PaymentPlanIds } = req.body;
   const createdBy = req.user?.userId || null;
   try {
@@ -230,7 +236,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update block
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockName, IsActive, PaymentPlanIds } = req.body;
   const updatedBy = req.user?.userId || null;
@@ -319,7 +325,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 //      still physically blocks a hard DELETE. This check catches that and
 //      reports it clearly instead of letting a raw SQL FK-violation surface.
 // Only once BOTH come back clear does the row actually get removed.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
@@ -454,7 +460,7 @@ router.get("/:id/floors", async (req, res) => {
 // PUT /api/block-master/:id/unit-type-specs — full replace for this block
 // Receives an array of {UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt,
 // SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt}.
-router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id/unit-type-specs", requirePageRight(PAGE, "edit"), async (req, res) => {
   const blockId = parseInt(req.params.id, 10);
   if (!Number.isFinite(blockId)) return res.status(400).json({ error: "Invalid block id" });
   const specs = req.body;

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Home, Pencil, Trash2, LayoutGrid, RotateCcw, CheckCircle2, Plus } from "lucide-react";
+import { Pencil, Trash2, LayoutGrid, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SheetMark } from "@/components/sheet/Sheet";
+import { RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, INP } from "./customers/config";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type { LayoutType } from "@/api/unitBhkConfigApi";
 import { VillaRoomPlanEditor } from "./VillaRoomPlanEditor";
@@ -32,9 +33,9 @@ export const villaTypesKey = (projectId: number | string | null | undefined) =>
 
 const sqft = (v?: number | null) => (v == null ? "—" : Number(v).toLocaleString("en-IN"));
 
-const inputCls =
-  "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
-const labelCls = "mb-1.5 block text-xs font-medium text-muted-foreground";
+const inputCls = INP;
+const NUMC = "font-heading tabular-nums";
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 
 type Props = {
   open: boolean;
@@ -46,13 +47,17 @@ type Props = {
   selectedPlotIds: number[];
   selectedProjectId?: number | null;
   onPlotsChanged: () => void;
+  /** Plot Master's rights: adding a type needs create, changing one edit, removing one delete. */
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 };
 
 // Villa types are managed in place from Plot Master, as facings are: they have
 // no meaning outside a plotted layout.
 export function VillaTypesDialog({
   open, onOpenChange, projects, initialProjectId, layoutTypes,
-  selectedPlotIds, selectedProjectId, onPlotsChanged,
+  selectedPlotIds, selectedProjectId, onPlotsChanged, canCreate, canEdit, canDelete,
 }: Props) {
   const queryClient = useQueryClient();
   const [projectId, setProjectId] = useState<string>("");
@@ -80,7 +85,8 @@ export function VillaTypesDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const { data: types = [] } = useQuery({
+  // A failed load says so; it used to read "No villa types for this project yet".
+  const { data: types = [], isError: typesFailed, error: typesError } = useQuery({
     queryKey: [...villaTypesKey(projectId), "all"],
     queryFn: () => fetchVillaTypes(projectId, true),
     enabled: open && !!projectId,
@@ -166,45 +172,33 @@ export function VillaTypesDialog({
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
   };
 
+  const th = `!px-3 !py-2 text-left ${LBL}`;
+  const td = "!px-3 !py-2.5";
+  const formOpen = draft.Id != null ? canEdit : canCreate;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent accent="crm" className="max-w-5xl w-[95vw]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Home size={17} className="text-primary" /> Villa types
-          </DialogTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">
+      <DialogContent className="max-w-5xl w-[95vw] rounded-none p-5 gap-4 max-h-[92vh] overflow-y-auto thin-scroll" style={{ border: RULE }}>
+        <div className="pb-3" style={{ borderBottom: RULE }}>
+          <p className={LBL}>Plot Master</p>
+          <DialogTitle className="mt-1 font-heading text-lg font-bold tracking-tight">Villa types</DialogTitle>
+          <p className="mt-1 text-xs text-muted-foreground">
             The villa designs this layout offers. Converting plots to a villa takes its areas from the type planned on them.
           </p>
-        </DialogHeader>
-
-        {/* Project selector */}
-        <div className="w-full sm:max-w-sm">
-          <label className={labelCls}>Project</label>
-          <Select
-            value={projectId}
-            onValueChange={(value) => {
-              setProjectId(value);
-              setDraft({}); setPlanFor(null); setAssignTo("");
-            }}
-          >
-            <SelectTrigger className="h-10">
-              <SelectValue placeholder="Choose a project" />
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((p) => (
-                <SelectItem key={p.ProjectId} value={String(p.ProjectId)}>
-                  {p.ProjectName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
+        <label className="block space-y-1 w-full sm:max-w-sm">
+          <span className={`block ${LBL}`}>Project</span>
+          <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setDraft({}); setPlanFor(null); setAssignTo(""); }} className={inputCls}>
+            <option value="" disabled>Choose a project</option>
+            {projects.map((p) => <option key={p.ProjectId} value={String(p.ProjectId)}>{p.ProjectName}</option>)}
+          </select>
+        </label>
+
         {/* Fixed body height so choosing / clearing a project doesn't resize the card. */}
-        <div className="min-h-[30rem] grid content-start gap-5">
+        <div className="min-h-[30rem] grid content-start gap-4">
           {!projectId && (
-            <div className="min-h-[30rem] grid place-items-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+            <div className="min-h-[30rem] grid place-items-center border border-dashed border-foreground/30 text-sm text-muted-foreground">
               Choose a project to see and edit its villa types.
             </div>
           )}
@@ -213,102 +207,77 @@ export function VillaTypesDialog({
             <>
               {removedCount > 0 && (
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={showRemoved}
-                    onChange={(e) => setShowRemoved(e.target.checked)}
-                  />
-                  Show removed types ({removedCount})
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-foreground" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} />
+                  Show removed types (<span className="tabular-nums">{removedCount}</span>)
                 </label>
               )}
 
-              {/* ── Types table ─────────────────────────────────── */}
-              <div className="rounded-lg border border-border overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-muted-foreground text-xs">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">Code</th>
-                      <th className="px-3 py-2 text-left font-medium">Name</th>
-                      <th className="px-3 py-2 text-left font-medium">Layout</th>
-                      <th className="px-3 py-2 text-right font-medium">Base land</th>
-                      <th className="px-3 py-2 text-right font-medium">Built-up</th>
-                      <th className="px-3 py-2 text-right font-medium">Super built-up</th>
-                      <th className="px-3 py-2 text-right font-medium">Plots</th>
-                      <th className="px-3 py-2 text-right font-medium">Villas</th>
-                      <th className="px-3 py-2 text-right font-medium">Actions</th>
+              <div className="bg-card overflow-x-auto thin-scroll" style={{ border: RULE }}>
+                <table className="w-full text-sm min-w-[760px]">
+                  <thead>
+                    <tr style={{ borderBottom: RULE }}>
+                      <th className={th}>Code</th><th className={th}>Name</th><th className={th}>Layout</th>
+                      <th className={`${th} !text-right`}>Base land</th><th className={`${th} !text-right`}>Built-up</th><th className={`${th} !text-right`}>Super built-up</th>
+                      <th className={`${th} !text-right`}>Plots</th><th className={`${th} !text-right`}>Villas</th><th className={`${th} !text-right`}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {shownTypes.map((t) => (
-                      <tr
-                        key={t.Id}
-                        className={`border-t border-border transition-colors ${
-                          t.IsActive === false ? "opacity-50" : ""
-                        } ${draft.Id === t.Id ? "bg-primary/5" : "hover:bg-muted/20"}`}
-                      >
-                        <td className="px-3 py-2 font-mono text-xs font-semibold">{t.Code}</td>
-                        <td className="px-3 py-2">
-                          {t.Name}
-                          {t.IsActive === false && (
-                            <span className="ml-2 text-[0.6875rem] text-muted-foreground">Removed</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{t.HasFloorPlan ? <span className="text-primary font-medium">Floor plan · {t.PlanRoomCount} rooms · {t.PlanFloorCount} floor{t.PlanFloorCount === 1 ? "" : "s"}</span> : t.LayoutLabel || "—"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{sqft(t.BaseLandAreaSqFt)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums font-medium">{sqft(t.BuiltUpAreaSqFt)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{sqft(t.SuperBuiltUpAreaSqFt)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{t.PlotCount ?? 0}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{t.VillaCount ?? 0}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex justify-end gap-1">
-                            {t.IsActive === false ? (
-                              <button
-                                onClick={() => restore(t)}
-                                className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-border text-xs font-medium hover:bg-muted"
-                                title="Restore this villa type"
-                              >
-                                <RotateCcw size={13} /> Restore
-                              </button>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => { setPlanFor(planFor?.Id === t.Id ? null : t); setDraft({}); }}
-                                  className={`p-1.5 rounded transition-colors ${
-                                    planFor?.Id === t.Id
-                                      ? "bg-primary text-primary-foreground"
-                                      : "hover:bg-muted"
-                                  }`}
-                                  title="Room plan (floors &amp; rooms)"
-                                >
-                                  <LayoutGrid size={14} />
-                                </button>
-                                <button
-                                  onClick={() => startEditing(t)}
-                                  className={`p-1.5 rounded transition-colors ${
-                                    draft.Id === t.Id
-                                      ? "text-primary"
-                                      : "hover:bg-muted"
-                                  }`}
-                                  title="Edit villa type"
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  onClick={() => remove(t)}
-                                  title="Remove (blocked while unconverted plots plan it)"
-                                  className="p-1.5 rounded text-destructive hover:bg-destructive/10 transition-colors"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {shownTypes.length === 0 && (
+                    {typesFailed ? (
+                      <tr><td colSpan={9} className={`${td} text-center text-xs text-destructive`}>{(typesError as Error)?.message}</td></tr>
+                    ) : shownTypes.map((t) => {
+                      const on = draft.Id === t.Id || planFor?.Id === t.Id;
+                      return (
+                        <tr key={t.Id} className={`${t.IsActive === false ? "opacity-50" : ""} ${on ? "bg-primary/5" : "hover:bg-primary/5"}`}
+                          style={{ borderBottom: RULE_SOFT, boxShadow: on ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
+                          <td className={`${td} font-heading text-xs font-semibold tabular-nums`}>{t.Code}</td>
+                          <td className={td}>
+                            {t.Name}
+                            {t.IsActive === false && <span className="ml-2"><SheetMark text="Removed" tone="draft" /></span>}
+                          </td>
+                          <td className={`${td} text-xs text-muted-foreground`}>
+                            {t.HasFloorPlan
+                              ? <span className="text-foreground">Floor plan · <span className="tabular-nums">{t.PlanRoomCount}</span> rooms · <span className="tabular-nums">{t.PlanFloorCount}</span> floor{t.PlanFloorCount === 1 ? "" : "s"}</span>
+                              : t.LayoutLabel || "—"}
+                          </td>
+                          <td className={`${td} text-right ${NUMC}`}>{sqft(t.BaseLandAreaSqFt)}</td>
+                          <td className={`${td} text-right ${NUMC} font-semibold`}>{sqft(t.BuiltUpAreaSqFt)}</td>
+                          <td className={`${td} text-right ${NUMC}`}>{sqft(t.SuperBuiltUpAreaSqFt)}</td>
+                          <td className={`${td} text-right ${NUMC} text-muted-foreground`}>{t.PlotCount ?? 0}</td>
+                          <td className={`${td} text-right ${NUMC} text-muted-foreground`}>{t.VillaCount ?? 0}</td>
+                          <td className={td}>
+                            <div className="flex justify-end gap-1">
+                              {t.IsActive === false ? (
+                                canEdit && (
+                                  <button onClick={() => restore(t)} className={`${KEY_LINE} h-7 px-2.5`} title="Restore this villa type"><RotateCcw size={12} /> Restore</button>
+                                )
+                              ) : (
+                                <>
+                                  <button onClick={() => { setPlanFor(planFor?.Id === t.Id ? null : t); setDraft({}); }} title="Room plan (floors & rooms)"
+                                    className={`w-7 h-7 inline-flex items-center justify-center border transition-colors ${planFor?.Id === t.Id ? "bg-foreground text-card border-foreground" : "border-transparent hover:border-foreground"}`}>
+                                    <LayoutGrid size={13} />
+                                  </button>
+                                  {canEdit && (
+                                    <button onClick={() => startEditing(t)} title="Edit villa type"
+                                      className={`w-7 h-7 inline-flex items-center justify-center border transition-colors ${draft.Id === t.Id ? "border-foreground" : "border-transparent hover:border-foreground"}`}>
+                                      <Pencil size={13} />
+                                    </button>
+                                  )}
+                                  {canDelete && (
+                                    <button onClick={() => remove(t)} title="Remove (blocked while unconverted plots plan it)"
+                                      className="w-7 h-7 inline-flex items-center justify-center border border-transparent text-destructive hover:border-destructive">
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!typesFailed && shownTypes.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="p-6 text-center text-muted-foreground">
+                        <td colSpan={9} className={`${td} text-center text-muted-foreground`}>
                           {removedCount > 0
                             ? `No active villa types — ${removedCount} removed (tick "Show removed types" to restore them).`
                             : "No villa types for this project yet."}
@@ -319,234 +288,103 @@ export function VillaTypesDialog({
                 </table>
               </div>
 
-              {/* ── Room plan editor (inline, below table) ──────── */}
+              {/* Room plan editor, below the table. */}
               {planFor && (
                 <VillaRoomPlanEditor
                   type={planFor}
                   siblings={types.filter((x) => x.Id !== planFor.Id && x.IsActive !== false)}
-                  canEdit
+                  canEdit={canEdit}
                   onSaved={() => { refresh(); onPlotsChanged(); }}
                   onClose={() => setPlanFor(null)}
                 />
               )}
 
-              {/* ── Add / Edit form ──────────────────────────────── */}
-              <div
-                ref={formRef}
-                className={`rounded-lg border p-4 space-y-4 transition-colors ${
-                  draft.Id != null
-                    ? "border-amber-400/60 bg-amber-500/[0.04]"
-                    : "border-border"
-                }`}
-              >
-                {/* Edit mode banner */}
-                {draft.Id != null ? (
-                  <div className="flex items-center justify-between gap-3 rounded-md bg-amber-500/10 border border-amber-400/40 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Pencil size={13} className="text-amber-600 shrink-0" />
-                      <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                        Editing: {draft.Code} — {draft.Name}
-                      </span>
+              {/* Add / edit */}
+              {formOpen && (
+                <section ref={formRef} className="bg-card" style={{ border: RULE, boxShadow: draft.Id != null ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
+                  <header className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2" style={{ borderBottom: RULE_SOFT }}>
+                    <span className={HEAD}>{draft.Id != null ? `Editing ${draft.Code} — ${draft.Name}` : "Add a villa type"}</span>
+                    {draft.Id != null && canCreate && <button onClick={() => setDraft({})} className={`${KEY_LINE} h-7 px-2.5`}>Add new instead</button>}
+                  </header>
+                  <div className="p-4 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <label className="block space-y-1"><span className={`block ${LBL}`}>Code <span className="text-destructive">*</span></span>
+                        <input value={draft.Code || ""} maxLength={20} onChange={setField("Code")} placeholder="e.g. T4" className={`${inputCls} font-heading`} /></label>
+                      <label className="block space-y-1"><span className={`block ${LBL}`}>Name <span className="text-destructive">*</span></span>
+                        <input value={draft.Name || ""} maxLength={100} onChange={setField("Name")} placeholder="e.g. Villa Type 4" className={inputCls} /></label>
+                      <label className="block space-y-1"><span className={`block ${LBL}`}>Sort order</span>
+                        <input type="number" min="0" value={draft.SortOrder ?? ""} onChange={setField("SortOrder")} placeholder="100" className={`${inputCls} tabular-nums`} /></label>
                     </div>
-                    <button
-                      onClick={() => setDraft({})}
-                      className="text-xs border border-border rounded px-2.5 py-1 hover:bg-muted transition-colors"
-                    >
-                      Cancel / Add new instead
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-                      <Plus size={14} />
-                    </span>
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      Add a villa type
-                    </p>
-                  </div>
-                )}
 
-                {/* Row 1: Code · Name · Sort order */}
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className={labelCls}>Code *</label>
-                    <input
-                      value={draft.Code || ""}
-                      maxLength={20}
-                      onChange={setField("Code")}
-                      placeholder="e.g. T4"
-                      className={`${inputCls} font-mono`}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Name *</label>
-                    <input
-                      value={draft.Name || ""}
-                      maxLength={100}
-                      onChange={setField("Name")}
-                      placeholder="e.g. Villa Type 4"
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Sort order</label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={draft.SortOrder ?? ""}
-                      onChange={setField("SortOrder")}
-                      placeholder="100"
-                      className={inputCls}
-                    />
-                  </div>
-                </div>
-
-                {/* Row 2: rooms — from the floor plan when the type has one */}
-                {draft.Id != null && draft.HasFloorPlan ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
-                    <p className="text-sm">
-                      <span className="font-medium">Rooms: from the floor plan</span>
-                      <span className="text-muted-foreground"> — {draft.PlanRoomCount} rooms on {draft.PlanFloorCount} floor{draft.PlanFloorCount === 1 ? "" : "s"}</span>
-                    </p>
-                    <button type="button" onClick={() => { const t0 = types.find((x) => x.Id === draft.Id); if (t0) { setPlanFor(t0); setDraft({}); } }}
-                      className="inline-flex items-center gap-1.5 h-8 px-3 text-xs font-semibold border border-border rounded-lg bg-background hover:bg-muted">
-                      <LayoutGrid size={13} /> Edit rooms by floor
-                    </button>
-                  </div>
-                ) : (
-                <div>
-                  <label className={labelCls}>Room layout <span className="normal-case font-normal text-muted-foreground">— or plan rooms floor by floor with the <LayoutGrid size={11} className="inline -mt-0.5" /> Rooms button once the type is added</span></label>
-                  <Select
-                    value={draft.LayoutTypeId != null ? String(draft.LayoutTypeId) : "__none__"}
-                    onValueChange={(value) => {
-                      const id = value === "__none__" ? null : Number(value);
-                      const label = id != null
-                        ? layoutTypes.find((l) => l.id === id)?.label ?? null
-                        : null;
-                      setDraft((d) => ({ ...d, LayoutTypeId: id, LayoutLabel: label }));
-                    }}
-                  >
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Not set" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Not set</SelectItem>
-                      {layoutTypes
-                        .filter((l) => l.roomCount > 0 || l.id === Number(draft.LayoutTypeId))
-                        .map((l) => (
-                          <SelectItem key={l.id} value={String(l.id)}>{l.label}</SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                )}
-                {/* Row 3: Area fields */}
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className={labelCls}>Base land area (sq ft)</label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={draft.BaseLandAreaSqFt ?? ""}
-                      onChange={setField("BaseLandAreaSqFt")}
-                      className={`${inputCls} tabular-nums`}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Built-up area (sq ft) *</label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={draft.BuiltUpAreaSqFt ?? ""}
-                      onChange={setField("BuiltUpAreaSqFt")}
-                      className={`${inputCls} tabular-nums`}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Super built-up (sq ft)</label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={draft.SuperBuiltUpAreaSqFt ?? ""}
-                      onChange={setField("SuperBuiltUpAreaSqFt")}
-                      placeholder="Optional"
-                      className={`${inputCls} tabular-nums`}
-                    />
-                  </div>
-                </div>
-
-                {draft.Id != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Changes apply to future conversions only. Villas already built keep their current areas.
-                  </p>
-                )}
-
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-2 pt-1 border-t border-border">
-                  {draft.Id != null && (
-                    <button
-                      onClick={() => setDraft({})}
-                      className="h-10 px-4 text-sm border border-border rounded-lg hover:bg-muted"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                  <button
-                    onClick={save}
-                    disabled={saving}
-                    className="h-10 px-5 text-sm font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40 inline-flex items-center gap-2"
-                  >
-                    <CheckCircle2 size={15} />
-                    {saving ? "Saving…" : draft.Id != null ? "Update villa type" : "Add villa type"}
-                  </button>
-                </div>
-              </div>
-
-              {/* ── Assign to ticked plots ───────────────────────── */}
-              <div className="rounded-lg border border-border bg-muted/20 p-4">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                  Plan a villa type on selected plots
-                </p>
-                {canAssign ? (
-                  <div className="flex flex-wrap items-end gap-3">
-                    <div className="flex-1 min-w-[220px]">
-                      <label className={labelCls}>
-                        Type to plan on the {selectedPlotIds.length} ticked plot{selectedPlotIds.length === 1 ? "" : "s"}
+                    {/* Rooms — from the floor plan when the type has one. */}
+                    {draft.Id != null && draft.HasFloorPlan ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 bg-primary/5" style={{ border: RULE_SOFT }}>
+                        <p className="text-sm">
+                          <span className="font-medium">Rooms: from the floor plan</span>
+                          <span className="text-muted-foreground"> — <span className="tabular-nums">{draft.PlanRoomCount}</span> rooms on <span className="tabular-nums">{draft.PlanFloorCount}</span> floor{draft.PlanFloorCount === 1 ? "" : "s"}</span>
+                        </p>
+                        <button type="button" onClick={() => { const t0 = types.find((x) => x.Id === draft.Id); if (t0) { setPlanFor(t0); setDraft({}); } }} className={`${KEY_LINE} h-8 px-3`}>
+                          <LayoutGrid size={12} /> Edit rooms by floor
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="block space-y-1">
+                        <span className={`block ${LBL}`}>Room layout <span className="normal-case tracking-normal font-normal">— or plan rooms floor by floor with the room-plan key once the type is added</span></span>
+                        <select value={draft.LayoutTypeId != null ? String(draft.LayoutTypeId) : ""} className={inputCls}
+                          onChange={(e) => {
+                            const id = e.target.value ? Number(e.target.value) : null;
+                            const label = id != null ? layoutTypes.find((l) => l.id === id)?.label ?? null : null;
+                            setDraft((d) => ({ ...d, LayoutTypeId: id, LayoutLabel: label }));
+                          }}>
+                          <option value="">Not set</option>
+                          {layoutTypes.filter((l) => l.roomCount > 0 || l.id === Number(draft.LayoutTypeId)).map((l) => <option key={l.id} value={String(l.id)}>{l.label}</option>)}
+                        </select>
                       </label>
-                      <Select
-                        value={assignTo || "__clear__"}
-                        onValueChange={(v) => setAssignTo(v === "__clear__" ? "" : v)}
-                      >
-                        <SelectTrigger className="h-10">
-                          <SelectValue placeholder="No villa type (clear)" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__clear__">No villa type (clear)</SelectItem>
-                          {activeTypes.map((t) => (
-                            <SelectItem key={t.Id} value={String(t.Id)}>
-                              {t.Code} — {t.Name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    )}
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {([["BaseLandAreaSqFt", "Base land area (sq ft)", ""], ["BuiltUpAreaSqFt", "Built-up area (sq ft)", "*"], ["SuperBuiltUpAreaSqFt", "Super built-up (sq ft)", ""]] as const).map(([key, label, req]) => (
+                        <label key={key} className="block space-y-1"><span className={`block ${LBL}`}>{label}{req && <span className="text-destructive"> *</span>}</span>
+                          <input type="number" min="0" step="0.01" value={draft[key] ?? ""} onChange={setField(key)} placeholder={req ? "" : "Optional"} className={`${inputCls} ${NUMC} text-right`} /></label>
+                      ))}
                     </div>
-                    <button
-                      onClick={assign}
-                      className="h-10 px-4 text-sm font-semibold border border-primary text-primary rounded-lg hover:bg-primary hover:text-primary-foreground transition-colors inline-flex items-center gap-1.5"
-                    >
-                      <CheckCircle2 size={15} /> Apply to plots
-                    </button>
+                    {draft.Id != null && <p className="text-xs text-muted-foreground">Changes apply to future conversions only. Villas already built keep their current areas.</p>}
+                    <div className="flex items-center justify-end gap-2 pt-3" style={{ borderTop: RULE_SOFT }}>
+                      {draft.Id != null && <button onClick={() => setDraft({})} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>}
+                      <button onClick={save} disabled={saving} className={`${KEY_INK} h-9 px-4`}>
+                        {saving ? "Saving…" : draft.Id != null ? "Update villa type" : "Add villa type"}
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Tick plots of this project in Plot Master to plan a villa type on them.
-                    {selectedPlotIds.length > 0 &&
-                      selectedProjectId != null &&
-                      String(selectedProjectId) !== projectId && (
-                        <span className="ml-1 font-medium text-amber-600 dark:text-amber-400">
-                          (The ticked plots belong to a different project than the one selected above.)
-                        </span>
-                      )}
-                  </p>
-                )}
-              </div>
+                </section>
+              )}
+
+              {/* Plan a type on the ticked plots. */}
+              {canEdit && (
+                <section className="bg-card" style={{ border: RULE }}>
+                  <header className="px-4 py-2.5" style={{ borderBottom: RULE_SOFT }}><span className={HEAD}>Plan a villa type on selected plots</span></header>
+                  <div className="p-4">
+                    {canAssign ? (
+                      <div className="flex flex-wrap items-end gap-3">
+                        <label className="block space-y-1 flex-1 min-w-[220px]">
+                          <span className={`block ${LBL}`}>Type to plan on the <span className="tabular-nums">{selectedPlotIds.length}</span> ticked plot{selectedPlotIds.length === 1 ? "" : "s"}</span>
+                          <select value={assignTo} onChange={(e) => setAssignTo(e.target.value)} className={inputCls}>
+                            <option value="">No villa type (clear)</option>
+                            {activeTypes.map((t) => <option key={t.Id} value={String(t.Id)}>{t.Code} — {t.Name}</option>)}
+                          </select>
+                        </label>
+                        <button onClick={assign} className={`${KEY_INK} h-9 px-4`}>Apply to plots</button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Tick plots of this project in Plot Master to plan a villa type on them.
+                        {selectedPlotIds.length > 0 && selectedProjectId != null && String(selectedProjectId) !== projectId && (
+                          <span className="ml-1 font-medium text-foreground">(The ticked plots belong to a different project than the one selected above.)</span>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
             </>
           )}
         </div>

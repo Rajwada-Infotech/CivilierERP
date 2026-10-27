@@ -1,54 +1,53 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { translateError } from "@/lib/translateError";
-import { RefreshButton } from "@/components/ui/RefreshButton";
-import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, Trash2, Pencil, ListOrdered, Lock } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
 const API = "/api/crm/milestone-master";
+const NUM = "font-heading tabular-nums";
 
+// A failed load says so; it used to read "No milestones defined".
 async function fetchAll(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+  const r = await fetchWithAuth(API);
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(data?.error || `Could not load the milestones (${r.status}).`);
+  return Array.isArray(data) ? data : [];
 }
 
 const CrmMilestoneMaster: React.FC = () => {
   const qc = useQueryClient();
-  usePageRights("crm-milestone-master");
+  // The rights used to be fetched and ignored: New, Edit and Delete showed to everyone.
+  const rights = usePageRights("crm-milestone-master");
+  const ask = useSheetAsk();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [sortOrder, setSortOrder] = useState("");
+  const [isActive, setIsActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [isActive, setIsActive] = useState(true);
-  // Opens locked (read-only) whenever editing an existing row — "New
-  // Milestone" opens unlocked since there's nothing existing to protect.
+  // An existing milestone opens locked; Edit unlocks it. A new one opens unlocked.
   const [locked, setLocked] = useState(false);
-  // Asked on the sheet (components/sheet/SheetAsk), in place of window.confirm.
-  const ask = useSheetAsk();
-  const requestConfirm = (msg: string, onOk: () => void) => { void ask.confirm(msg, { title: "Confirm Delete", okLabel: "Delete", danger: true }).then((yes) => { if (yes) onOk(); }); };
-  const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"" | "active" | "inactive">("");
 
-  const { data: milestones = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: milestones = [], isLoading, isFetching, refetch, isError, error } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchAll, staleTime: 30_000 });
 
-  const resetForm = () => {
-    setEditingId(null);
-    setName(""); setSortOrder("");
-    setLocked(false);
-    setIsActive(true);
-  };
-
+  const resetForm = () => { setEditingId(null); setName(""); setSortOrder(""); setLocked(false); setIsActive(true); };
+  const close = () => { setDialogOpen(false); resetForm(); };
+  const openNew = () => { resetForm(); setDialogOpen(true); };
   const openEdit = (m: any) => {
     setEditingId(m.Id);
     setName(m.Name);
-    setSortOrder(String(m.SortOrder));
+    setSortOrder(String(m.SortOrder ?? ""));
     setIsActive(m.IsActive !== false && m.IsActive !== 0);
     setLocked(true);
     setDialogOpen(true);
@@ -62,18 +61,12 @@ const CrmMilestoneMaster: React.FC = () => {
       const res = await fetchWithAuth(isEdit ? `${API}/${editingId}` : API, {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          Name: name.trim(),
-          SortOrder: sortOrder || 0,
-          IsActive: isActive,
-        }),
+        body: JSON.stringify({ Name: name.trim(), SortOrder: sortOrder || 0, IsActive: isActive }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save the milestone");
       toast.success(isEdit ? "Milestone updated" : "Milestone created");
-      setDialogOpen(false);
-      setLocked(true);
-      resetForm();
+      close();
       qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -82,133 +75,177 @@ const CrmMilestoneMaster: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    requestConfirm("Delete this milestone? This cannot be undone.", async () => {
-      setDeletingId(id);
-      try {
-        const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-        toast.success("Milestone deleted");
-        qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
-      } catch (e: any) {
-        toast.error(translateError(e.message));
-      } finally {
-        setDeletingId(null);
-      }
-    });
+  const handleDelete = async (m: any) => {
+    if (!(await ask.confirm(`Delete the milestone ${m.Name}? This cannot be undone.`, { okLabel: "Delete", danger: true }))) return;
+    setDeletingId(m.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/${m.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not delete the milestone");
+      toast.success("Milestone deleted");
+      qc.invalidateQueries({ queryKey: ["crm-milestone-master"] });
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setDeletingId(null);
+    }
   };
 
-  const milestoneColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "SortOrder", header: "Order", size: 80,
-      cell: (i) => <span className="text-xs text-muted-foreground flex items-center gap-1"><ListOrdered size={11} /> {i.getValue() as number}</span> },
-    { accessorKey: "Name", header: "Name", size: 180,
-      cell: (i) => <span className="font-medium text-foreground">{i.getValue() as string}</span> },
-    { accessorKey: "IsActive", header: "Status", size: 100,
-      cell: (i) => (
-        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${i.row.original.IsActive ? "text-green-600 bg-green-50 border-green-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
-          {i.row.original.IsActive ? "Active" : "Inactive"}
-        </span>
-      ) },
-    { id: "actions", header: "", size: 80, enableSorting: false,
-      cell: (i) => (
-        <div className="flex items-center gap-1.5">
-          <button onClick={() => openEdit(i.row.original)} className="p-1 text-muted-foreground hover:text-primary" title="Edit"><Pencil size={13} /></button>
-          <button onClick={() => handleDelete(i.row.original.Id)} disabled={deletingId === i.row.original.Id}
-            className="p-1 text-muted-foreground hover:text-red-600 disabled:opacity-40 disabled:pointer-events-none" title="Delete"><Trash2 size={13} /></button>
-        </div>
-      ) },
+  const active = milestones.filter((m) => m.IsActive).length;
+  const inUse = milestones.filter((m) => Number(m.PlanCount) > 0).length;
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return milestones.filter((m) => (!q || String(m.Name).toLowerCase().includes(q)) && (!status || (status === "active" ? m.IsActive : !m.IsActive)));
+  }, [milestones, search, status]);
+
+  const figures = [
+    { label: "Milestones", value: milestones.length, note: "in all", onClick: () => setStatus("") },
+    { label: "Active", value: active, note: "offered in the plan form", onClick: () => setStatus("active") },
+    { label: "In a plan", value: inUse, note: "can't be deleted — deactivate instead" },
+    { label: "Inactive", value: milestones.length - active, note: "kept for old plans", onClick: () => setStatus("inactive") },
   ];
+  const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
+  const TABS = [
+    { k: "" as const, l: "All", n: milestones.length },
+    { k: "active" as const, l: "Active", n: active },
+    { k: "inactive" as const, l: "Inactive", n: milestones.length - active },
+  ];
+  const th = `!px-4 !py-2.5 text-left ${LBL}`;
+  const td = "!px-4 !py-3";
+  const canWrite = editingId != null ? rights.canEdit : rights.canCreate;
 
   return (
     <>
+      {ask.node}
       <Breadcrumbs items={["Dashboard", "CRM", "Milestone Master"]} />
-      <CrmShell
-        title="CRM — Milestone Master"
-      subtitle="Reusable milestone steps — Payment Plan Master picks from this list instead of retyping names"
-      action={
-          <div className="flex items-center gap-3">
-          <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          <button onClick={() => { resetForm(); setDialogOpen(true); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
-          <Plus size={14} /> New Milestone
-        </button>
-        </div>
-      }
-    >
-      <DataTable
-        data={milestones as any[]}
-        columns={milestoneColumns}
-        loading={isLoading}
-        emptyMessage="No milestones defined"
-        className="rounded-xl border border-border overflow-hidden bg-card"
-      />
-
-      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
-        <DialogContent accent="crm" className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
-              <span>{editingId != null ? "Edit Milestone" : "New Milestone"}</span>
-              {editingId != null && locked && (
-                <button onClick={() => setLocked(false)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
-                  <Pencil size={12} /> Edit
-                </button>
-              )}
-            </DialogTitle>
-          </DialogHeader>
-          {editingId != null && locked && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
-              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
-            </div>
-          )}
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Name *</label>
-              <input type="text" value={name} readOnly={locked} onChange={(e) => setName(e.target.value)}
-                className={inputCls} />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground block mb-1">Sort Order</label>
-              <input type="number" value={sortOrder} readOnly={locked} onChange={(e) => setSortOrder(e.target.value)}
-                className={inputCls} />
-            </div>
-            <div className={`flex items-center justify-between rounded-lg border border-border px-3 py-2 ${locked ? "opacity-70" : ""}`}>
-              <div>
-                <div className="text-xs font-medium text-foreground">Status</div>
-                <p className="text-[0.6875rem] text-muted-foreground">
-                  {isActive ? "Active — offered in the payment plan step picker." : "Inactive — hidden from the picker, kept for history."}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => { if (!locked) setIsActive((v) => !v); }}
-                disabled={locked}
-                role="switch"
-                aria-checked={isActive}
-                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${isActive ? "bg-green-500" : "bg-muted-foreground/30"} ${locked ? "cursor-not-allowed" : ""}`}
-              >
-                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${isActive ? "translate-x-[18px]" : "translate-x-1"}`} />
-              </button>
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Setup"
+        title="Milestones"
+        subtitle="The steps a payment plan is built from — agreement, plinth, each slab, possession — in the order they fall due. Payment Plans picks from this list instead of retyping names."
+        action={
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
+            {rights.canCreate && <button onClick={openNew} className={`${KEY_INK} h-9 px-4`}><Plus size={13} /> New milestone</button>}
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+              {figures.map((x) => (
+                <div key={x.label}>
+                  {x.onClick ? <button onClick={x.onClick} className="label link">{x.label}</button> : <p className="label">{x.label}</p>}
+                  <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                  <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+                </div>
+              ))}
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="px-4 py-3 flex flex-wrap items-center gap-2.5" style={{ borderBottom: RULE }}>
+              <div className="inline-flex items-stretch flex-wrap" style={{ border: RULE }}>
+                {TABS.map((t) => (
+                  <button key={t.k || "all"} onClick={() => setStatus(t.k)} className={tabClass(status === t.k)} style={{ borderRight: RULE_SOFT }}>
+                    {t.l} <span className="tabular-nums">{t.n}</span>
+                  </button>
+                ))}
+              </div>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search milestones…"
+                className="h-9 flex-1 min-w-48 border border-foreground/40 focus:border-foreground bg-card px-3 text-xs text-foreground outline-none" />
+              {(search || status) && <button onClick={() => { setSearch(""); setStatus(""); }} className={`${KEY_LINE} h-9 px-3`}><X size={12} /> Clear</button>}
+            </div>
+            <div className="overflow-x-auto thin-scroll">
+              <table className="w-full text-sm min-w-[560px]">
+                <thead>
+                  <tr style={{ borderBottom: RULE }}>
+                    <th className={`${th} w-20`}>Order</th><th className={th}>Milestone</th><th className={`${th} !text-right`}>In plans</th><th className={th}>State</th><th className={`${th} !text-right`}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {isError ? (
+                    <tr><td colSpan={5} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                  ) : isLoading ? (
+                    <tr><td colSpan={5} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
+                  ) : shown.length === 0 ? (
+                    <tr><td colSpan={5} className={`${td} text-center text-muted-foreground`}>{milestones.length ? "No milestone matches." : "No milestones yet."}</td></tr>
+                  ) : shown.map((m) => {
+                    const used = Number(m.PlanCount) > 0;
+                    return (
+                      <tr key={m.Id} onClick={() => openEdit(m)} className={`cursor-pointer hover:bg-primary/5 transition-colors ${m.IsActive ? "" : "text-muted-foreground"}`} style={{ borderBottom: RULE_SOFT }}>
+                        <td className={`${td} ${NUM} text-xs`}>{m.SortOrder}</td>
+                        <td className={`${td} font-medium`}>{m.Name}</td>
+                        <td className={`${td} text-right ${NUM} text-xs`}>{Number(m.PlanCount) || "—"}</td>
+                        <td className={td}><SheetMark text={m.IsActive ? "Active" : "Inactive"} tone={m.IsActive ? "done" : "draft"} /></td>
+                        <td className={td} onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-1">
+                            {rights.canEdit && (
+                              <button onClick={() => { openEdit(m); setLocked(false); }} className="w-7 h-7 inline-flex items-center justify-center border border-transparent hover:border-foreground" title="Edit"><Pencil size={13} /></button>
+                            )}
+                            {/* Used by a plan: disabled with the reason, not hidden — the server refuses it anyway. */}
+                            {rights.canDelete && (
+                              <button onClick={() => handleDelete(m)} disabled={used || deletingId === m.Id}
+                                title={used ? `Used by ${m.PlanCount} payment plan(s) — deactivate it instead` : "Delete"}
+                                className="w-7 h-7 inline-flex items-center justify-center border border-transparent text-destructive hover:border-destructive disabled:opacity-35 disabled:hover:border-transparent"><Trash2 size={13} /></button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </SheetShell>
+
+      <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) close(); }}>
+        <DialogContent className="max-w-sm rounded-none p-5 gap-4" style={{ border: RULE }}>
+          <div className="pb-3 flex items-start justify-between gap-3 pr-6" style={{ borderBottom: RULE }}>
+            <div className="min-w-0">
+              <p className={LBL}>Milestone</p>
+              <DialogTitle className="mt-1 font-heading text-lg font-bold tracking-tight">{editingId != null ? name || "Milestone" : "New milestone"}</DialogTitle>
+              {editingId != null && locked && <p className="mt-1 text-xs text-muted-foreground">Locked for viewing{rights.canEdit ? " — Edit to make changes." : "."}</p>}
+            </div>
+            {editingId != null && locked && rights.canEdit && (
+              <button onClick={() => setLocked(false)} className={`${KEY_LINE} h-8 px-3 shrink-0`}><Pencil size={12} /> Edit</button>
+            )}
+          </div>
+          <div className="space-y-3">
+            <label className="block space-y-1">
+              <span className={`block ${LBL}`}>Name <span className="text-destructive">*</span></span>
+              <input value={name} readOnly={locked} onChange={(e) => setName(e.target.value)} className={INP} />
+            </label>
+            <label className="block space-y-1">
+              <span className={`block ${LBL}`}>Order</span>
+              <input type="number" value={sortOrder} readOnly={locked} onChange={(e) => setSortOrder(e.target.value)} className={`${INP} font-heading tabular-nums`} />
+            </label>
+            <button type="button" role="switch" aria-checked={isActive} disabled={locked} onClick={() => setIsActive((v) => !v)}
+              className="flex items-start gap-3 text-left disabled:opacity-60 disabled:cursor-not-allowed">
+              <span className={`mt-0.5 relative h-4 w-7 shrink-0 border border-foreground transition-colors ${isActive ? "bg-foreground" : "bg-card"}`}>
+                <span className={`absolute top-[2px] h-2.5 w-2.5 transition-all ${isActive ? "left-[14px] bg-card" : "left-[2px] bg-foreground"}`} />
+              </span>
+              <span className="text-xs">
+                <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]">Status</span>
+                <span className="text-muted-foreground"> — {isActive ? "Active: offered in the payment plan form." : "Inactive: hidden from the form, kept for old plans."}</span>
+              </span>
+            </button>
+          </div>
+          <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE }}>
             {editingId != null && locked ? (
-              <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+              <button onClick={close} className={`${KEY_LINE} h-9 px-4`}>Done</button>
             ) : (
               <>
-                <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                  {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
-                </button>
+                <button onClick={close} className={`${KEY_LINE} h-9 px-4`}>Cancel</button>
+                {canWrite && (
+                  <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-4`}>{saving ? "Saving…" : editingId != null ? "Save changes" : "Create milestone"}</button>
+                )}
               </>
             )}
           </div>
         </DialogContent>
       </Dialog>
-      {ask.node}
-      </CrmShell>
     </>
   );
 };
