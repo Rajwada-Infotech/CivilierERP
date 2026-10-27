@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
-import { FollowupShell } from "@/components/followup/FollowupShell";
+import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -13,6 +13,16 @@ import {
 } from "@/components/MasterPage";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
+const RULE = "1px solid hsl(var(--foreground))";
+const RULE_SOFT = "1px solid hsl(var(--foreground) / 0.15)";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const KEY_INK = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-foreground text-card border border-foreground";
+const INP = "w-full h-9 border border-foreground/40 focus:border-foreground bg-card px-2.5 text-sm text-foreground outline-none transition-colors";
+// A project can belong to several companies (company_ids); company_id is only its primary one. Filtering on it hid a
+// project from every company but the first.
+const companiesOf = (p: { company_id?: number; company_ids?: string }) =>
+  String(p.company_ids ?? p.company_id ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
 // ── Unit Type Spec row shape ──────────────────────────────────────────────────
 interface SpecRow {
@@ -29,7 +39,7 @@ interface SpecRow {
 //   • CrmProjectAutoSetupUnitTemplate (auto-setup configured types for this block)
 //   • UnitMaster (unit types that exist as actual inventory in this block)
 // Staff only fill in the area/rate values. Unit types are immutable here.
-const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
+const SpecPanel: React.FC<{ blocks: RecordWithId[]; canEdit: boolean }> = ({ blocks, canEdit }) => {
   const queryClient = useQueryClient();
   const [blockId, setBlockId] = React.useState<string>("");
   const [rows, setRows] = React.useState<SpecRow[]>([]);
@@ -37,7 +47,8 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
 
   const activeBlocks = blocks.filter((b) => b.isActive);
 
-  const { data: serverData, isFetching } = useQuery<{ unitTypes: string[]; specs: any[] }>({
+  // A failed load used to read "No unit types found for this block".
+  const { data: serverData, isFetching, isError, error } = useQuery<{ unitTypes: string[]; specs: any[] }>({
     queryKey: ["block-unit-type-specs", blockId],
     queryFn: async () => {
       if (!blockId) return { unitTypes: [], specs: [] };
@@ -90,7 +101,7 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error((await res.json()).error || "Failed to save specs");
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Failed to save specs");
     },
     onSuccess: () => {
       toast.success("Specs saved!");
@@ -113,99 +124,84 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
       step={0.01}
       placeholder="—"
       value={rows[idx][field]}
+      readOnly={!canEdit}
       onChange={(e) => updateRow(idx, field, e.target.value)}
-      className="w-full bg-transparent border-b border-border focus:outline-none focus:border-primary text-sm py-0.5 tabular-nums text-right"
+      className={`${INP} !h-8 font-heading tabular-nums text-right read-only:bg-muted/30 read-only:border-foreground/20`}
     />
   );
 
+  const th = `!px-3 !py-2.5 text-left whitespace-nowrap ${LBL}`;
+  const sample = rows.find((r) => r.superBuiltUpArea && r.baseRate);
   return (
-    <div className="mb-6 rounded-xl border border-border bg-card p-5 shadow-sm">
-      <h3 className="text-base font-semibold mb-1">Unit Type Area Specifications</h3>
-      <p className="text-xs text-muted-foreground mb-4">
-        RERA area breakdown and base rate per unit type, per block. Unit types are auto-detected from Auto Setup and existing inventory — set the areas here once and every unit in this block inherits them.
-      </p>
+    <section className="bg-card" style={{ border: RULE }}>
+      <header className="px-4 py-3" style={{ borderBottom: RULE }}>
+        <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Unit type area specifications</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          RERA area breakdown and base rate per unit type, per block. Unit types are picked up from Auto Setup and existing inventory — set the areas here once and every unit in this block inherits them.
+        </p>
+      </header>
+      <div className="p-4 space-y-4">
+        <label className="flex flex-wrap items-center gap-3">
+          <span className={LBL}>Block</span>
+          <select value={blockId} onChange={(e) => { setBlockId(e.target.value); setDirty(false); }} className={`${INP} !w-auto min-w-0 sm:min-w-[260px]`}>
+            <option value="">— choose a block —</option>
+            {activeBlocks.map((b) => (
+              <option key={b._id} value={b._id}>{String(b.projectName ?? "")} / {String(b.blockName ?? "")}</option>
+            ))}
+          </select>
+          {isFetching && <span className="text-xs text-muted-foreground">Loading…</span>}
+        </label>
 
-      <div className="mb-4 flex items-center gap-3">
-        <label className="text-sm font-medium whitespace-nowrap">Select Block</label>
-        <select
-          value={blockId}
-          onChange={(e) => { setBlockId(e.target.value); setDirty(false); }}
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary min-w-0 sm:min-w-[220px]"
-        >
-          <option value="">— choose a block —</option>
-          {activeBlocks.map((b) => (
-            <option key={b._id} value={b._id}>
-              {String(b.projectName ?? "")} / {String(b.blockName ?? "")}
-            </option>
-          ))}
-        </select>
-        {isFetching && <span className="text-xs text-muted-foreground">Loading…</span>}
-      </div>
-
-      {blockId && !isFetching && (
-        <>
-          {rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground italic py-4 text-center">
-              No unit types found for this block. Configure unit types in Auto Project Setup first.
-            </p>
+        {blockId && isError && <p className="text-xs text-destructive">{(error as Error)?.message || "Failed to fetch specs"}</p>}
+        {blockId && !isFetching && !isError && (
+          rows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No unit types found for this block. Configure unit types in Auto Project Setup first.</p>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
+              <div className="overflow-x-auto thin-scroll" style={{ border: RULE }}>
+                <table className="w-full text-sm min-w-[680px]">
                   <thead>
-                    <tr className="border-b border-border text-muted-foreground text-xs uppercase">
-                      <th className="text-left py-2 pr-4 font-medium">Unit Type</th>
-                      <th className="text-right py-2 px-3 font-medium">Carpet (sqft)</th>
-                      <th className="text-right py-2 px-3 font-medium">Built-up (sqft)</th>
-                      <th className="text-right py-2 px-3 font-medium">SBU (sqft)</th>
-                      <th className="text-right py-2 px-3 font-medium">Terrace (sqft)</th>
-                      <th className="text-right py-2 px-3 font-medium">Base Rate (₹/sqft)</th>
+                    <tr style={{ borderBottom: RULE }}>
+                      <th className={th}>Unit type</th>
+                      <th className={`${th} !text-right`}>Carpet sq ft</th>
+                      <th className={`${th} !text-right`}>Built-up sq ft</th>
+                      <th className={`${th} !text-right`}>Super built-up sq ft</th>
+                      <th className={`${th} !text-right`}>Terrace sq ft</th>
+                      <th className={`${th} !text-right`}>Base rate ₹ / sq ft</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((row, idx) => (
-                      <tr key={row.unitType} className="border-b border-border/50 hover:bg-muted/30">
-                        <td className="py-2 pr-4 font-medium text-sm">{row.unitType}</td>
-                        <td className="py-2 px-3">{numInput(idx, "carpetArea")}</td>
-                        <td className="py-2 px-3">{numInput(idx, "builtUpArea")}</td>
-                        <td className="py-2 px-3">{numInput(idx, "superBuiltUpArea")}</td>
-                        <td className="py-2 px-3">{numInput(idx, "openTerrace")}</td>
-                        <td className="py-2 px-3">{numInput(idx, "baseRate")}</td>
+                      <tr key={row.unitType} style={{ borderBottom: RULE_SOFT }}>
+                        <td className="!px-3 !py-2 font-medium">{row.unitType}</td>
+                        <td className="!px-3 !py-2">{numInput(idx, "carpetArea")}</td>
+                        <td className="!px-3 !py-2">{numInput(idx, "builtUpArea")}</td>
+                        <td className="!px-3 !py-2">{numInput(idx, "superBuiltUpArea")}</td>
+                        <td className="!px-3 !py-2">{numInput(idx, "openTerrace")}</td>
+                        <td className="!px-3 !py-2">{numInput(idx, "baseRate")}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-
-              <div className="mt-3 flex items-center justify-between">
-                <div>
-                  {rows.some((r) => r.superBuiltUpArea && r.baseRate) && (() => {
-                    const r = rows.find((r) => r.superBuiltUpArea && r.baseRate)!;
-                    const price = Math.round(parseFloat(r.superBuiltUpArea) * parseFloat(r.baseRate));
-                    return (
-                      <p className="text-xs text-muted-foreground">
-                        {r.unitType}: ₹{parseFloat(r.baseRate).toLocaleString("en-IN")}/sqft × {r.superBuiltUpArea} sqft = ₹{price.toLocaleString("en-IN")}
-                      </p>
-                    );
-                  })()}
-                </div>
-                <div className="flex items-center gap-3">
-                  {dirty && <span className="text-xs text-muted-foreground italic">Unsaved changes</span>}
-                  <button
-                    type="button"
-                    disabled={!dirty || saveMutation.isPending}
-                    onClick={() => saveMutation.mutate()}
-                    className="px-4 py-1.5 rounded-md btn-module text-white text-sm font-medium disabled:opacity-40 transition-colors"
-                  >
-                    {saveMutation.isPending ? "Saving…" : "Save Specs"}
-                  </button>
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {sample && <>{sample.unitType}: <span className="font-heading tabular-nums">₹{parseFloat(sample.baseRate).toLocaleString("en-IN")}</span>/sq ft × <span className="font-heading tabular-nums">{sample.superBuiltUpArea}</span> sq ft = <span className="font-heading tabular-nums text-foreground">₹{Math.round(parseFloat(sample.superBuiltUpArea) * parseFloat(sample.baseRate)).toLocaleString("en-IN")}</span></>}
+                </p>
+                {canEdit && (
+                  <div className="flex items-center gap-3">
+                    {dirty && <SheetMark text="Unsaved changes" tone="waiting" />}
+                    <button type="button" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()} className={`${KEY_INK} h-9 px-4`}>
+                      {saveMutation.isPending ? "Saving…" : "Save specs"}
+                    </button>
+                  </div>
+                )}
               </div>
             </>
-          )}
-        </>
-      )}
-    </div>
+          )
+        )}
+      </div>
+    </section>
   );
 };
 
@@ -247,11 +243,11 @@ const fields: FieldDef[] = [
     disabledWhen: (form) => !form?.companyId,
     disabledPlaceholder: "Select a Company first",
     optionsProvider: (_data, _currentId, form) => {
-      const projects: { id: number; name: string; company_id: number }[] = (form?.__projects as any) ?? [];
+      const projects: { id: number; name: string; company_id: number; company_ids?: string }[] = (form?.__projects as any) ?? [];
       const selectedCompany = form?.companyId as string | undefined;
       if (!selectedCompany) return [];
       return projects
-        .filter((p) => String(p.company_id) === selectedCompany)
+        .filter((p) => companiesOf(p).includes(selectedCompany))
         .map((p) => ({ value: String(p.id), label: p.name }));
     },
   },
@@ -282,15 +278,15 @@ const fields: FieldDef[] = [
       const plans = taggedForProject.length ? taggedForProject : allPlans;
       const selected: string[] = (value as string[]) || [];
       if (!projectId) {
-        return <p className="text-[0.6875rem] text-muted-foreground">Select a Project first.</p>;
+        return <p className="text-xs text-muted-foreground">Select a project first.</p>;
       }
       if (!plans.length) {
-        return <p className="text-[0.6875rem] text-muted-foreground">No active payment plans exist yet — create one in Payment Plan Master first.</p>;
+        return <p className="text-xs text-muted-foreground">No active payment plans exist yet — create one in Payment Plan Master first.</p>;
       }
       return (
         <div>
           {taggedForProject.length > 0 && (
-            <p className="text-[0.6875rem] text-muted-foreground mb-1.5">Showing this Project's tagged plans.</p>
+            <p className="text-xs text-muted-foreground mb-1.5">Showing this project&apos;s tagged plans.</p>
           )}
           <div className="flex flex-wrap gap-2">
             {plans.map((p) => {
@@ -303,7 +299,8 @@ const fields: FieldDef[] = [
                   onClick={() =>
                     onChange(isSelected ? selected.filter((x) => x !== id) : [...selected, id])
                   }
-                  className={`px-3 py-1 rounded-full text-xs font-heading border transition-all ${isSelected ? "btn-module text-white border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary"}`}
+                  aria-pressed={isSelected}
+                  className={`h-7 px-2.5 text-xs border transition-colors ${isSelected ? "bg-foreground text-card border-foreground" : "bg-card text-foreground border-foreground/30 hover:border-foreground"}`}
                 >
                   {p.PlanName}
                 </button>
@@ -368,7 +365,7 @@ const BlockMaster: React.FC = () => {
   // own Company -> Project chain.
   const { data: dropdownData } = useQuery<{
     companies: { id: number; name: string }[];
-    projects: { id: number; name: string; company_id: number }[];
+    projects: { id: number; name: string; company_id: number; company_ids?: string }[];
   }>({
     queryKey: ["business-dropdown"],
     queryFn: async () => {
@@ -432,7 +429,7 @@ const BlockMaster: React.FC = () => {
         body: JSON.stringify(toPayload(event.record)),
       });
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to add block");
+        throw new Error((await res.json().catch(() => ({}))).error || "Failed to add block");
       toast.success("Block added!");
     }
     if (event.action === "update") {
@@ -442,7 +439,7 @@ const BlockMaster: React.FC = () => {
         body: JSON.stringify(toPayload(event.record)),
       });
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to update block");
+        throw new Error((await res.json().catch(() => ({}))).error || "Failed to update block");
       toast.success("Block updated!");
     }
     if (event.action === "delete") {
@@ -450,86 +447,120 @@ const BlockMaster: React.FC = () => {
         method: "DELETE",
       });
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to delete block");
+        throw new Error((await res.json().catch(() => ({}))).error || "Failed to delete block");
       toast.success("Block deleted!");
     }
     await queryClient.invalidateQueries({ queryKey: ["block-master"] });
   };
 
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading blocks...</div>;
-  if (error)
-    return <div className="p-6 text-red-500">Failed to load blocks.</div>;
+  const active = mappedData.filter((r) => r.isActive).length;
+  const figures = [
+    { label: "Blocks", value: mappedData.length, note: "in your projects" },
+    { label: "Active", value: active, note: "offered for units and bookings" },
+    { label: "Locked", value: mappedData.filter((r) => r.lockBookingNo || r.lockHoldId != null).length, note: "a unit booked or on hold — can't be deleted" },
+    { label: "Inactive", value: mappedData.length - active, note: "kept on old records" },
+  ];
 
   return (
     <>
       <Breadcrumbs
         items={["Dashboard", "Follow-Up", "Setup", "Block Master"]}
       />
-      <FollowupShell title="Block Master">
-      <SpecPanel blocks={mappedData} />
-      <MasterPage
-        title="Block"
-        canCreate={rights.canCreate}
-        canEdit={rights.canEdit}
-        canDelete={rights.canDelete}
-        fields={fields}
-        columns={columns}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        externalFormPatch={formDataPatch}
-        externalFormPatchKey={`${allPaymentPlans.length}:${companies.length}:${projectsList.length}`}
-        onFieldChange={(form, fieldName) => {
-          // Changing Company invalidates whatever Project was picked under
-          // the old one — same reset unitMaster.js's own projectId->blockId
-          // change already does one tier down.
-          if (fieldName === "companyId") {
-            return { ...form, projectId: "" };
-          }
-          return form;
-        }}
-        // A Block with a Booked or OnHold Unit under it can't be deleted —
-        // matches the server-side guard in blockMaster.js exactly. Editing
-        // stays open (unlike Unit Master) since a rename/reassign here is
-        // live-joined project-wide rather than locked to this one row.
-        isDeleteLocked={(row) =>
-          row.lockBookingNo
-            ? `Has a Unit booked (${row.lockBookingNo as string})`
-            : row.lockHoldId != null
-              ? "Has a Unit on hold"
-              : null
-        }
-        exportConfig={{
-          title: "Block Master",
-          filename: "block-master",
-          columns: exportColumns,
-        }}
-        viewConfig={{
-          title: "Block Details",
-          fields: [
-            { key: "projectName", label: "Project" },
-            { key: "blockName", label: "Block Name" },
-            { key: "paymentPlanNames", label: "Payment Plans" },
-            { key: "status", label: "Status" },
-          ],
-        }}
-        onPrint={(row) => {
-          const win = window.open("", "_blank", "width=600,height=400");
-          if (!win) return;
-          win.document.write(safeHtml`
-            <html><head><title>Block — ${row.blockName}</title>
-            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Block Card</h2><div className="overflow-x-auto thin-scroll"><table>
-              <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
-              <tr><td>Block Name</td><td>${row.blockName || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
-            </table></div></body></html>
-          `);
-          win.document.close();
-          win.print();
-        }}
-      />
-      </FollowupShell>
+      <SheetShell
+        eyebrow="CivilierERP · CRM · Setup"
+        title="Blocks"
+        subtitle="Each project's towers and blocks: the payment plans they offer, their type, and the area and rate every unit type in them inherits."
+      >
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {figures.map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{isLoading ? "…" : x.value.toLocaleString("en-IN")}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading blocks…</p>
+        ) : error ? (
+          <div className="px-4 py-2.5 text-xs text-destructive bg-card" style={{ border: "1px solid hsl(var(--destructive))" }}>
+            {(error as Error)?.message || "Failed to load blocks."}
+          </div>
+        ) : (
+        <>
+          <SpecPanel blocks={mappedData} canEdit={rights.canEdit} />
+          <MasterPage
+            title="Block"
+            canCreate={rights.canCreate}
+            canEdit={rights.canEdit}
+            canDelete={rights.canDelete}
+            fields={fields}
+            columns={columns}
+            columnRenderers={{
+              status: (v) => <SheetMark text={v ? "Active" : "Inactive"} tone={v ? "done" : "draft"} />,
+              blockName: (v) => <span className="font-heading text-xs font-semibold">{String(v ?? "")}</span>,
+              typeName: (v) => <span className={v === "Not set" ? "text-muted-foreground" : ""}>{String(v ?? "")}</span>,
+            }}
+            initialData={mappedData}
+            onDataEvent={handleDataEvent}
+            externalFormPatch={formDataPatch}
+            externalFormPatchKey={`${allPaymentPlans.length}:${companies.length}:${projectsList.length}`}
+            onFieldChange={(form, fieldName) => {
+              // Changing Company invalidates whatever Project was picked under
+              // the old one — same reset unitMaster.js's own projectId->blockId
+              // change already does one tier down.
+              if (fieldName === "companyId") {
+                return { ...form, projectId: "" };
+              }
+              return form;
+            }}
+            // A Block with a Booked or OnHold Unit under it can't be deleted —
+            // matches the server-side guard in blockMaster.js exactly. Editing
+            // stays open (unlike Unit Master) since a rename/reassign here is
+            // live-joined project-wide rather than locked to this one row.
+            isDeleteLocked={(row) =>
+              row.lockBookingNo
+                ? `Has a Unit booked (${row.lockBookingNo as string})`
+                : row.lockHoldId != null
+                  ? "Has a Unit on hold"
+                  : null
+            }
+            exportConfig={rights.canExport ? {
+              title: "Block Master",
+              filename: "block-master",
+              columns: exportColumns,
+            } : undefined}
+            viewConfig={{
+              title: "Block Details",
+              fields: [
+                { key: "projectName", label: "Project" },
+                { key: "blockName", label: "Block Name" },
+                { key: "paymentPlanNames", label: "Payment Plans" },
+                { key: "typeName", label: "Type" },
+                { key: "status", label: "Status", render: (v) => <SheetMark text={v ? "Active" : "Inactive"} tone={v ? "done" : "draft"} /> },
+              ],
+            }}
+            onPrint={(row) => {
+              const win = window.open("", "_blank", "width=600,height=400");
+              if (!win) return;
+              win.document.write(safeHtml`
+                <html><head><title>Block — ${row.blockName}</title>
+                <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+                </head><body><h2>Block Card</h2><table>
+                  <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
+                  <tr><td>Block Name</td><td>${row.blockName || "—"}</td></tr>
+                  <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
+                </table></body></html>
+              `);
+              win.document.close();
+              win.print();
+            }}
+          />
+        </>
+        )}
+      </SheetShell>
     </>
   );
 };

@@ -131,8 +131,8 @@ async function syncPaymentPlanProjectTags(db, planId, projectIds) {
 // Master's tag picker and the Application wizard's dropdown); the plan
 // management page itself omits the param so it can still see/reactivate
 // inactive plans.
-// Unit Master tags units with plans from this list, so its users may read it too.
-router.get("/", requireAnyPageRight(["crm-payment-plans", "followup-unit-master"], "view"), async (req, res) => {
+// Unit and Block Master tag units / blocks with plans from this list, so their users may read it too.
+router.get("/", requireAnyPageRight(["crm-payment-plans", "followup-unit-master", "followup-block-master"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const showAll = req.query.showAll === "true";
