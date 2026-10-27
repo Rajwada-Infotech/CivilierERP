@@ -1038,7 +1038,9 @@
   text-overflow: ellipsis;
   vertical-align: middle;
 }
-:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"]):not(:is(.flex, .inline-flex, .grid)):not(:empty):not(:has(> .h-full)) {
+/* Inline-block for spans and pills only: a plain div / p is its own line (a number over its date), and inline
+   it ran into the line above. */
+:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"]):not(:is(.flex, .inline-flex, .grid)):not(:empty):not(:has(> .h-full)):not(:is(div, p):not(.rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"])) {
   display: inline-block;
 }
 /* Flex pills (icon + text): let the text part shrink and truncate too. */

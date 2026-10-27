@@ -368,7 +368,8 @@ router.get("/villa-offers", requirePageRight("crm-bookings", "view"), async (req
 // full customer record (Details tab needs "all means all" — every KYC/
 // contact/co-applicant field, not just the denormalized name/mobile on the
 // booking itself), and a payment summary.
-router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) => {
+// The Invoices page opens a booking's payment plan to invoice it, so its right reads a booking too.
+router.get("/:id", requireAnyPageRight(["crm-bookings", "crm-invoices"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1729,7 +1730,8 @@ async function requireInvoiceableCustomer(pool, bookingId) {
 }
 
 // GET /:id/invoices — every invoice generated for this booking
-router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req, res) => {
+// Invoicing from the Invoices page: these take its right as well as the Booking page's.
+router.get("/:id/invoices", requireAnyPageRight(["crm-bookings", "crm-invoices"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
@@ -1752,7 +1754,7 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
 // Visible to the customer in their portal immediately (no separate "send"
 // step — an invoice is a record of a real transaction, not a draft that
 // needs sign-off like the Agreement/Sales Deed documents).
-router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.post("/:id/invoices", requireAnyPageRight(["crm-bookings", "crm-invoices"], "edit"), async (req, res) => {
   const _diagStep = { step: "init" };
   try {
     const pool = getPool();
@@ -2156,7 +2158,7 @@ async function generateFinalInvoiceForBooking(pool, bookingId, actorUserId) {
 }
 
 // POST /:id/invoices/final — the one final invoice of a Non-Invoice booking.
-router.post("/:id/invoices/final", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.post("/:id/invoices/final", requireAnyPageRight(["crm-bookings", "crm-invoices"], "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -2175,7 +2177,7 @@ router.post("/:id/invoices/final", requirePageRight("crm-bookings", "edit"), asy
 // the list was loaded, booking no longer active) doesn't block the rest;
 // same "keep going, report what happened" shape as crmAgreements.js's
 // PUT /documents/bulk-review.
-router.post("/invoices/bulk-generate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.post("/invoices/bulk-generate", requireAnyPageRight(["crm-bookings", "crm-invoices"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -2217,7 +2219,7 @@ router.post("/invoices/bulk-generate", requirePageRight("crm-bookings", "edit"),
 // the CrmInvoice row's stored base64. Regenerates + re-persists it on the
 // fly if the row predates the PdfBase64 column (getInvoicePdfBuffer handles
 // that) instead of 404ing on a real, existing invoice.
-router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "view"), async (req, res) => {
+router.get("/:id/invoices/:invoiceId/pdf", requireAnyPageRight(["crm-bookings", "crm-invoices"], "view"), async (req, res) => {
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.id);
@@ -2254,7 +2256,7 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
 // enforcement. If this list ever changes, update the frontend copy too or
 // the button's visibility will silently drift from what the server allows.
 const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
-router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/invoices/:invoiceId/void", requireAnyPageRight(["crm-bookings", "crm-invoices"], "edit"), async (req, res) => {
   try {
     if (!INVOICE_VOID_ROLES.includes(normalizeRole(req.user?.role))) {
       return res.status(403).json({ error: "Only Finance / Accounts Head can void an invoice" });
