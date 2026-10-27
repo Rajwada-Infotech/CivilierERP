@@ -1,6 +1,6 @@
-// backend/routes/crmInvoices.js
+﻿// backend/routes/crmInvoices.js
 //
-// Standalone, cross-booking Invoice list — backs the dedicated Invoice menu
+// Standalone, cross-booking Invoice list â€” backs the dedicated Invoice menu
 // item. Actual invoice creation still happens per-booking via
 // crmBookings.js's POST /:id/invoices (demand-gated, no auto-generation
 // anywhere) and the new bulk endpoint POST /bookings/invoices/bulk-generate
@@ -14,7 +14,7 @@
 //     invoiced" progress the CRM Invoices page shows). Each returned booking
 //     carries its own invoice list.
 //   - Flat: paginated over INVOICE rows directly, for Finance reconciliation
-//     across every booking in one sortable table — the old page's only mode.
+//     across every booking in one sortable table â€” the old page's only mode.
 //
 // Each view builds its filters once and uses them for the rows, the count and the summary, with the user's
 // project scope in all of them (the flat view had none, and the grouped count skipped it).
@@ -24,10 +24,14 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { projectPredicate, projectAllowed } = require("../services/projectScope");
+const { projectPredicate, projectAllowed, crmProjectGuards } = require("../services/projectScope");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
+
+// Guard /:id — verify the caller can access this invoice's project before any
+// handler runs. The SQL resolves the project via the booking join.
+crmProjectGuards(router, "SELECT b.ProjectId FROM dbo.CrmInvoice i JOIN dbo.CrmBooking b ON b.Id = i.BookingId WHERE i.Id = @id");
 
 const CREDIT_COLS = `
   (SELECT ISNULL(SUM(n.TotalAmount), 0) FROM dbo.CrmGstNote n WHERE n.InvoiceId = inv.Id AND n.Status IN (N'Issued', N'TimeBarred')) AS CreditedAmount,
@@ -128,7 +132,7 @@ async function invoiceSummary(pool, query, scope) {
   };
 }
 
-// GET / — view=flat (default "flat" for back-compat with any existing
+// GET / â€” view=flat (default "flat" for back-compat with any existing
 // caller) | view=grouped. Shared filters: type, search, companyId, projectId, blockId,
 // dateFrom, dateTo, page, pageSize. Grouped-only filter: invoicedStatus
 // (all|full|partial|none).
@@ -143,14 +147,14 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
     const summary = await invoiceSummary(pool, req.query, scope);
 
     if (view === "grouped") {
-      // Paginate over bookings (a booking with no invoice yet still appears — invoicedStatus=none, "0 of N
+      // Paginate over bookings (a booking with no invoice yet still appears â€” invoicedStatus=none, "0 of N
       // invoiced"). SQL Server can't use a SELECT alias in HAVING, so the invoiced filter wraps a derived table.
       const outerFilter = INVOICED_FILTER[invoicedStatus] || "";
       const req_ = pool.request().input("pageSize", sql.Int, pageSizeNum).input("offset", sql.Int, offset);
       const where = groupedWhere(req_, req.query, scope);
       const countReq = pool.request();
       const countWhere = groupedWhere(countReq, req.query, scope);
-      // How the matching bookings stand, the invoiced filter aside — the page's invoicing-status counts.
+      // How the matching bookings stand, the invoiced filter aside â€” the page's invoicing-status counts.
       const statusReq = pool.request();
       const statusWhere = groupedWhere(statusReq, req.query, scope);
       const [bookingsResult, countResult, statusResult] = await Promise.all([
@@ -221,7 +225,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
   }
 });
 
-// GET /:id — one invoice, for a ?invoiceId= link (the page looked only through the page it had loaded).
+// GET /:id â€” one invoice, for a ?invoiceId= link (the page looked only through the page it had loaded).
 router.get("/:id", requirePageRight("crm-invoices", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
