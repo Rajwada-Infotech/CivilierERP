@@ -158,7 +158,7 @@ export default function MaterialDashboard() {
         {/* A — figures, each opens the records behind it */}
         <Detail tag="A" title="Right now" note="Open a figure for its records">
           {isLoading ? (
-            <Skel h={110} />
+            <Skel h={200} />
           ) : !d?.pipeline ? (
             <p style={{ fontSize: 13, color: "var(--red)" }}>These figures could not be worked out. Use Re-read to try again.</p>
           ) : (
@@ -167,19 +167,19 @@ export default function MaterialDashboard() {
               <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.8fr) repeat(3, minmax(130px, 1fr))", minWidth: 520 }}>
                 <span />
                 {pipelineRows[0].figures.map((f) => (
-                  <span key={f.label} className="label" style={{ paddingBottom: 6, color: f.late ? "var(--red)" : undefined }}>{f.label}</span>
+                  <span key={f.label} className="label" style={{ paddingBottom: 10, fontSize: 11, color: f.late ? "var(--red)" : undefined }}>{f.label}</span>
                 ))}
                 {pipelineRows.map((row) => (
                   <React.Fragment key={row.doc}>
-                    <span className="label" style={{ color: "var(--ink)", padding: "9px 0", borderTop: "1px solid var(--rule-soft)", alignSelf: "stretch", display: "flex", alignItems: "center" }}>{row.doc}</span>
+                    <span className="label" style={{ color: "var(--ink)", fontSize: 11.5, padding: "16px 0", borderTop: "1px solid var(--rule-soft)", alignSelf: "stretch", display: "flex", alignItems: "center" }}>{row.doc}</span>
                     {row.figures.map((f) => {
                       const n = d.pipeline![f.key] ?? 0;
                       const red = !!f.late && n > 0;
                       return (
                         <button key={f.key} onClick={() => setDrill(f.key)} className="pipe-cell"
-                          style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 8, textAlign: "left", minWidth: 0, padding: "9px 8px 9px 0", borderTop: "1px solid var(--rule-soft)" }}>
-                          <span className="figure link" style={{ fontSize: 22, lineHeight: 1.1, color: red ? "var(--red)" : undefined, textDecoration: "underline dotted", textUnderlineOffset: 4, textDecorationThickness: 1 }}><Tick value={n} /></span>
-                          <span style={{ fontSize: 11.5, color: "var(--graphite)" }}>{f.sub}</span>
+                          style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 12, textAlign: "left", minWidth: 0, padding: "16px 8px 16px 0", borderTop: "1px solid var(--rule-soft)" }}>
+                          <span className="figure link" style={{ fontSize: "clamp(28px, 2.8vw, 38px)", lineHeight: 1, color: red ? "var(--red)" : undefined, textDecoration: "underline dotted", textUnderlineOffset: 4, textDecorationThickness: 1 }}><Tick value={n} /></span>
+                          <span style={{ fontSize: 13, color: "var(--graphite)" }}>{f.sub}</span>
                         </button>
                       );
                     })}
