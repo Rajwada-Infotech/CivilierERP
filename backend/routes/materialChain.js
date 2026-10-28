@@ -1,4 +1,5 @@
 const express = require("express");
+const { ebCoversGrnSql, grnIdsOfExpense } = require("../services/expenseGrnLink");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -193,11 +194,12 @@ async function getGRN(pool, id) {
   return r.recordset[0] || null;
 }
 
+// Invoices a GRN went into, merged ones included (services/expenseGrnLink.js).
 async function getExpensesForGRN(pool, grnId) {
   const r = await pool.request().input("grnId", sql.Int, parseInt(grnId, 10)).query(`
     SELECT Eid AS id, EDocNo, EDocDate, EStatus, ENetAmount, EVendorInvoiceNo
     FROM dbo.ExpenseBooking
-    WHERE ESourceType = 'GRN' AND ESourceId = @grnId
+    WHERE ${ebCoversGrnSql("", "@grnId")}
     ORDER BY Eid
   `);
   return r.recordset;
@@ -206,7 +208,7 @@ async function getExpensesForGRN(pool, grnId) {
 async function getExpense(pool, id) {
   const r = await pool.request().input("id", sql.Int, id).query(`
     SELECT Eid AS id, EDocNo, EDocDate, EStatus, ENetAmount, EVendorInvoiceNo,
-           ESourceType, ESourceId
+           ESourceType, ESourceId, ELinkedGrnIds
     FROM dbo.ExpenseBooking
     WHERE Eid = @id
   `);
@@ -327,8 +329,12 @@ async function downstreamOfWO(pool, woId) {
     vios.push(...(await getVIOsForPO(pool, po.id)));
     grns.push(...(await getGRNsForPO(pool, po.id)));
   }
+  // A merged invoice covers several of these GRNs: list it once.
   const expenses = [];
-  for (const grn of grns) expenses.push(...(await getExpensesForGRN(pool, grn.id)));
+  const seenEB = new Set();
+  for (const grn of grns) {
+    for (const eb of await getExpensesForGRN(pool, grn.id)) if (!seenEB.has(eb.id)) { seenEB.add(eb.id); expenses.push(eb); }
+  }
   return [
     ...mrs.map(mrNode),
     ...qts.map(qtNode),
@@ -423,13 +429,15 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
       if (!eb) return res.status(404).json({ error: "Invoice / Expense Booking not found" });
       current = expenseNode(eb);
       if (eb.ESourceType === "GRN" && eb.ESourceId) {
-        const grn = await getGRN(pool, parseInt(eb.ESourceId, 10));
-        if (grn) {
-          upstream.push(grnNode(grn));
-          if (grn.POID) {
-            const po = await getPO(pool, grn.POID);
-            if (po) upstream = [...(await upstreamOfPO(pool, po)), poNode(po), grnNode(grn)];
-          }
+        // Every GRN merged into this invoice, not just the first (they share one PO).
+        const grns = [];
+        for (const gid of grnIdsOfExpense(eb)) {
+          const g = await getGRN(pool, gid);
+          if (g) grns.push(g);
+        }
+        if (grns.length) {
+          const po = grns[0].POID ? await getPO(pool, grns[0].POID) : null;
+          upstream = po ? [...(await upstreamOfPO(pool, po)), poNode(po), ...grns.map(grnNode)] : grns.map(grnNode);
         }
       } else if ((eb.ESourceType === "PO" || eb.ESourceType === "WO_PO") && eb.ESourceId) {
         const po = await getPO(pool, parseInt(eb.ESourceId, 10));
