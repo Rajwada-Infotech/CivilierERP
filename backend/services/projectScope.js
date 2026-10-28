@@ -264,6 +264,7 @@ const SCOPE_SQL = {
   unit: "SELECT ProjectId FROM dbo.UnitMaster WHERE Id = @id",
   villaType: "SELECT ProjectId FROM dbo.VillaTypeMaster WHERE Id = @id",
   slot: "SELECT ProjectId FROM dbo.ParkingSlot WHERE Id = @id",
+  parkingRate: "SELECT ProjectId FROM dbo.ParkingMaster WHERE Id = @id",
 };
 async function projectsOf(kind, ids) {
   const list = [...new Set(ids.map((v) => parseInt(v, 10)).filter(Number.isFinite))];
