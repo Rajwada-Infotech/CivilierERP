@@ -438,6 +438,23 @@ export const InboxRow: React.FC<{
         {/* Col 6 — Approved/Rejected By */}
         <div className="ai-c-by min-w-0">
         <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Approved / Rejected by</span>
+        {item._steps?.length ? (
+          // Each step's decision in this approval cycle: "1st Level ✓ Super Admin".
+          <div className="flex flex-col gap-1 min-w-0">
+            {item._steps.map((st, i) => (
+              <span
+                key={i}
+                className="flex items-center gap-1.5 min-w-0 text-[0.6875rem]"
+                title={`${st.label}: ${st.status}${st.by ? ` by ${st.by}` : ""}${st.at ? ` · ${new Date(st.at).toLocaleString("en-IN")}` : ""}`}
+              >
+                <span className={`${TAG} shrink-0 ${st.status === "Rejected" ? "text-red-500 border-red-500" : "text-emerald-600 border-emerald-600"}`}>
+                  {st.status === "Rejected" ? <XCircle size={9} /> : <CheckCircle2 size={9} />} {st.label}
+                </span>
+                <span className="truncate text-foreground">{st.by || "—"}</span>
+              </span>
+            ))}
+          </div>
+        ) : (
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
             <span className={`${TAG} text-emerald-500 border-emerald-500 truncate max-w-[130px]`}>
@@ -453,6 +470,7 @@ export const InboxRow: React.FC<{
             <span className="text-[0.625rem] text-muted-foreground/50 italic">—</span>
           )}
         </div>
+        )}
         </div>
 
         </div>
@@ -466,7 +484,7 @@ export const InboxRow: React.FC<{
             </span>
           </div>
           {item._stage && (
-            <span className="block mt-0.5 font-heading text-[0.5625rem] tabular-nums text-muted-foreground">
+            <span className="block mt-1 font-heading text-[0.5625rem] tabular-nums text-muted-foreground">
               Step {item._stage.level} of {item._stage.total}
             </span>
           )}
