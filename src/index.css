@@ -1136,9 +1136,9 @@
   .ai-c-mod > div:last-child { flex-direction: column; align-items: flex-start; gap: 0; }
 }
 
-/* Laptop & wider: the single-row table — every detail in its own column,
-   with headers. Between 52rem and 76rem it's a denser version (below). */
-@container (min-width: 60rem) {
+/* Wide screens: the single-row table — every detail in its own column, with headers. Narrower than this the row
+   splits in two (below) instead of squeezing eight columns into one line. */
+@container (min-width: 76rem) {
   .ai-head { display: flex; }
   .ai-row {
     grid-template-columns:
@@ -1171,39 +1171,30 @@
   }
 }
 
-/* Dense table (52–76rem): same single row, scaled down so all columns and
-   the Approve / Reject buttons fit on laptops, Windows display scaling and
-   with the sidebars open. */
-@container (min-width: 60rem) and (max-width: 75.99rem) {
+/* Tablets and laptops (40–76rem): two tiers per row. On top the record, its status and the actions; under it the
+   details as a labelled grid, so nothing is cut short and the buttons keep their full size. */
+@container (min-width: 40rem) and (max-width: 75.99rem) {
   .ai-row {
-    grid-template-columns:
-      minmax(0, 1.3fr) minmax(0, 0.7fr) minmax(0, 0.95fr) minmax(0, 0.9fr)
-      minmax(0, 0.8fr) minmax(0, 1.15fr) minmax(0, 1.15fr) 17rem;
-    gap: 0.75rem;
-    padding: 0.75rem 0.75rem 0.75rem 0.5rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto;
+    grid-template-areas:
+      "mod  status actions"
+      "meta meta   meta";
+    column-gap: 1.25rem;
+    row-gap: 0.75rem;
+    padding: 1rem 1rem 1rem 0.75rem;
   }
-  .ai-row-head { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-  .ai-row-head p { font-size: 0.5625rem; letter-spacing: 0.08em; }
-  .ai-c-mod { gap: 0.5rem; }
-  .ai-c-mod > div:first-child { padding: 0.375rem; border-radius: 0.5rem; }
-  .ai-c-mod > div:first-child svg { width: 0.8125rem; height: 0.8125rem; }
-  .ai-c-mod p:first-child { font-size: 0.75rem; }
-  .ai-c-mod p:last-child,
-  .ai-meta :is(p, span) { font-size: 0.6875rem; }
-  .ai-c-amount > div:last-child { padding: 0.125rem 0.375rem; }
-  .ai-c-amount p { font-size: 0.75rem; }
-  .ai-c-status span { font-size: 0.625rem; padding: 0.125rem 0.375rem; }
-  /* Smaller action buttons (eye / Approve / Reject / open). */
-  .ai-c-actions { gap: 0.25rem; }
-  .ai-c-actions button,
-  .ai-c-actions a {
-    font-size: 0.6875rem;
-    padding: 0.3125rem 0.5rem;
-    height: auto;
-    min-height: 0;
-    gap: 0.25rem;
+  .ai-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: 0.625rem 1.25rem;
+    padding: 0.625rem 0 0 2.6rem;
+    border-top: 1px dashed hsl(var(--foreground) / 0.15);
   }
-  .ai-c-actions svg { width: 0.75rem; height: 0.75rem; }
+  .ai-meta > div { display: block; overflow: hidden; }
+  .ai-meta > div + div::before { content: none; }
+  .ai-meta span.ai-label { display: block; margin-bottom: 0.125rem; font-size: 0.5625rem; }
+  .ai-meta > div :is(p, span) { overflow: hidden; text-overflow: ellipsis; }
+  .ai-c-status { justify-self: end; text-align: right; }
 }
 
 

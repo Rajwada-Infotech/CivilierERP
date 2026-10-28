@@ -25,6 +25,23 @@ export interface ApprovalWorkflow {
   createdAt?: string;
 }
 
+// The square on / off key every sheet page uses (Master pages, Broker Master…), in place of the round switch.
+export function SquareSwitch({ checked, onChange, disabled, ariaLabel }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; ariaLabel?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative h-4 w-7 shrink-0 border border-foreground transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 disabled:opacity-40 disabled:cursor-not-allowed ${checked ? "bg-foreground" : "bg-card"}`}
+    >
+      <span className={`absolute top-[2px] h-2.5 w-2.5 transition-all ${checked ? "left-[14px] bg-card" : "left-[2px] bg-foreground"}`} />
+    </button>
+  );
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const MODULE_OPTIONS = [

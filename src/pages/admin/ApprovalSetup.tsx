@@ -8,9 +8,8 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Plus, Pencil, Trash2, ShieldCheck, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { ApprovalWorkflow, MODULE_OPTIONS, fetchWorkflows, apiSave, apiToggle, apiDelete } from "./approvalSetup/config";
+import { ApprovalWorkflow, SquareSwitch, MODULE_OPTIONS, fetchWorkflows, apiSave, apiToggle, apiDelete } from "./approvalSetup/config";
 import { ConfigForm } from "./approvalSetup/ConfigForm";
 import { RaiserRules } from "./approvalSetup/RaiserRules";
 
@@ -268,10 +267,11 @@ export default function ApprovalSetup() {
                       {/* Toggle + actions */}
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <div className="flex flex-col items-center gap-0.5">
-                          <Switch
+                          <SquareSwitch
                             checked={wf.active}
-                            onCheckedChange={() => handleToggle(wf.id)}
+                            onChange={() => handleToggle(wf.id)}
                             disabled={!canEdit}
+                            ariaLabel={`${wf.name}: ${wf.active ? "on" : "off"}`}
                           />
                           <span className={LBL}>
                             {wf.active ? "On" : "Off"}

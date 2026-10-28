@@ -3,8 +3,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Switch } from "@/components/ui/switch";
-import { MODULE_OPTIONS, APPROVAL_API } from "./config";
+import { MODULE_OPTIONS, APPROVAL_API, SquareSwitch } from "./config";
 
 // ─── Raiser may approve their own request (migration 571) ─────────────────────
 // Per approval: may the person who raised a request also approve it? Off
@@ -59,11 +58,11 @@ export function RaiserRules({ canEdit }: { canEdit: boolean }) {
                   {r.updatedBy ? ` · set by ${r.updatedBy}` : ""}
                 </div>
               </div>
-              <Switch
+              <SquareSwitch
                 checked={r.raiserMayApprove}
                 disabled={!canEdit || busy === r.module}
-                onCheckedChange={(v) => save(r.module, v)}
-                aria-label={`${n?.label || r.label || r.module}: raiser may approve`}
+                onChange={(v) => save(r.module, v)}
+                ariaLabel={`${n?.label || r.label || r.module}: raiser may approve`}
               />
             </li>
           );
