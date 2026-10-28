@@ -12,6 +12,8 @@ import {
   fmt,
   fmtNum,
   share,
+  pct,
+  Tick,
   GRN_COLS,
   PO_COLS,
   EXP_COLS,
@@ -78,25 +80,25 @@ export default function MaterialDashboard() {
     {
       doc: "Material requests",
       figures: [
-        { key: "mr-unapproved", label: "Unapproved", sub: "drafts and requests waiting for approval" },
-        { key: "mr-pending", label: "Pending — no PO", sub: "approved, no purchase order made" },
-        { key: "mr-overdue", label: "Overdue", sub: "past the required-by date, not fully ordered", late: true },
+        { key: "mr-unapproved", label: "Unapproved", sub: "draft or awaiting approval" },
+        { key: "mr-pending", label: "Pending", sub: "no PO made" },
+        { key: "mr-overdue", label: "Overdue", sub: "past required-by date", late: true },
       ],
     },
     {
       doc: "Purchase orders",
       figures: [
-        { key: "po-unapproved", label: "Unapproved", sub: "drafts and orders waiting for approval" },
-        { key: "po-pending", label: "Pending — no GRN", sub: "approved, nothing received against it" },
-        { key: "po-overdue", label: "Overdue", sub: "past the expected delivery, not fully received", late: true },
+        { key: "po-unapproved", label: "Unapproved", sub: "draft or awaiting approval" },
+        { key: "po-pending", label: "Pending", sub: "no GRN made" },
+        { key: "po-overdue", label: "Overdue", sub: "past expected delivery", late: true },
       ],
     },
     {
       doc: "Goods receipts",
       figures: [
-        { key: "grn-unapproved", label: "Unapproved", sub: "GRNs waiting for approval" },
-        { key: "grn-pending", label: "Pending — no invoice", sub: "approved, no invoice booked" },
-        { key: "grn-overdue", label: "Overdue", sub: `not invoiced within ${d?.grnInvoiceDays ?? 7} days of receipt`, late: true },
+        { key: "grn-unapproved", label: "Unapproved", sub: "awaiting approval" },
+        { key: "grn-pending", label: "Pending", sub: "no invoice booked" },
+        { key: "grn-overdue", label: "Overdue", sub: `not invoiced in ${d?.grnInvoiceDays ?? 7} days`, late: true },
       ],
     },
   ];
@@ -156,29 +158,34 @@ export default function MaterialDashboard() {
         {/* A — figures, each opens the records behind it */}
         <Detail tag="A" title="Right now" note="Open a figure for its records">
           {isLoading ? (
-            <div className="grid3" style={{ gap: 16 }}>{Array.from({ length: 9 }).map((_, i) => <Skel key={i} h={58} />)}</div>
+            <Skel h={110} />
           ) : !d?.pipeline ? (
             <p style={{ fontSize: 13, color: "var(--red)" }}>These figures could not be worked out. Use Re-read to try again.</p>
           ) : (
-            <div>
-              {pipelineRows.map((row, ri) => (
-                <div key={row.doc} style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px", paddingTop: ri ? 18 : 0, marginTop: ri ? 18 : 0, borderTop: ri ? "1px solid var(--rule)" : undefined }}>
-                  <p className="label" style={{ flex: "0 0 150px", paddingTop: 2, color: "var(--ink)" }}>{row.doc}</p>
-                  <div className="grid3" style={{ flex: "1 1 420px", rowGap: 18, columnGap: 24, minWidth: 0 }}>
+            // A compact matrix: a document per row, the three states as columns, headed once.
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.8fr) repeat(3, minmax(130px, 1fr))", minWidth: 520 }}>
+                <span />
+                {pipelineRows[0].figures.map((f) => (
+                  <span key={f.label} className="label" style={{ paddingBottom: 6, color: f.late ? "var(--red)" : undefined }}>{f.label}</span>
+                ))}
+                {pipelineRows.map((row) => (
+                  <React.Fragment key={row.doc}>
+                    <span className="label" style={{ color: "var(--ink)", padding: "9px 0", borderTop: "1px solid var(--rule-soft)", alignSelf: "stretch", display: "flex", alignItems: "center" }}>{row.doc}</span>
                     {row.figures.map((f) => {
                       const n = d.pipeline![f.key] ?? 0;
                       const red = !!f.late && n > 0;
                       return (
-                        <button key={f.key} onClick={() => setDrill(f.key)} style={{ textAlign: "left", minWidth: 0 }}>
-                          <span className="label link" style={{ display: "inline-block", marginBottom: 8, color: red ? "var(--red)" : undefined }}>{f.label}</span>
-                          <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)", color: red ? "var(--red)" : undefined }}>{fmtNum(n)}</span>
-                          <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{f.sub}</span>
+                        <button key={f.key} onClick={() => setDrill(f.key)} className="pipe-cell"
+                          style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 8, textAlign: "left", minWidth: 0, padding: "9px 8px 9px 0", borderTop: "1px solid var(--rule-soft)" }}>
+                          <span className="figure link" style={{ fontSize: 22, lineHeight: 1.1, color: red ? "var(--red)" : undefined, textDecoration: "underline dotted", textUnderlineOffset: 4, textDecorationThickness: 1 }}><Tick value={n} /></span>
+                          <span style={{ fontSize: 11.5, color: "var(--graphite)" }}>{f.sub}</span>
                         </button>
                       );
                     })}
-                  </div>
-                </div>
-              ))}
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           )}
         </Detail>
@@ -191,11 +198,11 @@ export default function MaterialDashboard() {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 36px", alignItems: "flex-end" }}>
                   <div>
                     <span className="label" style={{ display: "block", marginBottom: 8 }}>Ordered (PO)</span>
-                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)" }}>{fmt(d.purchaseOrders.totalValue)}</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)" }}><Tick value={d.purchaseOrders.totalValue} format={fmt} /></span>
                   </div>
                   <div>
                     <span className="label" style={{ display: "block", marginBottom: 8 }}>Received (GRN)</span>
-                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)", color: "var(--ink-2)" }}>{fmt(d.grns.totalValue)}</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)", color: "var(--ink-2)" }}><Tick value={d.grns.totalValue} format={fmt} /></span>
                   </div>
                 </div>
                 <div style={{ marginTop: 20 }}>
@@ -204,20 +211,20 @@ export default function MaterialDashboard() {
                     <span className="grow" style={{ display: "block", height: "100%", width: `${share(d.grns.totalValue, d.purchaseOrders.totalValue)}%`, background: "var(--blue)" }} />
                   </span>
                   <span style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "var(--graphite)" }}>
-                    {Math.round(share(d.grns.totalValue, d.purchaseOrders.totalValue))}% of the value ordered has been received · {fmtNum(d.purchaseOrders.total)} orders, {fmtNum(d.grns.total)} receipts
+                    <Tick value={share(d.grns.totalValue, d.purchaseOrders.totalValue)} format={pct} /> of the value ordered has been received · <Tick value={d.purchaseOrders.total} /> orders, <Tick value={d.grns.total} /> receipts
                   </span>
                 </div>
                 <div style={{ marginTop: 16 }}>
                   {[
-                    { label: "Still open", sub: `${fmtNum(d.purchaseOrders.open)} orders not yet fully received`, value: fmt(d.purchaseOrders.openValue), go: "pos" as DrillKey },
-                    { label: "Expenses booked", sub: `${fmtNum(d.expenses.approved)} approved · ${fmtNum(d.expenses.pending)} pending`, value: fmt(d.expenses.totalAmount), go: "expenses" as DrillKey },
+                    { label: "Still open", sub: <><Tick value={d.purchaseOrders.open} /> orders not yet fully received</>, value: d.purchaseOrders.openValue, go: "pos" as DrillKey },
+                    { label: "Expenses booked", sub: <><Tick value={d.expenses.approved} /> approved · <Tick value={d.expenses.pending} /> pending</>, value: d.expenses.totalAmount, go: "expenses" as DrillKey },
                   ].map((s) => (
                     <button key={s.label} onClick={() => setDrill(s.go)} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "12px 0", borderTop: "1px solid var(--rule-soft)", width: "100%" }}>
                       <span style={{ minWidth: 0, textAlign: "left" }}>
                         <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
                         <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
                       </span>
-                      <span className="figure" style={{ fontSize: 22, whiteSpace: "nowrap" }}>{s.value}</span>
+                      <span className="figure" style={{ fontSize: 22, whiteSpace: "nowrap" }}><Tick value={s.value} format={fmt} /></span>
                     </button>
                   ))}
                 </div>
@@ -225,7 +232,7 @@ export default function MaterialDashboard() {
             )}
           </Detail>
 
-          <Detail tag="C" title="Material requests" note={d ? `${fmtNum(d.materialRequests.total)} in all` : undefined}>
+          <Detail tag="C" title="Material requests" note={d ? <><Tick value={d.materialRequests.total} /> in all</> : undefined}>
             {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : d.materialRequests.total === 0 ? (
               <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No material requests yet.</p>
             ) : (
@@ -236,8 +243,8 @@ export default function MaterialDashboard() {
                     <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
                       <span className="label link" style={{ color: "var(--ink)" }}>{r.label}</span>
                       <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>
-                        <span className="figure" style={{ fontSize: 15, marginRight: 8 }}>{fmtNum(r.count)}</span>
-                        {Math.round(share(r.count, d.materialRequests.total))}%
+                        <span className="figure" style={{ fontSize: 15, marginRight: 8 }}><Tick value={r.count} /></span>
+                        <Tick value={share(r.count, d.materialRequests.total)} format={pct} />
                       </span>
                     </span>
                     <span className="hatch" style={{ display: "block", height: 7, marginTop: 7, border: "1px solid var(--ink)" }}>
@@ -245,7 +252,7 @@ export default function MaterialDashboard() {
                     </span>
                   </button>
                 ))}
-                <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--graphite)" }}>{fmtNum(d.materialRequests.thisMonth)} raised this month</p>
+                <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--graphite)" }}><Tick value={d.materialRequests.thisMonth} /> raised this month</p>
               </div>
             )}
           </Detail>
@@ -260,7 +267,7 @@ export default function MaterialDashboard() {
 
         {/* E + F */}
         <div className="grid2">
-          <Detail tag="E" title="Purchase orders by status" note={d ? `${fmtNum(poTotal)} orders` : undefined}>
+          <Detail tag="E" title="Purchase orders by status" note={d ? <><Tick value={poTotal} /> orders</> : undefined}>
             {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /></>) : d.poStatusBreakdown.length === 0 ? (
               <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No purchase orders yet.</p>
             ) : (
@@ -269,8 +276,8 @@ export default function MaterialDashboard() {
                   <div key={r.Status} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--rule-soft)" }}>
                     <i className={statusTone(r.Status || "Draft") === "waiting" ? "hatch" : ""} style={{ width: 10, height: 10, flexShrink: 0, border: "1px solid var(--ink)", ...fillFor(r.Status || "Draft") }} />
                     <span className="label" style={{ color: "var(--ink)", flex: 1, minWidth: 0 }}>{r.Status || "Draft"}</span>
-                    <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>{fmtNum(r.Count)} · {Math.round(share(r.Count, poTotal))}%</span>
-                    <span className="figure" style={{ fontSize: 15, minWidth: 110, textAlign: "right" }}>{fmt(Number(r.TotalValue))}</span>
+                    <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}><Tick value={r.Count} /> · <Tick value={share(r.Count, poTotal)} format={pct} /></span>
+                    <span className="figure" style={{ fontSize: 15, minWidth: 110, textAlign: "right" }}><Tick value={Number(r.TotalValue)} format={fmt} /></span>
                   </div>
                 ))}
               </div>
@@ -291,7 +298,7 @@ export default function MaterialDashboard() {
                         <span className="label" style={{ width: 16 }}>{idx + 1}</span>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.ItemName || "Unnamed item"}</span>
                         <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>
-                          {fmtNum(inQty)} in · {fmtNum(outQty)} out
+                          <Tick value={inQty} /> in · <Tick value={outQty} /> out
                         </span>
                       </span>
                       {/* in measured against the busiest item; the issued share of it drawn over in ink */}

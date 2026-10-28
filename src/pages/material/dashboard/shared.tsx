@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { animate, useReducedMotion } from "framer-motion";
 import type { ColumnDef } from "@/components/ui/DataTable";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 
@@ -57,6 +59,31 @@ export const fmtDate = (d: string | null) =>
 
 /** A purchase order is still open until it is fully received, closed, rejected or cancelled. */
 export const isOpenPO = (status: string | null | undefined) => !["Closed", "Rejected", "Received", "Cancelled"].includes(status || "");
+
+/** A percentage, whole. */
+export const pct = (n: number) => `${Math.round(n)}%`;
+
+/** A number that counts up when it first appears, and runs from the old value to the new one when it changes (the
+ *  dashboard re-reads every 30 s). Still under reduced motion. Whole numbers while running, the exact value at rest. */
+export function Tick({ value, format = fmtNum }: { value: number; format?: (n: number) => string }) {
+  const still = useReducedMotion();
+  const from = useRef(0);
+  const [v, setV] = useState(still ? value : 0);
+  useEffect(() => {
+    if (still) {
+      from.current = value;
+      setV(value);
+      return;
+    }
+    const c = animate(from.current, value, {
+      duration: 0.9,
+      ease: [0.16, 1, 0.3, 1],
+      onUpdate: (x) => { from.current = x; setV(x); },
+    });
+    return () => c.stop();
+  }, [value, still]);
+  return <>{format(v === value ? value : Math.round(v))}</>;
+}
 
 // ─── Cells ────────────────────────────────────────────────────────────────────
 const docCell = (text: string) => <span className="font-heading text-xs font-semibold tracking-wide text-foreground whitespace-nowrap">{text}</span>;
