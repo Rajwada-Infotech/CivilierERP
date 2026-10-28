@@ -430,6 +430,24 @@ router.get("/", async (req, res) => {
     const rows = result.recordsets[0];
     const total = result.recordsets[1][0]?.Total ?? 0;
 
+    // Each entry's lines for the register — item, quantity, quality grade and weight (photos stay on GET /:id).
+    if (rows.length) {
+      const ir = pool.request();
+      rows.forEach((r, i) => ir.input(`v${i}`, sql.Int, r.VehicleInOutID));
+      const items = (await ir.query(`
+        SELECT VehicleInOutID, VehicleInOutItemID, ItemName, UomName, ReceivedQty, Quality, Brand${await weightCols(pool)}
+        FROM dbo.VehicleInOutItems
+        WHERE VehicleInOutID IN (${rows.map((_, i) => `@v${i}`).join(", ")})
+        ORDER BY VehicleInOutItemID
+      `)).recordset;
+      const byRecord = new Map();
+      for (const it of items) {
+        if (!byRecord.has(it.VehicleInOutID)) byRecord.set(it.VehicleInOutID, []);
+        byRecord.get(it.VehicleInOutID).push(it);
+      }
+      rows.forEach((r) => { r.Items = byRecord.get(r.VehicleInOutID) || []; });
+    }
+
     res.json({
       data: rows,
       total,

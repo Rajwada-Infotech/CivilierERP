@@ -148,6 +148,31 @@ export const registerVehAttachmentCleanup = () => {
 
 /** Thumbnail/link for one attachment — resolves its authenticated blob URL
  *  before rendering an <img> (for images) or a download link (for PDFs etc). */
+/** "8.5 tonne" — a line's weight, or null when none was entered. */
+export const fmtWeight = (it: { Weight?: number | null; WeightUnit?: string | null }) =>
+  Number(it.Weight) > 0 ? `${Number(it.Weight).toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${it.WeightUnit || "kg"}` : null;
+
+/** An entry's received lines, one per row: item, quantity, quality grade and weight. Register and its phone cards. */
+export function VioLinesSummary({ items }: { items: any[] | undefined }) {
+  if (!Array.isArray(items) || items.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <div className="flex flex-col gap-1">
+      {items.map((it) => (
+        <div key={it.VehicleInOutItemID} className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.6875rem] leading-tight">
+          <span className="font-medium text-foreground truncate max-w-[12rem]" title={it.ItemName || ""}>{it.ItemName || "—"}</span>
+          <span className="font-heading tabular-nums text-muted-foreground whitespace-nowrap">
+            {Number(it.ReceivedQty ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 3 })}{it.UomName ? ` ${it.UomName}` : ""}
+          </span>
+          {it.Quality && (
+            <span className="inline-flex items-center px-1 py-px text-[0.5rem] font-semibold uppercase tracking-wide border border-foreground/40">{it.Quality}</span>
+          )}
+          {fmtWeight(it) && <span className="font-heading tabular-nums text-muted-foreground whitespace-nowrap">· {fmtWeight(it)}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The photo captured beside a received line (a base64 data URL); opens full size in a new tab. */
 export function LinePhotoThumb({ src, alt }: { src: string | null | undefined; alt: string }) {
   if (!src) return null;
@@ -321,6 +346,14 @@ export function VehicleCard({
           {rec.VehicleNo || "—"}
         </span>
       </div>
+
+      {/* Received lines */}
+      {Array.isArray(rec.Items) && rec.Items.length > 0 && (
+        <div>
+          <p className="text-[0.5625rem] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-1">Items</p>
+          <VioLinesSummary items={rec.Items} />
+        </div>
+      )}
 
       {/* Supplier / PO / Entry / Challan grid */}
       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -503,6 +536,14 @@ export const COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ getValue }) => (
       <span className="font-heading text-xs">{(getValue() as string) || "—"}</span>
     ),
+  },
+  {
+    id: "Items",
+    header: "Items · Quality · Weight",
+    size: 230,
+    meta: { className: "hidden sm:table-cell" },
+    enableSorting: false,
+    cell: ({ row }) => <VioLinesSummary items={row.original.Items} />,
   },
   {
     id: "CompanyProject",
