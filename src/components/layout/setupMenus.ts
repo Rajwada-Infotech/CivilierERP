@@ -569,20 +569,6 @@ export const crmSetupItems: SetupItem[] = [
     color: "text-pink-500",
     pageKey: "followup-extra-charge-master",
   },
-  {
-    icon: Activity,
-    label: "Pending Tasks",
-    path: "/crm/setup/pending-tasks",
-    color: "text-purple-500",
-    pageKey: "followup-pending-tasks",
-  },
-  {
-    icon: Calendar,
-    label: "Reminders",
-    path: "/crm/setup/reminders",
-    color: "text-indigo-500",
-    pageKey: "followup-reminders",
-  },
 ];
 
 export const adminSetupItems: SetupItem[] = [
