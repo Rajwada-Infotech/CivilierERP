@@ -2,12 +2,26 @@ import { formatINR } from "@/utils/formatCurrency";
 import { partnerLineKind } from "@/pages/finance/journalVoucher/ledgerGroups";
 import { Package } from "lucide-react";
 import type { ApprovalReviewState } from "./useApprovalReview";
+import { AttachmentThumb, LinePhotoThumb } from "@/pages/material/vehicleInOut/config";
+import type { VehicleAttachment } from "@/api/vehicleInOutApi";
 
 // The record's line items.
 export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
-  const { effectiveAmount, lineItems, isMaterialRequest, isJournalVoucher, isInterCompanyTransfer } = r;
+  const { effectiveAmount, lineItems, isMaterialRequest, isVehicleInOut, isJournalVoucher, isInterCompanyTransfer, detail } = r;
+  const vioAttachments = isVehicleInOut && Array.isArray((detail as any)?.Attachments) ? ((detail as any).Attachments as VehicleAttachment[]) : [];
   return (
     <>
+      {/* Vehicle In/Out: the files and photos attached to the entry. */}
+      {vioAttachments.length > 0 && (
+        <div>
+          <p className="text-[0.625rem] font-semibold font-heading uppercase tracking-[0.12em] text-muted-foreground mb-2">
+            Attachments ({vioAttachments.length})
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {vioAttachments.map((a) => <AttachmentThumb key={a.id} attachment={a} />)}
+          </div>
+        </div>
+      )}
       {/* Line items */}
       {lineItems.length > 0 && (
         <div>
@@ -71,6 +85,50 @@ export function ReviewLineItems({ r }: { r: ApprovalReviewState }) {
                     </td>
                   </tr>
                 </tfoot>
+              </table>
+            </div>
+          ) : isVehicleInOut ? (
+            <div className="border border-foreground/25 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="border-b border-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground text-left">Item</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground text-left">Quality</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground text-right">Received</th>
+                    <th className="px-3 py-2 text-[0.5625rem] font-heading uppercase tracking-[0.12em] text-muted-foreground text-right">Weight</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-foreground/10">
+                  {lineItems.map((li, i) => {
+                    const weight = Number(li.Weight) || 0;
+                    return (
+                      <tr key={i} className="hover:bg-primary/5 transition-colors">
+                        <td className="px-3 py-2 font-medium">
+                          <span className="inline-flex items-center gap-1.5">
+                            <LinePhotoThumb src={li.PhotoBase64 as string | null} alt={`${(li.ItemName as string) || "Item"} photo`} />
+                            <span>
+                              {(li.ItemName as string) || "—"}
+                              {li.Brand ? <span className="ml-1 font-normal text-muted-foreground">({li.Brand as string})</span> : null}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {li.Quality ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-wide border border-foreground/40">{li.Quality as string}</span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                          {Number(li.ReceivedQty ?? 0).toLocaleString("en-IN")}{li.UomName ? ` ${li.UomName as string}` : ""}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
+                          {weight > 0 ? `${weight.toLocaleString("en-IN")} ${(li.WeightUnit as string) || "kg"}` : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
               </table>
             </div>
           ) : isMaterialRequest ? (

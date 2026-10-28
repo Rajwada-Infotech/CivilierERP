@@ -1,17 +1,48 @@
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SHEET_FRAME_CSS } from "@/components/sheet/Sheet";
-import { EXP_COLS, GRN_COLS, ISSUE_COLS, ITEM_COLS, PO_COLS, REQUEST_COLS, TRANSFER_COLS, isOpenPO } from "./shared";
+import { SheetMark, statusTone } from "@/components/sheet/Sheet";
+import { EXP_COLS, GRN_COLS, ISSUE_COLS, ITEM_COLS, PO_COLS, REQUEST_COLS, TRANSFER_COLS, isOpenPO, fmt, fmtDate } from "./shared";
 
-export type DrillKey = "items" | "grns" | "pos" | "expenses" | "stock" | "issues" | "requests";
+// The pipeline lists all come back in one shape from /api/material-dashboard/pipeline/:key.
+const pipeCols = (dueHeader: string, withParty: boolean): ColumnDef<any, unknown>[] => [
+  { accessorKey: "DocNo", header: "Doc No", cell: ({ row }: any) => <span className="font-heading text-xs font-semibold tracking-wide whitespace-nowrap">{row.original.DocNo || `#${row.original.Id}`}</span> },
+  { accessorKey: "ProjectName", header: "Project", cell: ({ getValue }: any) => <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span> },
+  ...(withParty ? [{ accessorKey: "PartyName", header: "Supplier", cell: ({ getValue }: any) => <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span> }] : []),
+  { accessorKey: "DocDate", header: "Date", cell: ({ getValue }: any) => <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(getValue() as string)}</span> },
+  {
+    accessorKey: "DueDate", header: dueHeader,
+    cell: ({ getValue }: any) => {
+      const v = getValue() as string | null;
+      const late = !!v && new Date(v) < new Date(new Date().toDateString());
+      return <span className={`text-xs tabular-nums whitespace-nowrap ${late ? "text-destructive font-semibold" : "text-muted-foreground"}`}>{fmtDate(v)}</span>;
+    },
+  },
+  ...(withParty ? [{ accessorKey: "Amount", header: "Amount", cell: ({ getValue }: any) => <span className="font-heading text-xs tabular-nums whitespace-nowrap">{getValue() == null ? "—" : fmt(Number(getValue()))}</span> }] : []),
+  { accessorKey: "Status", header: "Status", cell: ({ getValue }: any) => { const s = (getValue() as string) || "Draft"; return <SheetMark text={s} tone={statusTone(s)} />; } },
+];
+const MR_PIPE = pipeCols("Required by", false);
+const PO_PIPE = pipeCols("Expected delivery", true);
+const GRN_PIPE = pipeCols("Invoice due by", true);
+// A pipeline row opens that record straight in its page's preview (each page reads ?view=<id>).
+const OPEN_PATH = { mr: "/material/material-request", po: "/material/purchase-order", grn: "/material/grn" } as const;
+const pipe = (key: PipelineKey, title: string, cols: ColumnDef<any, unknown>[], empty: string) =>
+  ({ title, url: `/api/material-dashboard/pipeline/${key}`, cols, empty, open: OPEN_PATH[key.split("-")[0] as keyof typeof OPEN_PATH] });
+
+export type PipelineKey =
+  | "mr-unapproved" | "mr-pending" | "mr-overdue"
+  | "po-unapproved" | "po-pending" | "po-overdue"
+  | "grn-unapproved" | "grn-pending" | "grn-overdue";
+export type DrillKey = "items" | "grns" | "pos" | "expenses" | "stock" | "issues" | "requests" | PipelineKey;
 
 const rowsOf = (j: any): any[] => (Array.isArray(j) ? j : (j?.data ?? []));
 
 // The list endpoints don't filter by status, so "open" and "pending" are picked out here.
-const DRILLS: Record<DrillKey, { title: string; url: string; cols: ColumnDef<any, unknown>[]; pick?: (r: any) => boolean; empty: string }> = {
+const DRILLS: Record<DrillKey, { title: string; url: string; cols: ColumnDef<any, unknown>[]; pick?: (r: any) => boolean; empty: string; open?: string }> = {
   items: { title: "Item master", url: "/api/item-master", cols: ITEM_COLS, empty: "No items found." },
   grns: { title: "Goods receipts", url: "/api/grns?page=1&limit=200", cols: GRN_COLS, empty: "No GRNs found." },
   pos: { title: "Open purchase orders", url: "/api/purchase-orders?page=1&limit=200", cols: PO_COLS, pick: (r) => isOpenPO(r.Status), empty: "No open purchase orders." },
@@ -19,6 +50,15 @@ const DRILLS: Record<DrillKey, { title: string; url: string; cols: ColumnDef<any
   stock: { title: "Stock transfers", url: "/api/stock-transfers?page=1&limit=200", cols: TRANSFER_COLS, empty: "No stock transfers found." },
   issues: { title: "Material issues", url: "/api/material-issues?page=1&limit=200&search=", cols: ISSUE_COLS, empty: "No material issues found." },
   requests: { title: "Material requests", url: "/api/material-requests?page=1&limit=200", cols: REQUEST_COLS, empty: "No material requests found." },
+  "mr-unapproved": pipe("mr-unapproved", "Material requests not approved", MR_PIPE, "Every material request is approved."),
+  "mr-pending": pipe("mr-pending", "Approved material requests with no purchase order", MR_PIPE, "Every approved request has a purchase order."),
+  "mr-overdue": pipe("mr-overdue", "Overdue material requests", MR_PIPE, "No material request is past its required-by date."),
+  "po-unapproved": pipe("po-unapproved", "Purchase orders not approved", PO_PIPE, "Every purchase order is approved."),
+  "po-pending": pipe("po-pending", "Approved purchase orders with no GRN", PO_PIPE, "Every approved purchase order has a GRN."),
+  "po-overdue": pipe("po-overdue", "Overdue purchase orders", PO_PIPE, "No purchase order is past its expected delivery."),
+  "grn-unapproved": pipe("grn-unapproved", "GRNs not approved", GRN_PIPE, "Every GRN is approved."),
+  "grn-pending": pipe("grn-pending", "Approved GRNs with no invoice", GRN_PIPE, "Every approved GRN has an invoice."),
+  "grn-overdue": pipe("grn-overdue", "Overdue GRNs", GRN_PIPE, "No GRN is overdue for its invoice."),
 };
 
 const RULE = "1px solid hsl(var(--foreground))";
@@ -28,6 +68,7 @@ const RULE = "1px solid hsl(var(--foreground))";
 const DRILL_CSS = ".md-drill .dt-toolbar { background: hsl(var(--card)) !important; z-index: 2; }";
 
 export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose: () => void }) {
+  const navigate = useNavigate();
   const d = open ? DRILLS[open] : null;
   const { data, isLoading, isError } = useQuery<any[]>({
     queryKey: ["materialDashboard-drill", open],
@@ -53,7 +94,9 @@ export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose:
             {d?.title}
             {data && <span className="ml-2 font-heading text-sm font-normal tabular-nums text-muted-foreground">{data.length}</span>}
           </DialogTitle>
-          <DialogDescription className="sr-only">The records behind this figure</DialogDescription>
+          <DialogDescription className={d?.open ? "text-xs text-muted-foreground mt-1" : "sr-only"}>
+            {d?.open ? "Open a row to see that record." : "The records behind this figure"}
+          </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[70vh]">
           {isLoading ? (
@@ -63,7 +106,14 @@ export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose:
           ) : !data?.length ? (
             <p className="px-6 py-10 text-sm text-muted-foreground">{d?.empty}</p>
           ) : (
-            <DataTable data={data} columns={d!.cols} searchable paginated emptyMessage={d!.empty} />
+            <DataTable
+              data={data}
+              columns={d!.cols}
+              searchable
+              paginated
+              emptyMessage={d!.empty}
+              onRowClick={d!.open ? (row) => { onClose(); navigate(`${d!.open}?view=${row.original.Id}`); } : undefined}
+            />
           )}
         </ScrollArea>
       </DialogContent>

@@ -16,6 +16,7 @@ import { type ColumnDef } from "@/components/ui/DataTable";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { fetchNextDocNumber, fetchDocTypes, type DocType } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fmtDate, FormHeader, defaultHeader, ACT, spaced } from "./config";
 
 export function useQuotation() {
@@ -231,6 +232,27 @@ export function useQuotation() {
       invalidate();
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete quotation"),
+  });
+
+  // Payment Terms master (Finance Setup) — one is picked per tagged supplier; the PO raised for them starts with it.
+  const { data: paymentTerms = [] } = useQuery<{ id: number; label: string; days: number }[]>({
+    queryKey: ["payment-terms-po"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/payment-terms/options");
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(body?.error || "Could not load payment terms");
+      return Array.isArray(body) ? body : [];
+    },
+  });
+
+  const supplierTermMutation = useMutation({
+    mutationFn: (v: { supplierId: number; termId: number | null }) =>
+      qtApi.setSupplierPaymentTerm(viewingRecord!.QuotationId, v.supplierId, v.termId),
+    onSuccess: async () => {
+      toast.success("Payment term saved");
+      if (viewingRecord) setViewingRecord(await qtApi.getQuotationById(viewingRecord.QuotationId));
+    },
+    onError: (err: any) => toast.error(err.message || "Failed to save the payment term"),
   });
 
   const sendMutation = useMutation({
@@ -550,6 +572,8 @@ ${printSuppliers.map(s => `<tr><td>${esc(s.SupplierName)}</td><td>${esc(s.Status
     updateMutation,
     deleteMutation,
     sendMutation,
+    paymentTerms,
+    supplierTermMutation,
     isSaving,
     goToList,
     startNew,

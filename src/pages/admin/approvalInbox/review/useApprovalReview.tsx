@@ -130,6 +130,8 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
   // every row. Name + Qty (+ UOM, if the detail response carries it) is all
   // that's meaningful here.
   const isMaterialRequest = item.Module === "material-requests";
+  // Vehicle In/Out lines are what arrived at the gate: received quantity, quality grade, brand and weight — no rate.
+  const isVehicleInOut = item.Module === "vehicle-in-out";
   // Journal Voucher lines are ledger postings (LHeadName/DebitAmount/
   // CreditAmount), not PO-style Item/Qty/Rate rows — the generic table
   // below was showing "—"/0/₹0 for every JV line since it read fields
@@ -560,6 +562,7 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
     hidePartyField,
     lineItems,
     isMaterialRequest,
+    isVehicleInOut,
     isJournalVoucher,
     isInterCompanyTransfer,
     woActivities,

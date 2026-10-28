@@ -217,7 +217,7 @@ export const money = (v: unknown) => {
 export const share = (part: unknown, whole: unknown) => (n0(whole) > 0 ? Math.min(100, Math.max(0, (n0(part) / n0(whole)) * 100)) : 0);
 
 // ── Small drawing parts ─────────────────────────────────────────────────────
-export const Detail: React.FC<{ tag: string; title: string; note?: string; children: React.ReactNode; className?: string }> = ({ tag, title, note, children, className }) => (
+export const Detail: React.FC<{ tag: string; title: string; note?: React.ReactNode; children: React.ReactNode; className?: string }> = ({ tag, title, note, children, className }) => (
   <section className={`cell ${className || ""}`}>
     <header style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
       <span className="tag">{tag}</span>

@@ -50,11 +50,13 @@ export function buildVehicleInOutLetterhead(rec: any, company: LetterheadCompany
     columns: [
       { header: "Received Items" },
       { header: "Received", align: "right" as const, widthMm: 34 },
+      { header: "Weight", align: "right" as const, widthMm: 28 },
     ],
     rows: items.map((it) => ({
       cells: [
         it.ItemName || "—",
         `${Number(it.ReceivedQty ?? it.Quantity ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 3 })}${it.UomName ? ` ${it.UomName}` : ""}`,
+        Number(it.Weight) > 0 ? `${Number(it.Weight).toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${it.WeightUnit || "kg"}` : "—",
       ],
       sub: [it.Brand ? `Brand: ${it.Brand}` : "", it.Quality ? `Quality: ${it.Quality}` : ""].filter(Boolean).join("  ·  ") || null,
     })),

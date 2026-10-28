@@ -246,6 +246,11 @@ class ValidationError extends Error {
  * so callers can validate before touching the header row.
  */
 const VALID_QUALITIES = new Set(["Excellent", "Good", "Bad"]);
+const VALID_WEIGHT_UNITS = new Set(["kg", "tonne"]);
+// Weight per line arrives with migration 584; saving and reading keep working on a server that hasn't run it.
+const { makeColumnProbe } = require("../services/columnProbe");
+const hasItemWeight = makeColumnProbe("dbo.VehicleInOutItems", "Weight");
+const weightCols = async (pool) => ((await hasItemWeight(pool)) ? ", Weight, WeightUnit" : ", CAST(NULL AS DECIMAL(18,3)) AS Weight, CAST(NULL AS NVARCHAR(10)) AS WeightUnit");
 
 async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutId) {
   const submitted = (Array.isArray(items) ? items : [])
@@ -262,6 +267,9 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
       // not sourced from the PO item, since the same ordered item can
       // arrive under different brands lot to lot.
       brand: typeof it.brand === "string" && it.brand.trim() ? it.brand.trim().slice(0, 100) : null,
+      // Optional weight of what arrived on this line, in kg or tonnes.
+      weight: Number(it.weight) > 0 ? Math.round(Number(it.weight) * 1000) / 1000 : null,
+      weightUnit: Number(it.weight) > 0 ? (VALID_WEIGHT_UNITS.has(it.weightUnit) ? it.weightUnit : "kg") : null,
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
@@ -298,6 +306,7 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
     DELETE FROM dbo.VehicleInOutItems WHERE VehicleInOutID = @ID
   `);
 
+  const withWeight = await hasItemWeight(pool);
   for (const line of validatedItems) {
     await pool
       .request()
@@ -309,11 +318,13 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
       .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty)
       .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null)
       .input("Quality", sql.NVarChar(20), line.quality || null)
-      .input("Brand", sql.NVarChar(100), line.brand || null).query(`
+      .input("Brand", sql.NVarChar(100), line.brand || null)
+      .input("Weight", sql.Decimal(18, 3), line.weight)
+      .input("WeightUnit", sql.NVarChar(10), line.weightUnit).query(`
         INSERT INTO dbo.VehicleInOutItems
-          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand)
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand${withWeight ? ", Weight, WeightUnit" : ""})
         VALUES
-          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality, @Brand)
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality, @Brand${withWeight ? ", @Weight, @WeightUnit" : ""})
       `);
   }
 }
@@ -418,6 +429,24 @@ router.get("/", async (req, res) => {
 
     const rows = result.recordsets[0];
     const total = result.recordsets[1][0]?.Total ?? 0;
+
+    // Each entry's lines for the register — item, quantity, quality grade and weight (photos stay on GET /:id).
+    if (rows.length) {
+      const ir = pool.request();
+      rows.forEach((r, i) => ir.input(`v${i}`, sql.Int, r.VehicleInOutID));
+      const items = (await ir.query(`
+        SELECT VehicleInOutID, VehicleInOutItemID, ItemName, UomName, ReceivedQty, Quality, Brand${await weightCols(pool)}
+        FROM dbo.VehicleInOutItems
+        WHERE VehicleInOutID IN (${rows.map((_, i) => `@v${i}`).join(", ")})
+        ORDER BY VehicleInOutItemID
+      `)).recordset;
+      const byRecord = new Map();
+      for (const it of items) {
+        if (!byRecord.has(it.VehicleInOutID)) byRecord.set(it.VehicleInOutID, []);
+        byRecord.get(it.VehicleInOutID).push(it);
+      }
+      rows.forEach((r) => { r.Items = byRecord.get(r.VehicleInOutID) || []; });
+    }
 
     res.json({
       data: rows,
@@ -580,7 +609,7 @@ router.get("/:id", async (req, res) => {
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
     const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand${await weightCols(pool)}
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ItemsID
     `);
@@ -703,7 +732,7 @@ router.get("/:id/items", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("ID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, Brand
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, Brand, Quality${await weightCols(pool)}
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ID
     `);

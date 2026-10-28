@@ -21,6 +21,8 @@ import { type MRPOPrefill, getMRPOPrefill, getApprovedMRList } from "@/api/mater
 import { type WDPOPrefill } from "@/api/engineeringApi";
 import { type WOPOPrefill } from "@/api/workOrderApi";
 import { type QTPOPrefill } from "@/api/quotationApi";
+
+export type LastRate = { ItemId: string; Rate: number; UomName: string | null; PurchaseOrderID: number; DocNo: string | null; PODate: string; Status: string | null };
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -866,6 +868,8 @@ export function usePurchaseOrder() {
         ? String(qtPrefill.SupplierId)
         : prev.supplierId,
       remarks: qtPrefill.Remarks ?? prev.remarks,
+      // The payment term agreed with this supplier on the quotation.
+      paymentTermId: qtPrefill.PaymentTermId ? String(qtPrefill.PaymentTermId) : prev.paymentTermId,
     }));
 
     const prefillLines: POLineItem[] = qtPrefill.items.map((it) => {
@@ -2141,7 +2145,28 @@ export function usePurchaseOrder() {
 
   const isReadOnly = viewMode === "view";
 
+  // The base rate each item was last ordered at from this supplier (any earlier PO, direct or MR-tagged) — shown
+  // beside the line's rate so a changed price is noticed. Keyed by item id.
+  const lastRateItemIds = useMemo(
+    () => [...new Set(lineItems.map((l) => l.itemId).filter(Boolean))].sort(),
+    [lineItems],
+  );
+  const { data: lastRates = {} } = useQuery<Record<string, LastRate>>({
+    queryKey: ["po-last-rates", form.supplierId, lastRateItemIds.join(","), editingId],
+    enabled: !!form.supplierId && lastRateItemIds.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const qs = new URLSearchParams({ supplierId: String(form.supplierId), itemIds: lastRateItemIds.join(",") });
+      if (editingId) qs.set("excludeId", String(editingId));
+      const r = await fetchWithAuth(`/api/purchase-orders/last-rates?${qs}`);
+      if (!r.ok) return {};
+      const rows: LastRate[] = await r.json().catch(() => []);
+      return Object.fromEntries(rows.map((x) => [String(x.ItemId).toLowerCase(), x]));
+    },
+  });
+
   return {
+    lastRates,
     importFileInputRef,
     importing,
     setImporting,

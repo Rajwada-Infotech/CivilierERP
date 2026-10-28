@@ -66,6 +66,31 @@ function isNamedOnLevel(levelDef, role, viewerUserId) {
   return roleMatch || userMatch;
 }
 
+// A Civil Work DPR activity's own approval levels (ApprovalLevelsJson) and the first one not yet satisfied.
+// null when the activity has no current assignment or no levels.
+async function dprApprovalLevels(rungId) {
+  const pool = getPool();
+  const a = await pool.request().input("rungId", sql.Int, rungId).query(
+    "SELECT Id, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+  );
+  if (!a.recordset.length) return null;
+  let levels = [];
+  try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+  if (!levels.length) return null;
+
+  const approvalsRes = await pool.request().input("aid", sql.Int, a.recordset[0].Id).query(
+    "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+  );
+  const approvals = approvalsRes.recordset;
+  const satisfied = (level) => {
+    const approvedIds = new Set(approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)));
+    if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
+    return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
+  };
+  const index = levels.findIndex((l) => !satisfied(l));
+  return { levels, index, currentLevel: index >= 0 ? levels[index] : null };
+}
+
 // Returns { visible, canAct, currentLevel?, totalLevels? } rather than a
 // plain boolean — canAct=false means "shown for awareness (named somewhere
 // on this workflow) but this isn't their level yet, so a click on Approve
@@ -104,25 +129,9 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
     const rungId = parseInt(item.RecordId, 10);
     if (!Number.isFinite(rungId) || viewerUserId == null) return { visible: false, canAct: false };
     try {
-      const pool = getPool();
-      const a = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Id, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
-      );
-      if (!a.recordset.length) return { visible: false, canAct: false };
-      let levels = [];
-      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
-      if (!levels.length) return { visible: false, canAct: false };
-
-      const approvalsRes = await pool.request().input("aid", sql.Int, a.recordset[0].Id).query(
-        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
-      );
-      const approvals = approvalsRes.recordset;
-      const satisfied = (level) => {
-        const approvedIds = new Set(approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)));
-        if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
-        return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
-      };
-      const currentLevel = levels.find((l) => !satisfied(l));
+      const dpr = await dprApprovalLevels(rungId);
+      if (!dpr) return { visible: false, canAct: false };
+      const { levels, currentLevel } = dpr;
       if (!currentLevel) return { visible: false, canAct: false }; // fully cleared — shouldn't normally still appear
 
       const named = currentLevel.userIds.map(Number).includes(Number(viewerUserId));
@@ -197,6 +206,35 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
 }
 
+// Which step of a multi-step approval a Pending record is waiting on — { level, total, label } — so the inbox badge
+// can say "Pending · Final Level" instead of a bare "Pending". null for single-step workflows, modules without a
+// level engine, and anything already past its last level. Uses the level visibility already worked out when it can;
+// admins skip that check, so it's resolved here for them.
+async function approvalStage(item, visibility, workflowCache) {
+  if (item.Status !== "Pending") return null;
+  try {
+    if (item.Module === "civilworkdpr-approval") {
+      const dpr = await dprApprovalLevels(parseInt(item.RecordId, 10));
+      if (!dpr || dpr.levels.length < 2 || dpr.index < 0) return null;
+      const last = dpr.index === dpr.levels.length - 1;
+      return { level: dpr.index + 1, total: dpr.levels.length, label: last ? "Final" : `Step ${dpr.index + 1}` };
+    }
+    const map = MODULE_MAP[item.Module];
+    const workflow = workflowCache.get(item.Module);
+    if (!map || !workflow?.LevelDefs?.length) return null;
+    const total = workflow.Levels || workflow.LevelDefs.length;
+    if (total < 2) return null;
+    const level = visibility.currentLevel
+      ?? (await resolveCurrentLevel(map.table.replace("dbo.", ""), parseInt(item.RecordId, 10), total, workflow.LevelDefs, null, { module: item.Module }));
+    if (!level || level > total) return null;
+    const label = workflow.LevelDefs[level - 1]?.label || (level === total ? "Final Level" : `Level ${level}`);
+    return { level, total, label };
+  } catch (err) {
+    logger.warn({ module: item.Module, recordId: item.RecordId, err: err.message }, "approval-inbox: could not work out the approval stage");
+    return null;
+  }
+}
+
 async function filterVisibleToViewer(items, req) {
   const viewerRole = req.user?.role;
   const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
@@ -215,6 +253,9 @@ async function filterVisibleToViewer(items, req) {
   const results = await Promise.all(
     items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
   );
+  const stages = await Promise.all(
+    items.map((item, i) => (results[i].visible ? approvalStage(item, results[i], workflowCache) : null)),
+  );
   const out = [];
   items.forEach((item, i) => {
     const r = results[i];
@@ -222,7 +263,9 @@ async function filterVisibleToViewer(items, req) {
     // _canAct is only attached when it's actually informative (false) —
     // omitted entirely for the common case so existing consumers/tests that
     // don't know about it are unaffected.
-    out.push(r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : item);
+    const row = r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : { ...item };
+    if (stages[i]) row._stage = stages[i];
+    out.push(row);
   });
   return out;
 }
