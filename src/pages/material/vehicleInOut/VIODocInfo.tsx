@@ -5,7 +5,7 @@ import type { VIOState } from "./useVehicleInOut";
 
 // Document info: type and number, year, company, project, godown, entry time.
 export function VIODocInfo({ m }: { m: VIOState }) {
-  const { finYears, editingId, errors, setReceivedQtyByItem, setPhotoByItem, setQualityByItem, setBrandByItem, form, pf, docNoPreview, loadingPreview, companies, filteredProjects } = m;
+  const { finYears, editingId, errors, setReceivedQtyByItem, setPhotoByItem, setQualityByItem, setBrandByItem, setWeightByItem, form, pf, docNoPreview, loadingPreview, companies, filteredProjects } = m;
   return (
     <>
       {/* ── Section 1: Document Info ── */}
@@ -49,6 +49,7 @@ export function VIODocInfo({ m }: { m: VIOState }) {
                   setPhotoByItem({});
                   setQualityByItem({});
                   setBrandByItem({});
+                  setWeightByItem({});
                 }}
                 className={`appearance-none ${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
               >
@@ -101,6 +102,7 @@ export function VIODocInfo({ m }: { m: VIOState }) {
                   setPhotoByItem({});
                   setQualityByItem({});
                   setBrandByItem({});
+                  setWeightByItem({});
                 }}
                 className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
               >

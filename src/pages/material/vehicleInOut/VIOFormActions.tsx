@@ -4,7 +4,7 @@ import type { VIOState } from "./useVehicleInOut";
 
 // Save / update and reset.
 export function VIOFormActions({ m }: { m: VIOState }) {
-  const { activeFinYear, editingId, setEditingId, setErrors, uploading, setReceivedQtyByItem, setPhotoByItem, setQualityByItem, setBrandByItem, setForm, createMut, updateMut, onSubmit } = m;
+  const { activeFinYear, editingId, setEditingId, setErrors, uploading, setReceivedQtyByItem, setPhotoByItem, setQualityByItem, setBrandByItem, setWeightByItem, setForm, createMut, updateMut, onSubmit } = m;
   return (
     <>
       {/* ── Actions ── */}
@@ -20,6 +20,7 @@ export function VIOFormActions({ m }: { m: VIOState }) {
               setPhotoByItem({});
               setQualityByItem({});
               setBrandByItem({});
+              setWeightByItem({});
               setEditingId(null);
               setErrors({});
             }}

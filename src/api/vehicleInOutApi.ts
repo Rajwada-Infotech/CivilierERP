@@ -31,7 +31,12 @@ export interface VehicleInOutLineItem {
   Quality: VehicleInOutItemQuality | null;
   /** Optional free-text brand for this line, set at entry time. */
   Brand: string | null;
+  /** Optional weight of what arrived on this line, with its unit (migration 584). */
+  Weight?: number | null;
+  WeightUnit?: VehicleInOutWeightUnit | null;
 }
+
+export type VehicleInOutWeightUnit = "kg" | "tonne";
 
 /** A PO line item together with how much has already been received across
  *  all Vehicle In/Out lots (GET /po-items/:poId). */

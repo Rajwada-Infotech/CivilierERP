@@ -148,6 +148,29 @@ export const registerVehAttachmentCleanup = () => {
 
 /** Thumbnail/link for one attachment — resolves its authenticated blob URL
  *  before rendering an <img> (for images) or a download link (for PDFs etc). */
+/** The photo captured beside a received line (a base64 data URL); opens full size in a new tab. */
+export function LinePhotoThumb({ src, alt }: { src: string | null | undefined; alt: string }) {
+  if (!src) return null;
+  const open = () => {
+    // A data URL can't be navigated to directly; show it on a blank page instead.
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.title = alt;
+    const img = w.document.createElement("img");
+    img.src = src;
+    img.alt = alt;
+    img.style.cssText = "max-width:100%;height:auto;display:block;margin:auto";
+    w.document.body.style.margin = "0";
+    w.document.body.style.background = "#111";
+    w.document.body.appendChild(img);
+  };
+  return (
+    <button type="button" onClick={open} title="Open the photo" className="shrink-0 border border-foreground/30 hover:border-foreground transition-colors">
+      <img src={src} alt={alt} className="w-9 h-9 object-cover block" />
+    </button>
+  );
+}
+
 export function AttachmentThumb({
   attachment,
   onRemove,
