@@ -20,11 +20,15 @@ async function multiMrReady(pool) {
   if (ready) return true;
   if (Date.now() - checkedAt < 60_000) return false;
   checkedAt = Date.now();
-  const r = await pool.request().query(`
-    SELECT CASE WHEN OBJECT_ID('dbo.PurchaseOrderMRs', 'U') IS NOT NULL
-                 AND OBJECT_ID('dbo.PurchaseOrderItemMRLinks', 'U') IS NOT NULL
-                 AND OBJECT_ID('dbo.vw_PurchaseOrderMRItemQty', 'V') IS NOT NULL THEN 1 ELSE 0 END AS ok`);
-  ready = r.recordset[0].ok === 1;
+  try {
+    const r = await pool.request().query(`
+      SELECT CASE WHEN OBJECT_ID('dbo.PurchaseOrderMRs', 'U') IS NOT NULL
+                   AND OBJECT_ID('dbo.PurchaseOrderItemMRLinks', 'U') IS NOT NULL
+                   AND OBJECT_ID('dbo.vw_PurchaseOrderMRItemQty', 'V') IS NOT NULL THEN 1 ELSE 0 END AS ok`);
+    ready = r?.recordset?.[0]?.ok === 1;
+  } catch {
+    ready = false; // can't tell: behave as before migration 585, ask again in a minute
+  }
   return ready;
 }
 
