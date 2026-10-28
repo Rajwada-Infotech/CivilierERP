@@ -4,24 +4,13 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
-const { send: sendMessage, missingFields } = require("../services/messageProviders");
+const { send: sendMessage, messagingStatus } = require("../services/messageProviders");
 
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const superAdminOnly = allowRoles("super_admin");
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-const parseConfigJson = (value) => {
-  if (!value) return {};
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
-  }
-};
 
 // ─── Channel management CRUD (super_admin only) ──────────────────────────────
 
@@ -193,32 +182,11 @@ router.delete("/channels/:id", superAdminOnly, async (req, res) => {
 
 // ====================== Messaging channels: status + test ======================
 const MESSAGING = ["email", "sms", "whatsapp"];
-const MESSAGING_FROM = { email: "fromEmail", sms: "senderId", whatsapp: "phoneNumberId" };
 
 // GET /messaging/status — whether each channel is set up and switched on (no secrets).
 router.get("/messaging/status", adminOnly, async (req, res) => {
   try {
-    const result = await getPool().request().query(`
-      SELECT Channel, ConfigJson, IsActive, UpdatedAt
-      FROM dbo.CommunicatorConfig
-      WHERE Channel IN ('email', 'sms', 'whatsapp')
-    `);
-    const rows = new Map(result.recordset.map((r) => [r.Channel, r]));
-    res.json({
-      channels: MESSAGING.map((channel) => {
-        const row = rows.get(channel);
-        const config = row?.IsActive ? parseConfigJson(row.ConfigJson) : {};
-        return {
-          channel,
-          saved: !!row?.IsActive,
-          active: !!config.isActive,
-          missing: missingFields(channel, config),
-          provider: config.provider || "",
-          from: config[MESSAGING_FROM[channel]] || "",
-          updatedAt: row?.UpdatedAt || null,
-        };
-      }),
-    });
+    res.json({ channels: await messagingStatus() });
   } catch (err) {
     console.error("ERROR in GET /messaging/status:", err);
     res.status(500).json({ error: "Failed to load messaging status" });

@@ -6,6 +6,8 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
+const { messagingStatus, PROVIDER_CHANNEL } = require("../services/messageProviders");
+const { LEAD_CHANNELS, messageLead } = require("../services/saMessaging");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -77,7 +79,7 @@ router.get("/pending-followups", requirePageRight("sa-lead-activities", "view"),
     const result = await req0.query(`
       SELECT
         a.Id, a.LeadId, a.ActivityType, a.Summary, a.NextFollowupDate, a.CreatedAt,
-        l.LeadUid, l.CustomerName, l.Mobile, l.Status, l.Classification
+        l.LeadUid, l.CustomerName, l.Mobile, l.Email, l.Status, l.Classification
       FROM dbo.SaLeadActivity a
       JOIN dbo.SaLead l ON l.Id = a.LeadId
       WHERE a.NextFollowupDate <= CAST(SYSDATETIME() AS DATE)
@@ -129,6 +131,51 @@ router.post("/lead/:leadId", requirePageRight("sa-lead-activities", "create"), a
     res.status(201).json({ success: true });
   } catch (e) {
     console.error("[sa-lead-activities] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /messaging-status — which of SMS / WhatsApp / Email can send right now
+// (set up and switched on in Admin → Integrations). No secrets.
+router.get("/messaging-status", requirePageRight("sa-lead-activities", "view"), async (req, res) => {
+  try {
+    const status = await messagingStatus();
+    res.json({
+      channels: LEAD_CHANNELS.map((type) => {
+        const s = status.find((c) => c.channel === PROVIDER_CHANNEL[type]);
+        return { type, ready: !!s?.ready, saved: !!s?.saved, active: !!s?.active };
+      }),
+    });
+  } catch (e) {
+    console.error("[sa-lead-activities] GET /messaging-status error:", e.message);
+    res.status(500).json({ error: "Could not read the messaging channels" });
+  }
+});
+
+// POST /lead/:leadId/send { channel, subject?, text } — sends through the
+// Admin → Integrations provider and records it as an Outbound activity.
+router.post("/lead/:leadId/send", requirePageRight("sa-lead-activities", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const lid = parseId(req.params.leadId);
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+    const channel = String(req.body?.channel || "");
+    const text = String(req.body?.text || "").trim();
+    const subject = String(req.body?.subject || "").trim();
+    if (!LEAD_CHANNELS.includes(channel)) return res.status(400).json({ error: `Channel must be one of: ${LEAD_CHANNELS.join(", ")}` });
+    if (!text) return res.status(400).json({ error: "Write the message first" });
+    if (channel === "Email" && !subject) return res.status(400).json({ error: "An email needs a subject" });
+
+    const req0 = pool.request().input("lid", sql.Int, lid);
+    const scope = applyLeadScope(req0, req, "l");
+    const check = await req0.query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+    if (!check.recordset.length) return res.status(403).json({ error: "Access denied" });
+
+    const r = await messageLead(pool, lid, channel, { subject, text }, actorId(req));
+    if (!r.ok) return res.status(422).json({ error: r.skipped && /^(Not set up|Missing|Switched off)/.test(r.error) ? `${channel} is not set up — ask an admin to set it up in Admin → Integrations (${r.error}).` : r.error });
+    res.status(201).json({ success: true });
+  } catch (e) {
+    console.error("[sa-lead-activities] POST /send error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

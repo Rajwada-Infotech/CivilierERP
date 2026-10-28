@@ -118,4 +118,38 @@ async function send(channel, message, { force = false } = {}) {
   }
 }
 
-module.exports = { send, loadConfig, missingFields, REQUIRED };
+// Timeline / activity channel name -> the Communicator channel whose saved provider settings send it.
+const PROVIDER_CHANNEL = { SMS: "sms", Email: "email", WhatsApp: "whatsapp" };
+
+// The setting that names who a channel sends as.
+const FROM_FIELD = { email: "fromEmail", sms: "senderId", whatsapp: "phoneNumberId" };
+
+/** Whether each channel is set up and switched on — no secrets. `ready` = it would send right now. */
+async function messagingStatus() {
+  const result = await getPool().request().query(`
+    SELECT Channel, ConfigJson, IsActive, UpdatedAt
+    FROM dbo.CommunicatorConfig
+    WHERE Channel IN ('email', 'sms', 'whatsapp')
+  `);
+  const rows = new Map(result.recordset.map((r) => [r.Channel, r]));
+  return Object.keys(REQUIRED).map((channel) => {
+    const row = rows.get(channel);
+    let config = {};
+    if (row?.IsActive) {
+      try { config = JSON.parse(row.ConfigJson || "{}"); } catch { config = {}; }
+    }
+    const missing = missingFields(channel, config);
+    return {
+      channel,
+      saved: !!row?.IsActive,
+      active: !!config.isActive,
+      missing,
+      ready: !!row?.IsActive && missing.length === 0 && !!config.isActive,
+      provider: config.provider || "",
+      from: config[FROM_FIELD[channel]] || "",
+      updatedAt: row?.UpdatedAt || null,
+    };
+  });
+}
+
+module.exports = { send, loadConfig, missingFields, messagingStatus, REQUIRED, PROVIDER_CHANNEL };

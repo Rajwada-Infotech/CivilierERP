@@ -8,6 +8,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { convertLead } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
 const { getIo } = require("../socket");
+const { welcomeLead, alertAssigned } = require("../services/saMessaging");
 const crypto = require("crypto");
 const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation");
 
@@ -167,7 +168,7 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
       }
     }
 
-    await pool.request()
+    const created = await pool.request()
       .input("uid", sql.NVarChar(50), uid)
       .input("cn", sql.NVarChar(200), b.CustomerName || null)
       .input("mob", sql.NVarChar(20), b.Mobile || null)
@@ -215,6 +216,7 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
            SourcePlacement, LeadCaptureUrl, UtmSource, UtmMedium, UtmCampaign,
            UtmContent, UtmTerm, CapturedAt, SourcePayload,
            IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES
           (@uid, @cn, @mob, @alt, @em, @pid, @cid, @aid,
            ISNULL(@dg, CAST(SYSDATETIME() AS DATE)), @rem, @st, @cl,
@@ -225,6 +227,7 @@ router.post("/", requirePageRight("sa-leads", "create"), async (req, res) => {
            1, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, LeadUid: uid });
+    welcomeLead(pool, created.recordset[0].Id, actorId(req));
   } catch (e) {
     console.error("[sa-leads] POST error:", e.message);
     if (e.number === 2601 || e.number === 2627) {
@@ -426,6 +429,7 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
         "Lead Assigned to Your Team",
         `Lead ${old.LeadUid} has been assigned to your team.`,
         leadId);
+      alertAssigned(pool, leadId, newTl);
     }
 
     // Notify new SP when AssignedSalespersonId changes
@@ -435,6 +439,7 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
         "Lead Assigned to You",
         `Lead ${old.LeadUid} has been assigned to you for follow-up.`,
         leadId);
+      alertAssigned(pool, leadId, newSp);
     }
 
     res.json({ success: true });

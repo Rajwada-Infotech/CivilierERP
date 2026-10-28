@@ -11,6 +11,7 @@ const compression = require("compression");
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
+const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const authMiddleware = require("./middleware/auth");
 const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
@@ -730,6 +731,7 @@ async function startServer() {
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
       startFollowupReminderEngine();
+      startSiteVisitReminderEngine();
       startAutoDepreciationEngine();
     });
 

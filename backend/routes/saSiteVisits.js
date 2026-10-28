@@ -7,6 +7,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { statusesThatCanMoveTo } = require("../constants/saStatuses");
+const { confirmSiteVisit } = require("../services/saMessaging");
 
 // Move a lead to `to` only if STATUS_TRANSITIONS allows it from its current
 // status. The check is in the UPDATE's WHERE, so it's atomic. Returns true
@@ -77,7 +78,7 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
       }
     }
 
-    await pool.request()
+    const visit = await pool.request()
       .input("lid", sql.Int, parseInt(b.LeadId))
       .input("pn", sql.NVarChar(200), b.ProjectName || null)
       .input("pd", sql.Date, b.PreferredDate || null)
@@ -91,12 +92,15 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
         INSERT INTO dbo.SaSiteVisit
           (LeadId, ProjectName, PreferredDate, PreferredTime, ExecutiveId,
            PickupRequired, CustomerNotes, Status, IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.LeadId, INSERTED.ProjectName, INSERTED.PreferredDate, INSERTED.PreferredTime, INSERTED.PickupRequired, INSERTED.Status
         VALUES
           (@lid, @pn, @pd, @pt, @eid, @pu, @cn, @st, 1, @cb, SYSDATETIME());
       `);
     await advanceLead(pool, parseInt(b.LeadId), "VisitScheduled");
 
     res.status(201).json({ success: true });
+    const booked = visit.recordset[0];
+    if (booked.Status === "Scheduled") confirmSiteVisit(pool, booked, actorId(req));
   } catch (e) {
     console.error("[sa-site-visits] POST error:", e.message);
     res.status(500).json({ error: e.message });

@@ -24,6 +24,7 @@ import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { LeadMessageForm } from "@/components/sa/LeadMessageForm";
 import { LEAD_CLASSIFICATIONS, LEAD_STAGES, LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { MoneyView, StageCell, TitleCell } from "@/components/sa/saCells";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
@@ -194,7 +195,7 @@ const SaLeadManagement: React.FC = () => {
   const [auditLeadId, setAuditLeadId] = useState<string | null>(null);
   // Lets staff log a call/WhatsApp/etc straight from a row instead of
   // leaving this page for Lead Activities or Follow-Ups just to do that.
-  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string } | null>(null);
+  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string; mobile?: string; email?: string } | null>(null);
   // Was a standalone "Tracking" tab with its own two hand-rolled tables —
   // same information, now a one-click filter on the grid itself instead of
   // a separate tab/page round-trip.
@@ -556,7 +557,7 @@ const SaLeadManagement: React.FC = () => {
               </button>
             );
             const interactionBtn = (
-              <button type="button" onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid) })} className={actionBtn}
+              <button type="button" onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid), mobile: row.Mobile ? String(row.Mobile) : undefined, email: row.Email ? String(row.Email) : undefined })} className={actionBtn}
                 title="Log a call, WhatsApp or meeting and see past ones">
                 <MessageSquarePlus size={13} /> Log call
               </button>
@@ -691,10 +692,10 @@ const SaLeadManagement: React.FC = () => {
       <CrmSideDrawer
         open={!!interactionLead}
         onClose={() => setInteractionLead(null)}
-        title="Log Interaction"
+        title="Log or Send"
         subtitle={interactionLead?.uid}
       >
-        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} />}
+        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} mobile={interactionLead.mobile} email={interactionLead.email} />}
       </CrmSideDrawer>
 
       {/* Transfer Leads Dialog */}
@@ -811,11 +812,15 @@ const SaLeadManagement: React.FC = () => {
 // hoisted into useLeadActivities.ts/LeadInteractionForm.tsx since this is
 // the only call site; if a second one shows up, promote it there instead
 // of copying this.
-const LeadInteractionPanelContent: React.FC<{ leadId: number }> = ({ leadId }) => {
+const LeadInteractionPanelContent: React.FC<{ leadId: number; mobile?: string; email?: string }> = ({ leadId, mobile, email }) => {
   const { data: history = [] } = useLeadActivityHistory(leadId);
   return (
     <div className="space-y-4">
       <LeadInteractionForm leadId={leadId} variant="compact" />
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <h3 className="text-xs font-semibold text-foreground">Send message</h3>
+        <LeadMessageForm leadId={leadId} mobile={mobile} email={email} />
+      </div>
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="px-3 py-2 bg-muted/30 border-b border-border">
           <h3 className="text-xs font-semibold text-foreground">History ({history.length})</h3>

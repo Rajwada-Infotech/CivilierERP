@@ -7,6 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { resolveDistributionForLead } = require("../services/saDistributionEngine");
+const { alertAssignedMany } = require("../services/saMessaging");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -181,6 +182,7 @@ router.post("/run-now/:level", requirePageRight("sa-lead-distribution", "create"
     );
     const pending = pendingResult.recordset;
     let distributedCount = 0;
+    const assigned = [];
     for (const lead of pending) {
       const result = await resolveDistributionForLead(pool, lead, level);
       if (!result) continue;
@@ -233,12 +235,14 @@ router.post("/run-now/:level", requirePageRight("sa-lead-distribution", "create"
         }
         await tx.commit();
         distributedCount++;
+        assigned.push({ leadId: lead.Id, userId: result.userId });
       } catch (txErr) {
         await tx.rollback();
         console.error(`[sa-distribution-rules] run-now tx failed for lead ${lead.Id}:`, txErr.message);
       }
     }
     res.json({ message: `Auto-distributed ${distributedCount} of ${pending.length} eligible leads`, distributedCount, eligibleCount: pending.length });
+    alertAssignedMany(pool, assigned);
   } catch (err) {
     console.error("[sa-distribution-rules] run-now error:", err.message);
     res.status(500).json({ error: "Internal server error" });

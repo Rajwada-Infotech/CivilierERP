@@ -1,8 +1,5 @@
 const { sql } = require("../db");
-const { send } = require("./messageProviders");
-
-// Timeline channel name -> Communicator channel whose saved provider settings send it.
-const PROVIDER_CHANNEL = { SMS: "sms", Email: "email", WhatsApp: "whatsapp" };
+const { send, PROVIDER_CHANNEL } = require("./messageProviders");
 
 /**
  * Core engine for triggering automated communications and logging them.

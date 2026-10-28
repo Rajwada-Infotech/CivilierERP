@@ -6,6 +6,7 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
+const { alertAssignedMany } = require("../services/saMessaging");
 router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -84,6 +85,7 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
     try {
       const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
       let distributed = 0, skipped = 0;
+      const assigned = [];
       for (const asgn of assignments) {
         const { userId, leadIdList } = asgn;
         for (const lid of leadIdList) {
@@ -104,6 +106,7 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
           if (!cur.recordset.length) { skipped++; continue; }
           if (cur.recordset[0].assignedTo === userId) continue;
           distributed++;
+          assigned.push({ leadId: lid, userId });
 
           await tx.request()
             .input("lid", sql.Int, lid)
@@ -126,6 +129,7 @@ router.post("/distribute", requirePageRight("sa-lead-distribution", "create"), a
       }
       await tx.commit();
       res.json({ success: true, distributed, skipped });
+      alertAssignedMany(pool, assigned);
     } catch (e) {
       await tx.rollback();
       throw e;
