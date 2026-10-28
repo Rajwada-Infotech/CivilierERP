@@ -97,7 +97,7 @@ export function LoginCard(p: LoginCardProps) {
               onClick={() => setShowPass((s) => !s)}
               aria-label={showPass ? "Hide password" : "Show password"}
               aria-pressed={showPass}
-              className="ls-eye absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 flex items-center justify-center rounded-lg"
+              className="ls-eye absolute right-2 inset-y-0 my-auto h-9 w-9 flex items-center justify-center rounded-lg"
               whileTap={{ scale: 0.8 }}
             >
               <AnimatePresence mode="wait" initial={false}>
