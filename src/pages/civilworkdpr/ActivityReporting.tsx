@@ -80,12 +80,16 @@ function StatusTile({
 // Purely informational — clicking anywhere on the row (including this
 // badge) opens the Activity Detail modal; clicking the badge specifically
 // jumps straight to its Photos tab instead of landing on Overview.
-function ActivityPhotosBadge({ rungId }: { rungId: number }) {
+// The count comes with the room's list (photoCount). This row used to download the activity's every photo — data
+// and all — just to count them, one request per row, which on a full room tripped the rate limit (429s).
+// enabled: false only reads the photos already cached by the detail modal, so an upload made there shows at once.
+function ActivityPhotosBadge({ rungId, count: listed }: { rungId: number; count?: number }) {
   const { data: photos } = useQuery({
     queryKey: ["activity-photos", rungId],
     queryFn: () => getActivityPhotos(rungId),
+    enabled: false,
   });
-  const count = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
+  const count = photos ? photos.before.length + photos.after.length : (listed ?? 0);
 
   return (
     <span
@@ -239,7 +243,7 @@ function ChainGroupList({
                             "opening an activity" look like it always landed
                             on Photos. */}
                         <div onClick={(e) => { e.stopPropagation(); openDetail(row, "photos"); }} className="inline-flex">
-                          <ActivityPhotosBadge rungId={row.rungId} />
+                          <ActivityPhotosBadge rungId={row.rungId} count={row.photoCount} />
                         </div>
                       </div>
                     );
@@ -331,7 +335,7 @@ function ChainGroupList({
                               openDetail(row, "photos");
                             }}
                           >
-                            <ActivityPhotosBadge rungId={row.rungId} />
+                            <ActivityPhotosBadge rungId={row.rungId} count={row.photoCount} />
                           </td>
                           <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
                             <AssignmentStatusSelect rungId={row.rungId} status={row.status} resumed={!!row.resumedAt} />
