@@ -165,11 +165,13 @@ export function usePurchaseOrder() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
-  // Source MR reference — set when form is opened from a Material Request
-  const [sourceMR, setSourceMR] = useState<{
-    id: number;
-    docNo: string;
-  } | null>(null);
+  // Source MRs — the first is the one the PO was opened from; more of the same company and project can be added,
+  // their items summed into the same lines. `sourceMR` / `setSourceMR` keep meaning "the (first) MR".
+  const [sourceMRs, setSourceMRs] = useState<{ id: number; docNo: string }[]>([]);
+  const sourceMR = sourceMRs[0] ?? null;
+  const setSourceMR = (mr: { id: number; docNo: string } | null) => setSourceMRs(mr ? [mr] : []);
+  const [addMrValue, setAddMrValue] = useState("");
+  const [addMrLoading, setAddMrLoading] = useState(false);
 
   // Source Quotation reference — set when form is opened from the L1 Chart
   const [sourceQT, setSourceQT] = useState<{
@@ -1123,6 +1125,7 @@ export function usePurchaseOrder() {
         amount: qty * rate + taxAmount,
         mrItemId: it.MRItemId ?? null,
         mrPendingQty: pendingQty,
+        mrSources: it.MRItemId ? [{ mrItemId: it.MRItemId, mrId: prefill.MRId, qty: pendingQty }] : undefined,
       };
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
@@ -1152,6 +1155,129 @@ export function usePurchaseOrder() {
     } finally {
       setMrDropdownLoading(false);
     }
+  };
+
+  // ── More Material Requests on the same PO ────────────────────────────────
+  // Only MRs of the PO's own company and project are offered. An item already on the PO (same item, same unit)
+  // has the new MR's pending quantity added to its line; anything else becomes a new line.
+  const { data: moreMRs = [], isLoading: moreMRsLoading } = useQuery({
+    queryKey: ["approvedMRList", form.companyId, form.projectId],
+    queryFn: () => getApprovedMRList({ companyId: String(form.companyId), projectId: String(form.projectId) }),
+    enabled: viewMode === "create" && !!sourceMR && !!form.companyId && !!form.projectId,
+    staleTime: 30_000,
+  });
+  const addableMRs = useMemo(
+    () => moreMRs.filter((m) => !sourceMRs.some((s) => s.id === m.MRId)),
+    [moreMRs, sourceMRs],
+  );
+
+  const lineSources = (li: POLineItem) =>
+    li.mrSources?.length
+      ? li.mrSources
+      : li.mrItemId && sourceMR
+        ? [{ mrItemId: li.mrItemId, mrId: sourceMR.id, qty: li.mrPendingQty ?? li.quantity }]
+        : [];
+  const reprice = (li: POLineItem): POLineItem => {
+    const taxAmount = (li.quantity * li.rate * li.gstRate) / 100;
+    return { ...li, taxAmount, amount: li.quantity * li.rate + taxAmount };
+  };
+
+  const addMR = async (mrId: string) => {
+    setAddMrValue(mrId);
+    if (!mrId) return;
+    setAddMrLoading(true);
+    try {
+      const prefill = await getMRPOPrefill(Number(mrId));
+      if (String(prefill.CompanyId) !== String(form.companyId) || String(prefill.ProjectId) !== String(form.projectId)) {
+        toast.error(`${prefill.DocNo} is for a different company or project — only MRs of this PO's company and project can be combined.`);
+        return;
+      }
+      const next = [...lineItems];
+      let added = 0;
+      for (const it of prefill.items) {
+        const pending = Number(it.PendingQty ?? it.Quantity ?? 0);
+        if (!it.MRItemId || pending <= 0) continue;
+        const uom = uoms.find(
+          (u) =>
+            (it.UOMCode && u.code.toLowerCase() === String(it.UOMCode).trim().toLowerCase()) ||
+            (it.UOMName && u.name.toLowerCase() === String(it.UOMName).trim().toLowerCase()),
+        );
+        const unit = uom?.name ?? it.UOMName ?? it.UOMCode ?? "";
+        const src = { mrItemId: it.MRItemId, mrId: prefill.MRId, qty: pending };
+        const at = next.findIndex(
+          (l) => l.itemId && String(l.itemId) === String(it.ItemId) && l.unit.toLowerCase() === String(unit).toLowerCase() && lineSources(l).length > 0,
+        );
+        if (at >= 0) {
+          const l = next[at];
+          next[at] = reprice({
+            ...l,
+            quantity: l.quantity + pending,
+            mrPendingQty: (l.mrPendingQty ?? l.quantity) + pending,
+            mrSources: [...lineSources(l), src],
+            mrItemId: null,
+          });
+        } else {
+          const cgst = Number(it.M_CGST ?? 0);
+          const sgst = Number(it.M_SGST ?? 0);
+          const igst = Number(it.M_IGST ?? 0);
+          const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
+          next.push({
+            id: uid(),
+            itemId: it.ItemId ?? "",
+            itemName: it.ItemName ?? "",
+            itemDescription: "",
+            quantity: pending,
+            uomId: uom?.id ?? null,
+            unit,
+            rate: 0,
+            cgstRate,
+            sgstRate,
+            igstRate,
+            gstRate,
+            taxAmount: 0,
+            amount: 0,
+            mrItemId: it.MRItemId,
+            mrPendingQty: pending,
+            mrSources: [src],
+          });
+        }
+        added++;
+      }
+      if (!added) {
+        toast.error(`${prefill.DocNo} has nothing left to order.`);
+        return;
+      }
+      setLineItems(next.filter((l) => l.itemId || l.itemName));
+      setSourceMRs((prev) => [...prev, { id: prefill.MRId, docNo: prefill.DocNo }]);
+      toast.success(`${prefill.DocNo} added — its items are summed into this PO.`);
+    } catch (err: any) {
+      toast.error(err.message ?? "Could not load that Material Request.");
+    } finally {
+      setAddMrValue("");
+      setAddMrLoading(false);
+    }
+  };
+
+  // Takes an added MR back out: its share comes off each summed line; lines that came only from it go.
+  const removeMR = (mrId: number) => {
+    setLineItems((prev) =>
+      prev.flatMap((l) => {
+        const srcs = lineSources(l);
+        const mine = srcs.filter((s) => s.mrId === mrId);
+        if (!mine.length) return [l];
+        const rest = srcs.filter((s) => s.mrId !== mrId);
+        if (!rest.length) return [];
+        const less = mine.reduce((a, s) => a + s.qty, 0);
+        return [reprice({
+          ...l,
+          quantity: Math.max(0, l.quantity - less),
+          mrPendingQty: rest.reduce((a, s) => a + s.qty, 0),
+          mrSources: rest,
+          mrItemId: rest.length === 1 ? rest[0].mrItemId : null,
+        })];
+      }),
+    );
+    setSourceMRs((prev) => prev.filter((m) => m.id !== mrId));
   };
 
   const filteredList = useMemo(() => {
@@ -1584,7 +1710,7 @@ export function usePurchaseOrder() {
     // a repeat PO off the same MR must stay within the remaining balance.
     const overCap = lineItems.find(
       (li) =>
-        li.mrItemId != null &&
+        (li.mrItemId != null || !!li.mrSources?.length) &&
         li.mrPendingQty != null &&
         li.quantity - li.mrPendingQty > 0.0001,
     );
@@ -1651,6 +1777,8 @@ export function usePurchaseOrder() {
         gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
         mrItemId: li.mrItemId ?? null,
+        // Several MR lines summed into this one — the server splits the quantity across them.
+        mrSources: li.mrSources?.length ? li.mrSources.map((s) => ({ mrItemId: s.mrItemId, qty: s.qty })) : undefined,
         costCenterId: li.costCenterId || null,
       })),
       PaymentTerms:
@@ -1672,6 +1800,7 @@ export function usePurchaseOrder() {
       // Source tracking
       SourceMRId: sourceMR?.id ?? null,
       SourceMRDocNo: sourceMR?.docNo ?? null,
+      SourceMRIds: sourceMRs.map((m) => m.id),
       SourceQTId: sourceQT?.id ?? null,
       SourceQTDocNo: sourceQT?.docNo ?? null,
       SourceWDId: sourceWD?.id ?? null,
@@ -2052,6 +2181,9 @@ export function usePurchaseOrder() {
             taxAmount,
             amount: qty * rate + taxAmount,
             costCenterId: pi.costCenterId ? String(pi.costCenterId) : (pi.CostCenterId ? String(pi.CostCenterId) : ""),
+            // Kept so saving an edit doesn't cut the line off from its Material Request(s).
+            mrItemId: pi.mrItemId ?? pi.MRItemId ?? null,
+            mrSources: Array.isArray(pi.mrSources) && pi.mrSources.length ? pi.mrSources : undefined,
           };
         }),
       );
@@ -2242,6 +2374,13 @@ export function usePurchaseOrder() {
     setTcDropdownOpen,
     sourceMR,
     setSourceMR,
+    sourceMRs,
+    addableMRs,
+    moreMRsLoading,
+    addMrValue,
+    addMrLoading,
+    addMR,
+    removeMR,
     sourceQT,
     setSourceQT,
     mrDropdownValue,

@@ -19,10 +19,12 @@ const sql = require("mssql");
  */
 
 async function poExistsForMR(pool, mrId) {
+  // Any PO raised against this MR — on its own or merged with other MRs (migration 585).
+  const { multiMrReady, poTaggedToMr } = require("../services/poMrLinks");
   const r = await pool
     .request()
     .input("id", sql.Int, mrId)
-    .query("SELECT TOP 1 DocNo FROM dbo.PurchaseOrders WHERE SourceMRId = @id");
+    .query(`SELECT TOP 1 DocNo FROM dbo.PurchaseOrders po WHERE ${poTaggedToMr(await multiMrReady(pool), "@id")}`);
   return r.recordset[0]?.DocNo
     ? `Purchase Order ${r.recordset[0].DocNo}`
     : null;

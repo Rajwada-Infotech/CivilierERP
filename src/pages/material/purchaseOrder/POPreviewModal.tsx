@@ -187,7 +187,11 @@ export function POPreviewModal({ m }: { m: POState }) {
                   <div className="mt-3 flex flex-wrap gap-2">
                     {(viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo) && (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-card border border-foreground/40 text-[0.625rem] font-semibold text-foreground">
-                        <Link2 size={9} /> MR: {viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo}
+                        <Link2 size={9} />{" "}
+                        {/* A PO merged from several Material Requests lists them all. */}
+                        {Array.isArray(viewingPO.SourceMRs) && viewingPO.SourceMRs.length > 1
+                          ? `MRs: ${viewingPO.SourceMRs.map((m: any) => m.DocNo || `#${m.MRId}`).join(", ")}`
+                          : `MR: ${viewingPO.EffectiveMRDocNo || viewingPO.SourceMRDocNo}`}
                         {!viewingPO.SourceMRDocNo && viewingPO.EffectiveMRDocNo && (
                           <span className="opacity-60 font-normal">(via Quotation)</span>
                         )}

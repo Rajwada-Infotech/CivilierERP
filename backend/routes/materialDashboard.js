@@ -3,6 +3,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool } = require("../db");
+const { multiMrReady } = require("../services/poMrLinks");
 const { projectPredicate, ebResolvedProjectSql } = require("../services/projectScope");
 const { redisGet, redisSet } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -27,7 +28,9 @@ router.use(checkPermissionForMethod("Material", "MaterialDashboard"));
 const GRN_INVOICE_DAYS = 7;
 const TODAY = "CAST(GETDATE() AS DATE)";
 const LIVE_PO = "ISNULL(p2.Status,'') NOT IN ('Rejected','Cancelled')";
+// /*MRPO*/ becomes the PurchaseOrderMRs check (a PO merging several MRs, migration 585) once that table exists.
 const MR_HAS_PO = `(EXISTS (SELECT 1 FROM dbo.PurchaseOrders p2 WHERE p2.SourceMRId = mr.MRId AND ${LIVE_PO})
+  /*MRPO*/
   OR EXISTS (SELECT 1 FROM dbo.PurchaseOrders p2 JOIN dbo.Quotations q2 ON q2.QuotationId = p2.SourceQTId
              WHERE q2.SourceMRId = mr.MRId AND ${LIVE_PO}))`;
 const GRN_HAS_INVOICE = `(EXISTS (SELECT 1 FROM dbo.ExpenseBooking e2
@@ -87,10 +90,15 @@ const PIPELINE_TABLES = {
     order: "g.GRNDate, g.GRNID",
   },
 };
-const pipelineSql = (key, scope, select) => {
+const pipelineSql = (key, scope, select, multiMr = false) => {
   const p = PIPELINE[key];
   const t = PIPELINE_TABLES[p.table];
-  return `SELECT ${select ?? t.cols} FROM ${t.from} WHERE (${p.where})${t.scope(scope)}`;
+  const where = p.where.replace(
+    "/*MRPO*/",
+    multiMr ? `OR EXISTS (SELECT 1 FROM dbo.PurchaseOrderMRs pm JOIN dbo.PurchaseOrders p2 ON p2.PurchaseOrderID = pm.PurchaseOrderID
+                 WHERE pm.MRId = mr.MRId AND ${LIVE_PO})` : "",
+  );
+  return `SELECT ${select ?? t.cols} FROM ${t.from} WHERE (${where})${t.scope(scope)}`;
 };
 
 // GET /pipeline/:key — the records behind one pipeline figure (most overdue / oldest first).
@@ -99,7 +107,7 @@ router.get("/pipeline/:key", async (req, res) => {
   if (!PIPELINE[key]) return res.status(404).json({ error: "Unknown figure" });
   try {
     const r = await getPool().request()
-      .query(`${pipelineSql(key, req.projectScope)} ORDER BY ${PIPELINE_TABLES[PIPELINE[key].table].order}`);
+      .query(`${pipelineSql(key, req.projectScope, undefined, await multiMrReady(getPool()))} ORDER BY ${PIPELINE_TABLES[PIPELINE[key].table].order}`);
     res.json(r.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -127,6 +135,7 @@ router.get("/", async (req, res) => {
     } catch (_) {}
 
     const pool = getPool();
+    const multiMr = await multiMrReady(pool);
 
     const safeQuery = async (sql) => {
       try {
@@ -425,7 +434,7 @@ router.get("/", async (req, res) => {
 
       // ── The document pipeline (see PIPELINE above) ─────────────────────
       safeQuery(`SELECT ${Object.keys(PIPELINE)
-        .map((k) => `(SELECT COUNT(*) FROM (${pipelineSql(k, scope, "1 AS x")}) c) AS [${k}]`)
+        .map((k) => `(SELECT COUNT(*) FROM (${pipelineSql(k, scope, "1 AS x", multiMr)}) c) AS [${k}]`)
         .join(", ")}`),
     ]);
 

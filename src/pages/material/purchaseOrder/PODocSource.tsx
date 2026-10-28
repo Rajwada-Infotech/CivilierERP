@@ -1,12 +1,12 @@
 import { Card } from "@/components/ui/card";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
-import { Hash, RefreshCw, AlertCircle, ClipboardList, X, Receipt, ChevronDown } from "lucide-react";
+import { Hash, RefreshCw, AlertCircle, ClipboardList, X, Receipt, ChevronDown, Plus } from "lucide-react";
 import { inputCls, selectCls, FieldLabel } from "./config";
 import type { POState } from "./usePurchaseOrder";
 
 // Document type and number, financial year, and the source (MR, quotation, work order) a PO is raised from.
 export function PODocSource({ m }: { m: POState }) {
-  const { viewMode, poDocTypeId, poDocNo, poDocTypes, poDocTypesLoading, finYearOptions, selectedFinYear, setSelectedFinYear, saving, sourceMR, mrDropdownValue, setMrDropdownValue, mrDropdownLoading, mrDropdownError, mrFilterCompanyId, setMrFilterCompanyId, mrFilterProjectId, setMrFilterProjectId, sourceWD, sourceWO, sourceSaleInvoice, setSourceSaleInvoice, saleInvoiceInput, setSaleInvoiceInput, approvedMRs, approvedMRsLoading, companies, filteredMRProjects, items, handleMRDropdownSelect, applyPoDocNumber, refreshPoDocNumber, validate, isReadOnly } = m;
+  const { sourceMRs, addableMRs, moreMRsLoading, addMrValue, addMrLoading, addMR, removeMR, viewMode, poDocTypeId, poDocNo, poDocTypes, poDocTypesLoading, finYearOptions, selectedFinYear, setSelectedFinYear, saving, sourceMR, mrDropdownValue, setMrDropdownValue, mrDropdownLoading, mrDropdownError, mrFilterCompanyId, setMrFilterCompanyId, mrFilterProjectId, setMrFilterProjectId, sourceWD, sourceWO, sourceSaleInvoice, setSourceSaleInvoice, saleInvoiceInput, setSaleInvoiceInput, approvedMRs, approvedMRsLoading, companies, filteredMRProjects, items, handleMRDropdownSelect, applyPoDocNumber, refreshPoDocNumber, validate, isReadOnly } = m;
   return (
     <>
       {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
@@ -198,17 +198,54 @@ export function PODocSource({ m }: { m: POState }) {
       )}
 
       {sourceMR && !isReadOnly && (
-        <div className="border border-foreground/40 bg-card px-4 py-3 flex items-center gap-3 text-sm">
-          <ClipboardList
-            size={15}
-            className="text-foreground shrink-0"
-          />
-          <span className="text-foreground">
-            Creating <span className="font-semibold">Normal PO</span> from
-            Material Request{" "}
-            <span className="font-heading font-bold">{sourceMR.docNo}</span>.
-            Items, company and project have been pre-filled.
-          </span>
+        <div className="border border-foreground/40 bg-card px-4 py-3 space-y-3 text-sm">
+          <div className="flex items-start gap-3">
+            <ClipboardList size={15} className="text-foreground shrink-0 mt-0.5" />
+            <span className="text-foreground">
+              Creating <span className="font-semibold">Normal PO</span> from{" "}
+              {sourceMRs.length > 1 ? `${sourceMRs.length} Material Requests` : "Material Request"}. Items, company and
+              project have been pre-filled{sourceMRs.length > 1 ? "; the same item on several requests is one summed line" : ""}.
+            </span>
+          </div>
+          {/* Every MR on this PO; the first one stays (start over to change it), any added one can be taken out. */}
+          <div className="flex flex-wrap items-center gap-2 pl-7">
+            {sourceMRs.map((m, i) => (
+              <span key={m.id} className="inline-flex items-center gap-1.5 border border-foreground px-2 py-1 font-heading text-[0.6875rem] font-semibold tracking-wide">
+                {m.docNo}
+                {i > 0 && viewMode === "create" && (
+                  <button type="button" onClick={() => removeMR(m.id)} className="text-muted-foreground hover:text-destructive" title={`Take ${m.docNo} off this PO`} aria-label={`Remove ${m.docNo}`}>
+                    <X size={11} />
+                  </button>
+                )}
+              </span>
+            ))}
+            {viewMode === "create" && (
+              <div className="relative">
+                <select
+                  value={addMrValue}
+                  onChange={(e) => void addMR(e.target.value)}
+                  disabled={moreMRsLoading || addMrLoading || addableMRs.length === 0}
+                  className={`${inputCls} !py-1 !h-8 pl-7 pr-8 appearance-none min-w-[15rem] text-xs`}
+                  title="Only approved requests of this PO's company and project are listed"
+                >
+                  <option value="">
+                    {moreMRsLoading ? "Loading…" : addableMRs.length === 0 ? "No other approved MRs for this project" : "Add another Material Request…"}
+                  </option>
+                  {addableMRs.map((mr) => (
+                    <option key={mr.MRId} value={String(mr.MRId)}>
+                      {mr.DocNo}{mr.FinYearName ? ` (${mr.FinYearName})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <Plus size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                {addMrLoading ? (
+                  <RefreshCw size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground animate-spin" />
+                ) : (
+                  <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
