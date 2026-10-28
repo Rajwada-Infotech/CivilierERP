@@ -966,6 +966,37 @@ const getPurchaseOrderDetail = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+// GET /last-rates?supplierId=&itemIds=1,2&excludeId= — for each item, the base rate (excl. GST) it was last ordered at
+// from this supplier: the latest PO by date that wasn't rejected or cancelled (the PO being edited is left out). The
+// PO form shows it beside the line's rate. Respects project scope.
+router.get("/last-rates", async (req, res) => {
+  const supplierId = parseInt(req.query.supplierId, 10);
+  const itemIds = String(req.query.itemIds || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 100);
+  const excludeId = parseInt(req.query.excludeId, 10);
+  if (!Number.isFinite(supplierId) || !itemIds.length) return res.json([]);
+  try {
+    const r = getPool().request().input("sup", sql.Int, supplierId).input("ex", sql.Int, Number.isFinite(excludeId) ? excludeId : null);
+    itemIds.forEach((id, i) => r.input(`it${i}`, sql.NVarChar(100), id));
+    const result = await r.query(`
+      SELECT ItemId, Rate, UomName, PurchaseOrderID, DocNo, PODate, Status FROM (
+        SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.Rate, poi.UomName, po.PurchaseOrderID,
+               COALESCE(po.DocNo, po.PurchaseOrderNo) AS DocNo, po.PODate, po.Status,
+               ROW_NUMBER() OVER (PARTITION BY poi.ItemId ORDER BY po.PODate DESC, po.PurchaseOrderID DESC, poi.SortOrder) AS rn
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+        WHERE po.SupplierID = @sup
+          AND ISNULL(po.Status, '') NOT IN ('Rejected', 'Cancelled', 'Deleted')
+          AND (@ex IS NULL OR po.PurchaseOrderID <> @ex)
+          AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${itemIds.map((_, i) => `@it${i}`).join(", ")})
+          ${req.projectScope ? projectPredicate(req.projectScope, "po.ProjectId") : ""}
+      ) x WHERE rn = 1
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
