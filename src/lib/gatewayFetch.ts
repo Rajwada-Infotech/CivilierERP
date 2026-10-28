@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "./apiBase";
-import { reportGatewayFailure, reportSystemRecovered, setHealthCheck } from "./systemStatus";
+import { getSystemStatus, reportGatewayFailure, reportSystemRecovered, setHealthCheck } from "./systemStatus";
 import { sendToMaintenancePage } from "./maintenanceRedirect";
 
 // While a new build is going live, nginx answers 502 (or 504) for the few seconds the backend restarts.
@@ -92,6 +92,27 @@ export function createGatewayFetch(native: FetchFn, delays: number[] = GATEWAY_R
 
 let installed = false;
 
+// The banner used to show only when one of the page's own requests failed during a deploy. A page that fetched
+// nothing in those seconds — one reading from its cache — never showed it (CRM pages, which keep their data longer,
+// most of all). A light heartbeat makes it universal: while the tab is visible, /health is asked every
+// HEARTBEAT_MS (and when the tab comes back into view); a gateway failure raises the banner, and the existing /health
+// poll takes it down and refreshes the page's data once the system answers. Being offline is not an update: a
+// network error is ignored, and so is the backend's own (JSON) 503.
+export const HEARTBEAT_MS = 15_000;
+
+/** One heartbeat: true when the gateway answered as if mid-deploy (and the banner was raised). */
+export async function heartbeat(native: FetchFn): Promise<boolean> {
+  if (getSystemStatus() === "updating") return false; // already shown; the /health poll is running
+  try {
+    const res = await native("/health", { cache: "no-store" });
+    if (!isGatewayFailure(res)) return false;
+    reportGatewayFailure();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Call once at start-up, before anything else fetches. */
 export function installGatewayFetch() {
   if (installed || typeof window === "undefined") return;
@@ -103,4 +124,7 @@ export function installGatewayFetch() {
     return res.ok;
   });
   window.fetch = createGatewayFetch(native);
+
+  window.setInterval(() => { if (!document.hidden) void heartbeat(native); }, HEARTBEAT_MS);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void heartbeat(native); });
 }
