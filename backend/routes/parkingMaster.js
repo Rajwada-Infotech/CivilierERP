@@ -1,10 +1,15 @@
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+// A rate (by id) and any project / block given must be inside the user's projects.
+require("../services/projectScope").setupScopeGuard(router, { idPaths: [["/", "parkingRate"]] });
+// Parking Master's own rights (admins always pass). Writes used to be admin-only while the page offered them to anyone
+// holding these rights, so everyone else got "Forbidden".
+const PAGE = "followup-parking-master";
 const { getPool, sql } = require("../db");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
 
@@ -38,6 +43,7 @@ router.get("/", cache("parking-master", 300), async (req, res) => {
       FROM dbo.ParkingMaster p
       LEFT JOIN dbo.enterprise  e ON e.id = p.ProjectId AND e.business_type = 'P'
       LEFT JOIN dbo.BlockMaster b ON b.Id = p.BlockId
+      ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "p.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName, p.ParkingType
     `);
     res.json(result.recordset);
@@ -76,7 +82,7 @@ router.get("/rate", async (req, res) => {
 });
 
 // POST — add parking rate
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const { ProjectId, BlockId, ParkingType, Charge, GstRate, IsActive } = req.body;
   if (!PARKING_TYPES.includes(ParkingType)) {
     return res.status(400).json({ error: `Invalid ParkingType. Must be: ${PARKING_TYPES.join(", ")}` });
@@ -148,7 +154,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update parking rate
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, ParkingType, Charge, GstRate, IsActive } = req.body;
   if (ParkingType && !PARKING_TYPES.includes(ParkingType)) {
@@ -211,7 +217,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 // ever been allotted against (even a past/cancelled booking) stays blocked
 // from deletion since bookings may still display/report off it live —
 // deactivate it instead.
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const updatedBy = req.user?.userId || null;

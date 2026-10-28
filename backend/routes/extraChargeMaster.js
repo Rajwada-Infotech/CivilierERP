@@ -1,4 +1,4 @@
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -9,14 +9,20 @@ const { getPool, sql } = require("../db");
 
 bumpCacheVersion("extra-charge-master").catch(() => {});
 
+// Extra Charge Master's own rights (admins always pass). Writes used to be admin-only while the page offered them to
+// anyone holding these rights, so everyone else got "Forbidden".
+const PAGE = "followup-extra-charge-master";
+
 // GET all extra charge types
 router.get("/", cache("extra-charge-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, ChargeName, DefaultAmount, GstRate, IsActive, CreatedAt, UpdatedAt
-      FROM dbo.ExtraChargeMaster
-      ORDER BY ChargeName
+      SELECT m.Id, m.ChargeName, m.DefaultAmount, m.GstRate, m.IsActive, m.CreatedAt, m.UpdatedAt,
+        -- How many booking charges use it: those can't delete it (deactivate instead), so the page says so up front.
+        (SELECT COUNT(*) FROM dbo.CrmExtraCharge c WHERE c.ExtraChargeMasterId = m.Id) AS UseCount
+      FROM dbo.ExtraChargeMaster m
+      ORDER BY m.ChargeName
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -26,9 +32,10 @@ router.get("/", cache("extra-charge-master", 300), async (req, res) => {
 });
 
 // POST — add charge type
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const { ChargeName, DefaultAmount, GstRate, IsActive } = req.body;
   if (!ChargeName?.trim()) return res.status(400).json({ error: "ChargeName is required" });
+  if (GstRate != null && GstRate !== "" && !(Number(GstRate) >= 0 && Number(GstRate) <= 100)) return res.status(400).json({ error: "GST rate must be between 0 and 100" });
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -52,16 +59,18 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update charge type
-router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { id } = req.params;
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { ChargeName, DefaultAmount, GstRate, IsActive } = req.body;
   if (!ChargeName?.trim()) return res.status(400).json({ error: "ChargeName is required" });
+  if (GstRate != null && GstRate !== "" && !(Number(GstRate) >= 0 && Number(GstRate) <= 100)) return res.status(400).json({ error: "GST rate must be between 0 and 100" });
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
-    await pool
+    const upd = await pool
       .request()
-      .input("Id",       sql.Int, parseInt(id))
+      .input("Id",       sql.Int, id)
       .input("Name",     sql.NVarChar(200), ChargeName.trim())
       .input("Default",  sql.Decimal(18, 2), DefaultAmount != null && DefaultAmount !== "" ? parseFloat(DefaultAmount) : null)
       .input("Gst",      sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
@@ -73,6 +82,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
+    // A missing charge type used to answer "updated successfully".
+    if (!upd.rowsAffected[0]) return res.status(404).json({ error: "Charge type not found" });
     await bumpCacheVersion("extra-charge-master");
     res.json({ message: "Extra charge type updated successfully" });
   } catch (err) {
@@ -82,7 +93,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // DELETE
-router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

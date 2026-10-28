@@ -1,4 +1,3 @@
-const allowRoles = require("../middleware/role");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -40,6 +39,7 @@ router.get("/", cache("parking-slot-master", 300), async (req, res) => {
       LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
       LEFT JOIN dbo.CrmInventoryHold h
         ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = 'Active' AND h.HoldUntil >= SYSDATETIME()
+      ${req.projectScope ? `WHERE ${require("../services/projectScope").projectPredicate(req.projectScope, "s.ProjectId", "").trim()}` : ""}
       ORDER BY e.name, b.BlockName, s.SlotNo
     `);
     res.json(result.recordset);
@@ -50,7 +50,9 @@ router.get("/", cache("parking-slot-master", 300), async (req, res) => {
 });
 
 // POST — add a parking slot
-router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+// Parking Slot Master's own rights (admins always pass); edits and deletes also come from Auto Project Setup's parking
+// lists. Create was admin-only, and edit / delete took only Auto Setup's rights, so this page's own users were refused.
+router.post("/", requireAnyPageRight(["followup-parking-slot-master"], "create"), async (req, res) => {
   const { ProjectId, BlockId, SlotNo, ParkingType, IsActive } = req.body;
   if (!SlotNo?.trim()) return res.status(400).json({ error: "SlotNo is required" });
   if (!PARKING_TYPES.includes(ParkingType)) {
@@ -123,8 +125,8 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 });
 
 // PUT — update a parking slot
-// Admins, or anyone who may edit in Auto Project Setup (its parking lists edit slots here).
-router.put("/:id", requireAnyPageRight(["crm-auto-project-setup"], "edit"), async (req, res) => {
+// This page's users, or anyone who may edit in Auto Project Setup (its parking lists edit slots here).
+router.put("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-auto-project-setup"], "edit"), async (req, res) => {
   const { id } = req.params;
   const { ProjectId, BlockId, SlotNo, ParkingType, IsActive } = req.body;
   if (!SlotNo?.trim()) return res.status(400).json({ error: "SlotNo is required" });
@@ -197,7 +199,7 @@ router.put("/:id", requireAnyPageRight(["crm-auto-project-setup"], "edit"), asyn
 // confirmed via sys.foreign_keys), so even a historical/inactive allotment
 // still physically blocks a hard DELETE. Only once both are clear does the
 // row actually get removed.
-router.delete("/:id", requireAnyPageRight(["crm-auto-project-setup"], "delete"), async (req, res) => {
+router.delete("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-auto-project-setup"], "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {

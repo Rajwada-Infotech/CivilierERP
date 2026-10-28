@@ -422,12 +422,6 @@ const TaskPerformanceReport = lazy(() => import("./pages/followup/TaskPerformanc
 const TaskDashboard = lazy(() => import("./pages/followup/TaskDashboard"));
 const TagPerformanceReport = lazy(() => import("./pages/followup/TagPerformanceReport"));
 const EntryTypeDocFollowUpReport = lazy(() => import("./pages/followup/EntryTypeDocFollowUpReport"));
-const FollowupReminders = lazy(
-  () => import("./pages/admin/masters/Reminders"),
-);
-const PendingTasksPage = lazy(
-  () => import("./pages/admin/masters/PendingTasks"),
-);
 const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialMediaMaster"));
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
 const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
@@ -2666,8 +2660,6 @@ function AppRoutes() {
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/cancel-template" element={<ProtectedRoute pageKey="followup-cancel-template-master"><CancelTemplateMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
-      <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
-      <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />
       <Route path="/crm/milestone-master"      element={<ProtectedRoute pageKey="crm-milestone-master"><CrmMilestoneMaster /></ProtectedRoute>} />
       <Route path="/crm/brokerage-rate-tiers"  element={<ProtectedRoute pageKey="crm-brokerage-rate-tiers"><CrmBrokerageRateTiers /></ProtectedRoute>} />
       <Route path="/crm/setup/gst-rules"       element={<ProtectedRoute pageKey="crm-gst-rule-master"><CrmGstRuleMaster /></ProtectedRoute>} />

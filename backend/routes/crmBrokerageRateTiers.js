@@ -17,6 +17,21 @@ const { actorId } = require("../services/saAccess");
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+// tierBrokeragePercent takes the active tier whose range holds the deal value, the highest minimum winning when two
+// overlap — so an overlapping tier silently changed which rate a deal got. Active tiers may not overlap. Returns the
+// clashing tier's range, or null.
+async function overlapping(pool, min, max, excludeId) {
+  const r = await pool.request()
+    .input("min", sql.Decimal(18, 2), min).input("max", sql.Decimal(18, 2), max).input("id", sql.Int, excludeId ?? 0)
+    .query(`SELECT TOP 1 MinDealValue, MaxDealValue FROM dbo.CrmBrokerageRateTier
+      WHERE IsActive = 1 AND Id <> @id
+        AND (@max IS NULL OR MinDealValue < @max) AND (MaxDealValue IS NULL OR MaxDealValue > @min)`);
+  const t = r.recordset[0];
+  if (!t) return null;
+  const rs = (v) => `₹${Number(v).toLocaleString("en-IN")}`;
+  return `${rs(t.MinDealValue)} – ${t.MaxDealValue != null ? rs(t.MaxDealValue) : "and above"}`;
+}
+
 router.get("/", requirePageRight("crm-brokerage-rate-tiers", "view"), async (req, res) => {
   try {
     const pool = getPool();
@@ -42,16 +57,23 @@ router.post("/", requirePageRight("crm-brokerage-rate-tiers", "create"), async (
     if (!Number.isFinite(min) || min < 0) return res.status(400).json({ error: "Min Deal Value must be a non-negative number" });
     if (max != null && (!Number.isFinite(max) || max <= min)) return res.status(400).json({ error: "Max Deal Value must be greater than Min Deal Value (or left blank for no upper bound)" });
     if (!Number.isFinite(rate) || rate <= 0 || rate > 10) return res.status(400).json({ error: "Rate % must be between 0 and 10" });
+    // The form's status was ignored: a tier created inactive came out active.
+    const active = b.IsActive === false || b.IsActive === 0 ? 0 : 1;
+    if (active) {
+      const clash = await overlapping(pool, min, max, null);
+      if (clash) return res.status(409).json({ error: `This range overlaps the active tier ${clash} — adjust one of them first.` });
+    }
 
     const result = await pool.request()
       .input("min", sql.Decimal(18,2), min)
       .input("max", sql.Decimal(18,2), max)
       .input("rate", sql.Decimal(5,2), rate)
+      .input("active", sql.Bit, active)
       .input("cb", sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.CrmBrokerageRateTier (MinDealValue, MaxDealValue, RatePercent, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@min, @max, @rate, 1, @cb, SYSDATETIME())
+        VALUES (@min, @max, @rate, @active, @cb, SYSDATETIME())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -72,8 +94,12 @@ router.put("/:id", requirePageRight("crm-brokerage-rate-tiers", "edit"), async (
     if (!Number.isFinite(min) || min < 0) return res.status(400).json({ error: "Min Deal Value must be a non-negative number" });
     if (max != null && (!Number.isFinite(max) || max <= min)) return res.status(400).json({ error: "Max Deal Value must be greater than Min Deal Value (or left blank for no upper bound)" });
     if (!Number.isFinite(rate) || rate <= 0 || rate > 10) return res.status(400).json({ error: "Rate % must be between 0 and 10" });
+    if (b.IsActive !== false) {
+      const clash = await overlapping(pool, min, max, id);
+      if (clash) return res.status(409).json({ error: `This range overlaps the active tier ${clash} — adjust one of them first.` });
+    }
 
-    await pool.request()
+    const upd = await pool.request()
       .input("id", sql.Int, id)
       .input("min", sql.Decimal(18,2), min)
       .input("max", sql.Decimal(18,2), max)
@@ -86,6 +112,7 @@ router.put("/:id", requirePageRight("crm-brokerage-rate-tiers", "edit"), async (
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    if (!upd.rowsAffected[0]) return res.status(404).json({ error: "Tier not found" });
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-brokerage-rate-tiers] PUT error:", e.message);
