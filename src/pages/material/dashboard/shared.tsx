@@ -19,6 +19,9 @@ export interface DashboardData {
   poStatusBreakdown: { Status: string; Count: number; TotalValue: number }[];
   topItems: { ItemID: string; ItemName: string | null; TotalIn: number; TotalOut: number; NetStock: number }[];
   timeline: { date: string; grn: number; po: number }[];
+  /** MR -> PO -> GRN figures, keyed "mr-unapproved" ... "grn-overdue"; null when the server couldn't work them out. */
+  pipeline: Record<string, number> | null;
+  grnInvoiceDays: number;
 }
 
 export const normalise = (raw: any): DashboardData => ({
@@ -38,6 +41,8 @@ export const normalise = (raw: any): DashboardData => ({
   poStatusBreakdown: raw.poStatusBreakdown ?? [],
   topItems: raw.topItems ?? [],
   timeline: raw.timeline ?? [],
+  pipeline: raw.pipeline ?? null,
+  grnInvoiceDays: raw.grnInvoiceDays ?? 7,
 });
 
 // ─── Format ───────────────────────────────────────────────────────────────────

@@ -18,7 +18,7 @@ import {
   ISSUE_COLS,
   REQUEST_COLS,
 } from "./dashboard/shared";
-import { DrillDialog, type DrillKey } from "./dashboard/DrillDialog";
+import { DrillDialog, type DrillKey, type PipelineKey } from "./dashboard/DrillDialog";
 import { FortnightPlot } from "./dashboard/FortnightPlot";
 
 type Recent = "grns" | "pos" | "expenses" | "issues" | "requests";
@@ -71,20 +71,35 @@ export default function MaterialDashboard() {
 
   const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
   const d = data;
-  const netStock = d ? d.stock.totalIn - d.stock.totalOut : 0;
 
-  const figures: { key: DrillKey | null; path?: string; label: string; value: string; sub: string; red?: boolean }[] = d
-    ? [
-        { key: "items", label: "Items", value: fmtNum(d.items.count), sub: `${fmtNum(d.items.groupCount)} item groups` },
-        { key: "grns", label: "GRNs this month", value: fmtNum(d.grns.thisMonth), sub: `${fmtNum(d.grns.today)} today · ${fmt(d.grns.thisMonthValue)}` },
-        { key: "pos", label: "Open purchase orders", value: fmtNum(d.purchaseOrders.open), sub: `${fmt(d.purchaseOrders.openValue)} not yet received` },
-        { key: "expenses", label: "Pending expenses", value: fmtNum(d.expenses.pending), sub: d.expenses.pending ? `${fmt(d.expenses.pendingAmount)} waiting for approval` : "nothing waiting for approval" },
-        { key: "stock", label: "Net stock", value: fmtNum(netStock), sub: `${fmtNum(d.stock.uniqueItems)} items tracked · ${fmtNum(d.stock.totalIn)} in, ${fmtNum(d.stock.totalOut)} out`, red: netStock < 0 },
-        { key: "issues", label: "Issues this month", value: fmtNum(d.materialIssues.thisMonth), sub: `${fmtNum(d.materialIssues.today)} today · ${fmtNum(d.materialIssues.total)} in all` },
-        { key: "requests", label: "Material requests", value: fmtNum(d.materialRequests.total), sub: `${fmtNum(d.materialRequests.thisMonth)} this month · ${fmtNum(d.materialRequests.pending)} pending` },
-        { key: null, path: "/material/uom", label: "Units of measure", value: fmtNum(d.uom.total), sub: "in the UOM master" },
-      ]
-    : [];
+  // One line per document, in the order the work flows: MR -> PO -> GRN. Each line: not approved yet, approved but the
+  // next document isn't made, and late. Every figure opens the records behind it.
+  const pipelineRows: { doc: string; figures: { key: PipelineKey; label: string; sub: string; late?: boolean }[] }[] = [
+    {
+      doc: "Material requests",
+      figures: [
+        { key: "mr-unapproved", label: "Unapproved", sub: "drafts and requests waiting for approval" },
+        { key: "mr-pending", label: "Pending — no PO", sub: "approved, no purchase order made" },
+        { key: "mr-overdue", label: "Overdue", sub: "past the required-by date, not fully ordered", late: true },
+      ],
+    },
+    {
+      doc: "Purchase orders",
+      figures: [
+        { key: "po-unapproved", label: "Unapproved", sub: "drafts and orders waiting for approval" },
+        { key: "po-pending", label: "Pending — no GRN", sub: "approved, nothing received against it" },
+        { key: "po-overdue", label: "Overdue", sub: "past the expected delivery, not fully received", late: true },
+      ],
+    },
+    {
+      doc: "Goods receipts",
+      figures: [
+        { key: "grn-unapproved", label: "Unapproved", sub: "GRNs waiting for approval" },
+        { key: "grn-pending", label: "Pending — no invoice", sub: "approved, no invoice booked" },
+        { key: "grn-overdue", label: "Overdue", sub: `not invoiced within ${d?.grnInvoiceDays ?? 7} days of receipt`, late: true },
+      ],
+    },
+  ];
 
   const requestRows = d
     ? [
@@ -141,15 +156,28 @@ export default function MaterialDashboard() {
         {/* A — figures, each opens the records behind it */}
         <Detail tag="A" title="Right now" note="Open a figure for its records">
           {isLoading ? (
-            <div className="grid4" style={{ gap: 16 }}>{Array.from({ length: 8 }).map((_, i) => <Skel key={i} h={58} />)}</div>
+            <div className="grid3" style={{ gap: 16 }}>{Array.from({ length: 9 }).map((_, i) => <Skel key={i} h={58} />)}</div>
+          ) : !d?.pipeline ? (
+            <p style={{ fontSize: 13, color: "var(--red)" }}>These figures could not be worked out. Use Re-read to try again.</p>
           ) : (
-            <div className="grid4" style={{ rowGap: 22, columnGap: 24 }}>
-              {figures.map((f) => (
-                <button key={f.label} onClick={() => (f.key ? setDrill(f.key) : navigate(f.path!))} style={{ textAlign: "left", minWidth: 0 }}>
-                  <span className="label link" style={{ display: "inline-block", marginBottom: 8, color: f.red ? "var(--red)" : undefined }}>{f.label}</span>
-                  <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)", color: f.red ? "var(--red)" : undefined }}>{f.value}</span>
-                  <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{f.sub}</span>
-                </button>
+            <div>
+              {pipelineRows.map((row, ri) => (
+                <div key={row.doc} style={{ display: "flex", flexWrap: "wrap", gap: "12px 24px", paddingTop: ri ? 18 : 0, marginTop: ri ? 18 : 0, borderTop: ri ? "1px solid var(--rule)" : undefined }}>
+                  <p className="label" style={{ flex: "0 0 150px", paddingTop: 2, color: "var(--ink)" }}>{row.doc}</p>
+                  <div className="grid3" style={{ flex: "1 1 420px", rowGap: 18, columnGap: 24, minWidth: 0 }}>
+                    {row.figures.map((f) => {
+                      const n = d.pipeline![f.key] ?? 0;
+                      const red = !!f.late && n > 0;
+                      return (
+                        <button key={f.key} onClick={() => setDrill(f.key)} style={{ textAlign: "left", minWidth: 0 }}>
+                          <span className="label link" style={{ display: "inline-block", marginBottom: 8, color: red ? "var(--red)" : undefined }}>{f.label}</span>
+                          <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)", color: red ? "var(--red)" : undefined }}>{fmtNum(n)}</span>
+                          <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{f.sub}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
             </div>
           )}
