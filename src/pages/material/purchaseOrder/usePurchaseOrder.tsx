@@ -866,6 +866,8 @@ export function usePurchaseOrder() {
         ? String(qtPrefill.SupplierId)
         : prev.supplierId,
       remarks: qtPrefill.Remarks ?? prev.remarks,
+      // The payment term agreed with this supplier on the quotation.
+      paymentTermId: qtPrefill.PaymentTermId ? String(qtPrefill.PaymentTermId) : prev.paymentTermId,
     }));
 
     const prefillLines: POLineItem[] = qtPrefill.items.map((it) => {
