@@ -109,8 +109,15 @@ export function useGRN() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewModalTab, grnPostingLoading, grnPostingData, viewingGrn?.GRNID]);
   const [search, setSearch] = useState("");
+  // The search goes to the server a pause after typing, and a new search or status starts from page 1.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
   const [page, setPage] = useState(1);
   const [grnStatusFilter, setGrnStatusFilter] = useState("All");
+  useEffect(() => { setPage(1); }, [debouncedSearch, grnStatusFilter]);
   const [loadingPO, setLoadingPO] = useState(false);
   const [pendingVehicleInOuts, setPendingVehicleInOuts] = useState<any[]>([]);
   const [loadingVehicleInOuts, setLoadingVehicleInOuts] = useState(false);
@@ -221,12 +228,15 @@ export function useGRN() {
     isLoading: loadingGrns,
     isFetching: fetchingGrns,
   } = useQuery({
-    queryKey: ["grns", page, limit, selectedFinYear],
+    queryKey: ["grns", page, limit, selectedFinYear, debouncedSearch, grnStatusFilter],
     queryFn: () =>
       grnApi.getGRNs({
         page,
         limit,
         ...(selectedFinYear ? { finYear: selectedFinYear } : {}),
+        // Searched and filtered on the server, over every GRN (the page only had the rows it loaded).
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+        ...(grnStatusFilter !== "All" ? { status: grnStatusFilter } : {}),
       }),
     placeholderData: (prev) => prev,
   });
@@ -346,18 +356,8 @@ export function useGRN() {
   const filteredGrns = grns.filter((grn: any) => {
     if (selectedFinYear && grn.FinYear && grn.FinYear !== selectedFinYear)
       return false;
-    if (grnStatusFilter !== "All" && grn.Status !== grnStatusFilter)
-      return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      grn.DocNo?.toLowerCase().includes(q) ||
-      grn.GRNNo?.toLowerCase().includes(q) ||
-      grn.PONumber?.toLowerCase().includes(q) ||
-      grn.SupplierName?.toLowerCase().includes(q) ||
-      grn.SourceTransferDocNo?.toLowerCase().includes(q) ||
-      grn.SourceMRDocNo?.toLowerCase().includes(q)
-    );
+    // Search and status are applied by the server, over every GRN (see the list query).
+    return true;
   });
 
   // ── Group by linked PO — every GRN raised against the same PO now shows
