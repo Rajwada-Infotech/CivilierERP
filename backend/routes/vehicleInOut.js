@@ -834,9 +834,9 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
       .input(
         "EntryTime",
         sql.DateTime,
-        entryTime ? parseIstDateTime(entryTime) : new Date(),
+        entryTime ? new Date(entryTime) : new Date(),
       )
-      .input("ExitTime", sql.DateTime, exitTime ? parseIstDateTime(exitTime) : null)
+      .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
       .input("ChallanNo", sql.NVarChar(100), challanNo)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("Status", sql.NVarChar(30), "Draft")
@@ -954,8 +954,8 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       .input("POID", sql.Int, poId || null)
       .input("PONumber", sql.NVarChar(100), poNumber || null)
       .input("VehicleNo", sql.NVarChar(50), vehicleNo)
-      .input("EntryTime", sql.DateTime, entryTime ? parseIstDateTime(entryTime) : null)
-      .input("ExitTime", sql.DateTime, exitTime ? parseIstDateTime(exitTime) : null)
+      .input("EntryTime", sql.DateTime, entryTime ? new Date(entryTime) : null)
+      .input("ExitTime", sql.DateTime, exitTime ? new Date(exitTime) : null)
       .input("ChallanNo", sql.NVarChar(100), challanNo)
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), email).query(`
