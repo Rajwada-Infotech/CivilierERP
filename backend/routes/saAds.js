@@ -319,7 +319,7 @@ async function getAdWithPlatform(pool, adId) {
       ${CONNECTION_JOIN}
       WHERE a.Id = @AdId AND a.IsActive = 1
     `);
-  return applyConnection(result.recordset[0]) || null;
+  return (await applyConnection(pool, result.recordset[0])) || null;
 }
 
 function parseUtmParameters(value) {

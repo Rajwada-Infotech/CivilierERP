@@ -21,8 +21,8 @@ const PLATFORM_SELECT = `
     p.ApiConfigId, p.AdAccountId, p.PixelId, p.ApiEnabled,
     -- Mask token fields; never return raw tokens to the client. The connection
     -- (Admin → Integrations) supplies the token; the platform's own is the old fallback.
-    CASE WHEN LEN(ic.AccessToken) > 0 OR LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
-    CASE WHEN LEN(ic.AccessToken) > 0 THEN 0 WHEN LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS UsesOwnToken,
+    CASE WHEN LEN(ic.AccessToken) > 0 OR LEN(ic.RefreshToken) > 0 OR LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
+    CASE WHEN LEN(ic.AccessToken) > 0 OR LEN(ic.RefreshToken) > 0 THEN 0 WHEN LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS UsesOwnToken,
     COALESCE(CASE WHEN LEN(ic.AccessToken) > 0 THEN ic.TokenExpiresAt END, p.TokenExpiresAt) AS TokenExpiresAt,
     ic.LastTestOk AS ConnectionTestOk, ic.LastTestAt AS ConnectionTestAt,
     p.CreatedAt, p.UpdatedAt,
@@ -120,7 +120,7 @@ router.post("/:id/test-connection", requirePageRight("sa-social-media", "edit"),
         WHERE p.Id = @Id
       `);
     if (!platResult.recordset[0]) return res.status(404).json({ error: "Platform not found" });
-    const plat = applyConnection(platResult.recordset[0]);
+    const plat = await applyConnection(pool, platResult.recordset[0]);
     if (!plat.AccessToken || !plat.ApiEnabled) {
       return res.status(400).json({ error: "No connection with a token is chosen, or automatic pulling is off. Connections are set up in Admin → Integrations." });
     }

@@ -7,15 +7,42 @@ const PROVIDER_CONFIG = {
   facebook: { label: "Meta Ads", family: "meta" },
   instagram: { label: "Meta Ads", family: "meta" },
   meta: { label: "Meta Ads", family: "meta", adapter: true },
-  // settings: extra values a connection of this provider needs (kept in IntegrationChannels.SettingsJson).
-  google: { label: "Google Ads", family: "google", adapter: true, settings: ["developerToken", "loginCustomerId"] },
+  // settings: extra values a connection of this provider needs (kept in IntegrationChannels.SettingsJson);
+  // secret ones are never sent back to the browser. autoRenew: the access token is renewed from the
+  // refresh token (Google's last about an hour).
+  google: {
+    label: "Google Ads", family: "google", adapter: true, autoRenew: true,
+    settings: [
+      { key: "clientId", label: "OAuth client ID", secret: false },
+      { key: "clientSecret", label: "OAuth client secret", secret: true },
+      { key: "loginCustomerId", label: "Manager account ID (only if you sign in through a manager account)", secret: false },
+    ],
+  },
   linkedin: { label: "LinkedIn Ads", family: "linkedin" },
 };
 
-/** The providers a connection in Admin → Integrations can be: [{ id, label, settings }]. */
+/** The providers a connection in Admin → Integrations can be: [{ id, label, settings, autoRenew }]. */
 const CONNECTION_PROVIDERS = Object.entries(PROVIDER_CONFIG)
   .filter(([, c]) => c.adapter)
-  .map(([id, c]) => ({ id, label: c.label, settings: c.settings || [] }));
+  .map(([id, c]) => ({ id, label: c.label, settings: c.settings || [], autoRenew: !!c.autoRenew }));
+
+/** Exchanges a Google OAuth refresh token for a fresh access token: { accessToken, expiresAt }. */
+async function renewGoogleAccessToken({ clientId, clientSecret, refreshToken }) {
+  let body;
+  try {
+    body = await requestJson("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
+    });
+  } catch (err) {
+    // Google's token endpoint answers { error, error_description } — e.g. invalid_client, invalid_grant.
+    const reason = String(err.body?.error_description || err.body?.error || err.message).replace(/\.+$/, "");
+    throw new Error(`Google refused to renew the token: ${reason}. Check the client ID, client secret and refresh token.`);
+  }
+  if (!body.access_token) throw new Error("Google did not return an access token — check the client ID, secret and refresh token");
+  return { accessToken: body.access_token, expiresAt: new Date(Date.now() + (Number(body.expires_in) || 3600) * 1000) };
+}
 
 function normalizeProvider(platformType) {
   return String(platformType || "").trim().toLowerCase();
@@ -145,13 +172,15 @@ async function requestJson(url, options = {}) {
 
 function googleHeaders(platform) {
   const settings = parseAccountDetails(platform);
+  // Google retired developer tokens on 9 Sep 2026 — API access now comes from the Google Cloud
+  // project that owns the OAuth client. The header is ignored today and will be rejected in a
+  // future API version, so it is only sent while an old connection still has one saved.
   const developerToken = platform.DeveloperToken || settings.developerToken || process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-  if (!developerToken) throw new Error("Google Ads developer token is required in AccountDetails.developerToken or GOOGLE_ADS_DEVELOPER_TOKEN");
   const headers = {
     Authorization: `Bearer ${platform.AccessToken}`,
-    "developer-token": developerToken,
     "Content-Type": "application/json",
   };
+  if (developerToken) headers["developer-token"] = developerToken;
   const loginCustomerId = platform.LoginCustomerId || settings.loginCustomerId || process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
   if (loginCustomerId) headers["login-customer-id"] = cleanCustomerId(loginCustomerId);
   return headers;
@@ -501,6 +530,7 @@ async function normalizeImportedLeads(ad, platform, importedLeads = []) {
 module.exports = {
   CONNECTION_PROVIDERS,
   providerFamily,
+  renewGoogleAccessToken,
   providerLabel,
   testPlatformConnection,
   syncAdToPlatform,

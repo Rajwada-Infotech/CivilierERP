@@ -20,13 +20,15 @@ export interface IntegrationConnection {
   LastTestMessage: string | null;
   HasAccessToken: number;
   HasRefreshToken: number;
-  HasDeveloperToken: boolean;
-  LoginCustomerId: string;
+  /** The provider's plain settings (e.g. OAuth client ID); secret ones only appear in SavedSecrets. */
+  Settings: Record<string, string>;
+  SavedSecrets: string[];
   UsedBy: string[];
 }
 
-/** settings: extra values this provider's connection needs, e.g. Google's developerToken / loginCustomerId. */
-export interface ConnectionProvider { id: string; label: string; settings: string[] }
+export interface ProviderSetting { key: string; label: string; secret: boolean }
+/** settings: extra values this provider's connection needs; autoRenew: the access token renews itself from the refresh token. */
+export interface ConnectionProvider { id: string; label: string; settings: ProviderSetting[]; autoRenew: boolean }
 
 /** Rejects with status 403 when the viewer isn't allowed to manage connections. */
 export const getConnections = async (): Promise<{ channels: IntegrationConnection[]; providers: ConnectionProvider[] }> => {
@@ -41,8 +43,7 @@ export interface ConnectionCredentials {
   accessToken?: string;
   refreshToken?: string;
   tokenExpiresAt?: string | null;
-  developerToken?: string;
-  loginCustomerId?: string;
+  settings?: Record<string, string>;
 }
 
 export const saveConnectionCredentials = async (id: number, body: ConnectionCredentials) => {

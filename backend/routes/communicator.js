@@ -6,7 +6,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
 const { send: sendMessage, messagingStatus } = require("../services/messageProviders");
 const { CONNECTION_PROVIDERS } = require("../services/saAdPlatformService");
-const { testConnection, parseSettings } = require("../services/integrationConnections");
+const { testConnection, parseSettings, providerOf } = require("../services/integrationConnections");
 
 
 router.use(authMiddleware);
@@ -23,10 +23,16 @@ const CHANNEL_COLUMNS = `
   CASE WHEN LEN(AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
   CASE WHEN LEN(RefreshToken) > 0 THEN 1 ELSE 0 END AS HasRefreshToken`;
 
-// SettingsJson holds the Google developer token (a secret) — only the login customer id is shown.
+// SettingsJson may hold secrets (e.g. an OAuth client secret): plain settings are shown,
+// secret ones only as "saved".
 const publicChannel = ({ SettingsJson, ...c }) => {
-  const settings = parseSettings(SettingsJson);
-  return { ...c, HasDeveloperToken: !!settings.developerToken, LoginCustomerId: settings.loginCustomerId || "" };
+  const saved = parseSettings(SettingsJson);
+  const defs = providerOf(c.Provider)?.settings ?? [];
+  return {
+    ...c,
+    Settings: Object.fromEntries(defs.filter((d) => !d.secret).map((d) => [d.key, saved[d.key] || ""])),
+    SavedSecrets: defs.filter((d) => d.secret && saved[d.key]).map((d) => d.key),
+  };
 };
 
 /**
@@ -172,14 +178,15 @@ router.put("/channels/:id", superAdminOnly, async (req, res) => {
 /**
  * PUT /api/communicator/channels/:id/credentials
  * Makes the channel a Meta / Google connection. A blank token keeps the saved one.
- * Body: { provider, accessToken?, refreshToken?, tokenExpiresAt?, developerToken?, loginCustomerId? }
+ * Body: { provider, accessToken?, refreshToken?, tokenExpiresAt?, settings?: { <provider setting>: value } }
  */
 router.put("/channels/:id/credentials", superAdminOnly, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
   const b = req.body || {};
   const provider = String(b.provider || "").trim();
-  if (!CONNECTION_PROVIDERS.some((p) => p.id === provider)) {
+  const providerDef = providerOf(provider);
+  if (!providerDef) {
     return res.status(400).json({ error: `Provider must be one of: ${CONNECTION_PROVIDERS.map((p) => p.label).join(", ")}` });
   }
   const text = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -190,8 +197,12 @@ router.put("/channels/:id/credentials", superAdminOnly, async (req, res) => {
     const cur = await pool.request().input("Id", sql.Int, id).query("SELECT SettingsJson FROM dbo.IntegrationChannels WHERE Id = @Id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Channel not found" });
     const settings = parseSettings(cur.recordset[0].SettingsJson);
-    if (text(b.developerToken)) settings.developerToken = text(b.developerToken);
-    if (b.loginCustomerId !== undefined) settings.loginCustomerId = text(b.loginCustomerId) || undefined;
+    // A blank secret keeps the saved one; a blank plain setting clears it.
+    for (const d of providerDef.settings) {
+      const v = text(b.settings?.[d.key]);
+      if (v) settings[d.key] = v;
+      else if (!d.secret && b.settings && d.key in b.settings) delete settings[d.key];
+    }
 
     const result = await pool.request()
       .input("Id", sql.Int, id)
@@ -209,9 +220,9 @@ router.put("/channels/:id/credentials", superAdminOnly, async (req, res) => {
           TokenExpiresAt = @TokenExpiresAt,
           SettingsJson   = @SettingsJson,
           -- New credentials: the last test no longer describes them.
-          LastTestOk     = CASE WHEN @AccessToken IS NULL THEN LastTestOk END,
-          LastTestAt     = CASE WHEN @AccessToken IS NULL THEN LastTestAt END,
-          LastTestMessage = CASE WHEN @AccessToken IS NULL THEN LastTestMessage END,
+          LastTestOk     = CASE WHEN @AccessToken IS NULL AND @RefreshToken IS NULL THEN LastTestOk END,
+          LastTestAt     = CASE WHEN @AccessToken IS NULL AND @RefreshToken IS NULL THEN LastTestAt END,
+          LastTestMessage = CASE WHEN @AccessToken IS NULL AND @RefreshToken IS NULL THEN LastTestMessage END,
           UpdatedAt      = GETDATE(),
           UpdatedBy      = @UpdatedBy
         WHERE Id = @Id;
