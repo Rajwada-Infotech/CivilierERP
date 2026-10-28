@@ -338,6 +338,7 @@ const ALL_ROUTES = [
   { path: "/api/sa/campaigns", file: "./routes/saCampaigns" },
   { path: "/api/sa/ads", file: "./routes/saAds" },
   { path: "/api/sa/leads", file: "./routes/saLeads" },
+  { path: "/api/sa/lead-import", file: "./routes/saLeadImport" },
   { path: "/api/sa/channel-partners", file: "./routes/saChannelPartners" },
   { path: "/api/sa/lead-activities", file: "./routes/saLeadActivities" },
   { path: "/api/sa/lead-tasks", file: "./routes/saLeadTasks" },

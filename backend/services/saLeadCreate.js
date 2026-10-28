@@ -3,7 +3,9 @@
  * (POST /api/sa/leads) and channel partners' API (POST /api/public/partner-leads).
  * A mobile number is the key against duplicates across all active leads.
  * Resolves { id, uid } or { status, error, existingLeadId? }; the welcome message
- * to the customer is sent after creation.
+ * to the customer is sent after creation unless { welcome: false }.
+ * { dryRun: true } runs every check and resolves { ok: true, value } without saving
+ * (value = the cleaned lead) — the bulk import's preview.
  */
 const crypto = require("crypto");
 const { sql } = require("../db");
@@ -15,7 +17,7 @@ function genUid() {
   return "LEAD-" + Date.now() + "-" + crypto.randomBytes(3).toString("hex").toUpperCase();
 }
 
-async function createLead(pool, input, actor) {
+async function createLead(pool, input, actor, { welcome = true, dryRun = false } = {}) {
   try {
     const normalizedContact = normalizeSaLeadContactFields(input);
     if (normalizedContact.errors.length) {
@@ -38,6 +40,8 @@ async function createLead(pool, input, actor) {
         };
       }
     }
+
+    if (dryRun) return { ok: true, value: b };
 
     const created = await pool.request()
       .input("uid", sql.NVarChar(50), uid)
@@ -98,7 +102,7 @@ async function createLead(pool, input, actor) {
            1, @cb, SYSDATETIME())
       `);
     const id = created.recordset[0].Id;
-    welcomeLead(pool, id, actor);
+    if (welcome) welcomeLead(pool, id, actor);
     return { id, uid };
   } catch (e) {
     if (e.number === 2601 || e.number === 2627) return { status: 409, error: "A lead with this mobile number already exists." };

@@ -16,7 +16,7 @@ const fetchUnitOptions = () => {
     .catch(() => ({ kinds: [], layouts: [] }));
   return unitOptionsPromise;
 };
-import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus } from "lucide-react";
+import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -25,6 +25,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
 import { LeadMessageForm } from "@/components/sa/LeadMessageForm";
+import { LeadImportDialog } from "@/components/sa/LeadImportDialog";
 import { LEAD_CLASSIFICATIONS, LEAD_STAGES, LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { MoneyView, StageCell, TitleCell } from "@/components/sa/saCells";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
@@ -150,6 +151,9 @@ const fmtDay = (d: unknown) =>
   d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const fmtWhen = (d: unknown) =>
   d ? new Date(String(d)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+// The lead form's source fields, reused by Import from file to tag a whole file at once.
+const IMPORT_SOURCE_FIELDS = fields.filter((f) => ["SourceType", "PlatformId", "CampaignId", "AdId", "ChannelPartnerId"].includes(f.name));
+
 const actionBtn = "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors";
 
 const exportColumns: ExportColumn[] = [
@@ -207,6 +211,7 @@ const SaLeadManagement: React.FC = () => {
   const { currentUser, canDoAction } = useAuth();
   const isTL = currentUser?.role === "sales_team_lead";
   const [transferOpen, setTransferOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferToTLId, setTransferToTLId] = useState("");
   const [transferNotes, setTransferNotes] = useState("");
@@ -446,6 +451,14 @@ const SaLeadManagement: React.FC = () => {
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
+            {canDoAction("sa-leads", "create") && (
+              <button
+                onClick={() => setImportOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+              >
+                <Upload size={13} /> Import from file
+              </button>
+            )}
             {/* Transfer Leads — Team Lead only. Used to have zero visibility
                 into its own approval status; now links straight to it. */}
             {isTL && (
@@ -697,6 +710,8 @@ const SaLeadManagement: React.FC = () => {
       >
         {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} mobile={interactionLead.mobile} email={interactionLead.email} />}
       </CrmSideDrawer>
+
+      <LeadImportDialog open={importOpen} onClose={() => setImportOpen(false)} sourceFields={IMPORT_SOURCE_FIELDS} />
 
       {/* Transfer Leads Dialog */}
       <Dialog open={transferOpen} onOpenChange={(o) => { if (!o) { setTransferOpen(false); setTransferSelectedIds(new Set()); setTransferToTLId(""); setTransferNotes(""); } }}>

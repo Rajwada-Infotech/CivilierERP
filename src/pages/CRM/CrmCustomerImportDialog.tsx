@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { buildWorkbook, downloadBlob, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
+import { parseDelimitedAuto } from "@/lib/sheetFile";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -200,43 +201,6 @@ function excelCol(i: number) {
     n = Math.floor((n - 1) / 26);
   }
   return out;
-}
-
-// ── Delimited Text Parsing (CSV / TSV / Clipboard) ───────────────────────────
-
-function parseDelimited(text: string, delimiter: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-    if (quoted) {
-      if (ch === '"' && next === '"') { cell += '"'; i++; }
-      else if (ch === '"') quoted = false;
-      else cell += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === delimiter) { row.push(cell); cell = ""; }
-    else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
-    else if (ch !== "\r") cell += ch;
-  }
-  row.push(cell);
-  if (row.some((v) => v.trim() !== "")) rows.push(row);
-  return rows;
-}
-
-function parseDelimitedAuto(text: string): { rows: string[][]; delimiter: string } {
-  const cleanText = text.replace(/^\uFEFF/, "");
-  const sample = cleanText.split(/\r?\n/).slice(0, 20).join("\n");
-  const delimiters = ["\t", ",", ";", "|"];
-  const scored = delimiters.map((delimiter) => {
-    const rows = parseDelimited(sample, delimiter).filter((r) => r.length > 1);
-    const cols = rows.reduce((sum, r) => sum + r.length, 0);
-    return { delimiter, score: rows.length * 10 + cols };
-  }).sort((a, b) => b.score - a.score);
-  const delimiter = scored[0]?.score > 0 ? scored[0].delimiter : ",";
-  return { rows: parseDelimited(cleanText, delimiter), delimiter };
 }
 
 // ── Smart Header Detection ───────────────────────────────────────────────────
