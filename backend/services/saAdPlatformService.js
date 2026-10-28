@@ -6,7 +6,14 @@ const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation
 const PROVIDER_CONFIG = {
   facebook: { label: "Meta Ads", family: "meta" },
   instagram: { label: "Meta Ads", family: "meta" },
-  meta: { label: "Meta Ads", family: "meta", adapter: true },
+  meta: {
+    // instantLeads: lead-form submissions can be delivered to us the moment they happen (metaLeadWebhook.js).
+    label: "Meta Ads", family: "meta", adapter: true, instantLeads: true,
+    settings: [
+      { key: "appId", label: "Meta app ID (for Connect with Facebook and instant leads)", secret: false },
+      { key: "appSecret", label: "Meta app secret", secret: true },
+    ],
+  },
   // settings: extra values a connection of this provider needs (kept in IntegrationChannels.SettingsJson);
   // secret ones are never sent back to the browser. autoRenew: the access token is renewed from the
   // refresh token (Google's last about an hour).
@@ -24,7 +31,7 @@ const PROVIDER_CONFIG = {
 /** The providers a connection in Admin → Integrations can be: [{ id, label, settings, autoRenew }]. */
 const CONNECTION_PROVIDERS = Object.entries(PROVIDER_CONFIG)
   .filter(([, c]) => c.adapter)
-  .map(([id, c]) => ({ id, label: c.label, settings: c.settings || [], autoRenew: !!c.autoRenew }));
+  .map(([id, c]) => ({ id, label: c.label, settings: c.settings || [], autoRenew: !!c.autoRenew, instantLeads: !!c.instantLeads }));
 
 /** Exchanges a Google OAuth refresh token for a fresh access token: { accessToken, expiresAt }. */
 async function renewGoogleAccessToken({ clientId, clientSecret, refreshToken }) {
@@ -529,6 +536,10 @@ async function normalizeImportedLeads(ad, platform, importedLeads = []) {
 
 module.exports = {
   CONNECTION_PROVIDERS,
+  META_GRAPH_VERSION,
+  metaUrl,
+  requestJson,
+  normalizeMetaLead,
   providerFamily,
   renewGoogleAccessToken,
   providerLabel,

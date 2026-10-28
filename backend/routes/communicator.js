@@ -7,6 +7,19 @@ const allowRoles = require("../middleware/role");
 const { send: sendMessage, messagingStatus } = require("../services/messageProviders");
 const { CONNECTION_PROVIDERS } = require("../services/saAdPlatformService");
 const { testConnection, parseSettings, providerOf } = require("../services/integrationConnections");
+const { startUrl } = require("../services/integrationOAuth");
+const { turnOn: turnOnInstantLeads } = require("../services/metaLeadWebhook");
+const { isOriginAllowed } = require("../config/origins");
+
+// A URL the browser sent us to hand to Meta / Google: must be one of our own origins.
+const ownUrl = (value) => {
+  try {
+    const u = new URL(String(value || ""));
+    return /^https?:$/.test(u.protocol) && isOriginAllowed(u.origin) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+};
 
 
 router.use(authMiddleware);
@@ -20,6 +33,7 @@ const superAdminOnly = allowRoles("super_admin");
 const CHANNEL_COLUMNS = `
   Id, ChannelKey, Label, Description, SortOrder, IsActive, UpdatedAt, UpdatedBy,
   Provider, TokenExpiresAt, LastTestAt, LastTestOk, LastTestMessage, SettingsJson,
+  WebhookOnAt, LastWebhookAt, LastWebhookOk, LastWebhookMessage, WebhookLeads,
   CASE WHEN LEN(AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
   CASE WHEN LEN(RefreshToken) > 0 THEN 1 ELSE 0 END AS HasRefreshToken`;
 
@@ -248,6 +262,47 @@ router.post("/channels/:id/test", superAdminOnly, async (req, res) => {
   } catch (err) {
     console.error("ERROR in POST /communicator/channels/:id/test:", err);
     res.status(500).json({ error: "Connection test failed to run" });
+  }
+});
+
+/**
+ * POST /api/communicator/channels/:id/oauth/start { redirectUri, returnTo }
+ * The Google / Facebook sign-in link for "Connect". redirectUri is our callback
+ * (/api/public/integrations/oauth/callback) as the browser reaches it; returnTo is
+ * the page to come back to. Both must be on one of our own origins.
+ */
+router.post("/channels/:id/oauth/start", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  const redirectUri = ownUrl(req.body?.redirectUri);
+  const returnTo = ownUrl(req.body?.returnTo);
+  if (!redirectUri || !returnTo) return res.status(400).json({ error: "This address isn't one of CivilierERP's own — open the page from the usual address" });
+  try {
+    const r = await startUrl(getPool(), id, { userId: req.user?.userId, redirectUri, returnTo });
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.json({ url: r.url });
+  } catch (err) {
+    console.error("ERROR in POST /communicator/channels/:id/oauth/start:", err);
+    res.status(500).json({ error: "Could not start the sign-in" });
+  }
+});
+
+/**
+ * POST /api/communicator/channels/:id/instant-leads { callbackUrl }
+ * Meta only: subscribes the app and every Page the connection manages to lead-form events,
+ * delivered to callbackUrl (/api/public/integrations/meta-leads/:id).
+ */
+router.post("/channels/:id/instant-leads", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  const callbackUrl = ownUrl(req.body?.callbackUrl);
+  if (!callbackUrl) return res.status(400).json({ error: "This address isn't one of CivilierERP's own — open the page from the usual address" });
+  if (!callbackUrl.startsWith("https://")) return res.status(400).json({ error: "Meta only delivers leads to an https:// address — switch this on from the live site" });
+  try {
+    res.json(await turnOnInstantLeads(getPool(), id, callbackUrl));
+  } catch (err) {
+    console.error("ERROR in POST /communicator/channels/:id/instant-leads:", err.message);
+    res.status(400).json({ error: err.message || "Could not switch on instant leads" });
   }
 });
 

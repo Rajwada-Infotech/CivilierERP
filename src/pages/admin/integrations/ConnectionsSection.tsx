@@ -1,11 +1,12 @@
-import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, PlugZap, Settings2, X } from "lucide-react";
+import { Check, Copy, Loader2, LogIn, PlugZap, Settings2, X, Zap } from "lucide-react";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { DateInput } from "@/components/ui/date-input";
 import {
-  getConnections, saveConnectionCredentials, testConnection,
+  getConnections, saveConnectionCredentials, testConnection, startConnect, turnOnInstantLeads, oauthRedirectUri, metaLeadsUrl,
   type ConnectionProvider, type IntegrationConnection,
 } from "@/api/integrationsApi";
 import { FIELD, HEAD, KEY_INK, KEY_LINE, LBL, RULE, SOFT_RULE, TAG, daysUntil, fmtDate } from "./styles";
@@ -80,11 +81,38 @@ const EditForm: React.FC<{ c: IntegrationConnection; providers: ConnectionProvid
   );
 };
 
+const CopyLine: React.FC<{ label: string; value: string }> = ({ label, value }) => {
+  const [done, setDone] = useState(false);
+  return (
+    <div>
+      <span className={`${LBL} block mb-1`}>{label}</span>
+      <div className="flex gap-2 items-center">
+        <code className="flex-1 min-w-0 truncate text-xs bg-muted px-2 py-2 font-mono">{value}</code>
+        <button type="button" className={`${KEY_LINE} h-8 px-2.5 shrink-0`} aria-label={`Copy ${label}`}
+          onClick={() => navigator.clipboard.writeText(value).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }, () => toast.error("Copy failed — select and copy it"))}>
+          {done ? <Check size={12} /> : <Copy size={12} />} {done ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const ConnectionCard: React.FC<{ c: IntegrationConnection; providers: ConnectionProvider[] }> = ({ c, providers }) => {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const test = useMutation({ mutationFn: () => testConnection(c.Id), onSettled: () => qc.invalidateQueries({ queryKey: QK }) });
-  const providerLabel = providers.find((p) => p.id === c.Provider)?.label;
+  const connect = useMutation({ mutationFn: () => startConnect(c.Id), onSuccess: (url) => { window.location.href = url; } });
+  const instant = useMutation({
+    mutationFn: () => turnOnInstantLeads(c.Id),
+    onSuccess: (r) => {
+      const failed = r.pages.filter((pg) => !pg.ok);
+      if (failed.length) toast.warning(`Instant leads on for ${r.pages.length - failed.length} Page(s); not for ${failed.map((pg) => pg.name).join(", ")}`);
+      else toast.success(`Instant leads on for ${r.pages.map((pg) => pg.name).join(", ")}`);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: QK }),
+  });
+  const providerDef = providers.find((p) => p.id === c.Provider);
+  const providerLabel = providerDef?.label;
   // A renewing connection (refresh token) never needs a new token pasted, so its expiry isn't a warning.
   const renews = !!providers.find((p) => p.id === c.Provider)?.autoRenew && !!c.HasRefreshToken;
   const hasCredentials = !!c.HasAccessToken || renews;
@@ -130,13 +158,40 @@ const ConnectionCard: React.FC<{ c: IntegrationConnection; providers: Connection
               <span className={LBL}>Used by</span>
               <span className="text-sm text-foreground text-right">{c.UsedBy.length ? c.UsedBy.join(", ") : "No platform yet"}</span>
             </div>
+            {providerDef?.instantLeads && (
+              <div className="pt-2 space-y-1.5" style={{ borderTop: SOFT_RULE }}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className={LBL}>Instant leads</span>
+                  <span className="text-sm text-foreground text-right">
+                    {c.WebhookOnAt ? `On since ${fmtDate(c.WebhookOnAt)} · ${c.WebhookLeads} received` : "Off — leads only come in when imported"}
+                  </span>
+                </div>
+                {c.LastWebhookAt && (
+                  <p className={`text-xs break-words ${c.LastWebhookOk === false ? "text-destructive" : "text-muted-foreground"}`}>
+                    Last delivery {fmtDate(c.LastWebhookAt)}: {c.LastWebhookMessage}
+                  </p>
+                )}
+                <button type="button" className={`${KEY_LINE} h-8 px-3 w-full`} disabled={!hasCredentials || instant.isPending} onClick={() => instant.mutate()}>
+                  {instant.isPending ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />} {c.WebhookOnAt ? "Re-check Pages" : "Turn on instant leads"}
+                </button>
+                {instant.isError && <p className="text-xs text-destructive break-words">{(instant.error as Error).message}</p>}
+              </div>
+            )}
           </>
         )}
       </div>
 
+      {!editing && c.Provider && (
+        <div className="px-4 pt-3" style={{ borderTop: SOFT_RULE }}>
+          <button type="button" className={`${KEY_INK} h-9 px-3 w-full`} disabled={connect.isPending} onClick={() => connect.mutate()}>
+            {connect.isPending ? <Loader2 size={12} className="animate-spin" /> : <LogIn size={12} />} {hasCredentials ? "Reconnect" : "Connect"} with {providerLabel}
+          </button>
+          {connect.isError && <p className="pt-2 text-xs text-destructive break-words">{(connect.error as Error).message}</p>}
+        </div>
+      )}
       {!editing && (
-        <div className="px-4 py-3 flex gap-2" style={{ borderTop: SOFT_RULE }}>
-          <button type="button" className={`${KEY_INK} h-9 px-3 flex-1`} disabled={!c.Provider || !hasCredentials || test.isPending} onClick={() => test.mutate()}>
+        <div className="px-4 py-3 flex gap-2" style={c.Provider ? undefined : { borderTop: SOFT_RULE }}>
+          <button type="button" className={`${KEY_LINE} h-9 px-3 flex-1`} disabled={!c.Provider || !hasCredentials || test.isPending} onClick={() => test.mutate()}>
             {test.isPending ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />} Test
           </button>
           <button type="button" className={`${KEY_LINE} h-9 px-3 flex-1`} onClick={() => setEditing(true)}>
@@ -151,8 +206,24 @@ const ConnectionCard: React.FC<{ c: IntegrationConnection; providers: Connection
 
 /** Meta / Google logins that Sales Automation's social media platforms use. */
 export const ConnectionsSection: React.FC = () => {
+  const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: QK, queryFn: getConnections, retry: false });
   const forbidden = (error as { status?: number } | null)?.status === 403;
+
+  // Back from "Connect with ...": say how it went, then tidy the address.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const ok = params.get("connected");
+    const err = params.get("connectError");
+    if (!ok && !err) return;
+    if (ok) toast.success("Connected — press Test to check it");
+    else toast.error(`Not connected: ${err}`);
+    qc.invalidateQueries({ queryKey: QK });
+    const next = new URLSearchParams(params);
+    next.delete("connected");
+    next.delete("connectError");
+    setParams(next, { replace: true });
+  }, [params, setParams, qc]);
 
   return (
     <div className="bg-card" style={{ border: RULE }}>
@@ -165,6 +236,18 @@ export const ConnectionsSection: React.FC = () => {
           The Meta and Google logins Sales Automation uses to push ads, read results and import leads. Each platform in
           Sales Automation → Social Media picks one of these; tokens are kept here only.
         </p>
+        {!forbidden && !error && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-foreground font-medium">Addresses to give Meta and Google</summary>
+            <div className="mt-2 space-y-2.5">
+              <CopyLine label="Sign-in return address (Google OAuth client → Authorised redirect URIs; Meta app → Valid OAuth redirect URIs)" value={oauthRedirectUri()} />
+              {data?.channels.filter((c) => data.providers.find((p) => p.id === c.Provider)?.instantLeads).map((c) => (
+                <CopyLine key={c.Id} label={`Instant leads address for ${c.Label} (set automatically by Turn on instant leads)`} value={metaLeadsUrl(c.Id)} />
+              ))}
+              <p className="text-xs text-muted-foreground">Meta and Google only accept https:// addresses (localhost aside) — connect from the live site.</p>
+            </div>
+          </details>
+        )}
         {forbidden ? (
           <p className="text-sm text-muted-foreground">Only a super admin can manage connections.</p>
         ) : error ? (

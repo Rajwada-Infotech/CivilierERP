@@ -431,7 +431,13 @@ async function createApp() {
     next();
   });
 
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({
+    limit: "10mb",
+    // Meta signs its lead deliveries over the exact bytes sent — keep them for that check only.
+    verify: (req, _res, buf) => {
+      if (req.originalUrl.startsWith("/api/public/integrations/meta-leads/")) req.rawBody = buf;
+    },
+  }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
   // Any successful write anywhere (staff or customer portal) drops every { dropOnAnyWrite } cache — see
   // middleware/writeInvalidator.js.
@@ -600,6 +606,8 @@ async function createApp() {
   // Channel partners' systems push leads with an API key (Admin → Integrations),
   // never a staff login — so it sits before the staff auth wall like the portal.
   app.use("/api/public/partner-leads", require("./routes/publicPartnerLeads"));
+  // Meta / Google call these: the "Connect" sign-in callback and instant Meta lead-form leads.
+  app.use("/api/public/integrations", require("./routes/publicIntegrations"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {
