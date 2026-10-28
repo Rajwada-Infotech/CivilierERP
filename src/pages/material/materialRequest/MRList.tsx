@@ -73,7 +73,7 @@ export function MRList({ m }: { m: MRState }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {["", "Pending", "Approved"].map((s) => (
+          {["", "Pending", "Approved", "Overdue"].map((s) => (
             <button
               key={s || "all"}
               aria-pressed={statusFilter === s}

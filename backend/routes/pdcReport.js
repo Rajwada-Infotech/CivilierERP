@@ -37,6 +37,7 @@ router.use(
 const sql = require("mssql");
 const { getPool } = require("../db");
 const { cache } = require("../middleware/cache");
+const { projectPredicate } = require("../services/projectScope");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "Reports"));
@@ -175,6 +176,8 @@ router.get("/", cache("pdc-report", 60), async (req, res) => {
     // a project filter is actually requested, never adds an implicit
     // "ProjectID IS NOT NULL" to the base query.
     if (projectId) conditions.push("u.ProjectID = @projectId");
+    // A user limited to some projects sees only those projects' cheques (not company-wide party cheques either).
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "u.ProjectID", "").trim());
     if (from) conditions.push("u.ChequeDate >= @from");
     if (to) conditions.push("u.ChequeDate <= @to");
     if (status) conditions.push(`${STATUS_CASE} = @status`);
@@ -254,6 +257,7 @@ router.get("/due-count", cache("pdc-due-count", 60), async (req, res) => {
                      THEN 1 END) AS dueSoonCount,
           COUNT(CASE WHEN ${STATUS_CASE} = 'Overdue' THEN 1 END) AS overdueCount
         FROM UnifiedCheques u
+        WHERE 1=1${projectPredicate(req.projectScope, "u.ProjectID")}
       `);
     const row = result.recordset[0] || {};
     res.json({

@@ -43,7 +43,7 @@ const PIPELINE = {
   "mr-overdue": {
     table: "mr",
     where: `mr.RequiredByDate < ${TODAY} AND mr.ShortClosedAt IS NULL
-      AND ISNULL(mr.Status,'') IN ('','Draft','Pending','Approved','Partially Ordered')`,
+      AND ISNULL(mr.Status,'') IN ('','Draft','Pending','Approved','Partially Fulfilled','Partially Ordered')`,
   },
   "po-unapproved": { table: "po", where: "ISNULL(po.Status,'') IN ('','Draft','Pending')" },
   "po-pending": {
