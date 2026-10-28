@@ -22,15 +22,13 @@
  * SOURCES array near the bottom of this file. Nothing else changes — no
  * migration, no new table, no frontend changes.
  *
- * Access scoping mirrors each source module's own rule rather than a single
- * blanket permission, since Records is a read-only window onto data that
- * already has per-module access rules:
- *   - Tickets: admin-tier roles see all; everyone else sees only tickets
- *     they created or are assigned to (same rule as ticketRoutes.js).
- *   - Vehicle In/Out: internal/operational log, visible to any authenticated
- *     non-customer user (same exposure as the Vehicle In/Out module itself).
- *   - Document Vault: internal/operational, visible to any authenticated
- *     non-customer user (Followup module is staff-only in the UI already).
+ * Access: the Records page right (view) opens the feed; within it each source follows its own module's rule —
+ *   - Tickets: admin-tier roles see all; everyone else sees only tickets they created or are assigned to
+ *     (same rule as ticketRoutes.js).
+ *   - Vehicle In/Out, GRN, Loan NOC / documents, Contract: only for someone who may view that module's page
+ *     (vehicle-in-out, grn-master, loan-sanction, finance-contracts), and — for a project-restricted user — only
+ *     their projects' documents (loans are company-level, so they have no project to filter on).
+ *   - Personal Vault: the owner's own files only.
  *
  * Routes
  *   GET /api/records  — unified, searchable list of all attachments across
@@ -48,11 +46,18 @@ router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
+const { requirePageRight, hasAnyPageAction } = require("../middleware/requirePageRight");
+const { projectPredicate } = require("../services/projectScope");
+
+router.use(requirePageRight("records", "view"));
 
 function actorFromReq(req) {
   return {
     id: req.user?.userId ?? req.user?.id ?? null,
     role: allowRoles.normalizeRole(req.user?.role),
+    scope: req.projectScope || null,
+    // May this user open the page behind a source? (admin-tier always.)
+    canView: (pageKey) => hasAnyPageAction(req, pageKey, ["view"]),
   };
 }
 
@@ -111,9 +116,7 @@ async function fetchTicketAttachments(pool, actor) {
 }
 
 async function fetchVehicleAttachments(pool, actor) {
-  // Operational gate log — any authenticated non-customer user can see it,
-  // same exposure as the Vehicle In/Out module itself.
-  if (actor.role === "customer") return [];
+  if (actor.role === "customer" || !(await actor.canView("vehicle-in-out"))) return [];
 
   const result = await pool.request().query(`
     SELECT
@@ -128,7 +131,7 @@ async function fetchVehicleAttachments(pool, actor) {
       a.UploadedAt
     FROM dbo.VehicleInOutAttachments a
     LEFT JOIN dbo.VehicleInOut v ON v.VehicleInOutID = a.VehicleInOutID
-    WHERE a.VehicleInOutID IS NOT NULL
+    WHERE a.VehicleInOutID IS NOT NULL${projectPredicate(actor.scope, "v.ProjectID")}
     ORDER BY a.UploadedAt DESC
   `);
 
@@ -150,7 +153,7 @@ async function fetchVehicleAttachments(pool, actor) {
 }
 
 async function fetchGRNAttachments(pool, actor) {
-  if (actor.role === "customer") return [];
+  if (actor.role === "customer" || !(await actor.canView("grn-master"))) return [];
   const tableCheck = await pool.request().query(
     "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.GRNAttachments')"
   );
@@ -168,7 +171,8 @@ async function fetchGRNAttachments(pool, actor) {
       a.UploadedAt
     FROM dbo.GRNAttachments a
     LEFT JOIN dbo.GoodsReceiptNotes g ON g.GRNID = a.GRNID
-    WHERE a.GRNID IS NOT NULL
+    LEFT JOIN dbo.PurchaseOrders gp ON gp.PurchaseOrderID = g.POID
+    WHERE a.GRNID IS NOT NULL${projectPredicate(actor.scope, "gp.ProjectId")}
     ORDER BY a.UploadedAt DESC
   `);
   return result.recordset.map((r) => ({
@@ -187,7 +191,7 @@ async function fetchGRNAttachments(pool, actor) {
 }
 
 async function fetchLoanNocAttachments(pool, actor) {
-  if (actor.role === "customer") return [];
+  if (actor.role === "customer" || !(await actor.canView("loan-sanction"))) return [];
   const tableCheck = await pool.request().query(
     "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.LoanNOCAttachments')"
   );
@@ -222,7 +226,7 @@ async function fetchLoanNocAttachments(pool, actor) {
 }
 
 async function fetchLoanDocumentAttachments(pool, actor) {
-  if (actor.role === "customer") return [];
+  if (actor.role === "customer" || !(await actor.canView("loan-sanction"))) return [];
   const tableCheck = await pool.request().query(
     "SELECT 1 AS f FROM sys.tables WHERE object_id = OBJECT_ID('dbo.LoanDocumentAttachments')"
   );
@@ -262,11 +266,11 @@ async function fetchLoanDocumentAttachments(pool, actor) {
 // {name, url (base64 data URI), type, size} in dbo.Contract.Attachments —
 // no dedicated attachments table, so this unpacks that column per row.
 async function fetchContractAttachments(pool, actor) {
-  if (actor.role === "customer") return [];
+  if (actor.role === "customer" || !(await actor.canView("finance-contracts"))) return [];
   const result = await pool.request().query(`
     SELECT ContractId, DocNo, Attachments, CreatedBy, CreatedAt, Status, UpdatedAt
     FROM dbo.Contract
-    WHERE Attachments IS NOT NULL AND Attachments <> ''
+    WHERE Attachments IS NOT NULL AND Attachments <> ''${projectPredicate(actor.scope, "ProjectId")}
   `);
   const rows = [];
   for (const r of result.recordset) {

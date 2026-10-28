@@ -37,7 +37,6 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { TaskProvider } from "./contexts/TaskContext";
 import { FinYearProvider } from "./contexts/FinYearContext";
 import { HsnProvider } from "./contexts/HsnContext";
-import { RecordsProvider } from "./contexts/RecordsContext";
 import { TdsProvider } from "./contexts/TdsContext";
 import { BillingTermsProvider } from "./contexts/BillingTermsContext";
 import { useActivityBrowser } from "./contexts/ActivityBrowserContext";
@@ -550,13 +549,11 @@ function ProtectedProviders({ children }: { children: React.ReactNode }) {
   return (
     <FinYearProvider>
       <HsnProvider>
-        <RecordsProvider>
-          <TdsProvider>
-            <BillingTermsProvider>
-              <TaskProvider>{children}</TaskProvider>
-            </BillingTermsProvider>
-          </TdsProvider>
-        </RecordsProvider>
+        <TdsProvider>
+          <BillingTermsProvider>
+            <TaskProvider>{children}</TaskProvider>
+          </BillingTermsProvider>
+        </TdsProvider>
       </HsnProvider>
     </FinYearProvider>
   );

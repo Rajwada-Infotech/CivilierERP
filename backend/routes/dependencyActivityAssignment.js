@@ -401,6 +401,8 @@ router.get(
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
         dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
+        -- The row's photo badge reads this, instead of each row downloading every photo just to count them.
+        (SELECT COUNT(*) FROM dbo.ActivityPhoto ph WHERE ph.DependencyMasterActivityId = dma.Id) AS photoCount,
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ',

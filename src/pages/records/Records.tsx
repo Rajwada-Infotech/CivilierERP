@@ -1,14 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { RecordsShell } from "@/components/records/RecordsShell";
-import {
-  FinanceGlassCard,
-  GlassSection,
-} from "@/components/finance/FinanceShell";
+import { SheetShell } from "@/components/sheet/Sheet";
 import { useRecords, type UnifiedRecord } from "@/hooks/useRecords";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -34,22 +29,14 @@ import {
   CheckSquare,
   Square,
   EyeOff,
+  Ticket,
+  Car,
+  PackageCheck,
+  Landmark,
+  FileSignature,
+  FolderLock,
 } from "lucide-react";
-// Module-strip icons use Ionicons (via react-icons/io5) instead of
-// lucide-react, per request — everything else on this page stays lucide.
-import {
-  IoArchiveOutline,
-  IoTicketOutline,
-  IoCarOutline,
-  IoLockClosedOutline,
-  IoFolderOpenOutline,
-} from "react-icons/io5";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   getPersonalVaultFolders,
   uploadToPersonalVault,
@@ -64,18 +51,28 @@ import {
   type PersonalVaultFolder,
 } from "@/api/personalVaultApi";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, INP } from "@/pages/CRM/customers/config";
+
+// ─── Sheet pieces ────────────────────────────────────────────────────────────
+
+const KEY =
+  "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+const chip = (on: boolean) =>
+  `${KEY} h-7 px-2.5 border ${on ? "bg-foreground text-card border-foreground" : "border-foreground/40 text-muted-foreground hover:text-foreground hover:border-foreground"}`;
+const ACT =
+  "w-7 h-7 inline-flex items-center justify-center border border-transparent text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40";
+const NUM = "font-heading tabular-nums";
+const DIALOG = "rounded-none p-5 gap-4 max-w-md";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fileIcon(type?: string) {
-  if (!type) return <File size={14} className="text-muted-foreground" />;
-  if (type.startsWith("image/"))
-    return <FileImage size={14} className="text-blue-400" />;
-  if (type.includes("pdf"))
-    return <FileText size={14} className="text-red-400" />;
+  if (!type) return <File size={14} className="text-muted-foreground shrink-0" />;
+  if (type.startsWith("image/")) return <FileImage size={14} className="text-foreground shrink-0" />;
+  if (type.includes("pdf")) return <FileText size={14} className="text-foreground shrink-0" />;
   if (type.includes("sheet") || type.includes("excel") || type.includes("csv"))
-    return <FileSpreadsheet size={14} className="text-green-500" />;
-  return <FileText size={14} className="text-muted-foreground" />;
+    return <FileSpreadsheet size={14} className="text-foreground shrink-0" />;
+  return <FileText size={14} className="text-muted-foreground shrink-0" />;
 }
 
 function formatFileSize(bytes?: number) {
@@ -90,15 +87,16 @@ function formatFileSize(bytes?: number) {
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-const MODULE_META: Record<
-  string,
-  { label: string; icon: React.ElementType; color: string }
-> = {
-  ticket: { label: "Ticket", icon: IoTicketOutline, color: "#ec4899" },
-  vehicle: { label: "Vehicle In/Out", icon: IoCarOutline, color: "#10b981" },
-  // "vault" (Follow-Up Document Vault) deliberately omitted — disconnected
-  // on the backend too (recordsRoutes.js), Follow-Up is stray/unused for now.
-  personal: { label: "Personal Vault", icon: IoFolderOpenOutline, color: "#f97316" },
+// Every source the server sends (backend/routes/recordsRoutes.js). GRN, the two Loan sources and Contract were
+// missing, so their folders had no name and no filter chip.
+const MODULE_META: Record<string, { label: string; icon: React.ElementType }> = {
+  ticket: { label: "Ticket", icon: Ticket },
+  vehicle: { label: "Vehicle In/Out", icon: Car },
+  grn: { label: "GRN", icon: PackageCheck },
+  "loan-noc": { label: "Loan NOC", icon: Landmark },
+  "loan-document": { label: "Loan documents", icon: Landmark },
+  contract: { label: "Contract", icon: FileSignature },
+  personal: { label: "Personal Vault", icon: FolderLock },
 };
 
 function PasswordInput({
@@ -107,14 +105,12 @@ function PasswordInput({
   placeholder,
   autoFocus,
   onKeyDown,
-  className,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
-  className?: string;
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -126,16 +122,13 @@ function PasswordInput({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        className={
-          className ??
-          "w-full pl-3 pr-9 py-2 rounded-lg text-sm bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-        }
+        className={`${INP} pr-9`}
       />
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
         tabIndex={-1}
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+        className="absolute right-2.5 inset-y-0 my-auto h-5 text-muted-foreground hover:text-foreground transition-colors"
         title={visible ? "Hide password" : "Show password"}
       >
         {visible ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -200,10 +193,11 @@ function ActionButtons({
             e.stopPropagation();
             onToggleSelect?.();
           }}
-          className="p-1.5 rounded-md text-muted-foreground hover:text-primary transition-colors"
+          className={ACT}
           title={selected ? "Deselect" : "Select"}
+          aria-pressed={!!selected}
         >
-          {selected ? <CheckSquare size={15} className="text-primary" /> : <Square size={15} />}
+          {selected ? <CheckSquare size={14} className="text-foreground" /> : <Square size={14} />}
         </button>
       )}
       <button data-row-view
@@ -212,10 +206,10 @@ function ActionButtons({
           handleAction("preview");
         }}
         disabled={loading !== null}
-        className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50"
+        className={ACT}
         title={`Preview ${record.filename}`}
       >
-        {loading === "preview" ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />}
+        {loading === "preview" ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
       </button>
       <button
         onClick={(e) => {
@@ -223,11 +217,10 @@ function ActionButtons({
           handleAction("download");
         }}
         disabled={loading !== null}
-        className="p-1.5 rounded-md hover:bg-[#ffe2021a] transition-colors disabled:opacity-50"
-        style={{ color: "#f59e0b" }}
+        className={ACT}
         title={`Download ${record.filename}`}
       >
-        {loading === "download" ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+        {loading === "download" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
       </button>
       {onDelete && (
         <button
@@ -238,10 +231,10 @@ function ActionButtons({
             Promise.resolve(onDelete()).finally(() => setLoading(null));
           }}
           disabled={loading !== null}
-          className="p-1.5 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+          className={`${ACT} hover:!text-destructive hover:!border-destructive`}
           title={`Delete ${record.filename}`}
         >
-          {loading === "delete" ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+          {loading === "delete" ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
         </button>
       )}
     </div>
@@ -320,16 +313,13 @@ function buildFolderTree(records: UnifiedRecord[]): ModuleGroup[] {
   );
 }
 
-// ─── Folder grid view — drill-down like a real file browser instead of an
-// inline-expanding accordion: root shows one folder card per module,
-// clicking one navigates into a grid of doc-reference folders, clicking
-// one of those navigates into the actual file list. ─────────────────────
+// ─── Folder grid view — drill-down like a file browser: root shows one folder card per module, clicking one
+// opens a grid of doc-reference folders, clicking one of those opens the actual file list. ─────────────────────
 
 function FolderCard({
   icon: Icon,
   label,
   sublabel,
-  color,
   count,
   size,
   onClick,
@@ -339,7 +329,6 @@ function FolderCard({
   icon: React.ElementType;
   label: string;
   sublabel?: string;
-  color: string;
   count: number;
   size: number;
   onClick: () => void;
@@ -356,7 +345,7 @@ function FolderCard({
       onKeyDown={(e) => {
         if (e.key === "Enter") onClick();
       }}
-      className="group relative flex flex-col items-start gap-2.5 p-4 rounded-xl border border-border/60 bg-card/40 hover:bg-card/80 hover:border-border transition-all text-left cursor-pointer"
+      className="group relative flex flex-col items-start gap-3 p-4 bg-card border border-foreground/25 hover:border-foreground transition-colors text-left cursor-pointer focus:outline-none focus-visible:border-foreground"
     >
       {menuItems && menuItems.length > 0 && (
         <div className="absolute top-2 right-2 z-10">
@@ -365,27 +354,32 @@ function FolderCard({
               e.stopPropagation();
               setMenuOpen((v) => !v);
             }}
-            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className={ACT}
             title="More options"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
           >
-            <MoreVertical size={15} />
+            <MoreVertical size={14} />
           </button>
           {menuOpen && (
             <>
               <BodyPortal><div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} /></BodyPortal>
-              <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-border bg-popover shadow-lg z-20 overflow-hidden py-1">
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1 w-44 bg-card z-20 py-1"
+                style={{ border: RULE, boxShadow: "4px 4px 0 hsl(var(--foreground) / 0.12)" }}
+              >
                 {menuItems.map((mi) => (
                   <button
                     key={mi.label}
+                    role="menuitem"
                     onClick={(e) => {
                       e.stopPropagation();
                       setMenuOpen(false);
                       mi.onClick();
                     }}
-                    className={`w-full text-left px-3 py-1.5 text-xs font-heading transition-colors ${
-                      mi.danger
-                        ? "text-destructive hover:bg-destructive/10"
-                        : "text-foreground hover:bg-muted"
+                    className={`w-full text-left px-3 py-2 text-xs transition-colors ${
+                      mi.danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-primary/10"
                     }`}
                   >
                     {mi.label}
@@ -396,16 +390,13 @@ function FolderCard({
           )}
         </div>
       )}
-      <div
-        className="flex items-center justify-center w-11 h-11 rounded-xl transition-transform group-hover:scale-105"
-        style={{ background: `${color}1f` }}
-      >
-        <Icon size={22} style={{ color }} />
+      <div className="flex items-center justify-center w-10 h-10 border border-foreground text-foreground">
+        <Icon size={18} />
       </div>
       <div className="min-w-0 w-full">
-        <p className="text-sm font-heading font-semibold text-foreground truncate flex items-center gap-1.5" title={label}>
+        <p className="text-sm font-heading font-semibold text-foreground truncate flex items-center gap-1.5 pr-6" title={label}>
           {label}
-          {locked && <Lock size={11} className="text-muted-foreground shrink-0" />}
+          {locked && <Lock size={11} className="text-muted-foreground shrink-0" aria-label="Locked" />}
         </p>
         {sublabel && (
           <p className="text-xs text-muted-foreground truncate" title={sublabel}>
@@ -413,11 +404,11 @@ function FolderCard({
           </p>
         )}
       </div>
-      <div className="flex items-center justify-between w-full text-[0.6875rem] text-muted-foreground">
-        <span>
+      <div className="flex items-center justify-between w-full pt-2 text-[0.6875rem] text-muted-foreground" style={{ borderTop: RULE_SOFT }}>
+        <span className={NUM}>
           {count} file{count !== 1 ? "s" : ""}
         </span>
-        <span>{formatFileSize(size)}</span>
+        <span className={NUM}>{formatFileSize(size)}</span>
       </div>
     </div>
   );
@@ -434,6 +425,7 @@ function FileRow({
   selectMode,
   selected,
   onToggleSelect,
+  canDelete,
 }: {
   record: UnifiedRecord;
   onChanged?: () => void;
@@ -441,28 +433,27 @@ function FileRow({
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  canDelete: boolean;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-2.5 hover:bg-muted/30 transition-colors">
+    <div className={`flex items-center gap-3 px-4 py-2.5 transition-colors ${selected ? "bg-primary/5" : "hover:bg-primary/5"}`}>
       {fileIcon(record.mimeType)}
-      <span className="text-xs text-foreground truncate max-w-[220px]" title={record.filename}>
+      <span className="text-sm text-foreground truncate min-w-0 flex-1 sm:flex-none sm:max-w-[260px]" title={record.filename}>
         {record.filename}
       </span>
       {record.pendingDeletion && (
         <span
-          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-destructive/10 text-destructive border border-destructive/20 whitespace-nowrap"
+          className="inline-flex items-center px-1.5 py-0.5 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.08em] text-destructive border border-destructive whitespace-nowrap"
           title="The source document was deleted — this file is auto-purged after a 7-day grace period"
         >
           Deleted · purges in {record.purgeAt ? daysUntil(record.purgeAt) : "?"}d
         </span>
       )}
-      <span className="text-xs text-muted-foreground whitespace-nowrap">
-        {formatFileSize(record.size)}
-      </span>
-      <span className="hidden sm:inline text-xs text-muted-foreground whitespace-nowrap">
+      <span className={`${NUM} text-xs text-muted-foreground whitespace-nowrap`}>{formatFileSize(record.size)}</span>
+      <span className="hidden sm:inline text-xs text-muted-foreground whitespace-nowrap truncate max-w-[140px]">
         {record.uploadedBy || "—"}
       </span>
-      <span className="hidden md:inline text-xs text-muted-foreground whitespace-nowrap">
+      <span className={`hidden md:inline ${NUM} text-xs text-muted-foreground whitespace-nowrap`}>
         {record.uploadedAt ? format(new Date(record.uploadedAt), "dd/MM/yyyy HH:mm") : "—"}
       </span>
       <div className="ml-auto shrink-0">
@@ -473,7 +464,7 @@ function FileRow({
           selected={selected}
           onToggleSelect={onToggleSelect}
           onDelete={
-            record.source === "personal"
+            record.source === "personal" && canDelete
               ? async () => {
                   try {
                     await deletePersonalVaultFile(record.sourceId, vaultToken);
@@ -518,9 +509,9 @@ function AddFilesButton({
   };
 
   return (
-    <label className="flex items-center gap-1.5 mx-3 mt-3 mb-1 w-fit px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/25 hover:bg-orange-500/15 transition-colors cursor-pointer">
-      {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-      {uploading ? "Uploading…" : "Add Files"}
+    <label className={`${KEY_INK} h-8 px-3 cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
+      {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+      {uploading ? "Uploading…" : "Add files"}
       <input
         type="file"
         multiple
@@ -583,14 +574,15 @@ function VaultUnlockPanel({
   };
 
   return (
-    <div className="flex flex-col items-center gap-3 py-12 px-4">
-      <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-orange-500/10">
-        <Lock size={22} className="text-orange-500" />
+    <div className="flex flex-col items-center gap-3 py-12 px-4 text-center">
+      <div className="flex items-center justify-center w-11 h-11 border border-foreground text-foreground">
+        <Lock size={18} />
       </div>
-      <p className="text-sm font-heading font-semibold text-foreground">"{folderName}" is password-protected</p>
+      <p className={LBL}>Password-protected</p>
+      <p className="text-sm font-heading font-semibold text-foreground -mt-1">{folderName}</p>
       {!forgotOpen ? (
         <>
-          <div className="flex items-center gap-3 mt-1 w-80">
+          <div className="flex items-center gap-2 mt-1 w-full max-w-sm">
             <PasswordInput
               autoFocus
               value={password}
@@ -598,50 +590,29 @@ function VaultUnlockPanel({
               onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
               placeholder="Folder password"
             />
-            <button
-              onClick={handleUnlock}
-              disabled={busy || !password}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
-            >
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+            <button onClick={handleUnlock} disabled={busy || !password} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+              {busy ? <Loader2 size={12} className="animate-spin" /> : <KeyRound size={12} />}
               Unlock
             </button>
           </div>
           <button
             onClick={() => setForgotOpen(true)}
-            className="text-[0.6875rem] text-muted-foreground hover:text-primary underline underline-offset-2 mt-1"
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
           >
             Forgot password?
           </button>
         </>
       ) : (
-        <div className="flex flex-col items-center gap-2 mt-1 w-64">
-          <p className="text-[0.6875rem] text-muted-foreground text-center">
-            Verify your account password to reset this folder's password.
-          </p>
-          <PasswordInput
-            value={accountPassword}
-            onChange={setAccountPassword}
-            placeholder="Your account password"
-          />
-          <PasswordInput
-            value={newPassword}
-            onChange={setNewPassword}
-            placeholder="New folder password"
-          />
-          <div className="flex items-center gap-2 w-full mt-1">
-            <button
-              onClick={() => setForgotOpen(false)}
-              className="flex-1 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            >
+        <div className="flex flex-col items-stretch gap-2 mt-1 w-full max-w-xs">
+          <p className="text-xs text-muted-foreground">Verify your account password to reset this folder's password.</p>
+          <PasswordInput value={accountPassword} onChange={setAccountPassword} placeholder="Your account password" />
+          <PasswordInput value={newPassword} onChange={setNewPassword} placeholder="New folder password" />
+          <div className="flex items-center gap-2 mt-1">
+            <button onClick={() => setForgotOpen(false)} className={`${KEY_LINE} h-9 flex-1`}>
               Back
             </button>
-            <button
-              onClick={handleReset}
-              disabled={busy}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
-            >
-              {busy ? <Loader2 size={13} className="animate-spin" /> : "Reset"}
+            <button onClick={handleReset} disabled={busy} className={`${KEY_INK} h-9 flex-1`}>
+              {busy ? <Loader2 size={12} className="animate-spin" /> : "Reset"}
             </button>
           </div>
         </div>
@@ -690,37 +661,28 @@ function VaultSetPasswordDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className={`${DIALOG} max-w-sm`} style={{ border: RULE }}>
         <DialogHeader>
-          <DialogTitle className="font-heading text-base flex items-center gap-2">
-            <KeyRound size={16} className="text-orange-500" />
-            {hasPassword ? "Change Password" : "Set Password"} — {folderName}
+          <p className={LBL}>Personal vault · {folderName}</p>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight">
+            {hasPassword ? "Change password" : "Set password"}
           </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            {hasPassword ? "Leave it blank and save to remove the password." : "You'll need it — or your account password — to open this folder."}
+          </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3 pt-1">
-          <PasswordInput
-            autoFocus
-            value={newPassword}
-            onChange={setNewPassword}
-            placeholder={hasPassword ? "New password (blank to remove)" : "New password"}
-          />
-          {hasPassword && (
-            <p className="text-[0.6875rem] text-muted-foreground">Leave blank and save to remove password protection.</p>
-          )}
-        </div>
-        <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-          >
+        <PasswordInput
+          autoFocus
+          value={newPassword}
+          onChange={setNewPassword}
+          placeholder={hasPassword ? "New password (blank to remove)" : "New password"}
+        />
+        <div className="flex justify-end gap-2 pt-4" style={{ borderTop: RULE_SOFT }}>
+          <button onClick={onClose} className={`${KEY_LINE} h-9 px-4`}>
             Cancel
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
-          >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : "Save"}
+          <button onClick={handleSave} disabled={saving} className={`${KEY_INK} h-9 px-4`}>
+            {saving ? <Loader2 size={12} className="animate-spin" /> : "Save"}
           </button>
         </div>
       </DialogContent>
@@ -732,12 +694,12 @@ function RecordsFolderBrowser({
   records,
   searchActive,
   onChanged,
-  canDelete,
+  rights,
 }: {
   records: UnifiedRecord[];
   searchActive: boolean;
   onChanged?: () => void;
-  canDelete: boolean;
+  rights: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }) {
   const [moduleKey, setModuleKey] = useState<string | null>(null);
   const [docRefKey, setDocRefKey] = useState<string | null>(null);
@@ -751,8 +713,11 @@ function RecordsFolderBrowser({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
+  // Said out loud when it fails: without it a protected folder can't show as locked.
   const refreshVaultFolders = () => {
-    getPersonalVaultFolders().then(setVaultFolders).catch(() => {});
+    getPersonalVaultFolders()
+      .then(setVaultFolders)
+      .catch((e) => toast.error(e?.message || "Couldn't load your Personal Vault folders"));
   };
 
   useEffect(() => {
@@ -800,13 +765,14 @@ function RecordsFolderBrowser({
       (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
     );
     return (
-      <div className="divide-y divide-border/50">
+      <div className="divide-y divide-foreground/10">
         {flat.map((r) => (
           <FileRow
             key={r.id}
             record={r}
             onChanged={handleChanged}
             vaultToken={r.source === "personal" ? vaultTokens[r.docRef] : undefined}
+            canDelete={rights.canDelete}
           />
         ))}
       </div>
@@ -814,7 +780,7 @@ function RecordsFolderBrowser({
   }
 
   const crumbs: { label: string; onClick: () => void }[] = [
-    { label: "All Attachments", onClick: () => { setModuleKey(null); setDocRefKey(null); } },
+    { label: "All attachments", onClick: () => { setModuleKey(null); setDocRefKey(null); } },
   ];
   if (currentModule) {
     crumbs.push({ label: currentModule.module, onClick: () => setDocRefKey(null) });
@@ -868,13 +834,9 @@ function RecordsFolderBrowser({
   return (
     <div>
       {/* Breadcrumb trail */}
-      <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-border/50 text-xs overflow-x-auto">
+      <div className="flex items-center gap-1.5 px-4 py-2.5 text-xs overflow-x-auto" style={{ borderBottom: RULE_SOFT }}>
         {currentModule && (
-          <button
-            onClick={goBack}
-            title="Back"
-            className="flex items-center justify-center w-6 h-6 rounded-md text-muted-foreground hover:text-primary hover:bg-muted shrink-0 mr-0.5 transition-colors"
-          >
+          <button onClick={goBack} title="Back" aria-label="Back" className={`${ACT} mr-0.5 shrink-0`}>
             <ArrowLeft size={14} />
           </button>
         )}
@@ -884,10 +846,8 @@ function RecordsFolderBrowser({
             <button
               onClick={c.onClick}
               disabled={i === crumbs.length - 1}
-              className={`whitespace-nowrap font-heading transition-colors ${
-                i === crumbs.length - 1
-                  ? "text-foreground cursor-default"
-                  : "text-muted-foreground hover:text-primary"
+              className={`whitespace-nowrap font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${
+                i === crumbs.length - 1 ? "text-foreground cursor-default" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {c.label}
@@ -896,26 +856,22 @@ function RecordsFolderBrowser({
         ))}
       </div>
 
-      <div className="p-3">
+      <div className="p-4">
         {!currentModule ? (
           tree.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">No attachments yet.</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-              {tree.map((mg) => {
-                const meta = MODULE_META[mg.source] ?? { label: mg.module, icon: File, color: "#94a3b8" };
-                return (
-                  <FolderCard
-                    key={mg.key}
-                    icon={meta.icon}
-                    label={mg.module}
-                    color={meta.color}
-                    count={mg.fileCount}
-                    size={mg.totalSize}
-                    onClick={() => setModuleKey(mg.key)}
-                  />
-                );
-              })}
+              {tree.map((mg) => (
+                <FolderCard
+                  key={mg.key}
+                  icon={MODULE_META[mg.source]?.icon ?? File}
+                  label={mg.module}
+                  count={mg.fileCount}
+                  size={mg.totalSize}
+                  onClick={() => setModuleKey(mg.key)}
+                />
+              ))}
             </div>
           )
         ) : !currentDocRef ? (
@@ -927,32 +883,27 @@ function RecordsFolderBrowser({
                 const isPersonal = currentModule.source === "personal";
                 const meta = isPersonal ? vaultFolders.find((f) => f.FolderName === dg.docRef) : null;
                 const token = vaultTokens[dg.docRef];
+                const menu = isPersonal
+                  ? [
+                      ...(rights.canEdit
+                        ? [{ label: meta?.HasPassword ? "Change password" : "Set password", onClick: () => setPasswordDialogFolder(dg.docRef) }]
+                        : []),
+                      ...(rights.canDelete
+                        ? [{ label: "Delete folder", danger: true, onClick: () => handleDeleteFolder(dg.docRef, token) }]
+                        : []),
+                    ]
+                  : undefined;
                 return (
                   <FolderCard
                     key={dg.key}
                     icon={Folder}
                     label={dg.docRef}
                     sublabel={dg.docLabel !== dg.docRef ? dg.docLabel : undefined}
-                    color="#f59e0b"
                     count={dg.files.length}
                     size={dg.totalSize}
                     locked={isPersonal && !!meta?.HasPassword && !token}
                     onClick={() => setDocRefKey(dg.key)}
-                    menuItems={
-                      isPersonal
-                        ? [
-                            {
-                              label: meta?.HasPassword ? "Change Password" : "Set Password",
-                              onClick: () => setPasswordDialogFolder(dg.docRef),
-                            },
-                            {
-                              label: "Delete Folder",
-                              danger: true,
-                              onClick: () => handleDeleteFolder(dg.docRef, token),
-                            },
-                          ]
-                        : undefined
-                    }
+                    menuItems={menu}
                   />
                 );
               })}
@@ -964,39 +915,41 @@ function RecordsFolderBrowser({
             onUnlocked={(token) => setVaultTokens((prev) => ({ ...prev, [currentDocRef.docRef]: token }))}
           />
         ) : (
-          <div>
-            {currentModule.source === "personal" && (
-              <div className="flex items-center gap-3 mx-3 mt-3 mb-1 flex-wrap">
-                <AddFilesButton folderName={currentDocRef.docRef} onUploaded={handleChanged} vaultToken={currentToken} />
-                <button
-                  onClick={() => setPasswordDialogFolder(currentDocRef.docRef)}
-                  className="flex items-center gap-1.5 w-fit px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-muted text-muted-foreground border border-border hover:bg-muted/70 transition-colors"
-                >
-                  <KeyRound size={13} />
-                  {vaultMeta?.HasPassword ? "Change Password" : "Set Password"}
-                </button>
-                {canDelete && selectedIds.size > 0 && (
+          <div className="space-y-3">
+            {currentModule.source === "personal" && (rights.canCreate || rights.canEdit || rights.canDelete) && (
+              <div className="flex items-center gap-2 flex-wrap">
+                {rights.canCreate && (
+                  <AddFilesButton folderName={currentDocRef.docRef} onUploaded={handleChanged} vaultToken={currentToken} />
+                )}
+                {rights.canEdit && (
+                  <button onClick={() => setPasswordDialogFolder(currentDocRef.docRef)} className={`${KEY_LINE} h-8 px-3`}>
+                    <KeyRound size={12} />
+                    {vaultMeta?.HasPassword ? "Change password" : "Set password"}
+                  </button>
+                )}
+                {rights.canDelete && selectedIds.size > 0 && (
                   <button
                     onClick={handleBulkDelete}
                     disabled={bulkDeleting}
-                    className="flex items-center gap-1.5 w-fit px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive/10 text-destructive border border-destructive/25 hover:bg-destructive/15 transition-colors disabled:opacity-60"
+                    className={`${KEY} h-8 px-3 border border-destructive text-destructive hover:bg-destructive/10`}
                   >
-                    {bulkDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                    Delete {selectedIds.size} Selected
+                    {bulkDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    Delete {selectedIds.size} selected
                   </button>
                 )}
               </div>
             )}
-            <div className="rounded-lg border border-border/50 divide-y divide-border/50 overflow-hidden">
+            <div className="divide-y divide-foreground/10" style={{ border: RULE_SOFT }}>
               {currentDocRef.files.map((r) => (
                 <FileRow
                   key={r.id}
                   record={r}
                   onChanged={handleChanged}
                   vaultToken={currentToken}
-                  selectMode={currentModule.source === "personal"}
+                  selectMode={currentModule.source === "personal" && rights.canDelete}
                   selected={selectedIds.has(r.sourceId)}
                   onToggleSelect={() => toggleSelect(r.sourceId)}
+                  canDelete={rights.canDelete}
                 />
               ))}
             </div>
@@ -1087,73 +1040,55 @@ function NewFolderDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleCancel()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className={DIALOG} style={{ border: RULE }}>
         <DialogHeader>
-          <DialogTitle className="font-heading text-base flex items-center gap-2">
-            <FolderPlus size={16} className="text-orange-500" /> New Folder
-          </DialogTitle>
+          <p className={LBL}>Personal vault</p>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight">New folder</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            Private to you — unrelated to any project record. Any file type is accepted.
+          </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 pt-1">
+        <div className="space-y-4">
           <div>
-            <label className="block text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-              Folder Name
-            </label>
+            <label htmlFor="pv-folder-name" className={`${LBL} block mb-1.5`}>Folder name</label>
             <input
+              id="pv-folder-name"
               autoFocus
               value={folderName}
               onChange={(e) => setFolderName(e.target.value)}
               placeholder="e.g. XYZ Vault"
-              className="w-full px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+              className={INP}
             />
+          </div>
+          <div>
+            <p className={`${LBL} mb-1.5`}>
+              Password <span className="normal-case tracking-normal font-normal">(optional)</span>
+            </p>
+            <PasswordInput value={password} onChange={setPassword} placeholder="Leave blank for no password" />
             <p className="text-[0.6875rem] text-muted-foreground mt-1">
-              Private to you — unrelated to any project record. Any file type is accepted.
+              You'll need it — or your account password to reset it — to open this folder later.
             </p>
           </div>
           <div>
-            <label className="block text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-              Password <span className="normal-case text-muted-foreground/60">(optional)</span>
+            <p className={`${LBL} mb-1.5`}>Files</p>
+            <label className={`${KEY_LINE} h-9 px-3 cursor-pointer`}>
+              <Upload size={12} /> {files.length ? "Choose other files" : "Choose files"}
+              <input type="file" multiple className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
             </label>
-            <PasswordInput
-              value={password}
-              onChange={setPassword}
-              placeholder="Leave blank for no password"
-            />
-            <p className="text-[0.6875rem] text-muted-foreground mt-1">
-              Protect this folder — you'll need it (or your account password to reset) to open it later.
-            </p>
-          </div>
-          <div>
-            <label className="block text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-              Files
-            </label>
-            <input
-              type="file"
-              multiple
-              onChange={(e) => setFiles(Array.from(e.target.files || []))}
-              className="w-full text-xs text-muted-foreground file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-primary file:text-primary-foreground file:text-xs file:font-heading file:font-semibold file:cursor-pointer"
-            />
             {files.length > 0 && (
-              <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
-                {files.length} file{files.length !== 1 ? "s" : ""} selected ·{" "}
-                {formatFileSize(files.reduce((s, f) => s + f.size, 0))}
+              <p className={`${NUM} text-[0.6875rem] text-muted-foreground mt-1.5`}>
+                {files.length} file{files.length !== 1 ? "s" : ""} selected · {formatFileSize(files.reduce((s, f) => s + f.size, 0))}
               </p>
             )}
           </div>
         </div>
-        <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
-          <button
-            onClick={handleCancel}
-            className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-          >
+        <div className="flex justify-end gap-2 pt-4" style={{ borderTop: RULE_SOFT }}>
+          <button onClick={handleCancel} className={`${KEY_LINE} h-9 px-4`}>
             Cancel
           </button>
-          <button
-            onClick={handleCreate}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white transition-all disabled:opacity-60"
-          >
-            {saving ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-            {saving ? "Uploading…" : "Create Folder"}
+          <button onClick={handleCreate} disabled={saving} className={`${KEY_INK} h-9 px-4`}>
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            {saving ? "Uploading…" : "Create folder"}
           </button>
         </div>
       </DialogContent>
@@ -1165,12 +1100,10 @@ function NewFolderDialog({
 
 export default function Records() {
   const rights = usePageRights("records");
-  const { records, loading, error, refreshRecords } = useRecords();
+  const { records, failedSources, loading, error, refreshRecords } = useRecords();
   const [moduleFilter, setModuleFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [newFolderOpen, setNewFolderOpen] = useState(false);
-  const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
 
   const counts = useMemo(() => {
     const byModule: Record<string, number> = {};
@@ -1179,8 +1112,7 @@ export default function Records() {
   }, [records]);
 
   const filteredByModule = useMemo(
-    () =>
-      moduleFilter ? records.filter((r) => r.source === moduleFilter) : records,
+    () => (moduleFilter ? records.filter((r) => r.source === moduleFilter) : records),
     [records, moduleFilter],
   );
 
@@ -1190,187 +1122,131 @@ export default function Records() {
     const q = search.trim().toLowerCase();
     if (!q) return filteredByModule;
     return filteredByModule.filter((r) =>
-      [r.docRef, r.docLabel, r.filename, r.module, r.uploadedBy ?? ""]
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
+      [r.docRef, r.docLabel, r.filename, r.module, r.uploadedBy ?? ""].join(" ").toLowerCase().includes(q),
     );
   }, [filteredByModule, search]);
 
   const totalSize = records.reduce((s, r) => s + (r.size || 0), 0);
 
-  const summaryStats = [
-    {
-      label: "Total Files",
-      value: String(records.length),
-      icon: IoArchiveOutline,
-      color: "#f59e0b",
-    },
-    {
-      label: "Tickets",
-      value: String(counts.ticket ?? 0),
-      icon: IoTicketOutline,
-      color: "#ec4899",
-    },
-    {
-      label: "Vehicle In/Out",
-      value: String(counts.vehicle ?? 0),
-      icon: IoCarOutline,
-      color: "#10b981",
-    },
-    {
-      label: "Storage Used",
-      value: formatFileSize(totalSize),
-      icon: IoLockClosedOutline,
-      color: "#818cf8",
-    },
+  const figures = [
+    { label: "Total files", value: String(records.length), note: `${Object.keys(counts).length} sources` },
+    { label: "Tickets", value: String(counts.ticket ?? 0), note: "ticket attachments" },
+    { label: "Vehicle In/Out", value: String(counts.vehicle ?? 0), note: "gate photos and papers" },
+    { label: "Storage used", value: formatFileSize(totalSize), note: "across everything listed" },
   ];
+  // Filter chips: only sources that have something to show (plus the one selected, so it can be cleared).
+  const chipKeys = Object.keys(MODULE_META).filter((k) => (counts[k] ?? 0) > 0 || moduleFilter === k);
 
   return (
     <>
       <Breadcrumbs items={["Records"]} />
-      <RecordsShell
+      <SheetShell
+        eyebrow="CivilierERP · Records"
         title="Records"
-        subtitle="Every attachment across the ERP — Tickets, Vehicle In/Out, Contract, and your own Personal Vault — in one searchable place"
+        subtitle="Every attachment across the ERP — tickets, vehicle entries, GRNs, loans, contracts — and your own Personal Vault, in one searchable place."
         action={
           <div className="flex items-center gap-2">
             {rights.canCreate && (
-              <button
-                onClick={() => setNewFolderOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-orange-500/30 hover:bg-orange-500/10 transition-colors"
-                style={{ color: "#f97316" }}
-              >
-                <FolderPlus size={13} />
-                New Folder
+              <button onClick={() => setNewFolderOpen(true)} className={`${KEY_INK} h-9 px-4`}>
+                <FolderPlus size={12} /> New folder
               </button>
             )}
-            <button
-              onClick={refreshRecords}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-amber-500/30 hover:bg-[#ffe2021a] transition-colors"
-              style={{ color: "#fbbf24" }}
-            >
-              <RefreshCw size={13} />
-              Refresh
+            <button onClick={refreshRecords} className={`${KEY_LINE} h-9 w-9`} title="Refresh" aria-label="Refresh">
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             </button>
           </div>
         }
       >
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {summaryStats.map((s) => (
-            <FinanceGlassCard
-              key={s.label}
-              label={s.label}
-              value={s.value}
-              icon={s.icon}
-              accentColor={s.color}
-            />
-          ))}
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+            {figures.map((x) => (
+              <div key={x.label}>
+                <p className="label">{x.label}</p>
+                <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9 }}>{loading ? "…" : x.value}</p>
+                <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{x.note}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         {error && (
-          <div className="p-4 text-center text-destructive text-sm bg-destructive/5 border border-destructive/20 rounded-xl">
-            Failed to load records: {error}
+          <div className="px-4 py-2.5 text-xs text-destructive bg-card" style={{ border: "1px solid hsl(var(--destructive))" }}>
+            Couldn't load records: {error}
+          </div>
+        )}
+        {failedSources.length > 0 && (
+          <div className="px-4 py-2.5 text-xs bg-card" style={{ border: RULE, boxShadow: "inset 3px 0 0 hsl(var(--destructive))" }}>
+            Some attachments couldn't be loaded ({failedSources.map((k) => MODULE_META[k]?.label ?? k).join(", ")}) — the
+            rest are listed. Refresh to try again.
           </div>
         )}
 
-        <GlassSection
-          title="All Attachments"
-          icon={IoArchiveOutline}
-          accentColor="#f59e0b"
-          action={
-            <div className="flex items-center gap-2">
-              {/* Module quick-filter chips */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setModuleFilter(null)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-heading transition-colors ${
-                    moduleFilter === null
-                      ? "bg-amber-500/20 text-amber-500"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  All
-                </button>
-                {Object.entries(MODULE_META).map(([key, meta]) => (
-                  <button
-                    key={key}
-                    onClick={() =>
-                      setModuleFilter(moduleFilter === key ? null : key)
-                    }
-                    className="px-2.5 py-1 rounded-full text-xs font-heading transition-colors"
-                    style={
-                      moduleFilter === key
-                        ? { background: `${meta.color}28`, color: meta.color }
-                        : { color: "var(--muted-foreground)" }
-                    }
-                  >
-                    {meta.label} ({counts[key] ?? 0})
-                  </button>
-                ))}
-              </div>
-            </div>
-          }
-        >
-          {/* Doc-reference search bar — searches doc ref, filename, module, uploader */}
-          <div className="relative mb-3">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by document number, filename, module, or uploader…"
-              className="w-full pl-9 pr-9 py-2.5 rounded-xl text-sm bg-muted/60 border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-amber-500/30 placeholder:text-muted-foreground/70"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                title="Clear search"
-              >
-                <X size={14} />
+        <div className="bg-card" style={{ border: RULE }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderBottom: RULE }}>
+            <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">
+              All attachments <span className={`${NUM} font-normal text-muted-foreground ml-1`}>{searched.length}</span>
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button onClick={() => setModuleFilter(null)} aria-pressed={moduleFilter === null} className={chip(moduleFilter === null)}>
+                All
               </button>
-            )}
+              {chipKeys.map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setModuleFilter(moduleFilter === key ? null : key)}
+                  aria-pressed={moduleFilter === key}
+                  className={chip(moduleFilter === key)}
+                >
+                  {MODULE_META[key].label} <span className={NUM}>{counts[key] ?? 0}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div
-            className="rounded-xl overflow-hidden"
-            style={{
-              background: isDark ? "rgba(15,17,26,0.45)" : "rgba(255,255,255,0.72)",
-              border: isDark
-                ? "1px solid rgba(245,158,11,0.18)"
-                : "1px solid rgba(245,158,11,0.22)",
-              backdropFilter: "blur(16px)",
-              WebkitBackdropFilter: "blur(16px)",
-              boxShadow: isDark
-                ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-                : "0 4px 24px rgba(245,158,11,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
-            }}
-          >
-            {loading ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                Loading records…
-              </div>
-            ) : searched.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                {records.length === 0
-                  ? "No attachments yet. Files uploaded in Tickets, Vehicle In/Out, Contract, or your Personal Vault will appear here automatically."
-                  : "No attachments match your search."}
-              </div>
-            ) : (
-              <RecordsFolderBrowser records={searched} searchActive={search.trim().length > 0} onChanged={refreshRecords} canDelete={rights.canDelete} />
-            )}
+          {/* Search — doc ref, filename, module, uploader */}
+          <div className="px-4 py-3" style={{ borderBottom: RULE_SOFT }}>
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 inset-y-0 my-auto text-muted-foreground pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by document number, filename, module, or uploader…"
+                className={`${INP} pl-8 pr-8`}
+                aria-label="Search attachments"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-2.5 inset-y-0 my-auto h-5 text-muted-foreground hover:text-foreground"
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
-        </GlassSection>
-      </RecordsShell>
-      <NewFolderDialog
-        open={newFolderOpen}
-        onClose={() => setNewFolderOpen(false)}
-        onCreated={refreshRecords}
-      />
+
+          {loading ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">Loading records…</div>
+          ) : searched.length === 0 ? (
+            <div className="p-8 text-center text-sm text-muted-foreground">
+              {records.length === 0
+                ? "No attachments yet. Files uploaded in Tickets, Vehicle In/Out, GRNs, Loans, Contracts or your Personal Vault appear here automatically."
+                : "No attachments match your search."}
+            </div>
+          ) : (
+            <RecordsFolderBrowser
+              records={searched}
+              searchActive={search.trim().length > 0}
+              onChanged={refreshRecords}
+              rights={{ canCreate: rights.canCreate, canEdit: rights.canEdit, canDelete: rights.canDelete }}
+            />
+          )}
+        </div>
+      </SheetShell>
+      <NewFolderDialog open={newFolderOpen} onClose={() => setNewFolderOpen(false)} onCreated={refreshRecords} />
     </>
   );
 }
