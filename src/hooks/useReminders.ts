@@ -234,6 +234,13 @@ const REMINDER_PAGE_KEYS: Record<string, string[]> = {
   grn: ["grn-master", "grns"],
   tds: ["tds-master"],
   work_order: ["work-order", "engineering-work-order"],
+  // Every other source too: a reminder only shows to someone who may open the page it links to. (The server
+  // already limits each list to the user's own projects.)
+  expense_emi: ["expense-booking"],
+  loan_emi: ["loan-sanction"],
+  material_request: ["material-request"],
+  pdc: ["reports"],
+  followup: ["followup-dashboard"],
 };
 
 function hasReminderAccess(
@@ -296,6 +303,7 @@ export async function fetchAllReminders(
 
   const invoicedSources = new Set<string>();
   try {
+    if (!hasReminderAccess(role, pagePermissions, "purchase_order") && !hasReminderAccess(role, pagePermissions, "grn")) throw new Error("not needed");
     const ebRes = await fetchWithAuth("/api/expense-booking?limit=200");
     if (ebRes.ok) {
       const ebRaw = await ebRes.json();
@@ -368,6 +376,8 @@ export async function fetchAllReminders(
     toList(tdsRes),
     toList(woRes),
   ]);
+  const ifAllowed = (type: keyof typeof REMINDER_PAGE_KEYS, fetcher: () => Promise<ReminderItem[]>) =>
+    hasReminderAccess(role, pagePermissions, type) ? fetcher().catch(() => [] as ReminderItem[]) : Promise.resolve([] as ReminderItem[]);
   const [, emiItems, mrItems, pdcItems, followupItems, loanEmiItems] = await Promise.all([
     Promise.resolve().then(() => {
       process(poList, "purchase_order", "PurchaseOrderID", "PO", "/material/purchase-order");
@@ -375,11 +385,11 @@ export async function fetchAllReminders(
       process(tdsList, "tds", "Id", "TDS", "/masters/tds");
       process(woList, "work_order", "Id", "WO", "/material/work-order");
     }),
-    fetchEmiReminders().catch(() => [] as ReminderItem[]),
-    fetchMaterialRequestReminders().catch(() => [] as ReminderItem[]),
-    fetchPdcReminders().catch(() => [] as ReminderItem[]),
-    fetchFollowUpReminders().catch(() => [] as ReminderItem[]),
-    fetchLoanEmiReminders().catch(() => [] as ReminderItem[]),
+    ifAllowed("expense_emi", fetchEmiReminders),
+    ifAllowed("material_request", fetchMaterialRequestReminders),
+    ifAllowed("pdc", fetchPdcReminders),
+    ifAllowed("followup", fetchFollowUpReminders),
+    ifAllowed("loan_emi", fetchLoanEmiReminders),
   ]);
 
   items.push(...emiItems);

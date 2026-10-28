@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -52,7 +52,18 @@ const fillFor = (status: string): React.CSSProperties => {
 export default function MaterialDashboard() {
   usePageRights("material-dashboard");
   const navigate = useNavigate();
-  const [drill, setDrill] = useState<DrillKey | null>(null);
+  // ?drill=<key>: coming back from a record opened in one of these lists — open that list again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [drill, setDrill] = useState<DrillKey | null>(() => {
+    const k = searchParams.get("drill") || "";
+    return /^((mr|po|grn)-(unapproved|pending|overdue)|items|grns|pos|expenses|stock|issues|requests)$/.test(k) ? (k as DrillKey) : null;
+  });
+  useEffect(() => {
+    if (!searchParams.get("drill")) return;
+    searchParams.delete("drill");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [recent, setRecent] = useState<Recent>("grns");
 
   const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery<DashboardData>({

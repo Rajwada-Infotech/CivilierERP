@@ -418,7 +418,10 @@ router.get("/", authenticateToken, async (req, res) => {
       LEFT JOIN  dbo.FinYear     fy  WITH (NOLOCK) ON fy.FId = mr.FinYearId
       LEFT JOIN  dbo.MaterialRequestItems mri WITH (NOLOCK) ON mri.MRId = mr.MRId
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
-        AND (@statusFilter = '' OR mr.Status = @statusFilter)
+        AND (@statusFilter = '' OR mr.Status = @statusFilter
+             -- "Overdue" tab: past its required-by date and not yet fully ordered (same rule as the Material dashboard).
+             OR (@statusFilter = 'Overdue' AND mr.RequiredByDate < CAST(GETDATE() AS DATE) AND mr.ShortClosedAt IS NULL
+                 AND ISNULL(mr.Status, '') IN ('', 'Draft', 'Pending', 'Approved', 'Partially Fulfilled', 'Partially Ordered')))
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
         AND (@projectId IS NULL OR mr.ProjectId = @projectId)${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,

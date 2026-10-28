@@ -2,6 +2,7 @@
 // prefills from MR / quotation / work order / work done, totals, print and the
 // mutations. The page and its parts read from this one object.
 import { generateUUID } from "../../../utils/cryptoPolyfill";
+import { useReturnAfterView } from "@/hooks/useReturnAfterView";
 import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -2296,6 +2297,9 @@ export function usePurchaseOrder() {
       return Object.fromEntries(rows.map((x) => [String(x.ItemId).toLowerCase(), x]));
     },
   });
+
+  // Opened from the Material dashboard: back to that list once the record is closed.
+  useReturnAfterView(viewMode !== "list");
 
   return {
     lastRates,

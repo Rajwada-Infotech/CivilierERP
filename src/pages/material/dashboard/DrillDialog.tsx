@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -69,6 +69,7 @@ const DRILL_CSS = ".md-drill .dt-toolbar { background: hsl(var(--card)) !importa
 
 export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose: () => void }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const d = open ? DRILLS[open] : null;
   const { data, isLoading, isError } = useQuery<any[]>({
     queryKey: ["materialDashboard-drill", open],
@@ -112,7 +113,12 @@ export function DrillDialog({ open, onClose }: { open: DrillKey | null; onClose:
               searchable
               paginated
               emptyMessage={d!.empty}
-              onRowClick={d!.open ? (row) => { onClose(); navigate(`${d!.open}?view=${row.original.Id}`); } : undefined}
+              onRowClick={d!.open ? (row) => {
+                // The record's page brings the user back to this same list once they close it.
+                const returnTo = `${location.pathname}?drill=${open}`;
+                onClose();
+                navigate(`${d!.open}?view=${row.original.Id}`, { state: { returnTo } });
+              } : undefined}
             />
           )}
         </ScrollArea>

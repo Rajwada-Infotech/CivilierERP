@@ -1,6 +1,7 @@
 // Everything the GRN page holds: master data, the list, the form, PO lines received,
 // attachments, print and the mutations. The page and its parts read from this one object.
 import * as grnApi from "@/api/grnApi";
+import { useReturnAfterView } from "@/hooks/useReturnAfterView";
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { printGrn, downloadGrnPdf } from "@/utils/grnDocument";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -978,6 +979,9 @@ export function useGRN() {
   };
 
   // ─── JSX ─────────────────────────────────────────────────────────────────────
+
+  // Opened from the Material dashboard: back to that list once the record is closed.
+  useReturnAfterView(!!viewingGrn || showForm);
 
   return {
     rights,
