@@ -2,6 +2,7 @@
 // form state, the mutations and the register columns. The page and its parts read
 // from this one object.
 import * as mrApi from "@/api/materialRequestApi";
+import { useReturnAfterView } from "@/hooks/useReturnAfterView";
 import { generateUUID } from "@/utils/cryptoPolyfill";
 import { projectBelongsToCompany } from "@/lib/projectBelongsTo";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
@@ -807,6 +808,9 @@ export function useMaterialRequest() {
       setImporting(false);
     }
   };
+
+  // Opened from the Material dashboard: back to that list once the record is closed.
+  useReturnAfterView(!!viewingRecord || viewMode !== "list");
 
   return {
     rights,
