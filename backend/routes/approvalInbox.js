@@ -206,31 +206,68 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
 }
 
-// Which step of a multi-step approval a Pending record is waiting on — { level, total, label } — so the inbox badge
-// can say "Pending · Final Level" instead of a bare "Pending". null for single-step workflows, modules without a
-// level engine, and anything already past its last level. Uses the level visibility already worked out when it can;
-// admins skip that check, so it's resolved here for them.
-async function approvalStage(item, visibility, workflowCache) {
-  if (item.Status !== "Pending") return null;
+const levelLabel = (defs, level, total) => defs?.[level - 1]?.label || (level === total ? "Final Level" : `Level ${level}`);
+
+// Where a record stands in its approval workflow, for the inbox row:
+//   stage — the step a Pending record is waiting on, { level, total, label } ("Pending · Final Level");
+//   steps — the decisions taken so far in this approval cycle, one per approver: { level, label, status, by, at }.
+// Every module with an Approval Setup workflow (and a Civil Work DPR activity's own levels) gets it, one step or
+// many. Uses the level visibility already worked out when it can; admins skip that check, so it's resolved here.
+async function approvalProgress(item, visibility, workflowCache) {
   try {
+    const recordId = parseInt(item.RecordId, 10);
     if (item.Module === "civilworkdpr-approval") {
-      const dpr = await dprApprovalLevels(parseInt(item.RecordId, 10));
-      if (!dpr || dpr.levels.length < 2 || dpr.index < 0) return null;
-      const last = dpr.index === dpr.levels.length - 1;
-      return { level: dpr.index + 1, total: dpr.levels.length, label: last ? "Final" : `Step ${dpr.index + 1}` };
+      const dpr = await dprApprovalLevels(recordId);
+      if (!dpr) return null;
+      const total = dpr.levels.length;
+      const dprLabel = (i) => (i === total - 1 ? "Final" : `Step ${i + 1}`);
+      const done = await getPool().request().input("rungId", sql.Int, recordId).query(`
+        SELECT ap.LevelId, ap.ApprovedAt, u.name AS ByName
+        FROM dbo.DependencyActivityApproval ap
+        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = ap.AssignmentId AND daa.IsCurrent = 1
+        LEFT JOIN dbo.users u ON u.id = ap.ApproverUserId
+        WHERE daa.DependencyMasterActivityId = @rungId
+        ORDER BY ap.ApprovedAt`);
+      const steps = done.recordset.map((x) => {
+        const i = dpr.levels.findIndex((l) => l.id === x.LevelId);
+        return { level: i + 1, label: dprLabel(i), status: "Approved", by: x.ByName || null, at: x.ApprovedAt };
+      });
+      const stage = item.Status === "Pending" && dpr.index >= 0 ? { level: dpr.index + 1, total, label: dprLabel(dpr.index) } : null;
+      return { stage, steps };
     }
+
     const map = MODULE_MAP[item.Module];
     const workflow = workflowCache.get(item.Module);
     if (!map || !workflow?.LevelDefs?.length) return null;
     const total = workflow.Levels || workflow.LevelDefs.length;
-    if (total < 2) return null;
-    const level = visibility.currentLevel
-      ?? (await resolveCurrentLevel(map.table.replace("dbo.", ""), parseInt(item.RecordId, 10), total, workflow.LevelDefs, null, { module: item.Module }));
-    if (!level || level > total) return null;
-    const label = workflow.LevelDefs[level - 1]?.label || (level === total ? "Final Level" : `Level ${level}`);
-    return { level, total, label };
+    const tableName = map.table.replace("dbo.", "");
+
+    let stage = null;
+    if (item.Status === "Pending") {
+      const level = visibility.currentLevel
+        ?? (await resolveCurrentLevel(tableName, recordId, total, workflow.LevelDefs, null, { module: item.Module }));
+      if (level && level <= total) stage = { level, total, label: levelLabel(workflow.LevelDefs, level, total) };
+    }
+
+    // This cycle's decisions: everything after the last "sent for approval" marker (Level 0, Pending).
+    const log = await getPool().request()
+      .input("TableName", sql.NVarChar(100), tableName)
+      .input("RecordId", sql.Int, recordId)
+      .query(`
+        SELECT a.Level, a.ActionStatus, a.ActionAt, COALESCE(u.name, a.ApproverEmail) AS ByName
+        FROM dbo.ApprovalAuditLog a
+        LEFT JOIN dbo.users u ON u.id = a.UserId OR (a.UserId IS NULL AND u.email = a.ApproverEmail)
+        WHERE a.TableName = @TableName AND a.RecordId = @RecordId AND a.Level >= 1
+          AND a.ActionStatus IN ('Approved', 'Rejected')
+          AND a.ActionAt >= ISNULL((SELECT MAX(c.ActionAt) FROM dbo.ApprovalAuditLog c
+                                    WHERE c.TableName = @TableName AND c.RecordId = @RecordId AND c.Level = 0 AND c.ActionStatus = 'Pending'), '1900-01-01')
+        ORDER BY a.ActionAt`);
+    const steps = log.recordset.map((x) => ({
+      level: x.Level, label: levelLabel(workflow.LevelDefs, x.Level, total), status: x.ActionStatus, by: x.ByName || null, at: x.ActionAt,
+    }));
+    return stage || steps.length ? { stage, steps } : null;
   } catch (err) {
-    logger.warn({ module: item.Module, recordId: item.RecordId, err: err.message }, "approval-inbox: could not work out the approval stage");
+    logger.warn({ module: item.Module, recordId: item.RecordId, err: err.message }, "approval-inbox: could not work out the approval progress");
     return null;
   }
 }
@@ -253,8 +290,8 @@ async function filterVisibleToViewer(items, req) {
   const results = await Promise.all(
     items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
   );
-  const stages = await Promise.all(
-    items.map((item, i) => (results[i].visible ? approvalStage(item, results[i], workflowCache) : null)),
+  const progress = await Promise.all(
+    items.map((item, i) => (results[i].visible ? approvalProgress(item, results[i], workflowCache) : null)),
   );
   const out = [];
   items.forEach((item, i) => {
@@ -264,7 +301,8 @@ async function filterVisibleToViewer(items, req) {
     // omitted entirely for the common case so existing consumers/tests that
     // don't know about it are unaffected.
     const row = r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : { ...item };
-    if (stages[i]) row._stage = stages[i];
+    if (progress[i]?.stage) row._stage = progress[i].stage;
+    if (progress[i]?.steps?.length) row._steps = progress[i].steps;
     out.push(row);
   });
   return out;
