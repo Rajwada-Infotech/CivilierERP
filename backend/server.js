@@ -317,6 +317,7 @@ const ALL_ROUTES = [
   { path: "/api/personal-vault", file: "./routes/personalVault" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
+  { path: "/api/integrations/partner-keys", file: "./routes/partnerApiKeys" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },
   { path: "/api/menu-master", file: "./routes/menuMaster" },
   { path: "/api/menu-type", file: "./routes/menuType" },
@@ -596,6 +597,9 @@ async function createApp() {
   // including login itself — was rejected with "No token provided" before
   // crmPortal.js's own router ever ran.
   app.use("/api/crm-portal", require("./routes/crmPortal"));
+  // Channel partners' systems push leads with an API key (Admin → Integrations),
+  // never a staff login — so it sits before the staff auth wall like the portal.
+  app.use("/api/public/partner-leads", require("./routes/publicPartnerLeads"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {

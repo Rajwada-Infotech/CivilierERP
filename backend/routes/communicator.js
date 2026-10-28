@@ -5,6 +5,8 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
 const { send: sendMessage, messagingStatus } = require("../services/messageProviders");
+const { CONNECTION_PROVIDERS } = require("../services/saAdPlatformService");
+const { testConnection, parseSettings } = require("../services/integrationConnections");
 
 
 router.use(authMiddleware);
@@ -14,6 +16,19 @@ const superAdminOnly = allowRoles("super_admin");
 
 // ─── Channel management CRUD (super_admin only) ──────────────────────────────
 
+// Every channel column the browser may see — credentials only as Has* flags, never the values.
+const CHANNEL_COLUMNS = `
+  Id, ChannelKey, Label, Description, SortOrder, IsActive, UpdatedAt, UpdatedBy,
+  Provider, TokenExpiresAt, LastTestAt, LastTestOk, LastTestMessage, SettingsJson,
+  CASE WHEN LEN(AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
+  CASE WHEN LEN(RefreshToken) > 0 THEN 1 ELSE 0 END AS HasRefreshToken`;
+
+// SettingsJson holds the Google developer token (a secret) — only the login customer id is shown.
+const publicChannel = ({ SettingsJson, ...c }) => {
+  const settings = parseSettings(SettingsJson);
+  return { ...c, HasDeveloperToken: !!settings.developerToken, LoginCustomerId: settings.loginCustomerId || "" };
+};
+
 /**
  * GET /api/communicator/channels
  * Returns all channel rows (active + inactive) for the admin UI.
@@ -22,7 +37,7 @@ router.get("/channels", superAdminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, ChannelKey, Label, Description, SortOrder, IsActive, UpdatedAt, UpdatedBy
+      SELECT ${CHANNEL_COLUMNS}
       FROM dbo.IntegrationChannels
       ORDER BY SortOrder ASC
     `);
@@ -38,7 +53,10 @@ router.get("/channels", superAdminOnly, async (req, res) => {
       .catch(() => ({ recordset: [] }));
     const usedBy = new Map();
     for (const r of usage.recordset) usedBy.set(r.ApiConfigId, [...(usedBy.get(r.ApiConfigId) || []), r.Name]);
-    res.json({ channels: result.recordset.map((c) => ({ ...c, UsedBy: usedBy.get(c.Id) || [] })) });
+    res.json({
+      channels: result.recordset.map((c) => ({ ...publicChannel(c), UsedBy: usedBy.get(c.Id) || [] })),
+      providers: CONNECTION_PROVIDERS,
+    });
   } catch (err) {
     console.error("ERROR in GET /communicator/channels:", err);
     res.status(500).json({ error: err.message });
@@ -92,11 +110,11 @@ router.post("/channels", superAdminOnly, async (req, res) => {
       .input("UpdatedBy",   sql.NVarChar(100), String(updatedBy))
       .query(`
         INSERT INTO dbo.IntegrationChannels (ChannelKey, Label, Description, SortOrder, IsActive, CreatedAt, UpdatedAt, UpdatedBy)
-        OUTPUT INSERTED.*
-        VALUES (@Key, @Label, @Description, @SortOrder, 1, GETDATE(), GETDATE(), @UpdatedBy)
+        VALUES (@Key, @Label, @Description, @SortOrder, 1, GETDATE(), GETDATE(), @UpdatedBy);
+        SELECT ${CHANNEL_COLUMNS} FROM dbo.IntegrationChannels WHERE Id = SCOPE_IDENTITY();
       `);
 
-    res.status(201).json({ channel: result.recordset[0] });
+    res.status(201).json({ channel: publicChannel(result.recordset[0]) });
   } catch (err) {
     console.error("ERROR in POST /communicator/channels:", err);
     res.status(500).json({ error: err.message });
@@ -138,16 +156,87 @@ router.put("/channels/:id", superAdminOnly, async (req, res) => {
           UpdatedAt   = GETDATE(),
           UpdatedBy   = @UpdatedBy
         WHERE Id = @Id;
-        SELECT * FROM dbo.IntegrationChannels WHERE Id = @Id;
+        SELECT ${CHANNEL_COLUMNS} FROM dbo.IntegrationChannels WHERE Id = @Id;
       `);
 
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: "Channel not found" });
     }
-    res.json({ channel: result.recordset[0] });
+    res.json({ channel: publicChannel(result.recordset[0]) });
   } catch (err) {
     console.error("ERROR in PUT /communicator/channels/:id:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /api/communicator/channels/:id/credentials
+ * Makes the channel a Meta / Google connection. A blank token keeps the saved one.
+ * Body: { provider, accessToken?, refreshToken?, tokenExpiresAt?, developerToken?, loginCustomerId? }
+ */
+router.put("/channels/:id/credentials", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  const b = req.body || {};
+  const provider = String(b.provider || "").trim();
+  if (!CONNECTION_PROVIDERS.some((p) => p.id === provider)) {
+    return res.status(400).json({ error: `Provider must be one of: ${CONNECTION_PROVIDERS.map((p) => p.label).join(", ")}` });
+  }
+  const text = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const updatedBy = req.user?.name || req.user?.email || req.user?.userId || "system";
+
+  try {
+    const pool = getPool();
+    const cur = await pool.request().input("Id", sql.Int, id).query("SELECT SettingsJson FROM dbo.IntegrationChannels WHERE Id = @Id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Channel not found" });
+    const settings = parseSettings(cur.recordset[0].SettingsJson);
+    if (text(b.developerToken)) settings.developerToken = text(b.developerToken);
+    if (b.loginCustomerId !== undefined) settings.loginCustomerId = text(b.loginCustomerId) || undefined;
+
+    const result = await pool.request()
+      .input("Id", sql.Int, id)
+      .input("Provider", sql.NVarChar(30), provider)
+      .input("AccessToken", sql.NVarChar(sql.MAX), text(b.accessToken))
+      .input("RefreshToken", sql.NVarChar(sql.MAX), text(b.refreshToken))
+      .input("TokenExpiresAt", sql.DateTime2(3), b.tokenExpiresAt || null)
+      .input("SettingsJson", sql.NVarChar(sql.MAX), JSON.stringify(settings))
+      .input("UpdatedBy", sql.NVarChar(100), String(updatedBy))
+      .query(`
+        UPDATE dbo.IntegrationChannels SET
+          Provider       = @Provider,
+          AccessToken    = COALESCE(@AccessToken, AccessToken),
+          RefreshToken   = COALESCE(@RefreshToken, RefreshToken),
+          TokenExpiresAt = @TokenExpiresAt,
+          SettingsJson   = @SettingsJson,
+          -- New credentials: the last test no longer describes them.
+          LastTestOk     = CASE WHEN @AccessToken IS NULL THEN LastTestOk END,
+          LastTestAt     = CASE WHEN @AccessToken IS NULL THEN LastTestAt END,
+          LastTestMessage = CASE WHEN @AccessToken IS NULL THEN LastTestMessage END,
+          UpdatedAt      = GETDATE(),
+          UpdatedBy      = @UpdatedBy
+        WHERE Id = @Id;
+        SELECT ${CHANNEL_COLUMNS} FROM dbo.IntegrationChannels WHERE Id = @Id;
+      `);
+    res.json({ channel: publicChannel(result.recordset[0]) });
+  } catch (err) {
+    console.error("ERROR in PUT /communicator/channels/:id/credentials:", err);
+    res.status(500).json({ error: "Could not save the connection" });
+  }
+});
+
+/**
+ * POST /api/communicator/channels/:id/test — calls Meta / Google with the saved token and records the result.
+ */
+router.post("/channels/:id/test", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  try {
+    const result = await testConnection(getPool(), id);
+    if (!result) return res.status(404).json({ error: "Channel not found" });
+    res.json(result);
+  } catch (err) {
+    console.error("ERROR in POST /communicator/channels/:id/test:", err);
+    res.status(500).json({ error: "Connection test failed to run" });
   }
 });
 

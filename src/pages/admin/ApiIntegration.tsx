@@ -6,15 +6,9 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { getMessagingStatus, sendMessagingTest, type MessagingChannel, type MessagingStatus } from "@/api/communicatorConfigApi";
-
-const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
-const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
-const RULE = "1px solid hsl(var(--foreground))";
-const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
-const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
-const FIELD = "w-full h-9 px-2.5 border border-foreground/40 focus:border-foreground bg-card text-sm text-foreground placeholder:text-muted-foreground/60 outline-none";
-const TAG = "inline-flex items-center gap-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] px-1.5 py-0.5 border whitespace-nowrap";
+import { FIELD, HEAD, KEY_INK, KEY_LINE, LBL, RULE, TAG } from "./integrations/styles";
+import { ConnectionsSection } from "./integrations/ConnectionsSection";
+import { PartnerKeysSection } from "./integrations/PartnerKeysSection";
 
 const CHANNELS: Record<MessagingChannel, { label: string; Icon: LucideIcon; setup: string; fromLabel: string; testLabel: string; placeholder: string }> = {
   email: { label: "Email", Icon: Mail, setup: "/admin/communicator/email-setup", fromLabel: "Sends from", testLabel: "Test to email", placeholder: "you@company.com" },
@@ -110,7 +104,7 @@ export default function ApiIntegrationPage() {
       <SheetShell
         eyebrow="CivilierERP · Admin"
         title="Integrations"
-        subtitle="The providers that carry messages to customers. When a booking is approved, the applicant is sent an SMS, a WhatsApp and an email through every channel that is set up and switched on."
+        subtitle="Every outside service CivilierERP talks to: the SMS, WhatsApp and email providers that message customers and leads, the Meta and Google logins Sales Automation runs ads through, and the keys channel partners use to send leads in."
         action={
           <button type="button" onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 px-3`}>
             <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} /> Re-read
@@ -151,6 +145,9 @@ export default function ApiIntegrationPage() {
             )}
           </div>
         </div>
+
+        <ConnectionsSection />
+        <PartnerKeysSection canEdit={rights.canEdit} />
       </SheetShell>
     </>
   );

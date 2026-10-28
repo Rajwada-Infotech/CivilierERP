@@ -18,6 +18,7 @@ const {
 } = require("../services/saAdPlatformService");
 const { getNextDocNumber } = require("../services/docNumber");
 const { welcomeLeads } = require("../services/saMessaging");
+const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection } = require("../services/integrationConnections");
 
 const router = express.Router();
 router.use(apiRateLimit);
@@ -310,13 +311,15 @@ async function getAdWithPlatform(pool, adId) {
         p.AccessToken,
         p.ApiConfigId,
         p.AccountDetails,
-        p.PixelId
+        p.PixelId,
+        ${CONNECTION_COLUMNS}
       FROM dbo.SaAd a
       JOIN dbo.SaCampaign c ON c.Id = a.CampaignId
       LEFT JOIN dbo.SaSocialMediaPlatform p ON p.Id = c.PlatformId
+      ${CONNECTION_JOIN}
       WHERE a.Id = @AdId AND a.IsActive = 1
     `);
-  return result.recordset[0] || null;
+  return applyConnection(result.recordset[0]) || null;
 }
 
 function parseUtmParameters(value) {

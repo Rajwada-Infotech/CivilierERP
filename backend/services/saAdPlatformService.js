@@ -2,13 +2,20 @@ const GOOGLE_ADS_VERSION = process.env.GOOGLE_ADS_API_VERSION || "v24";
 const META_GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
 const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation");
 
+// adapter: this file can actually talk to that family's API (test, push, metrics, leads).
 const PROVIDER_CONFIG = {
   facebook: { label: "Meta Ads", family: "meta" },
   instagram: { label: "Meta Ads", family: "meta" },
-  meta: { label: "Meta Ads", family: "meta" },
-  google: { label: "Google Ads", family: "google" },
+  meta: { label: "Meta Ads", family: "meta", adapter: true },
+  // settings: extra values a connection of this provider needs (kept in IntegrationChannels.SettingsJson).
+  google: { label: "Google Ads", family: "google", adapter: true, settings: ["developerToken", "loginCustomerId"] },
   linkedin: { label: "LinkedIn Ads", family: "linkedin" },
 };
+
+/** The providers a connection in Admin → Integrations can be: [{ id, label, settings }]. */
+const CONNECTION_PROVIDERS = Object.entries(PROVIDER_CONFIG)
+  .filter(([, c]) => c.adapter)
+  .map(([id, c]) => ({ id, label: c.label, settings: c.settings || [] }));
 
 function normalizeProvider(platformType) {
   return String(platformType || "").trim().toLowerCase();
@@ -492,6 +499,8 @@ async function normalizeImportedLeads(ad, platform, importedLeads = []) {
 }
 
 module.exports = {
+  CONNECTION_PROVIDERS,
+  providerFamily,
   providerLabel,
   testPlatformConnection,
   syncAdToPlatform,
