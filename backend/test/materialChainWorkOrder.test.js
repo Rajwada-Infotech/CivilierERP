@@ -62,7 +62,7 @@ const makePool = () => ({
         if (/FROM dbo\.Quotations\s+WHERE QuotationId = @id/i.test(text)) return rs([QT]);
         if (/WHERE SourceWOId = @woId AND SourceMRId IS NULL/i.test(text)) return rs([]);
         if (/FROM dbo\.PurchaseOrders\s+WHERE SourceQTId = @qtId/i.test(text)) return rs([PO]);
-        if (/FROM dbo\.PurchaseOrders\s+WHERE SourceMRId = @mrId/i.test(text)) return rs([PO]);
+        if (/FROM dbo\.PurchaseOrders po\s+WHERE[\s\S]*SourceMRId = @mrId/i.test(text)) return rs([PO]);
         if (/FROM dbo\.PurchaseOrders po[\s\S]*WHERE po\.PurchaseOrderID = @id/i.test(text)) return rs([PO]);
         if (/FROM dbo\.VehicleInOut/i.test(text)) return rs([]);
         if (/FROM dbo\.GoodsReceiptNotes grn[\s\S]*WHERE grn\.GRNID = @id/i.test(text)) return rs([GRN]);
