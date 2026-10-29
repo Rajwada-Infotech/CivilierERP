@@ -86,8 +86,14 @@ async function processDelivery(pool, channelId, body) {
   let added = 0;
   let repeats = 0; // already a lead — noted on it as enquired again
   for (const change of changes) {
+    // A Meta lead id is digits only; anything else is never put into a Graph URL (which carries the access token).
+    const leadgenId = String(change.leadgen_id ?? "");
+    if (!/^\d{1,30}$/.test(leadgenId)) {
+      notes.push(`skipped a change with an invalid lead id`);
+      continue;
+    }
     try {
-      const lead = await requestJson(metaUrl(String(change.leadgen_id), { access_token: conn.AccessToken, fields: LEAD_FIELDS }));
+      const lead = await requestJson(metaUrl(encodeURIComponent(leadgenId), { access_token: conn.AccessToken, fields: LEAD_FIELDS }));
       const source = await sourceFor(pool, channelId, lead.ad_id || change.ad_id, change.page_id);
       const r = await createLead(pool, { ...normalizeMetaLead(lead), ...source, SourceType: "Ad" }, null, { repeatVia: "a Meta lead form" });
       if (r.noted) repeats += 1;
