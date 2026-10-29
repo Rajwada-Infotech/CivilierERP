@@ -9,8 +9,8 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET / — all active channel partners
 router.get("/", requirePageRight("sa-channel-partners", "view"), async (req, res) => {

@@ -13,8 +13,8 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
 const { applyPagination } = require("../services/crmListPagination");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Fields the Application page ("select company/project, auto-fetch
 // everything from the customer") reads directly — PAN/Aadhaar/Address that

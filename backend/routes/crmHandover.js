@@ -14,8 +14,8 @@ const { requireActiveBooking, maybeAutoCreateSalesDeed } = require("../services/
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { getBookingFunding, bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const SNAG_CATEGORIES = ["Electrical", "Plumbing", "Civil", "Paint", "Carpentry", "Other"];
 

@@ -11,8 +11,8 @@ const { actorId } = require("../services/saAccess");
 const { placeHold, releaseHold } = require("../services/crmHoldService");
 const { logCrmAudit } = require("../services/crmAudit");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // The Unit and Parking Matrix are where holds are placed and released, under their own rights (placing is
 // "create" there, release "edit"); this route only accepted the Bookings edit right, so a matrix user without

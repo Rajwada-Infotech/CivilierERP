@@ -8,8 +8,8 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { projectPredicate, projectAllowed } = require("../services/projectScope");
 const { actorId } = require("../services/saAccess");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Shared by POST / and PUT /:id. `items[0]` is always "Booking" — a fixed ₹
 // concept stored on the plan itself (BookingAmount) and never sourced from

@@ -20,8 +20,8 @@ const { assertSanePercentRate } = require("../services/brokerageValidation");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const { calculateTds } = require("../services/tds");
 

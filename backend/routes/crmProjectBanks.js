@@ -8,8 +8,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET / — every active Project↔Bank link (management page).
 router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) => {

@@ -17,8 +17,8 @@ const { transition: approvalTransition } = require("../services/approvalService"
 const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const NOC_TYPES = ["Organisation", "Bank"];
 
