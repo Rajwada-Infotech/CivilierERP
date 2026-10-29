@@ -23,6 +23,18 @@ import { type WDPOPrefill } from "@/api/engineeringApi";
 import { type WOPOPrefill } from "@/api/workOrderApi";
 import { type QTPOPrefill } from "@/api/quotationApi";
 
+/** A quotation (for this PO's MR) whose lowest (L1) supplier isn't the PO's — GET /api/purchase-orders/l1-check. */
+export type L1Deviation = {
+  quotationId: number;
+  quotationDocNo: string;
+  mrId: number | null;
+  mrDocNo: string | null;
+  mrDate: string | null;
+  l1SupplierId: number;
+  l1SupplierName: string | null;
+  l1Total: number;
+  chosenQuoteTotal: number | null;
+};
 export type LastRate = { ItemId: string; Rate: number; UomName: string | null; PurchaseOrderID: number; DocNo: string | null; PODate: string; Status: string | null };
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
@@ -179,6 +191,11 @@ export function usePurchaseOrder() {
     id: number;
     docNo: string;
   } | null>(null);
+
+  // Why the PO goes to a supplier other than the lowest (L1) on the MR's quotation — required then, and the
+  // directors are told. originalSupplierId: the supplier an edited PO was saved with (no reason asked unless changed).
+  const [supplierChangeReason, setSupplierChangeReason] = useState("");
+  const [originalSupplierId, setOriginalSupplierId] = useState<string | null>(null);
 
   // ── Approved MR dropdown ──────────────────────────────────────────────────
   const [mrDropdownValue, setMrDropdownValue] = useState<string>("");
@@ -1561,11 +1578,12 @@ export function usePurchaseOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceWO, selectedFinYear]);
 
-  // ── Auto-switch doc type between PO (MR/Sale Invoice) and DPO (Direct) ───
+  // ── Auto-switch doc type: QPO (from a quotation), PO (MR/Sale Invoice), DPO (Direct) ───
   useEffect(() => {
     if (viewMode !== "create" || sourceWO) return; // WO has its own effect
     const hasMROrSI = !!(sourceMR || sourceSaleInvoice);
-    const targetPrefix = hasMROrSI ? "PO" : "DPO";
+    // A quotation-sourced PO stays QPO even when the quotation came from an MR.
+    const targetPrefix = sourceQT || qtPrefill ? "QPO" : hasMROrSI ? "PO" : "DPO";
     const target = poDocTypes.find(
       (dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix,
     );
@@ -1576,7 +1594,7 @@ export function usePurchaseOrder() {
       (docNo) => applyPoDocNumber(target.TypeOfDocId, docNo),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceMR, sourceSaleInvoice, sourceWO, viewMode, poDocTypes]);
+  }, [sourceMR, sourceSaleInvoice, sourceWO, sourceQT, qtPrefill, viewMode, poDocTypes]);
 
   // ── Line item helpers ─────────────────────────────────────────────────────
   const updateLine = (idx: number, patch: Partial<POLineItem>) => {
@@ -1706,6 +1724,11 @@ export function usePurchaseOrder() {
       toast.error("Please fill in all required fields.");
       return false;
     }
+    if (supplierDeviations.length && !supplierChangeReason.trim()) {
+      setErrors({ supplierChangeReason: true });
+      toast.error("Give a reason for choosing a supplier other than the L1.");
+      return false;
+    }
 
     // MR-sourced lines can't exceed what's still pending on that MR item —
     // a repeat PO off the same MR must stay within the remaining balance.
@@ -1804,6 +1827,7 @@ export function usePurchaseOrder() {
       SourceMRIds: sourceMRs.map((m) => m.id),
       SourceQTId: sourceQT?.id ?? null,
       SourceQTDocNo: sourceQT?.docNo ?? null,
+      SupplierChangeReason: supplierChangeReason.trim() || null,
       SourceWDId: sourceWD?.id ?? null,
       SourceWDDocNo: sourceWD?.docNo ?? null,
       SourceWOId: sourceWO?.id ?? null,
@@ -2051,6 +2075,8 @@ export function usePurchaseOrder() {
     setCompanyDetails(null);
     setMrDropdownValue("");
     setMrDropdownError(null);
+    setSupplierChangeReason("");
+    setOriginalSupplierId(null);
     setViewMode("create");
   };
 
@@ -2085,6 +2111,8 @@ export function usePurchaseOrder() {
     setPoDocTypeId(docTypeId);
     setPoDocNo(docNo);
 
+    setSupplierChangeReason(raw.SupplierChangeReason ?? "");
+    setOriginalSupplierId(supplier?.id ?? String(raw.SupplierID ?? ""));
     setForm({
       poNumber: raw.PurchaseOrderNo ?? "",
       poDate: raw.PODate ? raw.PODate.slice(0, 10) : "",
@@ -2298,10 +2326,34 @@ export function usePurchaseOrder() {
     },
   });
 
+  // The MR's quotation(s) whose L1 supplier isn't the one chosen — asks for a reason (POHeaderDetails).
+  const l1MrIds = [...new Set([sourceMR?.id, ...sourceMRs.map((x) => x.id)].filter((x): x is number => x != null))];
+  const l1CheckOn =
+    (viewMode === "create" || viewMode === "edit") &&
+    !!form.supplierId &&
+    (viewMode === "create" ? l1MrIds.length > 0 || !!sourceQT : form.supplierId !== originalSupplierId);
+  const { data: l1Deviations = [] } = useQuery<L1Deviation[]>({
+    queryKey: ["po-l1-check", form.supplierId, l1MrIds.join(","), sourceQT?.id ?? null, viewMode === "edit" ? editingId : null],
+    enabled: l1CheckOn,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const qs = new URLSearchParams({ supplierId: String(form.supplierId), mrIds: l1MrIds.join(",") });
+      if (sourceQT) qs.set("qtId", String(sourceQT.id));
+      if (viewMode === "edit" && editingId) qs.set("excludeId", String(editingId));
+      const r = await fetchWithAuth(`/api/purchase-orders/l1-check?${qs}`);
+      if (!r.ok) return [];
+      return r.json().catch(() => []);
+    },
+  });
+  const supplierDeviations = l1CheckOn ? l1Deviations : [];
+
   // Opened from the Material dashboard: back to that list once the record is closed.
   useReturnAfterView(viewMode !== "list");
 
   return {
+    supplierDeviations,
+    supplierChangeReason,
+    setSupplierChangeReason,
     lastRates,
     importFileInputRef,
     importing,
