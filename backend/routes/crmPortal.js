@@ -3,6 +3,8 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { getPool, sql } = require("../db");

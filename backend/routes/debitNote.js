@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, ebProjectPredicate, ebProjectIdSql, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
 
@@ -11,7 +13,6 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 const { syncBillStatus } = require("../utils/syncBillStatus");
 const { reverseDebitNotePosting } = require("../services/generalLedger");
@@ -24,7 +25,6 @@ function userEmail(req) {
 }
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Party Type -> AccountHeadMaster.LHeadType, matches the convention already
 // established across SupplierMaster/ContractorMaster/CustomerMaster/CrmBrokerMaster.

@@ -4,6 +4,8 @@ const { returnLeadToPool } = require("../services/saHandoff");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access (dbo.UserProjectAccess / RoleProjectAccess): a restricted user
 // gets 403 on any booking outside their projects. Lists filter the same way.
 const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
@@ -12,7 +14,6 @@ const { getPool, sql } = require("../db");
 const { getRedis } = require("../redis");
 const { triggerBookingConfirmed } = require("../services/communicationTriggers");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
@@ -92,7 +93,6 @@ const {
 const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS } = require("../services/crmApplicationChecklist");
 const { createMoneyReceiptAfterDataReview } = require("../services/crmMoneyReceiptWorkflow");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 const upload = multer({

@@ -1,14 +1,14 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
 const { send: sendMessage, missingFields } = require("../services/messageProviders");
 
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const superAdminOnly = allowRoles("super_admin");
 

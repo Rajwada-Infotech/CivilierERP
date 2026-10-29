@@ -4,13 +4,13 @@
 // saw an empty pool, and one limited to some projects saw used leads as still available.
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requireAnyPageRight } = require("../middleware/requirePageRight");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Also read by Customers' New Customer form (to offer only leads no active customer carries yet) and by Applications
 // (to carry the lead's source chain onto a new application).

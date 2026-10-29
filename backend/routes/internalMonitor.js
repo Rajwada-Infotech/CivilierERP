@@ -11,6 +11,8 @@ const express = require("express");
 const { feed, snapshot, startVitals } = require("../services/activityFeed");
 
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 

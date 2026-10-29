@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Any saved chain change can alter the step list new villas copy
 // (services/autoDprChains.js caches it), so a successful write clears it.
 router.use((req, res, next) => {
   if (req.method !== "GET") res.on("finish", () => { if (res.statusCode < 300) require("../services/autoDprChains").clearTemplateCache(); });
   next();
 });
-const apiRateLimit = require("../middleware/apiRateLimit");
-router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectAllowed, assertProjectAllowed } = require("../services/projectScope");
 const authMiddleware = require("../middleware/auth");

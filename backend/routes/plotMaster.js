@@ -4,6 +4,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { getEffectiveType } = require("../services/projectType");
 
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 // A user limited to some projects can't read or change another project's
 // blocks, floors, plots, villas or villa types (services/projectScope.js).

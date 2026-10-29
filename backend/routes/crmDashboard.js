@@ -65,7 +65,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmPossessionNotice n
       JOIN dbo.CrmBooking b ON b.Id = n.BookingId
-      WHERE n.Status = 'Disputed' ${projBookingCond.replace("AND b.", "AND b.")}
+      WHERE n.Status = 'Disputed' ${projBookingCond}
         AND b.IsActive = 1
     `);
 

@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -164,13 +166,15 @@ router.post(
   requirePageRight("apk-manager", "create"),
   upload.single("file"),
   async (req, res) => {
-    const tmp = req.file?.path;
+    // Only ever the temp file multer wrote (diskStorage above) — never a path taken from the request.
+    const uploaded = req.file?.path ? path.resolve(req.file.path) : null;
+    const tmp = uploaded && uploaded.startsWith(path.resolve(os.tmpdir()) + path.sep) && path.basename(uploaded).startsWith("apk-upload-") ? uploaded : null;
     const cleanup = () => tmp && fs.promises.unlink(tmp).catch(() => {});
     try {
       const appKey = String(req.body?.appKey || "");
       const app = APP_CATALOG[appKey];
       if (!app) return (await cleanup(), res.status(400).json({ error: "Choose which app this build is for." }));
-      if (!req.file) return res.status(400).json({ error: "Attach the .apk file." });
+      if (!req.file || !tmp) return (await cleanup(), res.status(400).json({ error: "Attach the .apk file." }));
 
       let manifest;
       try {

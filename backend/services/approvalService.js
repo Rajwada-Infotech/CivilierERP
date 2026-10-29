@@ -692,7 +692,8 @@ async function recordGLPosting(module, recordId, outcome, approverEmail) {
       `);
   } catch (logErr) {
     console.error(
-      `[generalLedger] could not record posting outcome for ${module} #${recordId}:`,
+      "[generalLedger] could not record posting outcome for",
+      `${module} #${recordId}:`,
       logErr.message,
     );
   }

@@ -6,6 +6,8 @@
 
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const authenticateToken = require("../middleware/auth");
 const { listAmendments, getAmendmentDetail, MODULES, DOC_TYPES } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");

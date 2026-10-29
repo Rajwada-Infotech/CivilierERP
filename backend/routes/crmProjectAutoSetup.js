@@ -3,13 +3,14 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { PARKING_TYPES } = require("../constants/parkingTypes");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 // A user limited to some projects can't read or change another project's
 // blocks, floors, plots, villas or villa types (services/projectScope.js).
 require("../services/projectScope").setupScopeGuard(router, { params: { projectId: "project", blockId: "block", unitId: "unit" }, idPaths: [["/blocks", "block"], ["/floors", "floor"], ["/plots", "plot"]] });
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
@@ -61,7 +62,6 @@ async function syncBlockPaymentPlanTags(pool, blockId, planIds) {
 }
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 
 async function getProject(pool, projectId) {

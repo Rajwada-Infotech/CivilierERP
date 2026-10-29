@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const worker = require("../worker");
 const {
   getRedis,
@@ -14,7 +15,6 @@ const {
 } = require("../redis");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const { requirePageRight } = require("../middleware/requirePageRight");
 

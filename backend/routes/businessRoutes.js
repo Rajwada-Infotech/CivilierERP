@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 router.get("/dropdown", async (req, res) => {
   try {

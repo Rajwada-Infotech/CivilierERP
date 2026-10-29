@@ -13,6 +13,7 @@
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -23,7 +24,6 @@ const { parseId } = require("../middleware/validateRequest");
 const PAGE = "crm-auto-project-setup";
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // One validator for POST and PUT. Before this, a non-numeric premium reached SQL as NaN
 // (a 500), a premium over 999.999 overflowed DECIMAL(6,3), and over-long codes/names were

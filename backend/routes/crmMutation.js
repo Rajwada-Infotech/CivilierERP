@@ -1,12 +1,13 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmMutation")); }
 const { projectParamGuard, projectPredicate, assertBookingAllowed } = require("../services/projectScope");
 // A document id in the path (the file download takes nothing else) follows its mutation's project.
 router.param("docId", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmMutationDocument x JOIN dbo.CrmMutation m ON m.Id = x.MutationId JOIN dbo.CrmBooking b ON b.Id = m.BookingId WHERE x.Id = @id"));
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -22,7 +23,6 @@ const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const multer = require("multer");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const upload = multer({
   storage: multer.memoryStorage(),

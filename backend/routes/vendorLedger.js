@@ -14,10 +14,10 @@
  */
 const express = require("express");
 const router = express.Router();
-const authenticateToken = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-router.use(authenticateToken);
 router.use(apiRateLimit);
+const authenticateToken = require("../middleware/auth");
+router.use(authenticateToken);
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 

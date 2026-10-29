@@ -1,12 +1,13 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a refund's own project, else its booking's.
 const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT COALESCE(r.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmRefund r LEFT JOIN dbo.CrmBooking b ON b.Id = r.BookingId WHERE r.Id = @id"));
 // A refund's GST document (credit note / refund voucher, migration 565): its own project.
 router.param("noteId", projectParamGuard("SELECT n.ProjectId FROM dbo.CrmGstNote n WHERE n.Id = @id"));
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -25,7 +26,6 @@ const { refundCreateSchema } = require("../validation/crmBookingSchemas");
 const { DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
 

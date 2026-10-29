@@ -42,7 +42,7 @@ export function activityHeaders(): Record<string, string> {
     sessionId =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
     sessionStorage.setItem("currentSessionId", sessionId);
     sessionStorage.setItem("sessionLoginTime", String(Date.now()));
   }
