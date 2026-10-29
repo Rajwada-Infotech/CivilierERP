@@ -87,13 +87,18 @@ jest.mock("../routes/dba", () => {
 // Any COUNT(...) query gets a single synthetic row (`total`/`cnt` = 0) so
 // pagination/count handlers that read recordset[0] don't blow up; every
 // other query resolves to an empty result set.
-function makeFakePool() {
+// workflowLevels: the Approval Setup levels the fake ApprovalWorkflows table
+// returns (none by default — no workflow, so nobody may approve).
+function makeFakePool({ workflowLevels = null } = {}) {
   const queries = [];
   const makeRequest = () => {
     const req = {
       input: () => req,
       query: async (text) => {
         queries.push(text);
+        if (workflowLevels && /FROM dbo\.ApprovalWorkflows/i.test(text)) {
+          return { recordset: [{ Id: 1, LevelsJson: JSON.stringify(workflowLevels) }] };
+        }
         if (/COUNT\(/i.test(text)) {
           return { recordset: [{ total: 0, cnt: 0 }], recordsets: [[{ total: 0, cnt: 0 }]] };
         }
@@ -448,16 +453,15 @@ describe("approvalService.transition(): authorisation guard (no DB round-trip)",
     ).rejects.toThrow(/Unknown module/i);
   });
 
-  test("admin role IS authorized — error only if DB lookup fails (pool returns no record)", async () => {
-    // Admin passes the role gate; next failure is inside the transaction
-    // (getRecordStatus finds no row). The error message must not be
-    // "not authorized" — it must be about the record not being found.
-    mockFakePool = makeFakePool(); // returns [] for all queries → no record found
+  test("admin gets no pass: with no rule in Approval Setup even admin is refused", async () => {
+    // Approval Setup is the only source of approvers (migration 582) — the
+    // fake pool has no workflow row, so nobody may approve.
+    mockFakePool = makeFakePool(); // returns [] for all queries → no workflow
     const { transition } = require("../services/approvalService");
 
     await expect(
       transition("expense-booking", 1, "Approved", "admin@example.com", "admin"),
-    ).rejects.toThrow(/not found|Record/i);
+    ).rejects.toThrow(/not authorized: no approval rule/i);
   });
 });
 
@@ -605,7 +609,9 @@ describe("material issue: approval/rejection requires admin role", () => {
     // Record-not-found is a genuine 400, distinct from an authorization
     // failure — confirms the mapping only special-cases the "not authorized"
     // message, not every error from transition().
-    mockFakePool = makeFakePool(); // empty recordset -> "not found in material-issues"
+    // Approval Setup names super_admin, so the request gets past the approver
+    // gate; then the empty recordset -> "not found in material-issues".
+    mockFakePool = makeFakePool({ workflowLevels: [{ id: 1, label: "Approval", roles: ["super_admin"] }] });
     const { createApp } = require("../server");
     const app = await createApp();
 

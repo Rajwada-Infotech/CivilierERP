@@ -16,31 +16,16 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting, hasApprovalInboxEditRight } = require("../services/approvalService");
+const { recordGLPosting, isApproverFor } = require("../services/approvalService");
 const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 
-// Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
-// approval engine (services/approvalService.js). Without this, any user with
-// ReceivedPayments "edit" permission could approve a receipt and post it to
-// the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
-// "director" added — the Director role is already treated as approver-tier
-// elsewhere (crm-bookings' MODULE_APPROVER_ROLE_OVERRIDES in
-// approvalService.js, and the named-director comment in approvalInbox.js),
-// it was just never added to this module's own hardcoded list.
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head", "director"];
-
-// Approve/Reject gate — kept DYNAMIC, same rule as the shared approval engine
-// (approvalService.transition) and the ApprovalActions buttons: the default
-// approver roles above, OR anyone granted "edit" on the "approval-inbox" page
-// through Menu Rights (role-level or per-user). Rights assigned in Menu Rights
-// therefore take effect here with no code change.
+// Approve/Reject gate: who approves received payments is set in Approval
+// Setup ("received-payment") — its roles or named people, nothing else.
 async function allowApprover(req, res, next) {
-  const role = String(req.user?.role || "").trim().toLowerCase();
-  if (APPROVER_ROLES.includes(role)) return next();
   const userId = Number(req.user?.userId ?? req.user?.id) || null;
-  if (await hasApprovalInboxEditRight(userId)) return next();
-  return res.status(403).json({ error: "You don't have approval rights for Received Payments" });
+  if (await isApproverFor("received-payment", userId, req.user?.role)) return next();
+  return res.status(403).json({ error: "You are not a Received Payments approver in Approval Setup" });
 }
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));

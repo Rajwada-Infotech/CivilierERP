@@ -12,7 +12,6 @@ const {
   postFundTransferApproval,
   postDebitNoteApproval,
 } = require("./generalLedger");
-const { userHasEffectivePageRight } = require("../middleware/permissions");
 const { notifyTransition } = require("./approvalNotifications");
 
 // Module slug → general ledger poster, called once a record reaches full
@@ -208,71 +207,6 @@ const MODULE_DOC_LINKS = {
   "inter-company-transfer": "Inter-Company Transfer",
   "fund-transfer": "Fund Transfer",
   "debit-note": "Debit Note",
-};
-
-const APPROVER_ROLES = ["admin", "super_admin", "dba"];
-
-// Modules where approve/reject is restricted to a tighter role set than the
-// system default (e.g. Journal Voucher forcefully corrects account-head
-// mismatches, and Inter-Company Transfer fires an entire auto-generated
-// document chain on approval — both are gated to super_admin only, unlike
-// every other module where admin/dba can also approve).
-//
-// Every CRM module is gated to admin/super_admin/marketing_head specifically —
-// marketing_head runs Sales/CRM approvals day-to-day, and dba is deliberately
-// excluded here (unlike the system default) since a DBA has no business
-// context to approve a customer-facing agreement, application, or refund.
-const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-const MODULE_APPROVER_ROLE_OVERRIDES = {
-  "journal-voucher": ["super_admin"],
-  "inter-company-transfer": ["super_admin"],
-  // Fund Transfer moves real cash and, for inter-company transfers, books a
-  // loan between two legal entities — same scrutiny level as Journal
-  // Voucher / Inter-Company (Stock) Transfer, per explicit instruction.
-  "fund-transfer": ["super_admin"],
-  "crm-applications": CRM_APPROVER_ROLES,
-  "crm-bookings": [...CRM_APPROVER_ROLES, "director"],
-  // legal_head added specifically here (not to CRM_APPROVER_ROLES generally) —
-  // this is the "SENIOR LOGIN IN LEGAL TEAM" approval gate from the workflow
-  // spec. legal_head can approve an Agreement's legal paperwork but has no
-  // approve rights on bookings/brokerage/cancellations/NOC — those stay
-  // admin/super_admin/marketing_head only.
-  "crm-agreements": [...CRM_APPROVER_ROLES, "legal_head"],
-  // Explicitly narrower than the other CRM modules — super_admin only, per
-  // instruction, "for now"; reassignable later purely via LevelsData same
-  // as every other module here, no code change needed when that happens.
-  "crm-agreement-date": ["super_admin"],
-  // No dedicated "director" role exists yet — hardcoded to super_admin
-  // only "for now", same reasoning as crm-agreement-date above.
-  "crm-sales-deed-director": ["super_admin"],
-  "crm-brokerage": CRM_APPROVER_ROLES,
-  "crm-cancellations": CRM_APPROVER_ROLES,
-  "crm-refunds": CRM_APPROVER_ROLES,
-  // crm-resales has no code-level role list on purpose: who approves each
-  // level (e.g. marketing head, then director) is set in Approval Setup.
-  "crm-noc": CRM_APPROVER_ROLES,
-  // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
-  // — no legal_head carve-out here, that's specific to crm-agreements (see
-  // its comment above).
-  "crm-sales-deed-senior": CRM_APPROVER_ROLES,
-  // Registry Complete is a permanent legal act — restricted to legal_head and
-  // above by default; configurable via ApprovalWorkflows LevelDefs in Setup.
-  "crm-registry-complete": [...CRM_APPROVER_ROLES, "legal_head"],
-  // Registry Cancel is serious but less permanent — marketing_head and above.
-  "crm-registry-cancel": CRM_APPROVER_ROLES,
-  // Mutation Approve records that the municipal authority granted Khata transfer
-  // — legal title consequence, same default set as Registry Complete.
-  "crm-mutation-approve": [...CRM_APPROVER_ROLES, "legal_head"],
-  // Query Payment Confirm records government fee payment — marketing_head and
-  // above; legal_head included since they coordinate the registry visit.
-  "crm-query-payment-confirm": [...CRM_APPROVER_ROLES, "legal_head"],
-  // A CRM Refund's payout voucher gets its own single-level workflow (see
-  // WORKFLOW_ID_MAP) instead of the multi-module Payments bundle — matching
-  // Received Payments' own approver set exactly (receivedPayment.js's
-  // APPROVER_ROLES), per explicit instruction that this should follow the
-  // same pattern Payments/Received Payments already use elsewhere, not a
-  // CRM-only carve-out with different people.
-  "crm-refund-payment": ["admin", "super_admin", "dba", "accounts_head"],
 };
 
 async function validateApprovalModuleMap(log = console) {
@@ -699,29 +633,6 @@ async function recordGLPosting(module, recordId, outcome, approverEmail) {
   }
 }
 
-/**
- * Fallback authorization check for approve/reject: does this user hold
- * "edit" on the "approval-inbox" page via Menu Rights (role-level or
- * per-user override)? Only consulted when the module's hardcoded role
- * whitelist already rejected the user — see the gate in transition().
- */
-async function hasApprovalInboxEditRight(userId) {
-  if (!userId) return false;
-  try {
-    const pool = getPool();
-    const result = await pool
-      .request()
-      .input("UserId", sql.Int, userId)
-      .query("SELECT RoleId FROM dbo.users WHERE id = @UserId");
-    const roleId = result.recordset[0]?.RoleId;
-    if (!roleId) return false;
-    return await userHasEffectivePageRight(userId, roleId, "approval-inbox", "edit");
-  } catch (err) {
-    console.error("[approvalService] hasApprovalInboxEditRight check failed:", err.message);
-    return false;
-  }
-}
-
 async function transition(
   module,
   id,
@@ -738,57 +649,26 @@ async function transition(
   const tableName = map.table.replace("dbo.", "");
 
   // ── Authorisation gate (cheap check before opening a transaction) ─────────
-  // Three independent ways in: the hardcoded per-module role whitelist (the
-  // original design), holding "edit" on the "approval-inbox" page via Menu
-  // Rights (added because granting someone that page's rights — the
-  // obvious, discoverable way to give approve/reject access — silently did
-  // nothing; only the fixed role list was ever actually checked), or being
-  // named by userId on this record's CURRENT workflow level in Approval
-  // Setup.
-  //
-  // The page-right fallback only applies to modules on the *default*
-  // APPROVER_ROLES list. Modules with an explicit, deliberately narrow
-  // MODULE_APPROVER_ROLE_OVERRIDES entry (Journal Voucher, Fund Transfer,
-  // Inter-Company Transfer, the CRM director/date sub-gates — all
-  // hardcoded to super_admin "per explicit instruction") stay locked to
-  // that role list regardless of page rights, since those overrides exist
-  // specifically to be stricter than a page permission can express.
-  //
-  // The Approval Setup userId path DOES apply to those restricted modules
-  // though — Approval Setup's own UI lets an admin name a specific person
-  // (e.g. Prashant) as a Journal Voucher approver alongside the hardcoded
-  // super_admin baseline, and approvalInbox.js's isVisibleToViewer already
-  // shows that person the record as theirs to act on (_canAct: true). Before
-  // this, transition() never consulted the workflow for restricted modules
-  // at all, so that same click 403'd — the inbox row looked actionable but
-  // wasn't. Mirrors isVisibleToViewer's per-level userId match (found via
-  // production report: Approval Setup named Prashant alongside Super Admin
-  // for Journal Voucher, but only Super Admin ever saw a working
-  // Approve/Reject).
   const isApproveOrReject =
     targetStatus === "Approved" || targetStatus === "Rejected";
   if (isApproveOrReject) {
-    const hasOverride = Object.prototype.hasOwnProperty.call(MODULE_APPROVER_ROLE_OVERRIDES, module);
-    const allowedApproverRoles = hasOverride ? MODULE_APPROVER_ROLE_OVERRIDES[module] : APPROVER_ROLES;
-    const roleAllowed = allowedApproverRoles.includes((userRole || "").toLowerCase());
-    // Only hit the DB for the page-right fallback when the role check
-    // already failed and this module isn't one of the deliberately
-    // narrower ones — the common case (an actual admin/dba) never pays
-    // for it.
-    const pageRightAllowed = !roleAllowed && !hasOverride && (await hasApprovalInboxEditRight(userId));
-    let workflowUserAllowed = false;
-    if (!roleAllowed && !pageRightAllowed && userId != null) {
-      const workflow = await getWorkflow(module);
-      if (workflow?.LevelDefs?.length) {
-        const totalLevels = workflow.Levels || workflow.LevelDefs.length;
-        const currentLevel = await resolveCurrentLevel(tableName, id, totalLevels, workflow.LevelDefs, null, { module, role: userRole, email: userEmail, userId });
-        const levelDef = workflow.LevelDefs[currentLevel - 1];
-        const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
-        workflowUserAllowed = hasUsers && levelDef.userIds.includes(userId);
-      }
+    // Approval Setup is the only source of approvers: the record's CURRENT
+    // level must name the user's role or the user (migration 582). No role
+    // list, admin pass or Menu Rights fallback in code.
+    const workflow = await getWorkflow(module);
+    if (!workflow?.LevelDefs?.length) {
+      // "not authorized" is kept in every refusal: routes map it to a 403.
+      const noWf = new Error("You are not authorized: no approval rule is set up for this in Approval Setup yet — ask an admin to add one.");
+      noWf.status = 403;
+      throw noWf;
     }
-    if (!roleAllowed && !pageRightAllowed && !workflowUserAllowed) {
-      const authErr = new Error("You are not authorized to approve or reject records.");
+    const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+    const currentLevel = await resolveCurrentLevel(tableName, id, totalLevels, workflow.LevelDefs, null, { module, role: userRole, email: userEmail, userId });
+    const levelDef = workflow.LevelDefs[currentLevel - 1];
+    if (levelDef && !userMatchesLevel(levelDef, userRole, userId)) {
+      const authErr = new Error(
+        `You are not authorized to approve step ${currentLevel}${levelDef.label ? ` (${levelDef.label})` : ""} — Approval Setup doesn't name your role or you.`,
+      );
       authErr.status = 403;
       throw authErr;
     }
@@ -898,23 +778,9 @@ async function transition(
       // is fully backward compatible with workflows that don't use it yet.
       const levelDef = levelDefs[nextLevel - 1];
       if (levelDef) {
-        // admin / super_admin hold every right and may act at any level.
-        // Anyone else passes when the level names their role OR names them —
-        // a level that lists both (e.g. role "director" plus today's
-        // directors) still admits a director added later. A level naming
-        // only roles, or only people, behaves exactly as before.
-        const role = (userRole || "").toLowerCase();
-        const levelRoles = Array.isArray(levelDef.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
-        const levelUsers = Array.isArray(levelDef.userIds) ? levelDef.userIds.map(Number) : [];
-        const superUser = role === "admin" || role === "super_admin";
-        // userIds is only enforced when the caller actually passed a userId --
-        // callers that don't pass one (older call sites) skip this check
-        // rather than being denied, so this can't regress any existing module.
-        const allowedHere = superUser
-          || (levelRoles.length === 0 && levelUsers.length === 0)
-          || levelRoles.includes(role)
-          || (levelUsers.length > 0 && (userId == null || levelUsers.includes(Number(userId))));
-        if (!allowedHere) {
+        // Re-checked under the lock: the level may have moved since the gate.
+        // Same single rule — the level names the user's role or the user.
+        if (!userMatchesLevel(levelDef, userRole, userId)) {
           const levelErr = new Error(
             `You are not authorized to approve level ${nextLevel}${levelDef.label ? ` (${levelDef.label})` : ""} of this workflow.`,
           );
@@ -1039,7 +905,7 @@ async function transition(
           result,
           actorUserId: userId,
           levelDefs: wf?.LevelDefs ?? [],
-          defaultRoles: MODULE_APPROVER_ROLE_OVERRIDES[module] ?? APPROVER_ROLES,
+          defaultRoles: [],
         });
       } catch {
         /* notifyTransition already logs; nothing may escape here */
@@ -1051,68 +917,52 @@ async function transition(
 }
 
 /**
- * Generic gate for CRM gated actions that do not use the full Pending→Approved
- * transition cycle (e.g. Registry Complete, Mutation Approve). Logic mirrors
- * transition()'s two-path auth:
- *   1. Role is in MODULE_APPROVER_ROLE_OVERRIDES[module], OR
- *   2. User holds "edit" on approval-inbox page AND the active workflow for
- *      the module (if one exists) permits their role/userId.
- *
- * Default role sets live in MODULE_APPROVER_ROLE_OVERRIDES above and are the
- * configurable baseline — admins can further restrict or expand per-level via
- * the Approval Setup UI (ApprovalWorkflows.LevelsData) without any code change.
+ * The one approver rule: a workflow level admits a user when it names their
+ * role or names them. Nothing else counts — no admin pass, and a level that
+ * names nobody admits nobody.
  */
-async function canPerformCrmGatedAction(module, userId, userRole) {
-  const role = (userRole || "").toLowerCase();
-
-  // DB-configured workflow always takes precedence over code defaults — this
-  // is the "dynamic from approval setup" path. An admin who sets up a workflow
-  // for this module in the Approval Setup UI completely overrides the role list
-  // below, without any code change.
-  const workflow = await getWorkflow(module);
-  if (workflow && workflow.LevelDefs?.length) {
-    if (!(await hasApprovalInboxEditRight(userId))) return false;
-    const levelDef = workflow.LevelDefs[0];
-    const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
-      levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
-    const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
-      userId == null || levelDef.userIds.includes(userId);
-    return roleOk && userOk;
-  }
-
-  // No DB workflow configured — fall back to the code-level defaults.
-  // MODULE_APPROVER_ROLE_OVERRIDES provides per-module defaults; CRM_APPROVER_ROLES
-  // is the system-wide baseline for any module not listed there.
-  const allowedRoles = MODULE_APPROVER_ROLE_OVERRIDES[module] || CRM_APPROVER_ROLES;
-  if (allowedRoles.includes(role)) return true;
-  // For modules without a code-level role override, also honour the approval-inbox
-  // page-right as a fallback (these users can configure a DB workflow to tighten it).
-  if (!Object.prototype.hasOwnProperty.call(MODULE_APPROVER_ROLE_OVERRIDES, module)) {
-    return hasApprovalInboxEditRight(userId);
-  }
-  return false;
+function userMatchesLevel(levelDef, userRole, userId) {
+  const role = String(userRole || "").trim().toLowerCase();
+  const roles = Array.isArray(levelDef?.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
+  const ids = Array.isArray(levelDef?.userIds) ? levelDef.userIds.map(Number) : [];
+  return (role !== "" && roles.includes(role)) || (userId != null && ids.includes(Number(userId)));
 }
 
 /**
- * Check whether a user may approve/reject a booking amendment.
- * Mirrors the same two-path logic transition() uses for CRM modules:
- *   1. Role is in CRM_APPROVER_ROLES, OR
- *   2. User holds "edit" on approval-inbox page AND the active workflow
- *      for "crm-booking-amendment" (if one exists) permits their role/userId.
+ * Single-step gates that don't run the full Pending -> Approved cycle
+ * (Registry Complete, Mutation Approve, Booking Amendment, Received Payment,
+ * Money Receipt, refund finance, the lock overrides...): may this user act?
+ * Decided by the module's level 1 in Approval Setup; no workflow, no one.
  */
-async function canApproveBookingAmendment(userId, userRole) {
-  const role = (userRole || "").toLowerCase();
-  if (CRM_APPROVER_ROLES.includes(role)) return true;
-  if (!(await hasApprovalInboxEditRight(userId))) return false;
-  const workflow = await getWorkflow("crm-booking-amendment");
-  if (!workflow || !workflow.LevelDefs?.length) return true;
-  const levelDef = workflow.LevelDefs[0];
-  const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
-    levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
-  const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
-    userId == null || levelDef.userIds.includes(userId);
-  return roleOk && userOk;
+async function isApproverFor(module, userId, userRole) {
+  const workflow = await getWorkflow(module);
+  const levelDef = workflow?.LevelDefs?.[0];
+  return !!levelDef && userMatchesLevel(levelDef, userRole, userId);
 }
+
+/**
+ * May this user approve/reject THIS record right now? The same check
+ * transition() makes (the record's current level), for showing or hiding
+ * Approve buttons. Read-only: unlike transition() it never restarts an
+ * amended record's approval cycle.
+ */
+async function canUserAct(module, recordId, userRole, userId) {
+  const map = MODULE_MAP[module];
+  if (!map) return isApproverFor(module, userId, userRole);
+  const workflow = await getWorkflow(module);
+  if (!workflow?.LevelDefs?.length) return false;
+  // No record given: is the user named on any step of this module at all?
+  if (recordId == null || recordId === "") {
+    return workflow.LevelDefs.some((l) => userMatchesLevel(l, userRole, userId));
+  }
+  const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+  const level = await resolveCurrentLevel(map.table.replace("dbo.", ""), Number(recordId), totalLevels, workflow.LevelDefs);
+  const levelDef = workflow.LevelDefs[level - 1];
+  return !!levelDef && userMatchesLevel(levelDef, userRole, userId);
+}
+
+const canPerformCrmGatedAction = (module, userId, userRole) => isApproverFor(module, userId, userRole);
+const canApproveBookingAmendment = (userId, userRole) => isApproverFor("crm-booking-amendment", userId, userRole);
 
 module.exports = {
   transition,
@@ -1128,10 +978,11 @@ module.exports = {
   validateApprovalModuleMap,
   recordGLPosting,
   writeAuditLog,
-  CRM_APPROVER_ROLES,
   canApproveBookingAmendment,
+  userMatchesLevel,
+  isApproverFor,
+  canUserAct,
   canPerformCrmGatedAction,
-  hasApprovalInboxEditRight,
   // Canonical module → {table, pk, status} / GL poster maps — the single
   // source of truth for what each module's identity/status column is.
   MODULE_MAP,
@@ -1140,8 +991,6 @@ module.exports = {
   // the exact same "which level, who's allowed" resolution transition()
   // itself uses, not a second, potentially drifting reimplementation.
   WORKFLOW_ID_MAP,
-  MODULE_APPROVER_ROLE_OVERRIDES,
-  APPROVER_ROLES,
   resolveCurrentLevel,
   isLevelSatisfied,
 };

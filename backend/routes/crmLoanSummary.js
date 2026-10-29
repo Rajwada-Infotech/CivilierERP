@@ -3,7 +3,7 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
@@ -15,15 +15,13 @@ router.use(authMiddleware);
 router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cancelled = CrmStatus.CANCELLED;
-    const rejected  = CrmStatus.REJECTED;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
-      `b.Status NOT IN ('${cancelled}', '${rejected}', 'Expired')`,
+      `b.Status NOT IN ${DEAD_BOOKING_SQL}`,
     ];
     // Not paginated — status-tab counts and disbursed totals are computed
     // client-side from the full set (see CrmLoanTracking.tsx), same

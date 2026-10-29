@@ -387,12 +387,9 @@ export const MODULE_CONFIG: Record<
   // Civil Work DPR's per-assignment Approval Setup — a Completed, QC-passed
   // activity awaiting whichever levels were configured for it in Work
   // Allocation. Not a dbo.ApprovalWorkflows module (see approvalInbox.js's
-  // own comment on this query block and isVisibleToViewer branch), so it's
-  // deliberately not in RESTRICTED_MODULES' sibling role-list logic below —
-  // it's added to RESTRICTED_MODULES itself instead, which makes button
-  // visibility depend purely on _canAct (this activity's own named
-  // approvers, computed server-side) rather than the generic
-  // "approval-inbox edit" fallback.
+  // own comment on this query block and isVisibleToViewer branch); like every
+  // module, its buttons follow the server's _canAct (here: this activity's
+  // own named approvers).
   "civilworkdpr-approval": {
     icon: ShieldCheck,
     color: "text-cyan-600 bg-cyan-600/10",
@@ -425,38 +422,9 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   contracts: "Contract",
 };
 
-// Every CRM approval module is gated to admin/super_admin/marketing_head —
-// dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
-export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
-export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-export const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
-export const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
-// Agreement Date and Sales Deed Director approval are narrower, separate
-// gates — super_admin only, "for now" per instruction, unlike the rest of
-// the CRM modules above. The backend enforces this independently via
-// approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
-// button visibility (and which /:id/<suffix>/approve path gets hit) here.
-export const DATE_APPROVER_ROLES = ["super_admin"];
+// Approve/Reject visibility comes from the server (_canAct, /can-act) —
+// Approval Setup is the only source of approvers; no role lists here.
 export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-transfer-deeds": "legal", "crm-transfer-deed-date": "date", "crm-agreement-date": "date", "crm-sales-deed-director": "director", "crm-refunds-finance": "finance" };
-export const REFUND_FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
-export const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
-
-// Modules the backend keeps deliberately role-locked (see
-// MODULE_APPROVER_ROLE_OVERRIDES in approvalService.js) — the
-// "approval-inbox" page-right fallback must not open these.
-export const RESTRICTED_MODULES = new Set([
-  "journal-voucher",
-  "inter-company-transfer",
-  "fund-transfer",
-  "crm-money-receipts",
-  "crm-refund-payment",
-  // Gates Approve/Reject to exactly this activity's own named approvers
-  // (server-computed _canAct) — the generic "approval-inbox edit" fallback
-  // must not open these, since that right has nothing to do with who's
-  // actually named in this one activity's Approval Setup.
-  "civilworkdpr-approval",
-  ...SUB_GATE_MODULES,
-]);
 
 export const ALL_MODULES = Object.keys(MODULE_CONFIG);
 

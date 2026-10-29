@@ -713,6 +713,7 @@ const DebitNoteMaster: React.FC = () => {
             status={row.status === false ? null : (row.approvalStatus as string)}
             recordId={row._id}
             endpoint="/api/debit-note"
+            module="debit-note"
             onSuccess={() => queryClient.invalidateQueries({ queryKey: ["debit-notes"] })}
           />
         )}

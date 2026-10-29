@@ -17,7 +17,7 @@ const fields: FieldDef[] = [
   { name: "Name", label: "Partner Name", type: "text", required: true, placeholder: "Person you deal with" },
   { name: "FirmName", label: "Firm", type: "text", placeholder: "Brokerage / agency name" },
   { name: "PartnerCode", label: "Code", type: "text", uppercase: true, placeholder: "Optional" },
-  { name: "Mobile", label: "Mobile", type: "text", placeholder: "10-digit mobile" },
+  { name: "Mobile", label: "Mobile", type: "text", placeholder: "98765 43210, or +971 50 123 4567 from abroad" },
   { name: "Email", label: "Email", type: "text" },
   { name: "Region", label: "Region", type: "text", placeholder: "Area they cover" },
   { name: "CommissionRate", label: "Default Commission (%)", type: "number", placeholder: "e.g. 2" },

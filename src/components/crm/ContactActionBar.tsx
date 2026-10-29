@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { Phone, MessageSquare, MessageCircle, Mail, PhoneCall, Copy } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toWhatsAppNumber } from "@/lib/phone";
 
 const RULE = "1px solid hsl(var(--foreground))";
 
@@ -9,12 +10,8 @@ const RULE = "1px solid hsl(var(--foreground))";
 // (Communication Log, Welcome Call, ...) — one implementation instead of
 // each page re-inventing tel:/sms:/wa.me/mailto: links.
 
-// Indian mobile numbers stored as plain 10-digit strings (occasionally with a
-// leading 0 or +91) — wa.me needs the bare country-code-prefixed digits.
-export function toWhatsAppNumber(mobile: string): string {
-  const digits = mobile.replace(/\D/g, "").replace(/^0+/, "");
-  return digits.startsWith("91") ? digits : `91${digits}`;
-}
+// wa.me needs the bare country-code-prefixed digits — see src/lib/phone.ts.
+export { toWhatsAppNumber };
 
 // "Call" has no reliable direct-dial affordance on desktop, so instead of a
 // bare tel: link that silently does nothing there, this pops up the number

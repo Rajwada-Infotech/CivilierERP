@@ -17,9 +17,10 @@ const {
   providerLabel,
 } = require("../services/saAdPlatformService");
 const { getNextDocNumber } = require("../services/docNumber");
+const { welcomeLeads } = require("../services/saMessaging");
+const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -309,13 +310,15 @@ async function getAdWithPlatform(pool, adId) {
         p.AccessToken,
         p.ApiConfigId,
         p.AccountDetails,
-        p.PixelId
+        p.PixelId,
+        ${CONNECTION_COLUMNS}
       FROM dbo.SaAd a
       JOIN dbo.SaCampaign c ON c.Id = a.CampaignId
       LEFT JOIN dbo.SaSocialMediaPlatform p ON p.Id = c.PlatformId
+      ${CONNECTION_JOIN}
       WHERE a.Id = @AdId AND a.IsActive = 1
     `);
-  return result.recordset[0] || null;
+  return (await applyConnection(pool, result.recordset[0])) || null;
 }
 
 function parseUtmParameters(value) {
@@ -428,6 +431,7 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
     const normalized = await normalizeImportedLeads(ad, ad, incoming);
     const utm = parseUtmParameters(ad.UtmParameters);
     let inserted = 0;
+    const newLeadIds = [];
     let skipped = 0;
     let invalid = 0;
 
@@ -485,11 +489,14 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
                'Ad', @LeadFormName, @SourceCampaignName, @SourceAdName, @SourcePlacement,
                @LeadCaptureUrl, @UtmSource, @UtmMedium, @UtmCampaign, @UtmContent, @UtmTerm, @CapturedAt, @SourcePayload,
                CAST(SYSDATETIME() AS DATE), 'New', 1, @CreatedBy, SYSDATETIME());
-            SELECT 1 AS Inserted;
+            SELECT CAST(SCOPE_IDENTITY() AS INT) AS Inserted;
           END
           ELSE SELECT 0 AS Inserted;
         `);
-      if (result.recordset[0]?.Inserted) inserted += 1;
+      if (result.recordset[0]?.Inserted) {
+        inserted += 1;
+        newLeadIds.push(result.recordset[0].Inserted);
+      }
       else skipped += 1;
     }
 
@@ -514,6 +521,7 @@ router.post("/:id/import-leads", requirePageRight("sa-leads", "create"), async (
       `);
 
     res.json({ success: true, received: incoming.length, inserted, skipped, invalid });
+    welcomeLeads(pool, newLeadIds, createdBy);
   } catch (err) {
     console.error("[sa-ads] POST /import-leads error:", err.message);
     if (err.number === 2601 || err.number === 2627) {

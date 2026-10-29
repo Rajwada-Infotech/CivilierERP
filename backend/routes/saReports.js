@@ -7,7 +7,6 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { isSaAdmin, isSaTeamLead, actorId, applyLeadScope } = require("../services/saAccess");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

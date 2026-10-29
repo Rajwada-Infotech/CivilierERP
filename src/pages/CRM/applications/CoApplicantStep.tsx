@@ -11,6 +11,7 @@ import { SearchableSelect } from "@/components/SearchableSelect";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { CO_APPLICANT_API, fetchCustomers, inputCls, labelCls, KEY_INK } from "./config";
+import { isValidPhone, PHONE_HINT } from "@/lib/phone";
 
 // ── Step 4: Co-Applicant(s) ─────────────────────────────────────────────────────
 // Captured directly against the Application (dbo.CrmCoApplicant, ApplicationId
@@ -105,7 +106,7 @@ export const CoApplicantStep: React.FC<{
 
   const handleSave = async () => {
     if (!draft.Name?.trim()) { toast.error("Name is required"); return; }
-    if (draft.Mobile?.trim() && !/^\d{10}$/.test(draft.Mobile.trim())) { toast.error("Co-applicant mobile must be exactly 10 digits"); return; }
+    if (!isValidPhone(draft.Mobile)) { toast.error(`Co-applicant mobile must be ${PHONE_HINT}`); return; }
     if (draft.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(draft.PanNo.trim().toUpperCase())) { toast.error("Co-applicant PAN must be in format ABCDE1234F"); return; }
     if (draft.AadhaarNo?.trim() && !/^\d{12}$/.test(draft.AadhaarNo.trim())) { toast.error("Co-applicant Aadhaar must be exactly 12 digits"); return; }
     if (draft.Pincode?.trim() && !/^\d{6}$/.test(draft.Pincode.trim())) { toast.error("Co-applicant Pincode must be exactly 6 digits"); return; }

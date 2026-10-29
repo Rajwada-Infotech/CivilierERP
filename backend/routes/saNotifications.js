@@ -4,7 +4,6 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

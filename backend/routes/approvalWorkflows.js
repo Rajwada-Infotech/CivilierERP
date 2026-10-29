@@ -24,6 +24,23 @@ function parseJson(val, fallback = []) {
 // ── Raiser may approve their own request (migration 571) ─────────────────────
 // GET  /api/approval-workflows/raiser-rules           — every module that records its raiser
 // PUT  /api/approval-workflows/raiser-rules/:module   { raiserMayApprove: bool }
+// May the signed-in user approve/reject this record now? Approval Setup
+// decides (approvalService.canUserAct — the same check transition() makes);
+// the Approve / Reject buttons ask here instead of keeping role lists.
+router.get("/can-act", authMiddleware, async (req, res) => {
+  const module = String(req.query.module || "").trim();
+  if (!module) return res.status(400).json({ error: "module is required" });
+  try {
+    const { canUserAct } = require("../services/approvalService");
+    const userId = Number(req.user?.userId ?? req.user?.id) || null;
+    const canAct = await canUserAct(module, req.query.recordId, req.user?.role, userId);
+    res.json({ canAct });
+  } catch (err) {
+    console.error("[approval-workflows] can-act error:", err.message);
+    res.status(500).json({ error: "Couldn't check approval rights" });
+  }
+});
+
 router.get("/raiser-rules", authMiddleware, async (_req, res) => {
   try {
     const { MAKER_COLUMNS, RAISER_RULE_EXTRA } = require("../services/approvalService");

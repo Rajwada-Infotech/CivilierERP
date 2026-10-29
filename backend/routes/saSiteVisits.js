@@ -7,6 +7,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { statusesThatCanMoveTo } = require("../constants/saStatuses");
+const { confirmSiteVisit } = require("../services/saMessaging");
 
 // Move a lead to `to` only if STATUS_TRANSITIONS allows it from its current
 // status. The check is in the UPDATE's WHERE, so it's atomic. Returns true
@@ -22,7 +23,6 @@ async function advanceLead(pool, leadId, to) {
   return result.rowsAffected[0] > 0;
 }
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -42,7 +42,7 @@ router.get("/", requirePageRight("sa-site-visits", "view"), async (req, res) => 
       FROM dbo.SaSiteVisit v
       JOIN  dbo.SaLead l ON v.LeadId = l.Id
       LEFT JOIN dbo.Users ex ON v.ExecutiveId = ex.id
-      WHERE v.IsActive = 1 AND ${scope0}
+      WHERE v.IsActive = 1 AND l.IsActive = 1 AND ${scope0}
       ORDER BY v.PreferredDate ASC, v.CreatedAt DESC
     `);
     res.json(r.recordset);
@@ -57,7 +57,14 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
   try {
     const pool = getPool();
     const b = req.body;
-    if (!b.LeadId) return res.status(400).json({ error: "LeadId required" });
+    const lid = parseId(b.LeadId);
+    if (lid === null) return res.status(400).json({ error: "Valid LeadId required" });
+
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("lid", sql.Int, lid)
+      .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied or lead not found" });
 
     // No conflict check existed at all — two different leads could be
     // scheduled to the same executive at the same date+time with nothing
@@ -77,7 +84,7 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
       }
     }
 
-    await pool.request()
+    const visit = await pool.request()
       .input("lid", sql.Int, parseInt(b.LeadId))
       .input("pn", sql.NVarChar(200), b.ProjectName || null)
       .input("pd", sql.Date, b.PreferredDate || null)
@@ -91,12 +98,15 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
         INSERT INTO dbo.SaSiteVisit
           (LeadId, ProjectName, PreferredDate, PreferredTime, ExecutiveId,
            PickupRequired, CustomerNotes, Status, IsActive, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.LeadId, INSERTED.ProjectName, INSERTED.PreferredDate, INSERTED.PreferredTime, INSERTED.PickupRequired, INSERTED.Status
         VALUES
           (@lid, @pn, @pd, @pt, @eid, @pu, @cn, @st, 1, @cb, SYSDATETIME());
       `);
     await advanceLead(pool, parseInt(b.LeadId), "VisitScheduled");
 
     res.status(201).json({ success: true });
+    const booked = visit.recordset[0];
+    if (booked.Status === "Scheduled") confirmSiteVisit(pool, booked, actorId(req));
   } catch (e) {
     console.error("[sa-site-visits] POST error:", e.message);
     res.status(500).json({ error: e.message });

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { confirmEngineerAssignment } from "@/api/dependencyActivityAssignmentApi";
 import { ClipboardCheck, ArrowUpRight, Inbox, CheckCircle2, XCircle, ArrowLeftRight, Warehouse, Building2, Eye, X, Loader2 } from "lucide-react";
 import { ApprovalReviewPanel } from "../ApprovalReviewPanel";
-import { InboxItem, MODULE_CONFIG, CRM_MODULES, CRM_APPROVER_ROLES, MR_APPROVER_ROLES, CRM_BOOKING_APPROVER_ROLES, DATE_APPROVER_ROLES, SUB_GATE_SUFFIX, REFUND_FINANCE_APPROVER_ROLES, SUB_GATE_MODULES, RESTRICTED_MODULES, needsBankReview, REVIEW_INSTEAD_LABEL, openInModulePath, fmtDate, fmtAmount, getEffectiveAmount } from "./config";
+import { InboxItem, MODULE_CONFIG, SUB_GATE_SUFFIX, needsBankReview, REVIEW_INSTEAD_LABEL, openInModulePath, fmtDate, fmtAmount, getEffectiveAmount } from "./config";
 
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 const RULE = "1px solid hsl(var(--foreground))";
@@ -113,23 +113,10 @@ export const InboxRow: React.FC<{
           recordId={item.RecordId}
           endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
           actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
-          approverRoles={
-            item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
-            : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
-            : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
-            // Same role set as Received Payments (admin/super_admin/dba/
-            // accounts_head) — matches approvalService.js's
-            // MODULE_APPROVER_ROLE_OVERRIDES["crm-refund-payment"] exactly.
-            : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
-            : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
-            // super_admin only — matches the backend's own gate exactly
-            // (dependencyActivityAssignment.js's approve/reject routes:
-            // named-on-the-level OR super_admin, never admin/dba generically).
-            // Everyone else's button visibility comes from workflowVisible
-            // (_canAct) below, not this role list.
-            : item.Module === "civilworkdpr-approval" ? ["super_admin"]
-            : undefined
-          }
+          // The inbox already worked out, per row, whether Approval Setup
+          // lets this viewer act (approvalInbox.js) — rows they can't act on
+          // took the "waiting" branch above.
+          canAct={item._canAct !== false}
           // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
           // until every Level-1/Level-2 checklist item is ticked — a one-click
           // Approve here can never succeed on its own, it can only ever
@@ -154,14 +141,6 @@ export const InboxRow: React.FC<{
               ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
               : undefined
           }
-          restricted={RESTRICTED_MODULES.has(item.Module)}
-          // Reaching this branch at all already means _canAct !== false (the
-          // "waiting on level" badge above handles that case) — so for a
-          // restricted module, this row being here means the inbox's own
-          // isVisibleToViewer (approvalInbox.js) matched this viewer by
-          // userId on the record's current Approval Setup level. See
-          // ApprovalActions' workflowVisible prop doc.
-          workflowVisible={item._canAct !== false}
           onSuccess={(action) => {
             if (action === "approve" || action === "reject") {
               onOptimisticUpdate(item.RecordId, item.Module);

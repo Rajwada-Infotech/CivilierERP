@@ -28,8 +28,11 @@ async function fetchApiConfigOptions(): Promise<{ value: string; label: string }
   try {
     const res = await fetchWithAuth(`${API}/api-configs`);
     if (!res.ok) return [];
-    const data: { Id: number; ChannelKey: string; Label: string }[] = await res.json();
-    return data.map((c) => ({ value: String(c.Id), label: `${c.Label} (${c.ChannelKey})` }));
+    const data: { Id: number; Label: string; Provider: string | null; HasAccessToken: number }[] = await res.json();
+    return data.map((c) => ({
+      value: String(c.Id),
+      label: `${c.Label}${c.Provider ? ` · ${c.Provider}` : ""}${c.HasAccessToken ? "" : " (no token yet)"}`,
+    }));
   } catch { return []; }
 }
 
@@ -48,15 +51,10 @@ const fields: FieldDef[] = [
   { name: "notes", label: "Notes", type: "textarea", fullWidth: true },
 
   { name: "_connection", label: "Connection", type: "section" },
-  { name: "apiConfigId", label: "Integration Channel", type: "select", asyncOptions: fetchApiConfigOptions },
+  { name: "apiConfigId", label: "Connection (set up in Admin → Integrations)", type: "select", asyncOptions: fetchApiConfigOptions },
   { name: "adAccountId", label: "Ad Account ID", type: "text", placeholder: "act_1234567890" },
   { name: "pixelId", label: "Pixel / Conversion ID", type: "text" },
   { name: "apiEnabled", label: "Pull leads & results automatically", type: "toggle", defaultValue: false },
-
-  { name: "_tokens", label: "Access Tokens", type: "section" },
-  { name: "accessToken", label: "Access Token", type: "textarea", fullWidth: true, placeholder: "Paste a new token to replace it. Leave blank to keep the saved one." },
-  { name: "refreshToken", label: "Refresh Token", type: "textarea", fullWidth: true, placeholder: "Optional" },
-  { name: "tokenExpiresAt", label: "Token Expires On", type: "date" },
 ];
 
 const columns = [
@@ -77,7 +75,7 @@ const ConnectionCell = (_: unknown, row: RecordWithId) => {
   const days = tokenDaysLeft(row);
   const tone = !row.hasAccessToken || (days !== null && days < 0) ? "text-red-600"
     : days !== null && days <= 7 ? "text-amber-600" : "text-emerald-600";
-  const text = !row.hasAccessToken ? "Connected — no token saved"
+  const text = !row.hasAccessToken ? "No token — set up its connection in Admin → Integrations"
     : days === null ? "Connected"
     : days < 0 ? "Token expired"
     : days <= 7 ? `Token expires in ${days} day${days === 1 ? "" : "s"}`
@@ -86,6 +84,7 @@ const ConnectionCell = (_: unknown, row: RecordWithId) => {
     <div className="min-w-0">
       <div className={`text-xs font-medium ${tone}`}>{text}</div>
       {row.apiConfigLabel ? <div className="text-[0.6875rem] text-muted-foreground truncate">{String(row.apiConfigLabel)}</div> : null}
+      {row.usesOwnToken ? <div className="text-[0.6875rem] text-amber-600">Uses its own old token — move it to a connection in Admin → Integrations</div> : null}
     </div>
   );
 };
@@ -95,7 +94,7 @@ const YesNo = (v: unknown) => <p className="text-sm">{v ? "Yes" : "No"}</p>;
 const exportColumns: ExportColumn[] = [
   { header: "Platform Name", accessor: "name" },
   { header: "Type", accessor: "platformType" },
-  { header: "API Channel", accessor: "apiConfigLabel" },
+  { header: "Connection", accessor: "apiConfigLabel" },
   { header: "Ad Account", accessor: "adAccountId" },
   { header: "API Enabled", accessor: "apiEnabled" },
   { header: "Campaigns", accessor: "campaignCount" },
@@ -125,12 +124,10 @@ const SaSocialMediaMaster: React.FC = () => {
       apiConfigLabel: item.ApiConfigLabel ?? "",
       adAccountId: item.AdAccountId ?? "",
       pixelId: item.PixelId ?? "",
-      accessToken: "",
-      refreshToken: "",
       tokenExpiresAt: item.TokenExpiresAt ? String(item.TokenExpiresAt).slice(0, 10) : "",
       apiEnabled: Boolean(item.ApiEnabled),
       hasAccessToken: Boolean(item.HasAccessToken),
-      hasRefreshToken: Boolean(item.HasRefreshToken),
+      usesOwnToken: Boolean(item.UsesOwnToken),
       notes: item.Notes ?? "",
       isActive: Boolean(item.IsActive),
       campaignCount: item.CampaignCount ?? 0,
@@ -150,9 +147,6 @@ const SaSocialMediaMaster: React.FC = () => {
     ApiConfigId: r.apiConfigId ? parseInt(r.apiConfigId) : null,
     AdAccountId: r.adAccountId || null,
     PixelId: r.pixelId || null,
-    AccessToken: r.accessToken || null,
-    RefreshToken: r.refreshToken || null,
-    TokenExpiresAt: r.tokenExpiresAt || null,
     ApiEnabled: r.apiEnabled === true,
   });
 
@@ -289,11 +283,10 @@ const SaSocialMediaMaster: React.FC = () => {
               { key: "name", label: "Platform" },
               { key: "platformType", label: "Type" },
               { key: "apiEnabled", label: "Connection", render: (v, row) => ConnectionCell(v, row) },
-              { key: "apiConfigLabel", label: "Integration Channel" },
+              { key: "apiConfigLabel", label: "Connection" },
               { key: "adAccountId", label: "Ad Account ID" },
               { key: "pixelId", label: "Pixel / Conversion ID" },
-              { key: "hasAccessToken", label: "Access Token Saved", render: YesNo },
-              { key: "hasRefreshToken", label: "Refresh Token Saved", render: YesNo },
+              { key: "hasAccessToken", label: "Token Available", render: YesNo },
               { key: "tokenExpiresAt", label: "Token Expires On" },
               { key: "campaignCount", label: "Campaigns" },
               { key: "activeAdCount", label: "Active Ads" },

@@ -8,11 +8,9 @@ const { projectPredicate, ebResolvedProjectSql, paymentProjectSql } = require(".
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
-  MODULE_APPROVER_ROLE_OVERRIDES,
-  APPROVER_ROLES,
   getWorkflow,
   resolveCurrentLevel,
-  hasApprovalInboxEditRight,
+  isApproverFor,
 } = require("../services/approvalService");
 
 // ── Per-record visibility filter ────────────────────────────────────────────
@@ -57,13 +55,12 @@ const {
 // mis-resolved, even if they can't act on it from the wrong level. The
 // actual approve/reject gate in transition() is untouched and still checks
 // the real current level — this only widens what shows up in the list.
+// Same rule as approvalService.userMatchesLevel: a level names the viewer's
+// role or the viewer. A level naming nobody admits nobody.
 function isNamedOnLevel(levelDef, role, viewerUserId) {
-  const hasRoles = Array.isArray(levelDef?.roles) && levelDef.roles.length > 0;
-  const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
-  if (!hasRoles && !hasUsers) return null; // uncustomised — caller falls back
-  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
-  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
-  return roleMatch || userMatch;
+  const roles = Array.isArray(levelDef?.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
+  const ids = Array.isArray(levelDef?.userIds) ? levelDef.userIds.map(Number) : [];
+  return (role !== "" && roles.includes(role)) || (viewerUserId != null && ids.includes(Number(viewerUserId)));
 }
 
 // A Civil Work DPR activity's own approval levels (ApprovalLevelsJson) and the first one not yet satisfied.
@@ -102,9 +99,17 @@ async function dprApprovalLevels(rungId) {
 // MRs had been approved past Level 1 — before this, Level-2-only approvers
 // correctly couldn't act on the other 8 yet, but also couldn't see them
 // coming, which read as "the inbox is missing records" (2026-09-22).
+// admin / super_admin still SEE every pending item (oversight), but may act
+// only where Approval Setup names them, like everyone else.
 async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
+  const r = await whoMayAct(item, viewerRole, viewerUserId, workflowCache);
   const role = (viewerRole || "").toLowerCase();
-  if (role === "admin" || role === "super_admin") return { visible: true, canAct: true };
+  if (!r.visible && (role === "admin" || role === "super_admin")) return { ...r, visible: true, canAct: false };
+  return r;
+}
+
+async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
+  const role = (viewerRole || "").toLowerCase();
 
   // Work Allocation's per-engineer confirmation isn't a document approval by
   // a manager — it's one specific engineer confirming their own task
@@ -144,24 +149,20 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   }
 
   const map = MODULE_MAP[item.Module];
-  const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
-  const fallbackVisible = async () =>
-    fallbackRoles.includes(role) || (await hasApprovalInboxEditRight(viewerUserId));
 
-  // Modules the aggregator lists but that aren't in the shared MODULE_MAP
-  // (e.g. received-payment, crm-money-receipts — they never went through
-  // approvalService.js's level engine) keep today's page-right-only
-  // visibility; there's no per-level data to filter on.
-  if (!map) return { visible: true, canAct: true };
-
-  const workflow = workflowCache.get(item.Module);
-  if (!workflow || !workflow.LevelDefs?.length) {
-    const visible = await fallbackVisible();
-    return { visible, canAct: visible };
+  // Gates outside the level engine (received-payment, crm-money-receipts,
+  // crm-booking-amendment...) are single-step: level 1 in Approval Setup.
+  if (!map) {
+    const ok = await isApproverFor(item.Module, viewerUserId, role);
+    return { visible: ok, canAct: ok };
   }
 
+  // No workflow in Approval Setup: nobody may act on it.
+  const workflow = workflowCache.get(item.Module);
+  if (!workflow || !workflow.LevelDefs?.length) return { visible: false, canAct: false };
+
   const isNamedOnWorkflow = workflow.LevelDefs.some(
-    (l) => isNamedOnLevel(l, role, viewerUserId) === true,
+    (l) => isNamedOnLevel(l, role, viewerUserId),
   );
 
   const tableName = map.table.replace("dbo.", "");
@@ -183,18 +184,7 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   }
 
   const levelDef = workflow.LevelDefs[currentLevel - 1];
-  if (!levelDef) {
-    const visible = await fallbackVisible();
-    return { visible, canAct: visible };
-  }
-
-  const matched = isNamedOnLevel(levelDef, role, viewerUserId);
-  // Level left uncustomised — no named roles or people — falls back to the
-  // module's default approver set, exactly like transition()'s own gate does.
-  if (matched === null) {
-    const visible = await fallbackVisible();
-    return { visible, canAct: visible };
-  }
+  const matched = !!levelDef && isNamedOnLevel(levelDef, role, viewerUserId);
   if (matched) return { visible: true, canAct: true, currentLevel, totalLevels };
 
   // Not a match on the level it currently resolved to, but this viewer IS

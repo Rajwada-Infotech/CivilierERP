@@ -6,7 +6,6 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, isSaAdmin } = require("../services/saAccess");
 const { CLOSED_LEAD_SQL, countedInvoiceSql } = require("../constants/saStatuses");
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

@@ -443,7 +443,7 @@ const CrmNoc: React.FC = () => {
                     <button onClick={handleMarkIssued} disabled={markingIssued} className={`${KEY_INK} h-9 px-4`}>{markingIssued ? "Marking…" : "Mark issued"}</button>
                   ) : detail.Status === CrmStatus.PENDING ? (
                     // Approve / Reject for approvers; a "waiting for approval" note for others.
-                    <ApprovalActions sheet status={detail.Status} recordId={detail.Id} endpoint={API} onSuccess={() => { invalidate(); setOpenNoc(null); }} />
+                    <ApprovalActions sheet status={detail.Status} recordId={detail.Id} endpoint={API} module="crm-noc" onSuccess={() => { invalidate(); setOpenNoc(null); }} />
                   ) : detail.Status === CrmStatus.REJECTED ? (
                     <ApprovalActions sheet status={detail.Status} recordId={detail.Id} endpoint={API} submitOnly onSuccess={() => { invalidate(); setOpenNoc(null); }} />
                   ) : null}

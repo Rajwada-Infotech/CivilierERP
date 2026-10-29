@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { SA_LEAD_BOOKED } = require("../constants/saStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -122,7 +122,7 @@ const APP_SELECT = `
     -- this guard. Stage being derived fresh from the live Booking row on
     -- every query is exactly what makes it safe regardless of that history.
     CASE
-      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired') THEN 'Converted'
+      WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ${DEAD_BOOKING_SQL} THEN 'Converted'
       WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}') THEN 'NotConverted'
       ELSE 'InProcess'
     END AS Stage,
@@ -141,7 +141,7 @@ const APP_SELECT = `
     -- whatever its Status happens to read.
     CASE
       WHEN a.Status NOT IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}', 'Expired') AND bk.Id IS NULL AND a.PreferredUnitId IS NOT NULL AND (
-        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred') AND ob.ApplicationId <> a.Id)
+        EXISTS (SELECT 1 FROM dbo.CrmBooking ob WHERE ob.UnitId = a.PreferredUnitId AND ob.IsActive = 1 AND ob.Status NOT IN ${DEAD_BOOKING_SQL} AND ob.ApplicationId <> a.Id)
         OR EXISTS (SELECT 1 FROM dbo.CrmInventoryHold oh WHERE oh.EntityType = 'Unit' AND oh.EntityId = a.PreferredUnitId AND oh.Status = '${CrmStatus.ACTIVE}' AND oh.HoldUntil >= SYSDATETIME() AND oh.ApplicationId <> a.Id)
       ) THEN 1 ELSE 0
     END AS UnitUnavailableForBooking
@@ -165,7 +165,7 @@ const APP_SELECT = `
     SELECT TOP 1 Id, BookingNo, Status, WorkflowStage, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
-    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Transferred') THEN 0 ELSE 1 END, CreatedAt DESC
+    ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL} THEN 0 ELSE 1 END, CreatedAt DESC
   ) bk
 `;
 
@@ -503,7 +503,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     if (changingUnitSelection) {
       const bkCheck = await pool.request()
         .input("AppId", sql.Int, id)
-        .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND Status NOT IN ('Cancelled','Expired','Rejected')");
+        .query(`SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND Status NOT IN ${DEAD_BOOKING_SQL}`);
       if (bkCheck.recordset.length > 0) {
         return res.status(400).json({
           error: "Cannot change unit/payment plan — this application has an active booking. Manage changes through the Booking module instead.",
@@ -1227,7 +1227,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
     // for the rare case of an Approved Application with an active Booking
     // where someone hits this endpoint directly.
     const activeBooking = await pool.request().input("id", sql.Int, id)
-      .query(`SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}`);
+      .query(`SELECT Id, BookingNo, Status FROM dbo.CrmBooking WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`);
     if (activeBooking.recordset.length) {
       const bk = activeBooking.recordset[0];
       return res.status(400).json({
@@ -1279,7 +1279,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const activeBooking = await pool.request().input("id", sql.Int, id).query(`
       SELECT TOP 1 Id, BookingNo, Status
       FROM dbo.CrmBooking
-      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${require("../constants/crmStatuses").DEAD_BOOKING_SQL}
+      WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}
     `);
     if (activeBooking.recordset.length) {
       const b = activeBooking.recordset[0];

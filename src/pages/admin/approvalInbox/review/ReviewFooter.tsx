@@ -1,5 +1,5 @@
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { SUB_GATE_SUFFIX, SUB_GATE_MODULES, CRM_MODULES, CRM_APPROVER_ROLES, DATE_APPROVER_ROLES, MR_APPROVER_ROLES, RESTRICTED_MODULES, openInModulePath, needsBankReview } from "../config";
+import { SUB_GATE_SUFFIX, openInModulePath, needsBankReview } from "../config";
 import type { ApprovalReviewState } from "./useApprovalReview";
 
 // The action bar: approve / reject (or review first) across the bottom.
@@ -21,13 +21,7 @@ export function ReviewFooter({ r }: { r: ApprovalReviewState }) {
           recordId={item.RecordId}
           endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
           actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
-          approverRoles={
-            SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
-            : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
-            : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
-            : undefined
-          }
-          restricted={RESTRICTED_MODULES.has(item.Module)}
+          canAct={item._canAct !== false}
           // CRM payment without a deposit bank yet: Accounts sets it on the
           // Received Payment page first — Approve here would be refused.
           reviewInstead={needsBankReview(item) && cfg?.navPath

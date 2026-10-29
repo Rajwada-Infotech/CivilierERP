@@ -34,7 +34,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking, requireApprovedBooking, checkLoanProcessingCleared, maybeAutoCreateLegalMilestone, getProjectSaleGate } = require("../services/crmWorkflowGuards");
 const { logCrmAudit } = require("../services/crmAudit");
-const { transition: approvalTransition, recordGLPosting, canPerformCrmGatedAction, CRM_APPROVER_ROLES } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting, canPerformCrmGatedAction, isApproverFor } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
@@ -170,8 +170,9 @@ async function logDeedApprovalHistory(deedId, action, remarks, actorIdVal, actor
 // approver-tier role (or the legal department head) still overrides, the
 // same as a locked KYC record.
 async function requireAssignedLegalOrApprover(req, res, pool, deedId) {
-  const role = String(req.user?.role || "").trim().toLowerCase();
-  if ([...CRM_APPROVER_ROLES, "legal_head"].includes(role)) return true;
+  // Besides the assigned legal executive, who may upload is set in Approval
+  // Setup ("crm-sales-deed-docs").
+  if (await isApproverFor("crm-sales-deed-docs", actorId(req), req.user?.role)) return true;
 
   const row = await pool.request().input("id", sql.Int, deedId)
     .query("SELECT LegalExecutiveId FROM dbo.CrmSalesDeed WHERE Id = @id");

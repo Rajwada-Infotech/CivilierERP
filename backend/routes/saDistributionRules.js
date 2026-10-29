@@ -2,13 +2,12 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const { distributableStatus } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { resolveDistributionForLead } = require("../services/saDistributionEngine");
+const { autoDistribute } = require("../services/saDistributionEngine");
+const { alertAssignedMany } = require("../services/saMessaging");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -174,71 +173,9 @@ router.post("/run-now/:level", requirePageRight("sa-lead-distribution", "create"
   const distributedBy = req.user?.userId || null;
   try {
     const pool = getPool();
-    const pendingResult = await pool.request().query(
-      level === 1
-        ? `SELECT Id, CampaignId, AssignedTeamLeadId FROM dbo.SaLead WHERE IsActive = 1 AND Status = 'New'`
-        : `SELECT Id, CampaignId, AssignedTeamLeadId FROM dbo.SaLead WHERE IsActive = 1 AND Status = 'Assigned' AND AssignedTeamLeadId IS NOT NULL AND AssignedSalespersonId IS NULL`
-    );
-    const pending = pendingResult.recordset;
-    let distributedCount = 0;
-    for (const lead of pending) {
-      const result = await resolveDistributionForLead(pool, lead, level);
-      if (!result) continue;
-
-      // Wrap the distribution log INSERT and lead UPDATE atomically so a crash
-      // between them can't leave an orphaned distribution row with a stale lead status.
-      //
-      // The pending list above was fetched once, up front, outside any
-      // transaction - two concurrent /run-now calls (double-click, or a
-      // scheduled job racing a manual trigger) could both see the same lead
-      // as pending before either writes it, producing the exact duplicate
-      // SaLeadDistribution row / fairness-skew bug already fixed for the
-      // manual /distribute route (see saLeadDistribution.js). Re-check the
-      // lead's eligibility under an UPDLOCK/HOLDLOCK inside this per-lead
-      // transaction, same pattern, so a second concurrent run sees the
-      // already-updated row and skips it.
-      const tx = pool.transaction();
-      await tx.begin();
-      try {
-        const assignedCol = level === 1 ? "AssignedTeamLeadId" : "AssignedSalespersonId";
-        const cur = await tx.request().input("lid", sql.Int, lead.Id).input("st", sql.NVarChar(30), distributableStatus(level)).query(
-          `SELECT ${assignedCol} AS assignedTo FROM dbo.SaLead WITH (UPDLOCK, HOLDLOCK) WHERE Id = @lid AND IsActive = 1 AND Status = @st`,
-        );
-        if (!cur.recordset.length || cur.recordset[0].assignedTo != null) {
-          await tx.commit();
-          continue;
-        }
-
-        await tx.request()
-          .input("lid", sql.Int, lead.Id)
-          .input("fuid", sql.Int, distributedBy)
-          .input("tuid", sql.Int, result.userId)
-          .input("lvl", sql.Int, level)
-          .input("dby", sql.Int, distributedBy)
-          .query(`
-            INSERT INTO dbo.SaLeadDistribution (LeadId, FromUserId, ToUserId, Level, Method, DistributedAt, DistributedBy)
-            VALUES (@lid, @fuid, @tuid, @lvl, 'Auto', SYSDATETIME(), @dby)
-          `);
-
-        if (level === 1) {
-          await tx.request()
-            .input("lid", sql.Int, lead.Id)
-            .input("tuid", sql.Int, result.userId)
-            .query(`UPDATE dbo.SaLead SET AssignedTeamLeadId = @tuid, Status = 'Assigned', UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
-        } else {
-          await tx.request()
-            .input("lid", sql.Int, lead.Id)
-            .input("tuid", sql.Int, result.userId)
-            .query(`UPDATE dbo.SaLead SET AssignedSalespersonId = @tuid, UpdatedAt = SYSDATETIME() WHERE Id = @lid`);
-        }
-        await tx.commit();
-        distributedCount++;
-      } catch (txErr) {
-        await tx.rollback();
-        console.error(`[sa-distribution-rules] run-now tx failed for lead ${lead.Id}:`, txErr.message);
-      }
-    }
-    res.json({ message: `Auto-distributed ${distributedCount} of ${pending.length} eligible leads`, distributedCount, eligibleCount: pending.length });
+    const { distributedCount, eligibleCount, assigned } = await autoDistribute(pool, level, distributedBy);
+    res.json({ message: `Auto-distributed ${distributedCount} of ${eligibleCount} eligible leads`, distributedCount, eligibleCount });
+    alertAssignedMany(pool, assigned);
   } catch (err) {
     console.error("[sa-distribution-rules] run-now error:", err.message);
     res.status(500).json({ error: "Internal server error" });

@@ -6,9 +6,9 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection, connectionMismatch } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -18,18 +18,22 @@ const PLATFORM_SELECT = `
   SELECT
     p.Id, p.Name, p.PlatformType, p.AccountDetails, p.Notes, p.IsActive,
     p.ApiConfigId, p.AdAccountId, p.PixelId, p.ApiEnabled,
-    -- Mask token fields; never return raw tokens to the client
-    CASE WHEN p.AccessToken IS NOT NULL AND LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
-    CASE WHEN p.RefreshToken IS NOT NULL AND LEN(p.RefreshToken) > 0 THEN 1 ELSE 0 END AS HasRefreshToken,
-    p.TokenExpiresAt, p.CreatedAt, p.UpdatedAt,
+    -- Mask token fields; never return raw tokens to the client. The connection
+    -- (Admin → Integrations) supplies the token; the platform's own is the old fallback.
+    CASE WHEN LEN(ic.AccessToken) > 0 OR LEN(ic.RefreshToken) > 0 OR LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
+    CASE WHEN LEN(ic.AccessToken) > 0 OR LEN(ic.RefreshToken) > 0 THEN 0 WHEN LEN(p.AccessToken) > 0 THEN 1 ELSE 0 END AS UsesOwnToken,
+    COALESCE(CASE WHEN LEN(ic.AccessToken) > 0 THEN ic.TokenExpiresAt END, p.TokenExpiresAt) AS TokenExpiresAt,
+    ic.LastTestOk AS ConnectionTestOk, ic.LastTestAt AS ConnectionTestAt,
+    p.CreatedAt, p.UpdatedAt,
     ic.Label AS ApiConfigLabel,
     ic.ChannelKey AS ApiConfigKey,
+    ic.Provider AS ApiConfigProvider,
     (SELECT COUNT(*) FROM dbo.SaCampaign c WHERE c.PlatformId = p.Id) AS CampaignCount,
     (SELECT COUNT(*) FROM dbo.SaCampaign c
        JOIN dbo.SaAd a ON a.CampaignId = c.Id
        WHERE c.PlatformId = p.Id AND a.IsActive = 1) AS ActiveAdCount
   FROM dbo.SaSocialMediaPlatform p
-  LEFT JOIN dbo.IntegrationChannels ic ON ic.Id = p.ApiConfigId
+  ${CONNECTION_JOIN}
 `;
 
 // GET /
@@ -49,12 +53,13 @@ router.get(
   },
 );
 
-// GET /api-configs — available integration channels for dropdown
+// GET /api-configs — the connections (Admin → Integrations) a platform can use
 router.get("/api-configs", requirePageRight("sa-social-media", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, ChannelKey, Label
+      SELECT Id, ChannelKey, Label, Provider,
+             CASE WHEN LEN(AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken
       FROM dbo.IntegrationChannels
       WHERE IsActive = 1
       ORDER BY Label
@@ -107,11 +112,16 @@ router.post("/:id/test-connection", requirePageRight("sa-social-media", "edit"),
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const platResult = await pool.request()
       .input("Id", sql.Int, id)
-      .query("SELECT AccessToken, AdAccountId, PlatformType, ApiEnabled, AccountDetails, PixelId FROM dbo.SaSocialMediaPlatform WHERE Id = @Id");
+      .query(`
+        SELECT p.AccessToken, p.AdAccountId, p.PlatformType, p.ApiEnabled, p.AccountDetails, p.PixelId, ${CONNECTION_COLUMNS}
+        FROM dbo.SaSocialMediaPlatform p
+        ${CONNECTION_JOIN}
+        WHERE p.Id = @Id
+      `);
     if (!platResult.recordset[0]) return res.status(404).json({ error: "Platform not found" });
-    const plat = platResult.recordset[0];
+    const plat = await applyConnection(pool, platResult.recordset[0]);
     if (!plat.AccessToken || !plat.ApiEnabled) {
-      return res.status(400).json({ error: "Platform has no access token or API is disabled" });
+      return res.status(400).json({ error: "No connection with a token is chosen, or automatic pulling is off. Connections are set up in Admin → Integrations." });
     }
 
     // Basic connectivity test — try a simple API call based on platform type
@@ -171,18 +181,22 @@ router.put(
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
 
-    const { ApiConfigId, AdAccountId, AccessToken, RefreshToken, TokenExpiresAt, PixelId, ApiEnabled } = req.body;
+    // Tokens are no longer typed here — they belong to the connection in Admin → Integrations.
+    const { ApiConfigId, AdAccountId, PixelId, ApiEnabled } = req.body;
     const updatedBy = req.user?.userId || null;
 
     try {
       const pool = getPool();
+      const plat = await pool.request().input("Id", sql.Int, id)
+        .query("SELECT PlatformType FROM dbo.SaSocialMediaPlatform WHERE Id = @Id");
+      if (!plat.recordset[0]) return res.status(404).json({ error: "Platform not found" });
+      const mismatch = await connectionMismatch(pool, ApiConfigId || null, plat.recordset[0].PlatformType);
+      if (mismatch) return res.status(400).json({ error: mismatch });
+
       await pool.request()
         .input("Id",              sql.Int,            id)
         .input("ApiConfigId",     sql.Int,            ApiConfigId || null)
         .input("AdAccountId",     sql.NVarChar(200),  AdAccountId || null)
-        .input("AccessToken",     sql.NVarChar(sql.MAX), AccessToken || null)
-        .input("RefreshToken",    sql.NVarChar(sql.MAX), RefreshToken || null)
-        .input("TokenExpiresAt",  sql.DateTime2(3),   TokenExpiresAt || null)
         .input("PixelId",         sql.NVarChar(200),  PixelId || null)
         .input("ApiEnabled",      sql.Bit,            ApiEnabled !== false ? 1 : 0)
         .input("UpdatedBy",       sql.Int,            updatedBy)
@@ -190,9 +204,6 @@ router.put(
           UPDATE dbo.SaSocialMediaPlatform SET
             ApiConfigId    = @ApiConfigId,
             AdAccountId    = @AdAccountId,
-            AccessToken    = COALESCE(@AccessToken, AccessToken),
-            RefreshToken   = COALESCE(@RefreshToken, RefreshToken),
-            TokenExpiresAt = @TokenExpiresAt,
             PixelId        = @PixelId,
             ApiEnabled     = @ApiEnabled,
             UpdatedBy      = @UpdatedBy,
