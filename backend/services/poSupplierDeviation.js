@@ -20,7 +20,12 @@ const { emitNotification } = require("./notify");
 const hasReasonColumn = makeColumnProbe("dbo.PurchaseOrders", "SupplierChangeReason");
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const day = (d) => (d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "");
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const day = (d) => {
+  if (!d) return "";
+  const x = new Date(new Date(d).getTime() + 330 * 60_000); // IST
+  return `${String(x.getUTCDate()).padStart(2, "0")} ${MONTHS[x.getUTCMonth()]} ${x.getUTCFullYear()}`;
+};
 
 async function findL1Deviations(pool, { mrIds = [], qtId = null, supplierId }) {
   const sup = parseInt(supplierId, 10);
