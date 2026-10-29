@@ -4,7 +4,7 @@
 //   IMForm · IMTable · IMViewDialog · IMImportDialog
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell } from "@/components/sheet/Sheet";
-import { Check, Loader2, Download, Upload } from "lucide-react";
+import { Check, Loader2, Download, Upload, FileSpreadsheet } from "lucide-react";
 import { DuplicateShortCodesPanel } from "./DuplicateShortCodesPanel";
 import { Item } from "./itemMaster/config";
 import { useItemMaster } from "./itemMaster/useItemMaster";
@@ -18,7 +18,7 @@ const KEY_LINE =
 
 export default function ItemMaster() {
   const m = useItemMaster();
-  const { rights, data, importFileInputRef, importing, handleRenameDuplicate, handleDownloadTemplate, handleImportClick, handleImportFileChange } = m;
+  const { rights, data, importFileInputRef, importing, handleRenameDuplicate, handleDownloadTemplate, handleExport, exporting, handleImportClick, handleImportFileChange } = m;
 
   if (m.isLoading)
     return (
@@ -49,6 +49,15 @@ export default function ItemMaster() {
               onChange={handleImportFileChange}
               className="hidden"
             />
+            <button
+              onClick={handleExport}
+              disabled={exporting || !data.length}
+              title="Download every item as Excel, grouped by item group"
+              className={`${KEY_LINE} h-9 px-3`}
+            >
+              {exporting ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+              <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export"}</span>
+            </button>
             <button
               onClick={handleDownloadTemplate}
               title="Download a blank CSV with all Item Master fields"
