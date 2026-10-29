@@ -1561,11 +1561,12 @@ export function usePurchaseOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceWO, selectedFinYear]);
 
-  // ── Auto-switch doc type between PO (MR/Sale Invoice) and DPO (Direct) ───
+  // ── Auto-switch doc type: QPO (from a quotation), PO (MR/Sale Invoice), DPO (Direct) ───
   useEffect(() => {
     if (viewMode !== "create" || sourceWO) return; // WO has its own effect
     const hasMROrSI = !!(sourceMR || sourceSaleInvoice);
-    const targetPrefix = hasMROrSI ? "PO" : "DPO";
+    // A quotation-sourced PO stays QPO even when the quotation came from an MR.
+    const targetPrefix = sourceQT || qtPrefill ? "QPO" : hasMROrSI ? "PO" : "DPO";
     const target = poDocTypes.find(
       (dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix,
     );
@@ -1576,7 +1577,7 @@ export function usePurchaseOrder() {
       (docNo) => applyPoDocNumber(target.TypeOfDocId, docNo),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceMR, sourceSaleInvoice, sourceWO, viewMode, poDocTypes]);
+  }, [sourceMR, sourceSaleInvoice, sourceWO, sourceQT, qtPrefill, viewMode, poDocTypes]);
 
   // ── Line item helpers ─────────────────────────────────────────────────────
   const updateLine = (idx: number, patch: Partial<POLineItem>) => {
