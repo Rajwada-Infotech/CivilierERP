@@ -1,14 +1,14 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { isSaAdmin, isSaTeamLead, actorId, applyLeadScope } = require("../services/saAccess");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 function dateRangeFilter(req, column) {
   // Validate date format before interpolating to prevent SQL injection

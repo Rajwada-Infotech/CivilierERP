@@ -2,15 +2,15 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection, connectionMismatch } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(authMiddleware);
+const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 bumpCacheVersion("sa-social-media").catch(() => {});
 

@@ -13,6 +13,8 @@ const { parseSettings } = require("../services/integrationConnections");
 const { verifyHandshake, signatureValid, processDelivery, loadConnection } = require("../services/metaLeadWebhook");
 
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.use(rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false }));
 
 // Back to Admin → Integrations with the outcome in the address (the page shows it).

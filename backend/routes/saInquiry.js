@@ -1,14 +1,14 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET / — all inquiry calls (row-level scoped via the joined lead)
 router.get("/", requirePageRight("sa-inquiry", "view"), async (req, res) => {

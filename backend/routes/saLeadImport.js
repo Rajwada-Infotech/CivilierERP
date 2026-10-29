@@ -15,9 +15,10 @@
 const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { createLead } = require("../services/saLeadCreate");
@@ -26,7 +27,6 @@ const { autoDistribute } = require("../services/saDistributionEngine");
 const { alertAssignedMany } = require("../services/saMessaging");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const FIELD_KEYS = new Set(IMPORT_FIELDS.map((f) => f.key));
 // The source picked for the whole file — the only lead fields not taken from the columns.

@@ -1,9 +1,10 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { convertLead } = require("../services/saHandoff");
 const { applyLeadScope, actorId, isSaAdmin } = require("../services/saAccess");
@@ -47,7 +48,6 @@ async function emitNotification(pool, userId, type, title, body, refId) {
 }
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const { validateSourceChain } = require("../services/sourceChain");
 
