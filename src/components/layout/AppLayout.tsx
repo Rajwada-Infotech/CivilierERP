@@ -13,6 +13,7 @@ import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
 import { useLiveData } from "@/hooks/useLiveData";
 import { markAllStale } from "@/lib/queryClient";
 import { LoginRemindersPopup } from "@/components/LoginRemindersPopup";
+import { DirectorAlerts } from "@/components/DirectorAlerts";
 const SlowConnectionBanner = React.lazy(
   () => import("@/components/SlowConnectionBanner"),
 );
@@ -186,6 +187,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         <NavPanelAutoExpand isHome={isHome} homeNavOpen={homeNavOpen} setHomeNavOpen={setHomeNavOpen}>
           <div className="min-h-screen bg-background" data-module={activeModule ?? undefined}>
             <TopNavbar />
+            <DirectorAlerts />
 
             {/* ── Home-only toggle — the only way back to the module strip
                 from a page that otherwise renders with none at all. Once

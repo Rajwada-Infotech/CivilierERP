@@ -6,8 +6,9 @@
  *   findL1Deviations — the quotations (the PO's own SourceQTId, and any raised for its MRs) whose L1 supplier is not
  *                      the PO's supplier. L1 is worked out like the L1 chart: among suppliers who submitted a rate for
  *                      every item, the lowest total. A quotation with no such supplier has no L1 and is skipped.
- *   notifyDirectors  — tells every active user with the "director" role (bell + phone) which MR, which supplier, how
- *                      much, against which L1, and why.
+ *   notifyDirectors  — tells every active user with the "director" role which MR, which supplier, how much, against
+ *                      which L1, and why: a toast on any Civilier page they have open (socket "po:supplier-change"),
+ *                      and a push to their phones (Admin app). Not kept in the notification bell.
  *
  * MRs with no quotation, or whose quotation has no complete submission yet, are not affected: the plain MR → PO flow
  * is unchanged.
@@ -15,7 +16,8 @@
 
 const { sql } = require("../db");
 const { makeColumnProbe } = require("./columnProbe");
-const { emitNotification } = require("./notify");
+const { getIo } = require("../socket");
+const { sendToUsers } = require("./pushNotifications");
 
 const hasReasonColumn = makeColumnProbe("dbo.PurchaseOrders", "SupplierChangeReason");
 
@@ -148,9 +150,12 @@ async function notifyDirectors(pool, poId, deviations, reason) {
       ` Reason: ${String(reason || "").trim()}`
     ).slice(0, 500);
     for (const uid of directors) {
-      await emitNotification(pool, uid, "po_supplier_change", title, body, poId, "purchase_order", { push: true, apps: ["admin"] });
-      sent++;
+      try {
+        getIo().to(`user:${uid}`).emit("po:supplier-change", { title, body, poId, poNo: po.PurchaseOrderNo });
+      } catch { /* socket may not be initialised in tests */ }
     }
+    await sendToUsers(directors, { title, body, data: { type: "po_supplier_change", refId: poId, refType: "purchase_order" } }, { apps: ["admin"] });
+    sent += directors.length;
   }
   return sent;
 }
