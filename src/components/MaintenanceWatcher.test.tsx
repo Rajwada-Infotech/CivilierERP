@@ -39,6 +39,10 @@ function mount(path = "/") {
   );
 }
 
+// Let the status fetch a render starts finish inside act(), so its state update doesn't land after the test. The timers
+// are fake here and React Query hands results over on a timer, so run the clock on a little.
+const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(50); });
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-09T10:00:00Z"));
@@ -58,7 +62,8 @@ describe("MaintenanceWatcher", () => {
   it("shows nothing while maintenance is off", async () => {
     status.mockResolvedValue(off);
     mount();
-    await waitFor(() => expect(status).toHaveBeenCalled());
+    await settle();
+    expect(status).toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("overlay")).not.toBeInTheDocument();
   });
@@ -86,7 +91,8 @@ describe("MaintenanceWatcher", () => {
   it("covers the app at once when a call is refused, before the next check", async () => {
     status.mockResolvedValue(off);
     mount("/projects");
-    await waitFor(() => expect(status).toHaveBeenCalled());
+    await settle();
+    expect(status).toHaveBeenCalled();
     act(() => {
       window.dispatchEvent(new CustomEvent(MAINTENANCE_EVENT));
     });

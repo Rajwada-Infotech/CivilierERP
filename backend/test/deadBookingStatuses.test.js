@@ -13,11 +13,29 @@ describe("dead booking statuses", () => {
   });
 
   // Live-booking filters that must use the shared list, never a hand-written one.
-  const files = ["crmPayments.js", "crmSalesDeed.js", "crmPrePossession.js", "crmReports.js"];
-  const handWritten = /b\.Status NOT IN \((?![^)]*Expired)(?![^)]*Transferred)[^)]*Cancelled[^)]*\)/;
+  const files = [
+    "crmPayments.js",
+    "crmSalesDeed.js",
+    "crmPrePossession.js",
+    "crmReports.js",
+    "crmLoanSummary.js",
+    "crmApplications.js",
+    "crmCustomer360.js",
+  ];
+
   test.each(files)("%s has no booking filter that misses Expired or Transferred", (file) => {
     const src = fs.readFileSync(path.join(__dirname, "..", "routes", file), "utf8");
-    const bad = src.split("\n").filter((line) => handWritten.test(line));
+    const bad = src.split("\n").filter((line) => {
+      if (line.trim().startsWith("//") || line.trim().startsWith("--")) return false;
+      const isBookingStatus = /(b|bk|ob)\.Status\s+NOT\s+IN/i.test(line) ||
+        (/CrmBooking/i.test(line) && /Status\s+NOT\s+IN/i.test(line));
+      if (!isBookingStatus) return false;
+      if (!/Cancelled/i.test(line)) return false;
+      if (line.includes("DEAD_BOOKING_SQL")) return false;
+      const hasExpired = /Expired/i.test(line);
+      const hasTransferred = /Transferred/i.test(line);
+      return !hasExpired || !hasTransferred;
+    });
     expect(bad).toEqual([]);
   });
 });

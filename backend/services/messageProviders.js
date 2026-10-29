@@ -33,9 +33,13 @@ async function loadConfig(channel) {
 /** Which settings a channel is missing, or [] when it can send. */
 const missingFields = (channel, config) => (REQUIRED[channel] || []).filter((k) => !String(config?.[k] ?? "").trim());
 
-// Indian numbers stored as 10 digits get the 91 country code most gateways expect.
+// Gateways want the full international number without "+": an Indian mobile is stored as its
+// 10 digits (91 added here); a number from outside India is stored with its "+country code"
+// (validation/phone.js), which must not be mistaken for an Indian one however many digits it has.
 const toIntlNumber = (mobile) => {
-  const digits = String(mobile || "").replace(/\D/g, "");
+  const raw = String(mobile || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("+")) return digits;
   return digits.length === 10 ? `91${digits}` : digits;
 };
 
@@ -118,4 +122,38 @@ async function send(channel, message, { force = false } = {}) {
   }
 }
 
-module.exports = { send, loadConfig, missingFields, REQUIRED };
+// Timeline / activity channel name -> the Communicator channel whose saved provider settings send it.
+const PROVIDER_CHANNEL = { SMS: "sms", Email: "email", WhatsApp: "whatsapp" };
+
+// The setting that names who a channel sends as.
+const FROM_FIELD = { email: "fromEmail", sms: "senderId", whatsapp: "phoneNumberId" };
+
+/** Whether each channel is set up and switched on — no secrets. `ready` = it would send right now. */
+async function messagingStatus() {
+  const result = await getPool().request().query(`
+    SELECT Channel, ConfigJson, IsActive, UpdatedAt
+    FROM dbo.CommunicatorConfig
+    WHERE Channel IN ('email', 'sms', 'whatsapp')
+  `);
+  const rows = new Map(result.recordset.map((r) => [r.Channel, r]));
+  return Object.keys(REQUIRED).map((channel) => {
+    const row = rows.get(channel);
+    let config = {};
+    if (row?.IsActive) {
+      try { config = JSON.parse(row.ConfigJson || "{}"); } catch { config = {}; }
+    }
+    const missing = missingFields(channel, config);
+    return {
+      channel,
+      saved: !!row?.IsActive,
+      active: !!config.isActive,
+      missing,
+      ready: !!row?.IsActive && missing.length === 0 && !!config.isActive,
+      provider: config.provider || "",
+      from: config[FROM_FIELD[channel]] || "",
+      updatedAt: row?.UpdatedAt || null,
+    };
+  });
+}
+
+module.exports = { send, loadConfig, missingFields, messagingStatus, REQUIRED, PROVIDER_CHANNEL };

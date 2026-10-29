@@ -1,5 +1,6 @@
 // CRM Customer Bank Details: the bank, identity, income and financing details (KYC) of each approved booking. Once
 // on file they are sensitive: only the booking's assigned salesperson or an admin-tier role may change them.
+import { useCanApprove } from "@/hooks/useCanApprove";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -22,9 +23,6 @@ const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
 const BKG_API = "/api/crm/bookings";
 
-// The roles the server always lets edit (approvalService CRM_APPROVER_ROLES); everyone else must be the booking's
-// assigned salesperson. The server is the real gate; this shows the lock before a save is refused.
-const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const EMPTY_FORM = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
@@ -82,8 +80,9 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   // Editing needs the page's edit right as well as being an approver or the assigned salesperson (the server refuses
   // either way; the page used to offer Edit without the right).
-  const role = String(currentUser?.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  const isApprover = CRM_APPROVER_ROLES.includes(role);
+  // Besides the assigned salesperson, who may edit a locked record is set in
+  // Approval Setup (crm-bank-details-edit); the server is the real gate.
+  const isApprover = useCanApprove("crm-bank-details-edit");
   const isAssigned = row.AssignedTo != null && currentUser?.id != null && Number(currentUser.id) === Number(row.AssignedTo);
   const hasRight = canDoAction("crm-customer-bank-details", "edit");
   const canEdit = hasRight && (isApprover || isAssigned);

@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DateInput } from "@/components/ui/date-input";
 import { StatusBadge, getStatusClasses, getStatusLabel } from "@/components/StatusBadge";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { LeadMessageForm } from "@/components/sa/LeadMessageForm";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
 
 const ACTIVITIES_API = "/api/sa/lead-activities";
@@ -85,7 +86,7 @@ const SaFollowups: React.FC = () => {
     for (const l of untouched as any[]) {
       if (seen.has(l.Id)) continue;
       seen.add(l.Id);
-      rows.push({ LeadId: l.Id, LeadUid: l.LeadUid, CustomerName: l.CustomerName, Mobile: l.Mobile, Status: l.Status, Classification: l.Classification, days: null, overdue: true, hasReminder: false });
+      rows.push({ LeadId: l.Id, LeadUid: l.LeadUid, CustomerName: l.CustomerName, Mobile: l.Mobile, Email: l.Email, Status: l.Status, Classification: l.Classification, days: null, overdue: true, hasReminder: false });
     }
     // Never-contacted first, then most overdue, then soonest due.
     const rank = (r: any) => (r.hasReminder ? r.days ?? 0 : -100000);
@@ -259,6 +260,11 @@ const SaFollowups: React.FC = () => {
               <div className="rounded-lg border border-border p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-foreground">Log Follow-Up</h3>
                 <LeadInteractionForm leadId={selectedLeadId} variant="compact" submitLabel="Log Follow-Up" />
+              </div>
+
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Send Message</h3>
+                <LeadMessageForm leadId={selectedLeadId} mobile={selected.Mobile} email={selected.Email} />
               </div>
 
               <div className="rounded-lg border border-border overflow-hidden">

@@ -11,7 +11,7 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
 const { isMilestoneOneCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
-const { CRM_APPROVER_ROLES } = require("../services/approvalService");
+const { isApproverFor } = require("../services/approvalService");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -24,10 +24,10 @@ router.use(authMiddleware);
 // gate on top of it, mirroring the "same actor/role" reasoning already used
 // for the Booking auto-approve-on-Application-approve flow elsewhere in CRM.
 async function requireAssignedOrApprover(req, res, pool, { bookingId, applicationId }) {
-  const role = String(req.user?.role || "").trim().toLowerCase();
-  if (CRM_APPROVER_ROLES.includes(role)) return true;
-
+  // Besides the assigned salesperson, who may edit a locked record is set in
+  // Approval Setup ("crm-bank-details-edit").
   const actor = actorId(req);
+  if (await isApproverFor("crm-bank-details-edit", actor, req.user?.role)) return true;
   const query = bookingId
     ? pool.request().input("bid", sql.Int, bookingId).query("SELECT AssignedTo FROM dbo.CrmBooking WHERE Id = @bid")
     : pool.request().input("aid", sql.Int, applicationId).query("SELECT AssignedTo FROM dbo.CrmApplication WHERE Id = @aid");

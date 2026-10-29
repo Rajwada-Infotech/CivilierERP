@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { buildWorkbook, downloadBlob, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
+import { parseDelimitedAuto } from "@/lib/sheetFile";
+import { isValidPhone, PHONE_HINT } from "@/lib/phone";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -82,7 +84,7 @@ const DEFAULT_FIELDS: ImportField[] = [
   { key: "CustomerName", label: "Customer Name", required: true, category: "Identity", description: "Full legal or display name of the customer" },
   { key: "FirstName", label: "First Name (Merges to Name)", category: "Identity", description: "First name to auto-combine into Customer Name" },
   { key: "LastName", label: "Last Name (Merges to Name)", category: "Identity", description: "Last name to auto-combine into Customer Name" },
-  { key: "Mobile", label: "Mobile", category: "Contact", description: "Primary 10-digit mobile number used for lookup & uniqueness" },
+  { key: "Mobile", label: "Mobile", category: "Contact", description: "Primary mobile used for lookup & uniqueness — 10-digit Indian, or with its country code (+971…)" },
   { key: "AltMobile", label: "Alternate Mobile", category: "Contact", description: "Secondary phone or emergency contact number" },
   { key: "Email", label: "Email", category: "Contact", description: "Primary email address" },
   { key: "PanNo", label: "PAN", category: "Identity", description: "10-character PAN card number (AAAAA9999A)" },
@@ -200,43 +202,6 @@ function excelCol(i: number) {
     n = Math.floor((n - 1) / 26);
   }
   return out;
-}
-
-// ── Delimited Text Parsing (CSV / TSV / Clipboard) ───────────────────────────
-
-function parseDelimited(text: string, delimiter: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-    if (quoted) {
-      if (ch === '"' && next === '"') { cell += '"'; i++; }
-      else if (ch === '"') quoted = false;
-      else cell += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === delimiter) { row.push(cell); cell = ""; }
-    else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
-    else if (ch !== "\r") cell += ch;
-  }
-  row.push(cell);
-  if (row.some((v) => v.trim() !== "")) rows.push(row);
-  return rows;
-}
-
-function parseDelimitedAuto(text: string): { rows: string[][]; delimiter: string } {
-  const cleanText = text.replace(/^\uFEFF/, "");
-  const sample = cleanText.split(/\r?\n/).slice(0, 20).join("\n");
-  const delimiters = ["\t", ",", ";", "|"];
-  const scored = delimiters.map((delimiter) => {
-    const rows = parseDelimited(sample, delimiter).filter((r) => r.length > 1);
-    const cols = rows.reduce((sum, r) => sum + r.length, 0);
-    return { delimiter, score: rows.length * 10 + cols };
-  }).sort((a, b) => b.score - a.score);
-  const delimiter = scored[0]?.score > 0 ? scored[0].delimiter : ",";
-  return { rows: parseDelimited(cleanText, delimiter), delimiter };
 }
 
 // ── Smart Header Detection ───────────────────────────────────────────────────
@@ -997,14 +962,13 @@ export function CrmCustomerImportDialog({
     const updatedRows = preview.rows.map((r) => {
       if (r.rowNo === editingRow.rowNo) {
         const nameValid = !!updatedData.CustomerName?.trim();
-        const mobClean = (updatedData.Mobile || "").replace(/\D/g, "");
-        const mobValid = !mobClean || mobClean.length === 10;
+        const mobValid = isValidPhone(updatedData.Mobile);
         const panClean = (updatedData.PanNo || "").toUpperCase().trim();
         const panValid = !panClean || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panClean);
 
         const newErrors = [];
         if (!nameValid) newErrors.push("Customer Name missing");
-        if (!mobValid) newErrors.push("Mobile must be 10 digits");
+        if (!mobValid) newErrors.push(`Mobile must be ${PHONE_HINT}`);
         if (!panValid) newErrors.push("PAN format must be AAAAA9999A");
 
         return {

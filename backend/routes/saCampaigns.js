@@ -9,7 +9,6 @@ const { bumpCacheVersion } = require("../redis");
 const { getNextDocNumber } = require("../services/docNumber");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

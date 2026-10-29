@@ -1,7 +1,7 @@
 // A workflow's levels: adding one, and each level as a card.
 import { useState, useRef, useEffect } from "react";
 import { type User } from "@/api/userApi";
-import { Pencil, Trash2, ChevronUp, ChevronDown, X, Check, Users, GitBranch, AlertCircle } from "lucide-react";
+import { Pencil, Trash2, ChevronUp, ChevronDown, X, Check, Users, GitBranch, AlertCircle, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -12,12 +12,15 @@ import { UserMultiSelect } from "./UserMultiSelect";
 
 export function AddLevelRow({
   users,
+  roleNames,
   levelNumber,
   onConfirm,
   onCancel,
   initial,
 }: {
   users: User[];
+  /** Every role in Role Master, for the "Everyone with the role" picker. */
+  roleNames: string[];
   levelNumber: number;
   onConfirm: (level: Omit<ApprovalLevel, "id">) => void;
   onCancel: () => void;
@@ -27,7 +30,13 @@ export function AddLevelRow({
   const isEdit = !!initial;
   const [label, setLabel] = useState(initial?.label ?? "");
   const [userIds, setUserIds] = useState<number[]>(initial?.userIds ?? []);
+  const [roles, setRoles] = useState<string[]>(initial?.roles ?? []);
   const [mode, setMode] = useState<"any" | "all">(initial?.mode ?? "any");
+  const sameRole = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const toggleRole = (r: string) =>
+    setRoles((prev) => (prev.some((x) => sameRole(x, r)) ? prev.filter((x) => !sameRole(x, r)) : [...prev, r]));
+  // A stored role that is no longer in Role Master still shows, so it can be removed.
+  const roleChoices = [...roleNames, ...roles.filter((r) => !roleNames.some((n) => sameRole(n, r)))];
   const labelRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -39,7 +48,7 @@ export function AddLevelRow({
       labelRef.current?.focus();
       return;
     }
-    onConfirm({ label: label.trim(), userIds, mode });
+    onConfirm({ label: label.trim(), userIds, roles, mode });
   }
 
   return (
@@ -74,13 +83,34 @@ export function AddLevelRow({
 
         <div>
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-            Who can approve at this step?
+            These people can approve
           </label>
           <UserMultiSelect
             value={userIds}
             onChange={setUserIds}
             users={users}
           />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+            …and everyone with these roles
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {roleChoices.map((r) => {
+              const on = roles.some((x) => sameRole(x, r));
+              return (
+                <button key={r} type="button" onClick={() => toggleRole(r)} aria-pressed={on}
+                  className={cn("px-2 py-1 text-[0.6875rem] border transition-colors",
+                    on ? "border-foreground bg-foreground text-card" : "border-foreground/25 text-muted-foreground hover:border-foreground")}>
+                  {r}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
+            Anyone who holds a ticked role can approve this step, including people given the role later.
+          </p>
         </div>
 
         {userIds.length > 1 && (
@@ -214,10 +244,18 @@ export function LevelCard({
             )}
           </div>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            {levelUsers.length === 0 ? (
-              <span className="inline-flex items-center gap-1 text-[0.6875rem] text-foreground border border-dashed border-foreground/50 px-2 py-0.5">
-                <AlertCircle className="w-3 h-3" /> No one assigned yet
+            {(level.roles ?? []).map((r) => (
+              <span key={`role-${r}`} className="inline-flex items-center gap-1 px-2 py-0.5 text-[0.6875rem] border border-foreground/50 text-foreground"
+                title={`Everyone with the ${r} role`}>
+                <ShieldCheck className="w-3 h-3" /> {r}
               </span>
+            ))}
+            {levelUsers.length === 0 ? (
+              !(level.roles ?? []).length && (
+                <span className="inline-flex items-center gap-1 text-[0.6875rem] text-foreground border border-dashed border-foreground/50 px-2 py-0.5">
+                  <AlertCircle className="w-3 h-3" /> No one assigned yet
+                </span>
+              )
             ) : (
               levelUsers.map((u) => (
                 <span

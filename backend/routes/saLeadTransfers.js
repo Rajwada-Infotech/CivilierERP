@@ -4,9 +4,9 @@ const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin, applyLeadScope } = require("../services/saAccess");
+const { alertAssignedMany } = require("../services/saMessaging");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -235,6 +235,7 @@ router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async
 
       await tx.commit();
       res.json({ message: `${items.recordset.length} lead(s) transferred successfully` });
+      alertAssignedMany(pool, items.recordset.map((i) => ({ leadId: i.LeadId, userId: tfReq.ToTeamLeadId })));
     } catch (innerErr) {
       await tx.rollback();
       throw innerErr;

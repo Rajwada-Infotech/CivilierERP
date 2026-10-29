@@ -28,7 +28,6 @@
 // the stage field + log + remarks here and let that engine stamp the audit
 // trail in ApprovalAuditLog exactly like every other approve in the app.
 const { sql } = require("../db");
-const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 const { transition: approvalTransition } = require("./approvalService");
 const { ensureChecklistRows } = require("./crmApplicationChecklist");
 const { ensurePortalUser } = require("./crmPortalProvision");
@@ -40,16 +39,13 @@ const STAGE_CONFIRMED = "Confirmed";
 
 const WORKFLOW_STAGES = [STAGE_REVIEW, STAGE_MARKETING, STAGE_DIRECTOR, STAGE_CONFIRMED];
 
-// Who may act at each stage comes from Approval Setup: the "crm-bookings"
-// workflow's Level 1 is Marketing Head, Level 2 is Director, and a user may
-// act at a stage when their role is on that level OR they are named on it.
-// These role sets are only the fallback for a database with no workflow
-// configured (or a level with neither roles nor people set).
+// Who may act at each stage comes only from Approval Setup: the
+// "crm-bookings" workflow's Level 1 is Marketing Head, Level 2 is Director,
+// and a user may act at a stage when that level names their role or them.
 const STAGE_LEVEL = { MarketingHeadApproval: 1, DirectorApproval: 2 };
-const STAGE_ROLES = {
-  [STAGE_MARKETING]: ["admin", "super_admin", "marketing_head"],
-  [STAGE_DIRECTOR]: ["admin", "super_admin", "director"],
-};
+// The booking flow has two approval stages, so Approval Setup must define
+// at least that many levels (a structural need of this flow, not a setting).
+const MIN_APPROVAL_LEVELS = Object.keys(STAGE_LEVEL).length;
 
 // Human labels for UI badges / banners / logs.
 const STAGE_LABELS = {
@@ -137,26 +133,15 @@ async function getStageState(pool, bookingId, viewer = null) {
   };
 }
 
-// Role gate used by the routes: the passed role may approve at the given
-// stage if it is the stage's own role set. super_admin is included on both
-// stages as the parallel approver.
+// May this user act at the given stage? Decided only by the crm-bookings
+// workflow's matching level in Approval Setup (its roles or named people).
 async function canApproveStage(role, stage, userId = null) {
   const level = STAGE_LEVEL[stage];
   if (!level) return false;
-  const r = String(role || "").toLowerCase();
-  // admin / super_admin hold every right: they may act at any stage.
-  if (r === "admin" || r === "super_admin") return true;
-  let def = null;
-  try {
-    const wf = await require("./approvalService").getWorkflow("crm-bookings");
-    def = wf?.LevelDefs?.[level - 1] || null;
-  } catch (_) { /* no workflow table / row: fall back below */ }
-  const roles = Array.isArray(def?.roles) ? def.roles.map((x) => String(x).toLowerCase()) : [];
-  const users = Array.isArray(def?.userIds) ? def.userIds.map(Number) : [];
-  if (roles.length || users.length) {
-    return roles.includes(r) || (userId != null && users.includes(Number(userId)));
-  }
-  return (STAGE_ROLES[stage] || []).includes(r);
+  const { getWorkflow, userMatchesLevel } = require("./approvalService");
+  const wf = await getWorkflow("crm-bookings").catch(() => null);
+  const def = wf?.LevelDefs?.[level - 1];
+  return !!def && userMatchesLevel(def, role, userId);
 }
 
 // Shared guard: a booking must be live (not Cancelled/Rejected) and
@@ -183,8 +168,7 @@ async function requireActiveStage(pool, bookingId, stage) {
 
 // Staff "Submit for Approval" — Review -> MarketingHeadApproval. Two gates:
 // all 7 data-review checklist items (KYC, Project/Unit/Rate, Payment Plan,
-// Bank/Deposit, Broker, Source, Documents) must be Checked, and the Booking
-// Amount (Milestone #1) must be fully paid. ProjectUnitRate and
+// Bank/Deposit, Broker, Source, Documents) must be Checked, and the checklist must be complete. ProjectUnitRate and
 // PaymentPlanAmounts being Checked already IS "Unit/Rate/Value confirmed"
 // and "Payment Plan confirmed" — the old separate
 // UnitReviewConfirmed/PlanReviewConfirmed columns asserted the exact same
@@ -218,18 +202,6 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   // Same rule as checkBookingApprovalReadiness (crmBookings.js): never into approval at ₹0.
   if (!(Number(chk.TotalValue) > 0)) {
     throw Object.assign(new Error("Total value is ₹0 — set the rate (and the unit's saleable area) before sending for approval"), { status: 400 });
-  }
-
-  const m1 = await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .query(`SELECT TOP 1 AmountPaid, AmountDue, Status 
-            FROM dbo.CrmPaymentMilestone 
-            WHERE BookingId = @bid AND MilestoneNo = 1
-              AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
-            ORDER BY Id`);
-  const milestone1 = m1.recordset[0];
-  if (!milestone1 || (milestone1.Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
-    throw Object.assign(new Error("Milestone 1 (token payment) must be paid before submitting for approval"), { status: 400 });
   }
 
   const tx = pool.transaction();
@@ -272,15 +244,28 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     throw e;
   }
 
+  // Refuse BEFORE anything is recorded when Approval Setup has fewer levels
+  // than the booking flow needs. approvalTransition treats a missing
+  // workflow as one level and would flip Status to Approved on the first
+  // click (how production bookings 1/4/5 were approved on 22-25 Sep 2026,
+  // before the crm-bookings workflow existed).
+  const workflow = await require("./approvalService").getWorkflow("crm-bookings").catch(() => null);
+  const configuredLevels = workflow ? (workflow.Levels || workflow.LevelDefs?.length || 0) : 0;
+  if (configuredLevels < MIN_APPROVAL_LEVELS) {
+    const e = new Error(
+      `Booking approval needs ${MIN_APPROVAL_LEVELS} levels in Approval Setup (Marketing Head, then Director); `
+      + `it has ${configuredLevels}. Ask an admin to set it up before approving.`,
+    );
+    e.status = 409;
+    throw e;
+  }
+
   // Let the generic engine advance the ApprovalAuditLog level (level 1 for
   // Marketing Head, level 2 for Director) and enforce the seeded
   // ApprovalWorkflows LevelData. On the final level it flips Status to
   // Approved — which is exactly our "Confirmed".
   const result = await approvalTransition("crm-bookings", bookingId, "Approved", userEmail, userRole, null, userId);
 
-  // Require at least 2 approval levels (Marketing Head + Director) before confirming.
-  // A misconfigured 1-level workflow must never bypass Director approval.
-  const MIN_APPROVAL_LEVELS = 2;
   const confirmedNow = result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
   // nextStage is derived from the level approvalTransition ACTUALLY just
   // recorded (result.level), never from the `stage` parameter this request

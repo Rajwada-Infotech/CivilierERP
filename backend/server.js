@@ -11,6 +11,7 @@ const compression = require("compression");
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
 const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
+const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const { startPoPaymentReminderEngine } = require("./services/poPaymentReminders");
 const authMiddleware = require("./middleware/auth");
@@ -317,6 +318,7 @@ const ALL_ROUTES = [
   { path: "/api/personal-vault", file: "./routes/personalVault" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
+  { path: "/api/integrations/partner-keys", file: "./routes/partnerApiKeys" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },
   { path: "/api/menu-master", file: "./routes/menuMaster" },
   { path: "/api/menu-type", file: "./routes/menuType" },
@@ -337,6 +339,7 @@ const ALL_ROUTES = [
   { path: "/api/sa/campaigns", file: "./routes/saCampaigns" },
   { path: "/api/sa/ads", file: "./routes/saAds" },
   { path: "/api/sa/leads", file: "./routes/saLeads" },
+  { path: "/api/sa/lead-import", file: "./routes/saLeadImport" },
   { path: "/api/sa/channel-partners", file: "./routes/saChannelPartners" },
   { path: "/api/sa/lead-activities", file: "./routes/saLeadActivities" },
   { path: "/api/sa/lead-tasks", file: "./routes/saLeadTasks" },
@@ -430,7 +433,13 @@ async function createApp() {
     next();
   });
 
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({
+    limit: "10mb",
+    // Meta signs its lead deliveries over the exact bytes sent — keep them for that check only.
+    verify: (req, _res, buf) => {
+      if (req.originalUrl.startsWith("/api/public/integrations/meta-leads/")) req.rawBody = buf;
+    },
+  }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
   // Any successful write anywhere (staff or customer portal) drops every { dropOnAnyWrite } cache — see
   // middleware/writeInvalidator.js.
@@ -596,6 +605,11 @@ async function createApp() {
   // including login itself — was rejected with "No token provided" before
   // crmPortal.js's own router ever ran.
   app.use("/api/crm-portal", require("./routes/crmPortal"));
+  // Channel partners' systems push leads with an API key (Admin → Integrations),
+  // never a staff login — so it sits before the staff auth wall like the portal.
+  app.use("/api/public/partner-leads", require("./routes/publicPartnerLeads"));
+  // Meta / Google call these: the "Connect" sign-in callback and instant Meta lead-form leads.
+  app.use("/api/public/integrations", require("./routes/publicIntegrations"));
 
   // Active user tracking — runs after auth on all /api routes
   app.use("/api", authMiddleware, (req, res, next) => {
@@ -731,6 +745,7 @@ async function startServer() {
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
       startFollowupReminderEngine();
+      startSiteVisitReminderEngine();
       startAutoDepreciationEngine();
       startPoPaymentReminderEngine();
     });

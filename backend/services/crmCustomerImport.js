@@ -7,6 +7,7 @@
 
 const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
+const { normalizePhone } = require("../validation/phone");
 
 const MAX_ROWS = 2500;
 
@@ -93,16 +94,16 @@ function expandNumber(s) {
   return val;
 }
 
+// The customer form's phone rule (validation/phone.js): an Indian mobile as 10 digits, a number
+// from outside India as "+<country code><number>". A value it can't read is returned as typed,
+// so phoneOk() reports it.
 function cleanMobile(raw) {
-  let s = expandNumber(str(raw));
+  const s = expandNumber(str(raw));
   if (!s) return "";
-  s = s.replace(/[\s\-().]/g, "");
-  if (s.startsWith("+91")) s = s.slice(3);
-  else if (s.startsWith("0091")) s = s.slice(4);
-  else if (/^91\d{10}$/.test(s)) s = s.slice(2);
-  else if (/^0\d{10}$/.test(s)) s = s.slice(1);
-  return s;
+  const r = normalizePhone(s);
+  return r.error ? s.replace(/[\s\-().]/g, "") : r.value;
 }
+const phoneOk = (v) => !normalizePhone(v).error;
 
 const cleanDigits = (raw) => expandNumber(str(raw)).replace(/[\s\-]/g, "");
 const cleanPan = (raw) => str(raw).replace(/\s/g, "").toUpperCase();
@@ -216,15 +217,14 @@ function cleanRow(cells) {
   if (d.Mobile) {
     if (/e\+/i.test(d.Mobile)) {
       errors.push(`Mobile "${c.Mobile}" was truncated by Excel's scientific notation — format column as Text and re-enter`);
-    } else if (!/^\d{10}$/.test(d.Mobile)) {
-      // Same rule as the customer form: a 10-digit Indian mobile.
-      errors.push(`Mobile "${c.Mobile}" is not a valid 10-digit number`);
+    } else if (!phoneOk(d.Mobile)) {
+      errors.push(`Mobile "${c.Mobile}" is not a valid number — a 10-digit Indian mobile, or one with its country code (e.g. +971 50 123 4567)`);
     }
   }
 
   d.AltMobile = cleanMobile(rawAlt);
-  if (d.AltMobile && !/^\d{10}$/.test(d.AltMobile)) {
-    errors.push(`Alternate Mobile "${c.AltMobile}" is not a valid 10-digit number`);
+  if (d.AltMobile && !phoneOk(d.AltMobile)) {
+    errors.push(`Alternate Mobile "${c.AltMobile}" is not a valid number`);
   }
   if (d.AltMobile && d.AltMobile === d.Mobile) {
     warnings.push("Alternate Mobile is identical to Mobile — omitted duplicate");
@@ -249,7 +249,7 @@ function cleanRow(cells) {
   // Co-Applicant fields
   d.CoApplicantName = c.CoApplicantName || "";
   d.CoApplicantMobile = cleanMobile(c.CoApplicantMobile);
-  if (d.CoApplicantMobile && !/^\d{10}$/.test(d.CoApplicantMobile)) {
+  if (d.CoApplicantMobile && !phoneOk(d.CoApplicantMobile)) {
     errors.push(`Co-Applicant Mobile "${c.CoApplicantMobile}" is not a valid number`);
   }
   {

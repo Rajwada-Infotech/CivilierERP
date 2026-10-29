@@ -1,6 +1,8 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { cleanPhoneFields } = require("../validation/phone");
+const PHONE_LABELS = { Mobile: "Mobile", AltMobile: "Alternate mobile" };
 const router = express.Router();
 // Project access: a customer opens only if one of their applications is in the user's projects.
 router.param("id", require("../services/projectScope").crmCustomerGuard);
@@ -384,7 +386,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const { customerCreateSchema } = require("../validation/crmBookingSchemas");
     const parsed = customerCreateSchema.safeParse(b || {});
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request body" });
     }
 
     // Server-side requiredness for Customer Name — the frontend already
@@ -396,6 +398,9 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     // and CrmCustomer.Mobile / CrmApplication.Mobile are both nullable to
     // match (migrations 425 and 445).
     if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+    // Stored the one way (validation/phone.js) so the duplicate check below finds the same number however it was typed.
+    const phoneError = cleanPhoneFields(b, PHONE_LABELS);
+    if (phoneError) return res.status(400).json({ error: phoneError });
 
 
     if (b.Mobile?.trim()) {
@@ -473,6 +478,8 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
+    const phoneError = cleanPhoneFields(b, PHONE_LABELS);
+    if (phoneError) return res.status(400).json({ error: phoneError });
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);
     // GSTIN: changed only when the form sends it ("" clears it); checked

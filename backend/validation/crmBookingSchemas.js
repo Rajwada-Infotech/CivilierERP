@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { normalizePhone } = require("./phone");
 
 // Shared helper: treat empty string / null as "not provided"
 const emptyToUndef = (schema) =>
@@ -36,11 +37,12 @@ const bulkDemandSchema = z.object({
 // POST /api/crm/customers — create customer
 const customerCreateSchema = z.object({
   CustomerName: z.string().trim().min(1, "Customer name is required"),
+  // Indian mobile, or a number from outside India with its country code (validation/phone.js).
   Mobile:       emptyToUndef(
-    z.string().regex(/^\d{10}$/, "Mobile must be exactly 10 digits")
+    z.string().superRefine((v, ctx) => { const r = normalizePhone(v, "Mobile"); if (r.error) ctx.addIssue({ code: "custom", message: r.error }); })
   ),
   AltMobile:    emptyToUndef(
-    z.string().regex(/^\d{10}$/, "Alt mobile must be exactly 10 digits")
+    z.string().superRefine((v, ctx) => { const r = normalizePhone(v, "Alt mobile"); if (r.error) ctx.addIssue({ code: "custom", message: r.error }); })
   ),
   Email:        emptyToUndef(z.string().email("Invalid email address")),
   AadhaarNo:    emptyToUndef(z.string().max(20)),

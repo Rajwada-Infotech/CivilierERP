@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -35,11 +36,6 @@ const EMPTY_BANK = {
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
 };
 
-// Same approver set as CRM_APPROVER_ROLES on the backend (services/
-// approvalService.js) — kept in sync manually since it's a small, stable
-// list, same pattern CrmCustomerBankDetails.tsx already uses for its own
-// frontend-side permission preview.
-const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const TABS = ["Booking", "Parking & Extra Charges", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
@@ -120,8 +116,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const qc = useQueryClient();
   usePageRights("crm-bookings");
   const { canDoAction, currentUser } = useAuth();
-  const isAmendmentApprover = AMENDMENT_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase())
-    || canDoAction("approval-inbox" as any, "edit");
+  // Who approves amendments is set in Approval Setup (crm-booking-amendment).
+  const isAmendmentApprover = useCanApprove("crm-booking-amendment");
   const canEdit = canDoAction("crm-bookings", "edit");
   const navigate = useNavigate();
   const canRaiseDemand = canDoAction("crm-payments", "edit");

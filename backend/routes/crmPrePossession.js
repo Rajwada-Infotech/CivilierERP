@@ -133,12 +133,10 @@ router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res)
 router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const cancelled = CrmStatus.CANCELLED;
-    const rejected  = CrmStatus.REJECTED;
 
     const bindConds = (request) => [
       "b.IsActive = 1",
-      "b.Status NOT IN ('" + cancelled + "', '" + rejected + "', 'Expired')",
+      "b.Status NOT IN " + DEAD_BOOKING_SQL,
       "NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
       // A user limited to some projects sees only their bookings (this list and its counts used to show every project's).
       ...(req.projectScope ? [require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()] : []),
@@ -234,8 +232,6 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
 router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const cancelled = CrmStatus.CANCELLED;
-    const rejected  = CrmStatus.REJECTED;
     const q = [
       "SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName",
       "FROM dbo.CrmBooking b",
@@ -243,8 +239,7 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
       "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
       "WHERE b.IsActive = 1",
-      "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "', 'Expired', 'Transferred')",
-      req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId") : "",
+      "  AND b.Status NOT IN " + DEAD_BOOKING_SQL,
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
       // Only the user's own projects can start a check (every project's bookings used to be offered).
       require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId"),

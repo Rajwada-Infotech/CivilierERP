@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({ user: { id: "u1", role: "super_admin" } }));
@@ -37,6 +37,9 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 import { CompassProvider } from "./CompassProvider";
+
+// Let the fetches a render starts finish inside act(), so their state updates don't land after the test.
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 // jsdom lacks these; cmdk and Radix expect them.
 beforeAll(() => {
@@ -147,13 +150,16 @@ describe("Compass hotkeys", () => {
     expect(isOpen()).toBe(true); // still open, not toggled closed again
   });
 
-  it("prevents the browser default so Enter+Space doesn't also submit a form or scroll", () => {
+  it("prevents the browser default so Enter+Space doesn't also submit a form or scroll", async () => {
     mount();
     const kdEnter = new KeyboardEvent("keydown", { code: "Enter", key: "Enter", cancelable: true, bubbles: true });
-    window.dispatchEvent(kdEnter);
     const kdSpace = new KeyboardEvent("keydown", { code: "Space", key: " ", cancelable: true, bubbles: true });
-    window.dispatchEvent(kdSpace);
+    act(() => {
+      window.dispatchEvent(kdEnter);
+      window.dispatchEvent(kdSpace);
+    });
     expect(kdSpace.defaultPrevented).toBe(true);
+    await settle(); // the palette it opens finishes animating in
   });
 });
 

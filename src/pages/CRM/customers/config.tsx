@@ -2,6 +2,7 @@
 // leads pool, and the sheet styles.
 import React from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { isValidPhone, PHONE_HINT } from "@/lib/phone";
 
 export const API = "/api/crm/customers";
 
@@ -35,8 +36,8 @@ export const IDENTITY_FIELDS: { key: keyof CustomerForm; label: string; type: st
 export function checkCustomer(f: Partial<CustomerForm>): string | null {
   const s = (v: unknown) => String(v ?? "").trim();
   if (!s(f.CustomerName)) return "Enter the customer's name.";
-  if (s(f.Mobile) && !/^\d{10}$/.test(s(f.Mobile))) return "Mobile must be exactly 10 digits.";
-  if (s(f.AltMobile) && !/^\d{10}$/.test(s(f.AltMobile))) return "Alternate mobile must be exactly 10 digits.";
+  if (!isValidPhone(s(f.Mobile))) return `Mobile must be ${PHONE_HINT}.`;
+  if (!isValidPhone(s(f.AltMobile))) return `Alternate mobile must be ${PHONE_HINT}.`;
   if (s(f.PanNo) && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(s(f.PanNo).toUpperCase())) return "PAN must look like ABCDE1234F.";
   if (s(f.GstNo) && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$/.test(s(f.GstNo).replace(/\s+/g, "").toUpperCase())) return "GSTIN must be 15 characters, like 27AAPFU0939F1ZV.";
   if (s(f.AadhaarNo) && !/^\d{12}$/.test(s(f.AadhaarNo))) return "Aadhaar must be exactly 12 digits.";

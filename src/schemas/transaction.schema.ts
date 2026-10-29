@@ -10,8 +10,8 @@ export const TransactionStatusSchema = z.enum([
 ]);
 
 export const BaseTransactionSchema = z.object({
-  companyId: z.union([z.string(), z.number()], { error: (iss) => (iss.input === undefined ? "Company is required" : undefined) }),
-  projectId: z.union([z.string(), z.number()], { error: (iss) => (iss.input === undefined ? "Project is required" : undefined) }),
+  companyId: z.union([z.string(), z.number()], { message: "Company is required" }),
+  projectId: z.union([z.string(), z.number()], { message: "Project is required" }),
   tenure: z.string().optional().describe("Financial Year"),
   docNumber: z.string().optional(),
   docTypeId: z.union([z.string(), z.number()]).optional(),
@@ -35,7 +35,7 @@ export const BaseTransactionSchema = z.object({
 });
 
 export const PaymentPayloadSchema = BaseTransactionSchema.extend({
-  supplierId: z.union([z.string(), z.number()], { error: (iss) => (iss.input === undefined ? "Supplier is required" : undefined) }),
+  supplierId: z.union([z.string(), z.number()], { message: "Supplier is required" }),
   bankId: z.union([z.string(), z.number()]).optional(),
   amount: z.number().positive("Amount must be greater than zero"),
 });

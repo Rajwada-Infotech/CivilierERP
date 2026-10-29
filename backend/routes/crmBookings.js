@@ -494,7 +494,7 @@ router.post("/", requirePageRight("crm-bookings", "create"), async (req, res) =>
   // Validate the request body up-front so downstream code never sees garbage.
   const { bookingCreateSchema } = require("../validation/crmBookingSchemas");
   const parse = bookingCreateSchema.safeParse(req.body);
-  if (!parse.success) return res.status(400).json({ error: parse.error.errors[0]?.message || "Invalid request" });
+  if (!parse.success) return res.status(400).json({ error: parse.error.issues[0]?.message || "Invalid request" });
   try {
     const pool = getPool();
     // If this booking is being created from an application, verify the
@@ -1161,7 +1161,8 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     res.json({ success: true, ...stageResult, mrWarning });
   } catch (e) {
     console.error("[crm-bookings] ready-for-approval error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    const status = e.status && typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status : 500;
+    res.status(status).json({ error: e.message || "An internal error occurred. Please try again later." });
   }
 });
 

@@ -4,7 +4,22 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
-const { send: sendMessage, missingFields } = require("../services/messageProviders");
+const { send: sendMessage, messagingStatus } = require("../services/messageProviders");
+const { CONNECTION_PROVIDERS } = require("../services/saAdPlatformService");
+const { testConnection, parseSettings, providerOf } = require("../services/integrationConnections");
+const { startUrl } = require("../services/integrationOAuth");
+const { turnOn: turnOnInstantLeads } = require("../services/metaLeadWebhook");
+const { isOriginAllowed } = require("../config/origins");
+
+// A URL the browser sent us to hand to Meta / Google: must be one of our own origins.
+const ownUrl = (value) => {
+  try {
+    const u = new URL(String(value || ""));
+    return /^https?:$/.test(u.protocol) && isOriginAllowed(u.origin) ? u.toString() : null;
+  } catch {
+    return null;
+  }
+};
 
 
 router.use(authMiddleware);
@@ -12,18 +27,27 @@ router.use(apiRateLimit);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const superAdminOnly = allowRoles("super_admin");
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-const parseConfigJson = (value) => {
-  if (!value) return {};
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
-  }
-};
-
 // ─── Channel management CRUD (super_admin only) ──────────────────────────────
+
+// Every channel column the browser may see — credentials only as Has* flags, never the values.
+const CHANNEL_COLUMNS = `
+  Id, ChannelKey, Label, Description, SortOrder, IsActive, UpdatedAt, UpdatedBy,
+  Provider, TokenExpiresAt, LastTestAt, LastTestOk, LastTestMessage, SettingsJson,
+  WebhookOnAt, LastWebhookAt, LastWebhookOk, LastWebhookMessage, WebhookLeads,
+  CASE WHEN LEN(AccessToken) > 0 THEN 1 ELSE 0 END AS HasAccessToken,
+  CASE WHEN LEN(RefreshToken) > 0 THEN 1 ELSE 0 END AS HasRefreshToken`;
+
+// SettingsJson may hold secrets (e.g. an OAuth client secret): plain settings are shown,
+// secret ones only as "saved".
+const publicChannel = ({ SettingsJson, ...c }) => {
+  const saved = parseSettings(SettingsJson);
+  const defs = providerOf(c.Provider)?.settings ?? [];
+  return {
+    ...c,
+    Settings: Object.fromEntries(defs.filter((d) => !d.secret).map((d) => [d.key, saved[d.key] || ""])),
+    SavedSecrets: defs.filter((d) => d.secret && saved[d.key]).map((d) => d.key),
+  };
+};
 
 /**
  * GET /api/communicator/channels
@@ -33,7 +57,7 @@ router.get("/channels", superAdminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, ChannelKey, Label, Description, SortOrder, IsActive, UpdatedAt, UpdatedBy
+      SELECT ${CHANNEL_COLUMNS}
       FROM dbo.IntegrationChannels
       ORDER BY SortOrder ASC
     `);
@@ -49,7 +73,10 @@ router.get("/channels", superAdminOnly, async (req, res) => {
       .catch(() => ({ recordset: [] }));
     const usedBy = new Map();
     for (const r of usage.recordset) usedBy.set(r.ApiConfigId, [...(usedBy.get(r.ApiConfigId) || []), r.Name]);
-    res.json({ channels: result.recordset.map((c) => ({ ...c, UsedBy: usedBy.get(c.Id) || [] })) });
+    res.json({
+      channels: result.recordset.map((c) => ({ ...publicChannel(c), UsedBy: usedBy.get(c.Id) || [] })),
+      providers: CONNECTION_PROVIDERS,
+    });
   } catch (err) {
     console.error("ERROR in GET /communicator/channels:", err);
     res.status(500).json({ error: err.message });
@@ -103,11 +130,11 @@ router.post("/channels", superAdminOnly, async (req, res) => {
       .input("UpdatedBy",   sql.NVarChar(100), String(updatedBy))
       .query(`
         INSERT INTO dbo.IntegrationChannels (ChannelKey, Label, Description, SortOrder, IsActive, CreatedAt, UpdatedAt, UpdatedBy)
-        OUTPUT INSERTED.*
-        VALUES (@Key, @Label, @Description, @SortOrder, 1, GETDATE(), GETDATE(), @UpdatedBy)
+        VALUES (@Key, @Label, @Description, @SortOrder, 1, GETDATE(), GETDATE(), @UpdatedBy);
+        SELECT ${CHANNEL_COLUMNS} FROM dbo.IntegrationChannels WHERE Id = SCOPE_IDENTITY();
       `);
 
-    res.status(201).json({ channel: result.recordset[0] });
+    res.status(201).json({ channel: publicChannel(result.recordset[0]) });
   } catch (err) {
     console.error("ERROR in POST /communicator/channels:", err);
     res.status(500).json({ error: err.message });
@@ -149,16 +176,133 @@ router.put("/channels/:id", superAdminOnly, async (req, res) => {
           UpdatedAt   = GETDATE(),
           UpdatedBy   = @UpdatedBy
         WHERE Id = @Id;
-        SELECT * FROM dbo.IntegrationChannels WHERE Id = @Id;
+        SELECT ${CHANNEL_COLUMNS} FROM dbo.IntegrationChannels WHERE Id = @Id;
       `);
 
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: "Channel not found" });
     }
-    res.json({ channel: result.recordset[0] });
+    res.json({ channel: publicChannel(result.recordset[0]) });
   } catch (err) {
     console.error("ERROR in PUT /communicator/channels/:id:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PUT /api/communicator/channels/:id/credentials
+ * Makes the channel a Meta / Google connection. A blank token keeps the saved one.
+ * Body: { provider, accessToken?, refreshToken?, tokenExpiresAt?, settings?: { <provider setting>: value } }
+ */
+router.put("/channels/:id/credentials", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  const b = req.body || {};
+  const provider = String(b.provider || "").trim();
+  const providerDef = providerOf(provider);
+  if (!providerDef) {
+    return res.status(400).json({ error: `Provider must be one of: ${CONNECTION_PROVIDERS.map((p) => p.label).join(", ")}` });
+  }
+  const text = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const updatedBy = req.user?.name || req.user?.email || req.user?.userId || "system";
+
+  try {
+    const pool = getPool();
+    const cur = await pool.request().input("Id", sql.Int, id).query("SELECT SettingsJson FROM dbo.IntegrationChannels WHERE Id = @Id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Channel not found" });
+    const settings = parseSettings(cur.recordset[0].SettingsJson);
+    // A blank secret keeps the saved one; a blank plain setting clears it.
+    for (const d of providerDef.settings) {
+      const v = text(b.settings?.[d.key]);
+      if (v) settings[d.key] = v;
+      else if (!d.secret && b.settings && d.key in b.settings) delete settings[d.key];
+    }
+
+    const result = await pool.request()
+      .input("Id", sql.Int, id)
+      .input("Provider", sql.NVarChar(30), provider)
+      .input("AccessToken", sql.NVarChar(sql.MAX), text(b.accessToken))
+      .input("RefreshToken", sql.NVarChar(sql.MAX), text(b.refreshToken))
+      .input("TokenExpiresAt", sql.DateTime2(3), b.tokenExpiresAt || null)
+      .input("SettingsJson", sql.NVarChar(sql.MAX), JSON.stringify(settings))
+      .input("UpdatedBy", sql.NVarChar(100), String(updatedBy))
+      .query(`
+        UPDATE dbo.IntegrationChannels SET
+          Provider       = @Provider,
+          AccessToken    = COALESCE(@AccessToken, AccessToken),
+          RefreshToken   = COALESCE(@RefreshToken, RefreshToken),
+          TokenExpiresAt = @TokenExpiresAt,
+          SettingsJson   = @SettingsJson,
+          -- New credentials: the last test no longer describes them.
+          LastTestOk     = CASE WHEN @AccessToken IS NULL AND @RefreshToken IS NULL THEN LastTestOk END,
+          LastTestAt     = CASE WHEN @AccessToken IS NULL AND @RefreshToken IS NULL THEN LastTestAt END,
+          LastTestMessage = CASE WHEN @AccessToken IS NULL AND @RefreshToken IS NULL THEN LastTestMessage END,
+          UpdatedAt      = GETDATE(),
+          UpdatedBy      = @UpdatedBy
+        WHERE Id = @Id;
+        SELECT ${CHANNEL_COLUMNS} FROM dbo.IntegrationChannels WHERE Id = @Id;
+      `);
+    res.json({ channel: publicChannel(result.recordset[0]) });
+  } catch (err) {
+    console.error("ERROR in PUT /communicator/channels/:id/credentials:", err);
+    res.status(500).json({ error: "Could not save the connection" });
+  }
+});
+
+/**
+ * POST /api/communicator/channels/:id/test — calls Meta / Google with the saved token and records the result.
+ */
+router.post("/channels/:id/test", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  try {
+    const result = await testConnection(getPool(), id);
+    if (!result) return res.status(404).json({ error: "Channel not found" });
+    res.json(result);
+  } catch (err) {
+    console.error("ERROR in POST /communicator/channels/:id/test:", err);
+    res.status(500).json({ error: "Connection test failed to run" });
+  }
+});
+
+/**
+ * POST /api/communicator/channels/:id/oauth/start { redirectUri, returnTo }
+ * The Google / Facebook sign-in link for "Connect". redirectUri is our callback
+ * (/api/public/integrations/oauth/callback) as the browser reaches it; returnTo is
+ * the page to come back to. Both must be on one of our own origins.
+ */
+router.post("/channels/:id/oauth/start", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  const redirectUri = ownUrl(req.body?.redirectUri);
+  const returnTo = ownUrl(req.body?.returnTo);
+  if (!redirectUri || !returnTo) return res.status(400).json({ error: "This address isn't one of CivilierERP's own — open the page from the usual address" });
+  try {
+    const r = await startUrl(getPool(), id, { userId: req.user?.userId, redirectUri, returnTo });
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.json({ url: r.url });
+  } catch (err) {
+    console.error("ERROR in POST /communicator/channels/:id/oauth/start:", err);
+    res.status(500).json({ error: "Could not start the sign-in" });
+  }
+});
+
+/**
+ * POST /api/communicator/channels/:id/instant-leads { callbackUrl }
+ * Meta only: subscribes the app and every Page the connection manages to lead-form events,
+ * delivered to callbackUrl (/api/public/integrations/meta-leads/:id).
+ */
+router.post("/channels/:id/instant-leads", superAdminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "invalid id" });
+  const callbackUrl = ownUrl(req.body?.callbackUrl);
+  if (!callbackUrl) return res.status(400).json({ error: "This address isn't one of CivilierERP's own — open the page from the usual address" });
+  if (!callbackUrl.startsWith("https://")) return res.status(400).json({ error: "Meta only delivers leads to an https:// address — switch this on from the live site" });
+  try {
+    res.json(await turnOnInstantLeads(getPool(), id, callbackUrl));
+  } catch (err) {
+    console.error("ERROR in POST /communicator/channels/:id/instant-leads:", err.message);
+    res.status(400).json({ error: err.message || "Could not switch on instant leads" });
   }
 });
 
@@ -193,32 +337,11 @@ router.delete("/channels/:id", superAdminOnly, async (req, res) => {
 
 // ====================== Messaging channels: status + test ======================
 const MESSAGING = ["email", "sms", "whatsapp"];
-const MESSAGING_FROM = { email: "fromEmail", sms: "senderId", whatsapp: "phoneNumberId" };
 
 // GET /messaging/status — whether each channel is set up and switched on (no secrets).
 router.get("/messaging/status", adminOnly, async (req, res) => {
   try {
-    const result = await getPool().request().query(`
-      SELECT Channel, ConfigJson, IsActive, UpdatedAt
-      FROM dbo.CommunicatorConfig
-      WHERE Channel IN ('email', 'sms', 'whatsapp')
-    `);
-    const rows = new Map(result.recordset.map((r) => [r.Channel, r]));
-    res.json({
-      channels: MESSAGING.map((channel) => {
-        const row = rows.get(channel);
-        const config = row?.IsActive ? parseConfigJson(row.ConfigJson) : {};
-        return {
-          channel,
-          saved: !!row?.IsActive,
-          active: !!config.isActive,
-          missing: missingFields(channel, config),
-          provider: config.provider || "",
-          from: config[MESSAGING_FROM[channel]] || "",
-          updatedAt: row?.UpdatedAt || null,
-        };
-      }),
-    });
+    res.json({ channels: await messagingStatus() });
   } catch (err) {
     console.error("ERROR in GET /messaging/status:", err);
     res.status(500).json({ error: "Failed to load messaging status" });

@@ -4,7 +4,6 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useAuth } from "@/contexts/AuthContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { FileText, Download, RotateCcw, X, Check, Ban, RefreshCw, ChevronRight } from "lucide-react";
@@ -16,7 +15,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
-import { MR_APPROVER_ROLES } from "@/pages/admin/approvalInbox/config";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
 // One row per booking (its receipts on the loaded page, grouped here — BookingId is on every receipt), opened
@@ -241,9 +240,9 @@ const CrmMoneyReceipts: React.FC = () => {
   const [busyId, setBusyId] = useState<number | null>(null);
   const qc = useQueryClient();
   const { canEdit } = usePageRights("crm-money-receipts");
-  const { currentUser } = useAuth();
-  // Approve / Bounce / Sweep are Finance's — the server refuses everyone outside these roles.
-  const canApprove = canEdit && MR_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase());
+  // Approve / Bounce / Sweep: whoever Approval Setup names for crm-money-receipts.
+  const isReceiptApprover = useCanApprove("crm-money-receipts");
+  const canApprove = canEdit && isReceiptApprover;
 
   const patchFilters = useCallback((patch: Partial<ReceiptListFilters>) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); }, []);
   // Searches as you type (after a short pause); Enter still searches at once.

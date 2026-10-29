@@ -16,7 +16,7 @@ const fetchUnitOptions = () => {
     .catch(() => ({ kinds: [], layouts: [] }));
   return unitOptionsPromise;
 };
-import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus } from "lucide-react";
+import { CheckCircle2, IndianRupee, Kanban, ArrowRightLeft, Clock, Printer, Filter, MessageSquarePlus, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
@@ -24,6 +24,8 @@ import { CrmSideDrawer } from "@/components/crm/CrmSideDrawer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { LeadInteractionForm } from "@/components/sa/LeadInteractionForm";
+import { LeadMessageForm } from "@/components/sa/LeadMessageForm";
+import { LeadImportDialog } from "@/components/sa/LeadImportDialog";
 import { LEAD_CLASSIFICATIONS, LEAD_STAGES, LEAD_STATUS_KEYS } from "@/components/sa/leadStages";
 import { MoneyView, StageCell, TitleCell } from "@/components/sa/saCells";
 import { useLeadActivityHistory } from "@/hooks/useLeadActivities";
@@ -92,7 +94,7 @@ async function fetchChannelPartnerOptions(): Promise<{ value: string; label: str
 const fields: FieldDef[] = [
   { name: "_customer", label: "Customer", type: "section" },
   { name: "CustomerName", label: "Customer Name", type: "text", required: true },
-  { name: "Mobile", label: "Mobile Number", type: "text", required: true, placeholder: "10-digit mobile" },
+  { name: "Mobile", label: "Mobile Number", type: "text", required: true, placeholder: "98765 43210, or +971 50 123 4567 from abroad" },
   { name: "AltMobile", label: "Other Mobile", type: "text" },
   { name: "Email", label: "Email", type: "text" },
   { name: "DateGenerated", label: "Received On", type: "date" },
@@ -149,6 +151,9 @@ const fmtDay = (d: unknown) =>
   d ? new Date(String(d)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const fmtWhen = (d: unknown) =>
   d ? new Date(String(d)).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" }) : "—";
+// The lead form's source fields, reused by Import from file to tag a whole file at once.
+const IMPORT_SOURCE_FIELDS = fields.filter((f) => ["SourceType", "PlatformId", "CampaignId", "AdId", "ChannelPartnerId"].includes(f.name));
+
 const actionBtn = "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors";
 
 const exportColumns: ExportColumn[] = [
@@ -194,7 +199,7 @@ const SaLeadManagement: React.FC = () => {
   const [auditLeadId, setAuditLeadId] = useState<string | null>(null);
   // Lets staff log a call/WhatsApp/etc straight from a row instead of
   // leaving this page for Lead Activities or Follow-Ups just to do that.
-  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string } | null>(null);
+  const [interactionLead, setInteractionLead] = useState<{ id: string; uid: string; mobile?: string; email?: string } | null>(null);
   // Was a standalone "Tracking" tab with its own two hand-rolled tables —
   // same information, now a one-click filter on the grid itself instead of
   // a separate tab/page round-trip.
@@ -206,6 +211,7 @@ const SaLeadManagement: React.FC = () => {
   const { currentUser, canDoAction } = useAuth();
   const isTL = currentUser?.role === "sales_team_lead";
   const [transferOpen, setTransferOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [transferSelectedIds, setTransferSelectedIds] = useState<Set<string>>(new Set());
   const [transferToTLId, setTransferToTLId] = useState("");
   const [transferNotes, setTransferNotes] = useState("");
@@ -445,6 +451,14 @@ const SaLeadManagement: React.FC = () => {
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
+            {canDoAction("sa-leads", "create") && (
+              <button
+                onClick={() => setImportOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-accent transition-colors"
+              >
+                <Upload size={13} /> Import from file
+              </button>
+            )}
             {/* Transfer Leads — Team Lead only. Used to have zero visibility
                 into its own approval status; now links straight to it. */}
             {isTL && (
@@ -556,7 +570,7 @@ const SaLeadManagement: React.FC = () => {
               </button>
             );
             const interactionBtn = (
-              <button type="button" onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid) })} className={actionBtn}
+              <button type="button" onClick={() => setInteractionLead({ id: row._id, uid: String(row.LeadUid), mobile: row.Mobile ? String(row.Mobile) : undefined, email: row.Email ? String(row.Email) : undefined })} className={actionBtn}
                 title="Log a call, WhatsApp or meeting and see past ones">
                 <MessageSquarePlus size={13} /> Log call
               </button>
@@ -691,11 +705,13 @@ const SaLeadManagement: React.FC = () => {
       <CrmSideDrawer
         open={!!interactionLead}
         onClose={() => setInteractionLead(null)}
-        title="Log Interaction"
+        title="Log or Send"
         subtitle={interactionLead?.uid}
       >
-        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} />}
+        {interactionLead && <LeadInteractionPanelContent leadId={parseInt(interactionLead.id)} mobile={interactionLead.mobile} email={interactionLead.email} />}
       </CrmSideDrawer>
+
+      <LeadImportDialog open={importOpen} onClose={() => setImportOpen(false)} sourceFields={IMPORT_SOURCE_FIELDS} />
 
       {/* Transfer Leads Dialog */}
       <Dialog open={transferOpen} onOpenChange={(o) => { if (!o) { setTransferOpen(false); setTransferSelectedIds(new Set()); setTransferToTLId(""); setTransferNotes(""); } }}>
@@ -811,11 +827,15 @@ const SaLeadManagement: React.FC = () => {
 // hoisted into useLeadActivities.ts/LeadInteractionForm.tsx since this is
 // the only call site; if a second one shows up, promote it there instead
 // of copying this.
-const LeadInteractionPanelContent: React.FC<{ leadId: number }> = ({ leadId }) => {
+const LeadInteractionPanelContent: React.FC<{ leadId: number; mobile?: string; email?: string }> = ({ leadId, mobile, email }) => {
   const { data: history = [] } = useLeadActivityHistory(leadId);
   return (
     <div className="space-y-4">
       <LeadInteractionForm leadId={leadId} variant="compact" />
+      <div className="rounded-lg border border-border p-3 space-y-2">
+        <h3 className="text-xs font-semibold text-foreground">Send message</h3>
+        <LeadMessageForm leadId={leadId} mobile={mobile} email={email} />
+      </div>
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="px-3 py-2 bg-muted/30 border-b border-border">
           <h3 className="text-xs font-semibold text-foreground">History ({history.length})</h3>

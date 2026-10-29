@@ -1,13 +1,10 @@
 process.env.NODE_ENV = "test";
 
 /**
- * Journal Voucher and Inter-Company Transfer forcefully correct account-head
- * mismatches / fire an entire auto-generated document chain on approval —
- * both are restricted to super_admin only, unlike every other module where
- * admin/dba can also approve (backend/services/approvalService.js's
- * MODULE_APPROVER_ROLE_OVERRIDES). This test exercises transition()'s
- * authorization gate directly against a fake DB, for both the restricted
- * modules and one ordinary module (grn) that must remain unaffected.
+ * Approval Setup is the only source of approvers (migration 582): transition()
+ * admits a user only when the record's current level in the module's workflow
+ * names their role or names them. No code role list, no admin pass, and no
+ * workflow means nobody may approve. Exercised against a fake DB.
  */
 
 jest.mock("../db", () => {
@@ -95,60 +92,50 @@ beforeEach(() => {
   dbMock.__setWorkflow(null);
 });
 
-describe("approvalService: per-module approver role restriction", () => {
-  test.each(["admin", "dba"])(
-    "rejects '%s' approving a journal-voucher (super_admin only)",
-    async (role) => {
-      await expect(
-        transition("journal-voucher", 1, "Approved", "user@example.com", role),
-      ).rejects.toThrow(/not authorized/i);
-    },
-  );
+describe("approvalService: Approval Setup decides who approves", () => {
+  test("no workflow in Approval Setup -> nobody may approve, not even super_admin", async () => {
+    await expect(
+      transition("journal-voucher", 1, "Approved", "user@example.com", "super_admin", null, 1),
+    ).rejects.toThrow(/no approval rule is set up/i);
+  });
 
-  test("allows 'super_admin' to approve a journal-voucher", async () => {
-    const result = await transition("journal-voucher", 1, "Approved", "user@example.com", "super_admin");
+  test("a role named on the level may approve", async () => {
+    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["super_admin"], userIds: [] }]);
+    const result = await transition("journal-voucher", 1, "Approved", "user@example.com", "super_admin", null, 1);
     expect(result.newStatus).toBe("Approved");
   });
 
-  test.each(["admin", "dba"])(
-    "rejects '%s' approving an inter-company-transfer (super_admin only)",
-    async (role) => {
-      await expect(
-        transition("inter-company-transfer", 1, "Approved", "user@example.com", role),
-      ).rejects.toThrow(/not authorized/i);
-    },
-  );
-
-  test("allows 'super_admin' to approve an inter-company-transfer", async () => {
-    const result = await transition("inter-company-transfer", 1, "Approved", "user@example.com", "super_admin");
-    expect(result.newStatus).toBe("Approved");
+  test.each(["admin", "dba"])("'%s' not named on the level is refused (no admin pass)", async (role) => {
+    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["super_admin"], userIds: [] }]);
+    await expect(
+      transition("journal-voucher", 1, "Approved", "user@example.com", role, null, 7),
+    ).rejects.toThrow(/not authorized/i);
   });
 
-  test("allows a non-super_admin user named by userId on Approval Setup's current level for journal-voucher", async () => {
-    // Reproduces the production report: Approval Setup named a specific
-    // person (userId 42, role "accounts_head") alongside super_admin as a
-    // Journal Voucher approver, but transition() never consulted the
-    // workflow for restricted modules — only super_admin's role check ever
-    // passed, so that person's Approve/Reject 403'd even though the inbox
-    // showed the record as theirs to act on.
+  test("a person named by userId may approve whatever their role", async () => {
     dbMock.__setWorkflow([{ id: 1, label: "Level 1", userIds: [42] }]);
     const result = await transition("journal-voucher", 1, "Approved", "user@example.com", "accounts_head", null, 42);
     expect(result.newStatus).toBe("Approved");
   });
 
-  test("still rejects a non-super_admin user NOT named on journal-voucher's Approval Setup level", async () => {
+  test("someone not named by role or userId is refused", async () => {
     dbMock.__setWorkflow([{ id: 1, label: "Level 1", userIds: [42] }]);
     await expect(
       transition("journal-voucher", 1, "Approved", "user@example.com", "accounts_head", null, 99),
     ).rejects.toThrow(/not authorized/i);
   });
 
-  test("ordinary modules (grn) are unaffected — admin/dba can still approve", async () => {
-    const asAdmin = await transition("grn", 1, "Approved", "user@example.com", "admin");
-    expect(asAdmin.newStatus).toBe("Approved");
-    dbMock.__setRecordStatus("Pending");
-    dbMock.__resetApproval();
-    const asDba = await transition("grn", 1, "Approved", "user@example.com", "dba");
-    expect(asDba.newStatus).toBe("Approved");
+  test("a level naming nobody admits nobody", async () => {
+    dbMock.__setWorkflow([{ id: 1, label: "Level 1", roles: [], userIds: [] }]);
+    await expect(
+      transition("grn", 1, "Approved", "user@example.com", "admin", null, 2),
+    ).rejects.toThrow(/not authorized/i);
+  });
+
+  test("rejecting follows the same rule", async () => {
+    dbMock.__setWorkflow([{ id: 1, label: "Level 1", userIds: [42] }]);
+    await expect(
+      transition("grn", 1, "Rejected", "user@example.com", "admin", null, 2),
+    ).rejects.toThrow(/not authorized/i);
   });
 });

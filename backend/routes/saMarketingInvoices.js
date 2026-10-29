@@ -5,7 +5,6 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
