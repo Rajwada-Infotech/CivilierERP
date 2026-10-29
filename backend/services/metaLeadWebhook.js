@@ -84,19 +84,22 @@ async function processDelivery(pool, channelId, body) {
   const conn = await applyConnection(pool, { ...row });
   const notes = [];
   let added = 0;
+  let repeats = 0; // already a lead — noted on it as enquired again
   for (const change of changes) {
     try {
       const lead = await requestJson(metaUrl(String(change.leadgen_id), { access_token: conn.AccessToken, fields: LEAD_FIELDS }));
       const source = await sourceFor(pool, channelId, lead.ad_id || change.ad_id, change.page_id);
-      const r = await createLead(pool, { ...normalizeMetaLead(lead), ...source, SourceType: "Ad" }, null);
-      if (r.error) notes.push(`lead ${change.leadgen_id}: ${r.error}`);
+      const r = await createLead(pool, { ...normalizeMetaLead(lead), ...source, SourceType: "Ad" }, null, { repeatVia: "a Meta lead form" });
+      if (r.noted) repeats += 1;
+      else if (r.error) notes.push(`lead ${change.leadgen_id}: ${r.error}`);
       else added += 1;
     } catch (err) {
       notes.push(`lead ${change.leadgen_id}: ${err.message}`);
     }
   }
   const ok = notes.length === 0;
-  await recordDelivery(pool, channelId, ok, ok ? `${added} lead(s) added` : notes.join(" · "), added);
+  const summary = [`${added} lead(s) added`, repeats ? `${repeats} already a lead (noted as enquired again)` : "", ...notes].filter(Boolean).join(" · ");
+  await recordDelivery(pool, channelId, ok, summary, added);
 }
 
 /**

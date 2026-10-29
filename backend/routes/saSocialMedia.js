@@ -9,7 +9,6 @@ const { bumpCacheVersion } = require("../redis");
 const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection, connectionMismatch } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

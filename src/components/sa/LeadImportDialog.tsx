@@ -53,6 +53,7 @@ export const LeadImportDialog: React.FC<Props> = ({ open, onClose, sourceFields 
   const [remembered, setRemembered] = useState(false);
   const [source, setSource] = useState<Record<string, string>>({});
   const [sendWelcome, setSendWelcome] = useState(false);
+  const [distributeNow, setDistributeNow] = useState(false);
   const [results, setResults] = useState<RowResult[] | null>(null);
   const [imported, setImported] = useState(false);
   const [busy, setBusy] = useState<"" | "reading" | "checking" | "importing">("");
@@ -70,7 +71,7 @@ export const LeadImportDialog: React.FC<Props> = ({ open, onClose, sourceFields 
 
   const reset = () => {
     setFileName(""); setHeadings([]); setRows([]); setMapping({}); setRemembered(false);
-    setSource({}); setSendWelcome(false); setResults(null); setImported(false); setProgress(0);
+    setSource({}); setSendWelcome(false); setDistributeNow(false); setResults(null); setImported(false); setProgress(0);
   };
   useEffect(() => { if (!open) reset(); }, [open]);
 
@@ -102,13 +103,15 @@ export const LeadImportDialog: React.FC<Props> = ({ open, onClose, sourceFields 
     setBusy(dryRun ? "checking" : "importing");
     setProgress(0);
     const out: RowResult[] = [];
+    let distributed = 0;
     try {
       for (let i = 0; i < rows.length; i += size) {
-        const r = await post<{ results: RowResult[] }>("/run", {
+        const r = await post<{ results: RowResult[]; distributed: number }>("/run", {
           headings, mapping, rows: rows.slice(i, i + size), firstRowNo: i + 2, // row 1 is the headings
-          source, sendWelcome, dryRun,
+          source, sendWelcome, distributeNow, fileName, dryRun,
         });
         out.push(...r.results);
+        distributed += r.distributed ?? 0;
         setProgress(Math.min(rows.length, i + size));
       }
       // A mobile repeated across parts of a big file: only the first counts as new.
@@ -124,7 +127,10 @@ export const LeadImportDialog: React.FC<Props> = ({ open, onClose, sourceFields 
       if (!dryRun) {
         setImported(true);
         const added = out.filter((r) => r.status === "added").length;
-        toast.success(`${added} lead${added === 1 ? "" : "s"} added`);
+        toast.success(`${added} lead${added === 1 ? "" : "s"} added${distributeNow ? ` · ${distributed} handed to team leads` : ""}`);
+        if (distributeNow && added > distributed) {
+          toast.warning(`${added - distributed} not handed out — no active distribution rule covers them. Set one up in Lead Distribution, or hand them out there.`);
+        }
         qc.invalidateQueries({ queryKey: ["sa-leads"] });
       }
     } catch (e: any) {
@@ -229,6 +235,14 @@ export const LeadImportDialog: React.FC<Props> = ({ open, onClose, sourceFields 
                   <input type="checkbox" checked={sendWelcome} onChange={(e) => setSendWelcome(e.target.checked)} />
                   Send each new lead the welcome message (leave off for old lists)
                 </label>
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input type="checkbox" checked={distributeNow} onChange={(e) => setDistributeNow(e.target.checked)} />
+                  Hand the new leads to team leads now, by your distribution rules
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  Someone already in Sales Automation isn't added again — their lead gets an "enquired again" note and a follow-up due today.
+                  Columns set to "Add to remarks" are kept in the lead's remarks.
+                </p>
               </section>
 
               {results && (

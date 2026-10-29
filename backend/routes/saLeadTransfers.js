@@ -7,7 +7,6 @@ const { actorId, isSaAdmin, applyLeadScope } = require("../services/saAccess");
 const { alertAssignedMany } = require("../services/saMessaging");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

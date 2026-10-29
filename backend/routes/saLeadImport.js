@@ -6,7 +6,11 @@
  *
  *  GET  /fields   — the fields a column can fill, and the batch size
  *  POST /mapping  — { headings } → how they match: remembered from last time, else recognised by name
- *  POST /run      — { headings, mapping, rows, source, sendWelcome, dryRun } → a result per row
+ *  POST /run      — { headings, mapping, rows, source, sendWelcome, distributeNow, fileName, dryRun } → a result per row
+ *
+ * A mobile that is already a lead isn't added again; on the real import that lead gets an
+ * "enquired again" note with a follow-up due today. distributeNow hands the new leads to team
+ * leads by the standing distribution rules straight away.
  */
 const express = require("express");
 const crypto = require("crypto");
@@ -17,7 +21,9 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { createLead } = require("../services/saLeadCreate");
-const { IMPORT_FIELDS, IMPORT_BATCH, headingKey } = require("../constants/saLeadImport");
+const { IMPORT_FIELDS, IMPORT_BATCH, REMARKS_COLUMN, BOOKKEEPING_HEADINGS, headingKey } = require("../constants/saLeadImport");
+const { autoDistribute } = require("../services/saDistributionEngine");
+const { alertAssignedMany } = require("../services/saMessaging");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -29,7 +35,12 @@ const SOURCE_KEYS = ["SourceType", "PlatformId", "CampaignId", "AdId", "ChannelP
 const headingsHash = (headings) =>
   crypto.createHash("sha256").update([...new Set(headings.map(headingKey))].sort().join("|")).digest("hex");
 
-/** Recognises each heading by name; a field is given to the first heading that matches it. */
+const BOOKKEEPING = new Set(BOOKKEEPING_HEADINGS.map(headingKey));
+
+/**
+ * Recognises each heading by name; a field is given to the first heading that matches it.
+ * Anything else goes to remarks, except the source's own bookkeeping columns.
+ */
 function autoMapping(headings) {
   const taken = new Set();
   const mapping = {};
@@ -39,6 +50,8 @@ function autoMapping(headings) {
     if (field) {
       mapping[h] = field.key;
       taken.add(field.key);
+    } else if (!BOOKKEEPING.has(k)) {
+      mapping[h] = REMARKS_COLUMN.key;
     }
   }
   return mapping;
@@ -58,17 +71,23 @@ const CLEAN = {
 
 function rowToLead(headings, mapping, cells) {
   const lead = {};
+  const extra = [];
   headings.forEach((h, i) => {
     const field = mapping[h];
     const raw = String(cells?.[i] ?? "").trim();
-    if (!field || !FIELD_KEYS.has(field) || !raw || lead[field]) return;
-    lead[field] = CLEAN[field] ? CLEAN[field](raw) : raw;
+    if (!field || !raw) return;
+    if (field === REMARKS_COLUMN.key) extra.push(`${h}: ${raw}`);
+    else if (FIELD_KEYS.has(field) && !lead[field]) lead[field] = CLEAN[field] ? CLEAN[field](raw) : raw;
   });
+  if (extra.length) lead.CustomerRemarks = [lead.CustomerRemarks, ...extra].filter(Boolean).join("\n");
   return lead;
 }
 
 router.get("/fields", requirePageRight("sa-leads", "create"), (req, res) => {
-  res.json({ fields: IMPORT_FIELDS.map(({ key, label, required }) => ({ key, label, required })), batch: IMPORT_BATCH });
+  res.json({
+    fields: [...IMPORT_FIELDS.map(({ key, label, required }) => ({ key, label, required })), { ...REMARKS_COLUMN, required: false }],
+    batch: IMPORT_BATCH,
+  });
 });
 
 router.post("/mapping", requirePageRight("sa-leads", "create"), async (req, res) => {
@@ -105,12 +124,20 @@ router.post("/run", requirePageRight("sa-leads", "create"), async (req, res) => 
     const actor = actorId(req);
     const seen = new Map(); // mobile → row number, for repeats inside this batch
     const results = [];
+    const addedIds = [];
+    const via = `the import of ${String(b.fileName || "a file").slice(0, 120)}`;
     for (const [i, cells] of rows.entries()) {
       const rowNo = Number(b.firstRowNo || 1) + i;
       const lead = { ...rowToLead(headings, mapping, cells), ...source };
       const check = await createLead(pool, lead, actor, { dryRun: true });
       if (check.error) {
-        results.push({ rowNo, status: check.status === 409 ? "existing" : "error", reason: check.error, mobile: lead.Mobile || "" });
+        if (check.status === 409 && !dryRun) {
+          // The real import: note the repeat enquiry on the existing lead.
+          const made = await createLead(pool, lead, actor, { repeatVia: via });
+          results.push({ rowNo, status: "existing", reason: made.noted ? `${made.error} — noted on it as enquired again, follow-up due today` : made.error, mobile: lead.Mobile || "" });
+          continue;
+        }
+        results.push({ rowNo, status: check.status === 409 ? "existing" : "error", reason: check.status === 409 ? `${check.error} — will be noted on it as enquired again` : check.error, mobile: lead.Mobile || "" });
         continue;
       }
       const mobile = check.value.Mobile;
@@ -123,10 +150,19 @@ router.post("/run", requirePageRight("sa-leads", "create"), async (req, res) => 
         results.push({ rowNo, status: "new", mobile, name: check.value.CustomerName || "" });
         continue;
       }
-      const made = await createLead(pool, lead, actor, { welcome: b.sendWelcome === true });
+      const made = await createLead(pool, lead, actor, { welcome: b.sendWelcome === true, repeatVia: via });
+      if (!made.error) addedIds.push(made.id);
       results.push(made.error
-        ? { rowNo, status: made.status === 409 ? "existing" : "error", reason: made.error, mobile }
+        ? { rowNo, status: made.status === 409 ? "existing" : "error", reason: made.noted ? `${made.error} — noted on it as enquired again, follow-up due today` : made.error, mobile }
         : { rowNo, status: "added", mobile, leadUid: made.uid });
+    }
+
+    // Hand the new leads to team leads now, by the standing distribution rules.
+    let distributed = 0;
+    if (!dryRun && b.distributeNow === true && addedIds.length) {
+      const d = await autoDistribute(pool, 1, actor, addedIds);
+      distributed = d.distributedCount;
+      alertAssignedMany(pool, d.assigned);
     }
 
     // Remember how this file's columns matched (and its source) once something is imported.
@@ -143,7 +179,7 @@ router.post("/run", requirePageRight("sa-leads", "create"), async (req, res) => 
           WHEN NOT MATCHED THEN INSERT (HeadingsKey, MappingJson, SourceJson, UsedCount, UpdatedBy) VALUES (@k, @m, @s, 1, @u);
         `);
     }
-    res.json({ results });
+    res.json({ results, distributed });
   } catch (e) {
     console.error("[sa-lead-import] run error:", e.message);
     res.status(500).json({ error: e.message });

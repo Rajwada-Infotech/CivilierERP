@@ -23,9 +23,18 @@ const IMPORT_FIELDS = [
   { key: "SourcePlacement", label: "Placement / platform", required: false, headings: ["platform", "placement", "source"] },
 ];
 
+// A column matched to this is kept in the lead's remarks as "<heading>: <value>" — the default
+// for a column no field recognises (a form's own questions, e.g. "which_bhk?"), so nothing the
+// customer typed is lost.
+const REMARKS_COLUMN = { key: "__remarks", label: "Add to remarks" };
+
+// Columns that are the source's own bookkeeping, not anything the customer said — left out
+// rather than added to remarks when nothing else matches them.
+const BOOKKEEPING_HEADINGS = ["ad_id", "adset_id", "adset_name", "campaign_id", "form_id", "is_organic", "lead_status", "inbox_url", "is_qualified", "is_quality"];
+
 // Rows per request — the page sends a big file in parts of this size.
 const IMPORT_BATCH = 500;
 
 const headingKey = (h) => String(h || "").toLowerCase().replace(/[\s\-_.]/g, "");
 
-module.exports = { IMPORT_FIELDS, IMPORT_BATCH, headingKey };
+module.exports = { IMPORT_FIELDS, IMPORT_BATCH, REMARKS_COLUMN, BOOKKEEPING_HEADINGS, headingKey };

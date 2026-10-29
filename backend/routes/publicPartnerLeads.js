@@ -44,9 +44,9 @@ router.post("/", partnerLimiter, async (req, res) => {
     const results = [];
     for (const [index, raw] of incoming.entries()) {
       const lead = Object.fromEntries(PARTNER_FIELDS.filter((f) => raw[f] !== undefined).map((f) => [f, raw[f]]));
-      const r = await createLead(pool, { ...lead, SourceType: "Referral", ChannelPartnerId: partner.ChannelPartnerId }, null);
+      const r = await createLead(pool, { ...lead, SourceType: "Referral", ChannelPartnerId: partner.ChannelPartnerId }, null, { repeatVia: `channel partner ${partner.Name}` });
       results.push(r.error
-        ? { index, ok: false, error: r.error, duplicate: r.status === 409 }
+        ? { index, ok: false, error: r.error, duplicate: r.status === 409, ...(r.noted ? { notedOnExistingLead: true } : {}) }
         : { index, ok: true, leadUid: r.uid });
     }
     const added = results.filter((r) => r.ok).length;

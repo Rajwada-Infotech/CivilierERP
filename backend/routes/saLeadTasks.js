@@ -5,7 +5,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { actorId, isSaAdmin } = require("../services/saAccess");
+const { actorId, isSaAdmin, applyLeadScope } = require("../services/saAccess");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -59,6 +59,15 @@ router.get("/lead/:leadId", requirePageRight("sa-lead-tasks", "view"), async (re
     const pool = getPool();
     const lid = parseId(req.params.leadId);
     if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+
+    const req0 = pool.request().input("lid", sql.Int, lid);
+    const scope = applyLeadScope(req0, req, "l");
+    const check = await req0.query(
+      `SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`
+    );
+    if (!check.recordset.length)
+      return res.status(403).json({ error: "Access denied or lead not found" });
+
     const result = await pool.request()
       .input("lid", sql.Int, lid)
       .query(`${LEAD_TASK_SELECT} WHERE t.LeadId = @lid ORDER BY t.DueDate ASC`);
@@ -73,7 +82,17 @@ router.get("/lead/:leadId", requirePageRight("sa-lead-tasks", "view"), async (re
 router.post("/lead/:leadId", requirePageRight("sa-lead-tasks", "create"), async (req, res) => {
   try {
     const pool  = getPool();
-    const lid   = parseInt(req.params.leadId);
+    const lid   = parseId(req.params.leadId);
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+
+    const req0 = pool.request().input("lid", sql.Int, lid);
+    const scope = applyLeadScope(req0, req, "l");
+    const check = await req0.query(
+      `SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`
+    );
+    if (!check.recordset.length)
+      return res.status(403).json({ error: "Access denied or lead not found" });
+
     const b     = req.body;
     const actor = actorId(req);
 

@@ -33,9 +33,13 @@ async function loadConfig(channel) {
 /** Which settings a channel is missing, or [] when it can send. */
 const missingFields = (channel, config) => (REQUIRED[channel] || []).filter((k) => !String(config?.[k] ?? "").trim());
 
-// Indian numbers stored as 10 digits get the 91 country code most gateways expect.
+// Gateways want the full international number without "+": an Indian mobile is stored as its
+// 10 digits (91 added here); a number from outside India is stored with its "+country code"
+// (validation/phone.js), which must not be mistaken for an Indian one however many digits it has.
 const toIntlNumber = (mobile) => {
-  const digits = String(mobile || "").replace(/\D/g, "");
+  const raw = String(mobile || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("+")) return digits;
   return digits.length === 10 ? `91${digits}` : digits;
 };
 

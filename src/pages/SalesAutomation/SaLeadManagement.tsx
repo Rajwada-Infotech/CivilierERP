@@ -94,7 +94,7 @@ async function fetchChannelPartnerOptions(): Promise<{ value: string; label: str
 const fields: FieldDef[] = [
   { name: "_customer", label: "Customer", type: "section" },
   { name: "CustomerName", label: "Customer Name", type: "text", required: true },
-  { name: "Mobile", label: "Mobile Number", type: "text", required: true, placeholder: "10-digit mobile" },
+  { name: "Mobile", label: "Mobile Number", type: "text", required: true, placeholder: "98765 43210, or +971 50 123 4567 from abroad" },
   { name: "AltMobile", label: "Other Mobile", type: "text" },
   { name: "Email", label: "Email", type: "text" },
   { name: "DateGenerated", label: "Received On", type: "date" },

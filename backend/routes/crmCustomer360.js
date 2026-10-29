@@ -1,8 +1,9 @@
 const express = require("express");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
+const { projectPredicate, crmCustomerGuard } = require("../services/projectScope");
 const router = express.Router();
 // Project access: a customer opens only if one of their applications is in the user's projects.
-router.param("id", require("../services/projectScope").crmCustomerGuard);
+router.param("id", crmCustomerGuard);
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -28,7 +29,7 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
     const req0 = pool.request();
     const conds = ["c.IsActive = 1"];
     // A restricted user sees customers with an application in their projects.
-    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")})`);
+    if (req.projectScope) conds.push(`EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${projectPredicate(req.projectScope, "sa.ProjectId")})`);
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)");
@@ -47,12 +48,13 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("(EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId) OR EXISTS (SELECT 1 FROM dbo.CrmApplication a2 JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a2.Id AND ap.Status = N'Active' JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE a2.CustomerId = c.Id AND pm.BlockId = @blockId))"); }
     const where = `WHERE ${conds.join(" AND ")}`;
+    const scopeApp = req.projectScope ? projectPredicate(req.projectScope, "a.ProjectId") : "";
     const BASE_SELECT = `
       SELECT
         c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State,
-        (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id) AS ApplicationCount,
+        (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id ${scopeApp}) AS ApplicationCount,
         (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')) AS ActiveBookingCount,
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp}) AS ActiveBookingCount,
         -- Includes each booking's unswept On Account balance alongside
         -- milestone AmountPaid — under the current "everything holds in On
         -- Account until an explicit sweep" rule (crmPayments.js
@@ -61,13 +63,13 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
         -- under-report real cash received from this customer.
         ((SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp})
         + (SELECT ISNULL(SUM(CASE WHEN ISNULL(oa.Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND oa.Amount > ISNULL(oa.AppliedAmount,0) THEN oa.Amount - ISNULL(oa.AppliedAmount,0) ELSE 0 END), 0)
           FROM dbo.CrmOnAccountPayment oa JOIN dbo.CrmBooking b ON b.Id = oa.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))) AS TotalPaid,
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp})) AS TotalPaid,
         (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE a.CustomerId = c.Id AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}', 'Expired', 'Transferred')) AS TotalOutstanding
+          WHERE a.CustomerId = c.Id AND b.Status NOT IN ${DEAD_BOOKING_SQL} ${scopeApp}) AS TotalOutstanding
       FROM dbo.CrmCustomer c
     `;
 
@@ -88,7 +90,7 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
           .input("projectId2", sql.Int, projectId)
           .input("blockId2", sql.Int, blockId);
         const scopeClause = req.projectScope
-          ? ` AND EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${require("../services/projectScope").projectPredicate(req.projectScope, "sa.ProjectId")})`
+          ? ` AND EXISTS (SELECT 1 FROM dbo.CrmApplication sa WHERE sa.CustomerId = c.Id ${projectPredicate(req.projectScope, "sa.ProjectId")})`
           : "";
         return countReq.query(`
           SELECT COUNT(*) AS total
@@ -138,6 +140,9 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
     if (!customerRes.recordset.length) return res.status(404).json({ error: "Customer not found" });
     const customerRow = customerRes.recordset[0];
 
+    const scopeApp = req.projectScope ? projectPredicate(req.projectScope, "a.ProjectId") : "";
+    const scopeBooking = req.projectScope ? projectPredicate(req.projectScope, "b.ProjectId") : "";
+
     const [leads, apps, bookings, calls, tickets, cancellations] = await Promise.all([
       // A customer links to at most the ONE lead it converted from
       // (CrmCustomer.LeadId) — set at customer-creation time, whether via
@@ -155,7 +160,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
                u.name AS AssigneeName
         FROM dbo.CrmApplication a
         LEFT JOIN dbo.Users u ON u.id = a.AssignedTo
-        WHERE a.CustomerId = @cid
+        WHERE a.CustomerId = @cid ${scopeApp}
         ORDER BY a.CreatedAt DESC
       `),
       pool.request().input("cid", sql.Int, customerId).query(`
@@ -179,7 +184,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
                  + (SELECT ISNULL(SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount,0)
                      THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(CASE WHEN Status <> 'Waived' THEN AmountDue ELSE 0 END),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
-               CASE WHEN b.Status IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE
+               CASE WHEN b.Status IN ${DEAD_BOOKING_SQL} THEN 0 ELSE
                  (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)
                   FROM dbo.CrmPaymentMilestone m2 WHERE m2.BookingId = b.Id)
                END AS TotalOutstanding,
@@ -194,7 +199,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
                      ORDER BY CASE WHEN x.Status = 'Cancelled' THEN 1 ELSE 0 END, x.Id DESC) h
         LEFT JOIN dbo.CrmLegalMilestone lm ON lm.BookingId = b.Id
         LEFT JOIN dbo.CrmPrePossession pp ON pp.BookingId = b.Id
-        WHERE a.CustomerId = @cid
+        WHERE a.CustomerId = @cid ${scopeBooking}
         ORDER BY b.CreatedAt DESC
       `),
       pool.request().input("lid", sql.Int, customerRow.LeadId).query(`
@@ -208,7 +213,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
         FROM dbo.CrmServiceTicket t
         JOIN dbo.CrmBooking b ON b.Id = t.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE a.CustomerId = @cid
+        WHERE a.CustomerId = @cid ${scopeBooking}
         ORDER BY t.CreatedAt DESC
       `),
       pool.request().input("cid", sql.Int, customerId).query(`
@@ -216,7 +221,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
         FROM dbo.CrmCancellation c
         JOIN dbo.CrmBooking b ON b.Id = c.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        WHERE a.CustomerId = @cid
+        WHERE a.CustomerId = @cid ${scopeBooking}
         ORDER BY c.CreatedAt DESC
       `),
     ]);
@@ -302,7 +307,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
         FROM dbo.CrmGstNote n WHERE n.BookingId IN (${bookingIds.join(",")}) ORDER BY n.DocDate DESC, n.Id DESC`)).recordset;
       for (const b of enrichedBookings) b.creditNotes = cn.filter((n) => n.BookingId === b.Id);
     }
-    const liveBookings = enrichedBookings.filter((b) => ![CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(b.Status));
+    const liveBookings = enrichedBookings.filter((b) => !DEAD_BOOKING_STATUSES.includes(b.Status));
     const summary = {
       totalInvoiced: liveBookings.reduce((s, b) => s + b.invoices.reduce((si, i) => si + Number(i.Amount || 0), 0), 0),
       totalPaid: liveBookings.reduce((s, b) => s + Number(b.TotalPaid || 0), 0),

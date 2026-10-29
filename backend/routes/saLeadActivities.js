@@ -100,6 +100,15 @@ router.post("/lead/:leadId", requirePageRight("sa-lead-activities", "create"), a
     const pool = getPool();
     const lid = parseId(req.params.leadId);
     if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
+
+    const req0 = pool.request().input("lid", sql.Int, lid);
+    const scope = applyLeadScope(req0, req, "l");
+    const check = await req0.query(
+      `SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`
+    );
+    if (!check.recordset.length)
+      return res.status(403).json({ error: "Access denied or lead not found" });
+
     const b   = req.body;
     const actor = actorId(req);
 

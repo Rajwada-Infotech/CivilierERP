@@ -6,6 +6,10 @@
  * to the customer is sent after creation unless { welcome: false }.
  * { dryRun: true } runs every check and resolves { ok: true, value } without saving
  * (value = the cleaned lead) — the bulk import's preview.
+ * { repeatVia: "<where it came from>" }: when the mobile is already a lead, that lead gets a
+ * "enquired again" note with a follow-up due today instead of the enquiry being dropped
+ * (the result then also carries noted: true). Manual entry leaves it off — the person
+ * typing sees the existing lead and decides.
  */
 const crypto = require("crypto");
 const { sql } = require("../db");
@@ -13,11 +17,26 @@ const { normalizeSaLeadContactFields } = require("../validation/saLeadValidation
 const { validateSourceChain } = require("./sourceChain");
 const { welcomeLead } = require("./saMessaging");
 
+/** An existing lead enquired again: a note on its history and a follow-up due today. */
+async function noteRepeatEnquiry(pool, leadId, via, remarks, actor) {
+  const summary = `Enquired again via ${via}${remarks ? ` — ${String(remarks).slice(0, 1000)}` : ""}`;
+  await pool.request()
+    .input("lid", sql.Int, leadId)
+    .input("summary", sql.NVarChar(sql.MAX), summary)
+    .input("cb", sql.Int, actor)
+    .query(`
+      INSERT INTO dbo.SaLeadActivity (LeadId, ActivityType, Direction, Outcome, Summary, NextFollowupDate, CreatedBy)
+      VALUES (@lid, 'Note', 'Inbound', 'Enquired again', @summary, CAST(SYSDATETIME() AS DATE), @cb);
+      UPDATE dbo.SaLead SET LastActivityAt = SYSDATETIME() WHERE Id = @lid;
+    `);
+  return true;
+}
+
 function genUid() {
   return "LEAD-" + Date.now() + "-" + crypto.randomBytes(3).toString("hex").toUpperCase();
 }
 
-async function createLead(pool, input, actor, { welcome = true, dryRun = false } = {}) {
+async function createLead(pool, input, actor, { welcome = true, dryRun = false, repeatVia = null } = {}) {
   try {
     const normalizedContact = normalizeSaLeadContactFields(input);
     if (normalizedContact.errors.length) {
@@ -35,7 +54,8 @@ async function createLead(pool, input, actor, { welcome = true, dryRun = false }
       const dup = await pool.request().input("mob", sql.NVarChar(20), b.Mobile)
         .query("SELECT TOP 1 Id, LeadUid, CustomerName, Status FROM dbo.SaLead WHERE Mobile = @mob AND IsActive = 1 ORDER BY CreatedAt DESC");
       if (dup.recordset.length) {
-        return { status: 409, error: `A lead with this mobile number already exists: ${dup.recordset[0].LeadUid} (${dup.recordset[0].CustomerName || "no name"}, ${dup.recordset[0].Status})`,
+        const noted = !dryRun && repeatVia ? await noteRepeatEnquiry(pool, dup.recordset[0].Id, repeatVia, b.CustomerRemarks, actor) : false;
+        return { status: 409, noted, error: `A lead with this mobile number already exists: ${dup.recordset[0].LeadUid} (${dup.recordset[0].CustomerName || "no name"}, ${dup.recordset[0].Status})`,
           existingLeadId: dup.recordset[0].Id,
         };
       }

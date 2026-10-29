@@ -23,7 +23,6 @@ async function advanceLead(pool, leadId, to) {
   return result.rowsAffected[0] > 0;
 }
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
@@ -43,7 +42,7 @@ router.get("/", requirePageRight("sa-site-visits", "view"), async (req, res) => 
       FROM dbo.SaSiteVisit v
       JOIN  dbo.SaLead l ON v.LeadId = l.Id
       LEFT JOIN dbo.Users ex ON v.ExecutiveId = ex.id
-      WHERE v.IsActive = 1 AND ${scope0}
+      WHERE v.IsActive = 1 AND l.IsActive = 1 AND ${scope0}
       ORDER BY v.PreferredDate ASC, v.CreatedAt DESC
     `);
     res.json(r.recordset);
@@ -58,7 +57,14 @@ router.post("/", requirePageRight("sa-site-visits", "create"), async (req, res) 
   try {
     const pool = getPool();
     const b = req.body;
-    if (!b.LeadId) return res.status(400).json({ error: "LeadId required" });
+    const lid = parseId(b.LeadId);
+    if (lid === null) return res.status(400).json({ error: "Valid LeadId required" });
+
+    const scopeReq = pool.request();
+    const scope = applyLeadScope(scopeReq, req, "l");
+    const owned = await scopeReq.input("lid", sql.Int, lid)
+      .query(`SELECT 1 AS ok FROM dbo.SaLead l WHERE l.Id = @lid AND l.IsActive = 1 AND ${scope}`);
+    if (!owned.recordset.length) return res.status(403).json({ error: "Access denied or lead not found" });
 
     // No conflict check existed at all — two different leads could be
     // scheduled to the same executive at the same date+time with nothing

@@ -567,7 +567,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     });
     const parsed = refundBodySchema.safeParse(b);
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request body" });
     }
 
     const sourceType = b.SourceType;

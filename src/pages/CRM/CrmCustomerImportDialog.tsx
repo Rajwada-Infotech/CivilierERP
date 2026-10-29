@@ -10,6 +10,7 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { buildWorkbook, downloadBlob, readWorkbook, type XlsxCell, type XlsxSheet } from "@/lib/xlsxBook";
 import { parseDelimitedAuto } from "@/lib/sheetFile";
+import { isValidPhone, PHONE_HINT } from "@/lib/phone";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -83,7 +84,7 @@ const DEFAULT_FIELDS: ImportField[] = [
   { key: "CustomerName", label: "Customer Name", required: true, category: "Identity", description: "Full legal or display name of the customer" },
   { key: "FirstName", label: "First Name (Merges to Name)", category: "Identity", description: "First name to auto-combine into Customer Name" },
   { key: "LastName", label: "Last Name (Merges to Name)", category: "Identity", description: "Last name to auto-combine into Customer Name" },
-  { key: "Mobile", label: "Mobile", category: "Contact", description: "Primary 10-digit mobile number used for lookup & uniqueness" },
+  { key: "Mobile", label: "Mobile", category: "Contact", description: "Primary mobile used for lookup & uniqueness — 10-digit Indian, or with its country code (+971…)" },
   { key: "AltMobile", label: "Alternate Mobile", category: "Contact", description: "Secondary phone or emergency contact number" },
   { key: "Email", label: "Email", category: "Contact", description: "Primary email address" },
   { key: "PanNo", label: "PAN", category: "Identity", description: "10-character PAN card number (AAAAA9999A)" },
@@ -961,14 +962,13 @@ export function CrmCustomerImportDialog({
     const updatedRows = preview.rows.map((r) => {
       if (r.rowNo === editingRow.rowNo) {
         const nameValid = !!updatedData.CustomerName?.trim();
-        const mobClean = (updatedData.Mobile || "").replace(/\D/g, "");
-        const mobValid = !mobClean || mobClean.length === 10;
+        const mobValid = isValidPhone(updatedData.Mobile);
         const panClean = (updatedData.PanNo || "").toUpperCase().trim();
         const panValid = !panClean || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panClean);
 
         const newErrors = [];
         if (!nameValid) newErrors.push("Customer Name missing");
-        if (!mobValid) newErrors.push("Mobile must be 10 digits");
+        if (!mobValid) newErrors.push(`Mobile must be ${PHONE_HINT}`);
         if (!panValid) newErrors.push("PAN format must be AAAAA9999A");
 
         return {

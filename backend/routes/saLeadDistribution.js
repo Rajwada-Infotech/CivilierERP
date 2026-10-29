@@ -7,7 +7,6 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { alertAssignedMany } = require("../services/saMessaging");
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

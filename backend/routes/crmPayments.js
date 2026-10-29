@@ -629,7 +629,7 @@ router.post("/demands/bulk", requirePageRight("crm-payments", "edit"), async (re
     // Input validation
     const parsed = bulkDemandSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ error: parsed.error.errors[0]?.message || "Invalid request body" });
+      return res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid request body" });
     }
     const { projectName, milestoneName } = req.body || {};
     const int = (v) => (v != null && v !== "" && Number.isInteger(Number(v)) ? Number(v) : null);

@@ -21,7 +21,6 @@ const { welcomeLeads } = require("../services/saMessaging");
 const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 

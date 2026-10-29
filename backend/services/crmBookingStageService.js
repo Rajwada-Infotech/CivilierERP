@@ -28,7 +28,6 @@
 // the stage field + log + remarks here and let that engine stamp the audit
 // trail in ApprovalAuditLog exactly like every other approve in the app.
 const { sql } = require("../db");
-const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 const { transition: approvalTransition } = require("./approvalService");
 const { ensureChecklistRows } = require("./crmApplicationChecklist");
 const { ensurePortalUser } = require("./crmPortalProvision");
@@ -169,8 +168,7 @@ async function requireActiveStage(pool, bookingId, stage) {
 
 // Staff "Submit for Approval" — Review -> MarketingHeadApproval. Two gates:
 // all 7 data-review checklist items (KYC, Project/Unit/Rate, Payment Plan,
-// Bank/Deposit, Broker, Source, Documents) must be Checked, and the Booking
-// Amount (Milestone #1) must be fully paid. ProjectUnitRate and
+// Bank/Deposit, Broker, Source, Documents) must be Checked, and the checklist must be complete. ProjectUnitRate and
 // PaymentPlanAmounts being Checked already IS "Unit/Rate/Value confirmed"
 // and "Payment Plan confirmed" — the old separate
 // UnitReviewConfirmed/PlanReviewConfirmed columns asserted the exact same
@@ -204,18 +202,6 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   // Same rule as checkBookingApprovalReadiness (crmBookings.js): never into approval at ₹0.
   if (!(Number(chk.TotalValue) > 0)) {
     throw Object.assign(new Error("Total value is ₹0 — set the rate (and the unit's saleable area) before sending for approval"), { status: 400 });
-  }
-
-  const m1 = await pool.request()
-    .input("bid", sql.Int, bookingId)
-    .query(`SELECT TOP 1 AmountPaid, AmountDue, Status 
-            FROM dbo.CrmPaymentMilestone 
-            WHERE BookingId = @bid AND MilestoneNo = 1
-              AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
-            ORDER BY Id`);
-  const milestone1 = m1.recordset[0];
-  if (!milestone1 || (milestone1.Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
-    throw Object.assign(new Error("Milestone 1 (token payment) must be paid before submitting for approval"), { status: 400 });
   }
 
   const tx = pool.transaction();

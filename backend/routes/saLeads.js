@@ -46,7 +46,6 @@ async function emitNotification(pool, userId, type, title, body, refId) {
   }
 }
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
