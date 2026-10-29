@@ -8,6 +8,9 @@ router.use(apiRateLimit);
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
+// Directors' "different supplier chosen" notices are shown as toasts (DirectorAlerts), never in the bell.
+const TOAST_TYPES = "('po_supplier_change')";
+
 // GET / — list user's recent notifications (latest 50)
 router.get("/", async (req, res) => {
   try {
@@ -19,7 +22,7 @@ router.get("/", async (req, res) => {
       .query(`
         SELECT TOP 50 Id, UserId, Type, Title, Body, RefId, RefType, IsRead, CreatedAt
         FROM dbo.SaNotification
-        WHERE UserId = @UserId
+        WHERE UserId = @UserId AND Type NOT IN ${TOAST_TYPES}
         ORDER BY CreatedAt DESC
       `);
     res.json(result.recordset.map((n) => ({
@@ -47,10 +50,32 @@ router.put("/read-all", async (req, res) => {
     const pool = getPool();
     await pool.request()
       .input("UserId", sql.Int, parseInt(userId))
-      .query("UPDATE dbo.SaNotification SET IsRead = 1 WHERE UserId = @UserId AND IsRead = 0");
+      .query(`UPDATE dbo.SaNotification SET IsRead = 1 WHERE UserId = @UserId AND IsRead = 0 AND Type NOT IN ${TOAST_TYPES}`);
     res.json({ success: true });
   } catch (e) {
     console.error("[sa-notifications] PUT read-all error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /toasts — this user's toast notices not yet dismissed (oldest first), shown again on the next login
+router.get("/toasts", async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const result = await getPool().request()
+      .input("UserId", sql.Int, parseInt(userId))
+      .query(`
+        SELECT TOP 20 Id, Type, Title, Body, RefId, RefType, CreatedAt
+        FROM dbo.SaNotification
+        WHERE UserId = @UserId AND IsRead = 0 AND Type IN ${TOAST_TYPES}
+        ORDER BY CreatedAt
+      `);
+    res.json(result.recordset.map((n) => ({
+      id: n.Id, type: n.Type, title: n.Title, body: n.Body, refId: n.RefId, refType: n.RefType, createdAt: n.CreatedAt,
+    })));
+  } catch (e) {
+    console.error("[sa-notifications] GET /toasts error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

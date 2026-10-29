@@ -8,7 +8,9 @@
  *                      every item, the lowest total. A quotation with no such supplier has no L1 and is skipped.
  *   notifyDirectors  — tells every active user with the "director" role which MR, which supplier, how much, against
  *                      which L1, and why: a toast on any Civilier page they have open (socket "po:supplier-change"),
- *                      and a push to their phones (Admin app). Not kept in the notification bell.
+ *                      and a push to their phones (Admin app). Each notice is also kept (dbo.SaNotification, type
+ *                      po_supplier_change — left out of the bell) until the director dismisses it, so a director who
+ *                      wasn't online gets it as a toast on the next login.
  *
  * MRs with no quotation, or whose quotation has no complete submission yet, are not affected: the plain MR → PO flow
  * is unchanged.
@@ -150,8 +152,17 @@ async function notifyDirectors(pool, poId, deviations, reason) {
       ` Reason: ${String(reason || "").trim()}`
     ).slice(0, 500);
     for (const uid of directors) {
+      const row = (await pool.request()
+        .input("UserId", sql.Int, uid)
+        .input("Title", sql.NVarChar(200), title)
+        .input("Body", sql.NVarChar(500), body)
+        .input("RefId", sql.Int, poId)
+        .query(`
+          INSERT INTO dbo.SaNotification (UserId, Type, Title, Body, RefId, RefType)
+          OUTPUT INSERTED.Id
+          VALUES (@UserId, 'po_supplier_change', @Title, @Body, @RefId, 'purchase_order')`)).recordset[0];
       try {
-        getIo().to(`user:${uid}`).emit("po:supplier-change", { title, body, poId, poNo: po.PurchaseOrderNo });
+        getIo().to(`user:${uid}`).emit("po:supplier-change", { id: row.Id, title, body, refId: poId });
       } catch { /* socket may not be initialised in tests */ }
     }
     await sendToUsers(directors, { title, body, data: { type: "po_supplier_change", refId: poId, refType: "purchase_order" } }, { apps: ["admin"] });
