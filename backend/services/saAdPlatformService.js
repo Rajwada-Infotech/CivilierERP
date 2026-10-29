@@ -216,7 +216,7 @@ async function testPlatformConnection(platformType, accessToken, adAccountId, pl
 
     if (family === "meta") {
       const accountId = normalizeMetaAccountId(adAccountId);
-      const result = await requestJson(metaUrl(accountId || "me", {
+      const result = await requestJson(metaUrl(encodeURIComponent(accountId || "me"), {
         access_token: accessToken,
         fields: accountId ? "id,name,account_status" : "id,name",
       }));
@@ -283,7 +283,7 @@ async function pushGoogleAd(ad, platform) {
     partialFailure: true,
   };
 
-  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${customerId}/adGroupAds:mutate`, {
+  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${encodeURIComponent(customerId)}/adGroupAds:mutate`, {
     method: "POST",
     headers: googleHeaders(platform),
     body: JSON.stringify(body),
@@ -323,7 +323,7 @@ async function pushMetaAd(ad, platform) {
       },
     },
   };
-  const creative = await requestJson(metaUrl(`${accountId}/adcreatives`), {
+  const creative = await requestJson(metaUrl(`${encodeURIComponent(accountId)}/adcreatives`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(creativeBody),
@@ -336,7 +336,7 @@ async function pushMetaAd(ad, platform) {
     creative: { creative_id: creative.id },
     status: statusToMeta(ad.Status),
   };
-  const result = await requestJson(metaUrl(`${accountId}/ads`), {
+  const result = await requestJson(metaUrl(`${encodeURIComponent(accountId)}/ads`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(adBody),
@@ -409,7 +409,7 @@ async function fetchGoogleMetrics(ad, platform, dateRange = "LAST_30_DAYS") {
     WHERE ${where}
       AND segments.date DURING ${dateRange}
   `;
-  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${customerId}/googleAds:searchStream`, {
+  const result = await requestJson(`https://googleads.googleapis.com/${GOOGLE_ADS_VERSION}/customers/${encodeURIComponent(customerId)}/googleAds:searchStream`, {
     method: "POST",
     headers: googleHeaders(platform),
     body: JSON.stringify({ query }),
@@ -436,7 +436,7 @@ function aggregateGoogleRows(rows, rawResponse) {
 async function fetchMetaMetrics(ad, platform, datePreset = "last_30d") {
   const adId = ad.ExternalAdId;
   if (!adId) throw new Error("Meta metrics require ExternalAdId.");
-  const result = await requestJson(metaUrl(`${adId}/insights`, {
+  const result = await requestJson(metaUrl(`${encodeURIComponent(adId)}/insights`, {
     access_token: platform.AccessToken,
     date_preset: datePreset,
     fields: "impressions,clicks,spend,reach,frequency,ctr,cpc,cpm,actions,cost_per_action_type",
@@ -480,7 +480,7 @@ async function fetchLeadsFromPlatform(ad, platform) {
   const formId = settings.leadFormId || ad.LeadFormId || ad.ExternalLeadFormId || null;
   const objectId = formId || ad.ExternalAdId;
   if (!objectId) throw new Error("Meta lead pull requires AccountDetails.leadFormId or ad ExternalAdId.");
-  const result = await requestJson(metaUrl(`${objectId}/leads`, {
+  const result = await requestJson(metaUrl(`${encodeURIComponent(objectId)}/leads`, {
     access_token: platform.AccessToken,
     fields: "id,created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,field_data",
     limit: 100,

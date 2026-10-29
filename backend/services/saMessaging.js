@@ -75,9 +75,9 @@ async function alertAssigned(pool, leadId, userId) {
     ]);
     if (!lead || !user?.email) return;
     const r = await send(PROVIDER_CHANNEL.Email, { to: user.email, ...templates.leadAssigned(lead) });
-    if (!r.ok && !r.skipped) console.error(`[saMessaging] assignment alert for lead ${leadId} to user ${userId} failed: ${r.error}`);
+    if (!r.ok && !r.skipped) console.error("[saMessaging] assignment alert failed for lead", leadId, "to user", userId, r.error);
   } catch (e) {
-    console.error(`[saMessaging] assignment alert for lead ${leadId} failed:`, e.message);
+    console.error("[saMessaging] assignment alert failed for lead", leadId, e.message);
   }
 }
 
