@@ -62,8 +62,8 @@ describe("MaintenanceWatcher", () => {
   it("shows nothing while maintenance is off", async () => {
     status.mockResolvedValue(off);
     mount();
-    await waitFor(() => expect(status).toHaveBeenCalled());
     await settle();
+    expect(status).toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("overlay")).not.toBeInTheDocument();
   });
@@ -91,8 +91,8 @@ describe("MaintenanceWatcher", () => {
   it("covers the app at once when a call is refused, before the next check", async () => {
     status.mockResolvedValue(off);
     mount("/projects");
-    await waitFor(() => expect(status).toHaveBeenCalled());
     await settle();
+    expect(status).toHaveBeenCalled();
     act(() => {
       window.dispatchEvent(new CustomEvent(MAINTENANCE_EVENT));
     });
