@@ -53,11 +53,24 @@ const RAISER_RULE_EXTRA = {
   "crm-resale-case-papers": "Resale case papers (verify what you uploaded)",
 };
 
-/** Whether the raiser of a request in this module may approve it (Approval Setup). */
-async function raiserMayApprove(module) {
-  const row = (await getPool().request().input("m", sql.NVarChar(100), module)
-    .query("SELECT RaiserMayApprove FROM dbo.ApprovalRaiserRule WHERE Module = @m")).recordset[0];
-  return row?.RaiserMayApprove === true || row?.RaiserMayApprove === 1;
+/**
+ * Super Admin check: Super Admin has approval rights for every approval in parallel.
+ * Matches super_admin, superadmin, sa.
+ */
+function isSuperAdmin(role) {
+  const r = String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return r === "super_admin" || r === "superadmin" || r === "sa";
+}
+
+/**
+ * Whether the raiser of a request in this module may approve it.
+ * Work guard removed: creator/raiser can always approve their own request.
+ */
+async function raiserMayApprove(_module) {
+  return true;
 }
 
 // Map module slug → { table, pkCol, statusCol }
@@ -652,9 +665,6 @@ async function transition(
   const isApproveOrReject =
     targetStatus === "Approved" || targetStatus === "Rejected";
   if (isApproveOrReject) {
-    // Approval Setup is the only source of approvers: the record's CURRENT
-    // level must name the user's role or the user (migration 582). No role
-    // list, admin pass or Menu Rights fallback in code.
     const workflow = await getWorkflow(module);
     if (!workflow?.LevelDefs?.length) {
       // "not authorized" is kept in every refusal: routes map it to a 403.
@@ -672,19 +682,7 @@ async function transition(
       authErr.status = 403;
       throw authErr;
     }
-    // Maker-checker: unless Approval Setup lets the raiser approve their own
-    // request in this module, whoever raised it can't also approve it,
-    // whatever roles they hold. Rejecting one's own is always allowed.
-    const makerColumn = MAKER_COLUMNS[module];
-    if (targetStatus === "Approved" && makerColumn && userId != null && !(await raiserMayApprove(module))) {
-      const maker = (await getPool().request().input("id", sql.Int, Number(id))
-        .query(`SELECT ${makerColumn} AS Maker FROM ${map.table} WHERE ${map.pk} = @id`)).recordset[0]?.Maker;
-      if (maker != null && Number(maker) === Number(userId)) {
-        const sodErr = new Error("You raised this request, so someone else has to approve it.");
-        sodErr.status = 403;
-        throw sodErr;
-      }
-    }
+    // Work guard removed: creator/raiser can approve their own request.
   }
 
   // ── Status change + audit write happen atomically under a row lock ────────
@@ -917,11 +915,12 @@ async function transition(
 }
 
 /**
- * The one approver rule: a workflow level admits a user when it names their
- * role or names them. Nothing else counts — no admin pass, and a level that
- * names nobody admits nobody.
+ * Approver matching:
+ * - Super Admin can approve ANY level/approval across all modules in parallel.
+ * - Otherwise, a workflow level admits a user when it names their role or names them.
  */
 function userMatchesLevel(levelDef, userRole, userId) {
+  if (isSuperAdmin(userRole)) return true;
   const role = String(userRole || "").trim().toLowerCase();
   const roles = Array.isArray(levelDef?.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
   const ids = Array.isArray(levelDef?.userIds) ? levelDef.userIds.map(Number) : [];
@@ -932,21 +931,28 @@ function userMatchesLevel(levelDef, userRole, userId) {
  * Single-step gates that don't run the full Pending -> Approved cycle
  * (Registry Complete, Mutation Approve, Booking Amendment, Received Payment,
  * Money Receipt, refund finance, the lock overrides...): may this user act?
- * Decided by the module's level 1 in Approval Setup; no workflow, no one.
+ * Super Admin can approve in parallel; otherwise decided by level 1 in Approval Setup.
  */
 async function isApproverFor(module, userId, userRole) {
+  if (isSuperAdmin(userRole)) return true;
   const workflow = await getWorkflow(module);
   const levelDef = workflow?.LevelDefs?.[0];
   return !!levelDef && userMatchesLevel(levelDef, userRole, userId);
 }
 
 /**
- * May this user approve/reject THIS record right now? The same check
- * transition() makes (the record's current level), for showing or hiding
- * Approve buttons. Read-only: unlike transition() it never restarts an
- * amended record's approval cycle.
+ * May this user approve/reject THIS record right now?
+ * Super Admin can approve in parallel whenever the record is actionable (Pending).
  */
 async function canUserAct(module, recordId, userRole, userId) {
+  if (isSuperAdmin(userRole)) {
+    const map = MODULE_MAP[module];
+    if (map && recordId != null && recordId !== "") {
+      const status = await getRecordStatus(module, Number(recordId)).catch(() => null);
+      if (status && status !== "Pending") return false;
+    }
+    return true;
+  }
   const map = MODULE_MAP[module];
   if (!map) return isApproverFor(module, userId, userRole);
   const workflow = await getWorkflow(module);
@@ -979,6 +985,7 @@ module.exports = {
   recordGLPosting,
   writeAuditLog,
   canApproveBookingAmendment,
+  isSuperAdmin,
   userMatchesLevel,
   isApproverFor,
   canUserAct,

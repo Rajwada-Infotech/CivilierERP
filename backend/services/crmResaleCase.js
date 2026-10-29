@@ -480,10 +480,7 @@ async function reviewDocument(db, id, docId, decision, remarks, actorUserId) {
   if (!d) throw new CaseError("Document not found", 404);
   if (!["Verified", "Rejected"].includes(decision)) throw new CaseError("decision must be Verified or Rejected");
   if (decision === "Rejected" && !String(remarks || "").trim()) throw new CaseError("Say why it's rejected");
-  if (d.CreatedBy && actorUserId && Number(d.CreatedBy) === Number(actorUserId)
-      && !(await require("./approvalService").raiserMayApprove("crm-resale-case-papers"))) {
-    throw new CaseError("You uploaded this document, so someone else has to verify it (Approval Setup).", 403);
-  }
+  // Work guard removed: creator/uploader may also verify.
   await db.request().input("d", sql.Int, docId).input("s", sql.NVarChar(20), decision).input("rem", sql.NVarChar(1000), remarks || null).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmResaleDocument SET Status = @s, Remarks = ISNULL(@rem, Remarks), VerifiedBy = @by, VerifiedAt = SYSDATETIME() WHERE Id = @d");
   return caseState(db, id);

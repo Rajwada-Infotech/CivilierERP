@@ -133,12 +133,13 @@ async function getStageState(pool, bookingId, viewer = null) {
   };
 }
 
-// May this user act at the given stage? Decided only by the crm-bookings
-// workflow's matching level in Approval Setup (its roles or named people).
+// May this user act at the given stage? Super Admin can act in parallel;
+// otherwise decided by the crm-bookings workflow in Approval Setup.
 async function canApproveStage(role, stage, userId = null) {
+  const { isSuperAdmin, getWorkflow, userMatchesLevel } = require("./approvalService");
+  if (isSuperAdmin && isSuperAdmin(role)) return true;
   const level = STAGE_LEVEL[stage];
   if (!level) return false;
-  const { getWorkflow, userMatchesLevel } = require("./approvalService");
   const wf = await getWorkflow("crm-bookings").catch(() => null);
   const def = wf?.LevelDefs?.[level - 1];
   return !!def && userMatchesLevel(def, role, userId);
