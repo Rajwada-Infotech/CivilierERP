@@ -1063,10 +1063,11 @@ router.post("/:id/attachments", upload.array("files", 10), async (req, res) => {
       .query("SELECT Id FROM dbo.TaskMaster WHERE Id = @Id AND IsDeleted = 0");
     if (!task.recordset.length) return res.status(404).json({ error: "Task not found" });
 
-    await saveAttachments(pool, taskId, null, req.files, uploadedBy);
+    const files = Array.isArray(req.files) ? req.files : [];
+    await saveAttachments(pool, taskId, null, files, uploadedBy);
 
     await bumpTaskCaches();
-    res.json({ message: `${req.files.length} file(s) attached` });
+    res.json({ message: `${files.length} file(s) attached` });
   } catch (err) {
     console.error("[task-master] POST attachments error:", err.message);
     res.status(500).json({ error: err.message });

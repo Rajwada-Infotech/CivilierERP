@@ -2,15 +2,15 @@ const express = require("express");
 const { CrmStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { projectPredicate, crmCustomerGuard } = require("../services/projectScope");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a customer opens only if one of their applications is in the user's projects.
 router.param("id", crmCustomerGuard);
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyPagination } = require("../services/crmListPagination");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 // GET / — the Applicant Ledger's customer list: every customer with a

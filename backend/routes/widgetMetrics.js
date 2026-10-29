@@ -314,7 +314,7 @@ router.get("/:key", async (req, res) => {
     const data = await handler(pool);
     res.json({ key, label: def.label, module: def.module, unit: def.unit, ...data });
   } catch (err) {
-    console.error(`[widget-metric:${key}]`, err.message);
+    console.error("[widget-metric]", key, err.message);
     res.status(500).json({ error: `Failed to load metric "${key}"` });
   }
 });

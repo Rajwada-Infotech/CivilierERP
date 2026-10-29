@@ -2,9 +2,10 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on checklists outside their projects.
 require("../services/projectScope").crmProjectGuards(router);
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -14,7 +15,6 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // ─── Checklist template ──────────────────────────────────────────────────
 // ALWAYS_TEMPLATE applies to every booking — these facts exist for every

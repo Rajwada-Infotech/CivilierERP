@@ -14,6 +14,10 @@ import React, { useEffect, useState } from "react";
  * silently reappearing over a different row after a refresh, since which
  * record was being edited isn't itself persisted.
  */
+// Never written to the browser's storage: bank account numbers, IFSC, PAN / Aadhaar, passwords and PINs. A restored
+// draft just has them empty again.
+const SENSITIVE_KEY = /account.?(no|num)|ifsc|^pan(no|number)?$|aadha?ar|password|passcode|^pin$|cvv/i;
+
 export function useDraftForm<T extends object>(
   storageKey: string,
   emptyValue: T,
@@ -90,7 +94,7 @@ export function useDraftFormSync<T extends object>(
       (k) => String((values as any)[k] ?? "") !== String((emptyValue as any)[k] ?? ""),
     );
     try {
-      if (isDirty) localStorage.setItem(key, JSON.stringify(values));
+      if (isDirty) localStorage.setItem(key, JSON.stringify(values, (k, v) => (SENSITIVE_KEY.test(k) ? undefined : v)));
       else localStorage.removeItem(key);
     } catch {
       // localStorage unavailable — the draft simply won't persist.

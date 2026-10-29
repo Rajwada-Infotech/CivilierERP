@@ -24,6 +24,7 @@
 const express = require("express");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -34,7 +35,6 @@ const { parseId } = require("../middleware/validateRequest");
 const PAGE = "project-type-master";
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const SELECT = `
   SELECT t.Id, t.Code, t.Name, t.Description,

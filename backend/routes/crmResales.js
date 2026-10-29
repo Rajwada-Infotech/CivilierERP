@@ -32,13 +32,14 @@ const { releaseBookingInventoryLines } = require("../services/crmWorkflowGuards"
 const { getNextDocNumber } = require("../services/docNumber");
 const { resolveResaleFeeGst, GstSetupError } = require("../services/crmGst");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on records outside their projects.
 // A resale is for a plot or a unit; its project comes from either, else the seller's booking.
 { const { crmProjectGuards } = require("../services/projectScope"); crmProjectGuards(router, `
   SELECT COALESCE(p.ProjectId, u.ProjectId, b.ProjectId) AS ProjectId FROM dbo.CrmUnitResale r
   LEFT JOIN dbo.PlotMaster p ON p.Id = r.PlotId LEFT JOIN dbo.UnitMaster u ON u.Id = r.UnitId
   LEFT JOIN dbo.CrmBooking b ON b.Id = r.FromBookingId WHERE r.Id = @id`); }
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -48,7 +49,6 @@ const { LineStatus, ResaleStatus } = require("../constants/crmStatuses");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const SELECT = `
   SELECT r.Id, r.PlotId, r.UnitId, r.FromBookingId, r.FromCustomerId, r.ToBookingId, r.ToCustomerId,
@@ -695,7 +695,7 @@ const caseUpload = require("multer")({
 });
 const caseErr = (res, e, where) => {
   if (e.status) return res.status(e.status).json({ error: e.message });
-  console.error(`[crm-resales] ${where}:`, e.message);
+  console.error("[crm-resales]", `${where}:`, e.message);
   res.status(500).json({ error: "Something went wrong — please try again" });
 };
 const withCase = (fn) => async (req, res) => {

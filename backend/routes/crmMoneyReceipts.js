@@ -15,11 +15,12 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmMoneyReceipt")); }
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
@@ -36,7 +37,6 @@ const {
 const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 

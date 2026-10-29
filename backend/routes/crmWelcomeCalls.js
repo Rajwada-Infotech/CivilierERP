@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { projectPredicate } = require("../services/projectScope");
 // Project access: a restricted user gets 403 on welcome calls outside their projects.
 // On /:bookingId/bank-preferences/:id the :id is a bank preference, already
@@ -13,7 +15,6 @@ const { projectPredicate } = require("../services/projectScope");
   const guardCall = projectParamGuard(crmViaBookingSql("CrmWelcomeCall"));
   router.param("id", (req, res, next, value) => (req.path.includes("/bank-preferences/") ? next() : guardCall(req, res, next, value)));
 }
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
@@ -23,7 +24,6 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 const { applyPagination } = require("../services/crmListPagination");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 const WC_SELECT = `

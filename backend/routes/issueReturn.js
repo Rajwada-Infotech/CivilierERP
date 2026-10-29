@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { projectPredicate, projectParamGuard, assertProjectAllowed } = require("../services/projectScope");
 
@@ -8,13 +10,10 @@ const { projectPredicate, projectParamGuard, assertProjectAllowed } = require(".
 const returnGuard = projectParamGuard("SELECT ProjectId FROM dbo.MaterialIssueReturn WHERE ReturnId = @id");
 router.param("id", (req, res, next, id) => (req.path.startsWith("/issues/") ? projectParamGuard("SELECT ProjectId FROM dbo.MaterialIssues WHERE IssueId = @id")(req, res, next, id) : returnGuard(req, res, next, id)));
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { transition } = require("../services/approvalService");
-router.use(apiRateLimit);
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // A return is checked against its issue: the stock goes back into the godown the
 // issue took it from, and no line may return more than was issued less what other

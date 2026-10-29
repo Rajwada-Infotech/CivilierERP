@@ -1,14 +1,14 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { distributableStatus } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { alertAssignedMany } = require("../services/saMessaging");
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET / — distribution history scoped by role
 router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {

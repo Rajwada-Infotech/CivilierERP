@@ -2,6 +2,8 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: a sale deed belongs to its booking's project.
 const { projectParamGuard, projectPredicate, assertBookingAllowed } = require("../services/projectScope");
@@ -21,7 +23,6 @@ const guardRegistryDoc = projectParamGuard("SELECT b.ProjectId FROM dbo.CrmRegis
 router.param("docId", (req, res, next, value) =>
   (req.path.startsWith("/registry/") ? guardRegistryDoc : guardDeedDoc)(req, res, next, value));
 router.param("attachId", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmQueryPaymentAttachments x JOIN dbo.CrmQueryPayment qp ON qp.Id = x.QueryPaymentId JOIN dbo.CrmBooking b ON b.Id = qp.BookingId WHERE x.AttachmentId = @id"));
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
@@ -41,7 +42,6 @@ const { applyPagination } = require("../services/crmListPagination");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const multer = require('multer');
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 const upload = multer({

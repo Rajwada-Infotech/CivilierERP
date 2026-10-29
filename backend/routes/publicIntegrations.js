@@ -13,6 +13,8 @@ const { parseSettings } = require("../services/integrationConnections");
 const { verifyHandshake, signatureValid, processDelivery, loadConnection } = require("../services/metaLeadWebhook");
 
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.use(rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false }));
 
 // Back to Admin → Integrations with the outcome in the address (the page shows it).
@@ -46,7 +48,10 @@ router.get("/meta-leads/:channelId", async (req, res) => {
   if (id === null) return res.sendStatus(404);
   try {
     const challenge = await verifyHandshake(getPool(), id, req.query);
-    return challenge === null ? res.sendStatus(403) : res.type("text/plain").send(challenge);
+    if (challenge === null) return res.sendStatus(403);
+    // Meta's hub.challenge is a plain token; echo it back only if it is one, as text.
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(challenge)) return res.sendStatus(400);
+    return res.type("text/plain").send(challenge);
   } catch (err) {
     console.error("[public-integrations] meta handshake:", err.message);
     res.sendStatus(500);

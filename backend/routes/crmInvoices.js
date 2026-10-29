@@ -20,14 +20,14 @@
 // project scope in all of them (the flat view had none, and the grouped count skipped it).
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { projectPredicate, projectAllowed, crmProjectGuards } = require("../services/projectScope");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Guard /:id — verify the caller can access this invoice's project before any
 // handler runs. The SQL resolves the project via the booking join.

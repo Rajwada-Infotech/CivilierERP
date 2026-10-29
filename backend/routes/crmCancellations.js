@@ -3,11 +3,12 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const { returnLeadToPool } = require("../services/saHandoff");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { reversePostingBySource } = require("../services/generalLedger");
 // Project access: a cancellation belongs to its booking's project.
 const { projectParamGuard, projectPredicate, projectAllowed, assertBookingAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId WHERE c.Id = @id"));
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -29,7 +30,6 @@ const { getIo } = require("../socket");
 const { findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 // The set of company banks THIS booking's real payments actually landed in

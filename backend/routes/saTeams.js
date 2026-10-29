@@ -1,15 +1,15 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { isSaAdmin, actorId } = require("../services/saAccess");
 const { CLOSED_LEAD_SQL, distributableStatus } = require("../constants/saStatuses");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Sales teams master: a team is a record of its own — "Team A, led by X,
 // members Y and Z" (dbo.SaTeam, migration 581). Membership rows stay in

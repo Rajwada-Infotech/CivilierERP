@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, isSaAdmin } = require("../services/saAccess");
 const { CLOSED_LEAD_SQL, countedInvoiceSql } = require("../constants/saStatuses");
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Simple in-memory cache: { key: { data, expiresAt } }
 const _cache = {};

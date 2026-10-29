@@ -2,14 +2,14 @@
 const express = require("express");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { newKey, PARTNER_FIELDS, MAX_BATCH, REQUESTS_PER_MINUTE } = require("../services/partnerApiKeys");
 
 const router = express.Router();
-router.use(authMiddleware);
+const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const PAGE = "api-integration";
 

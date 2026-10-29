@@ -63,7 +63,7 @@ const kindOf = (col: string): Kind => {
 };
 const HEADER_WORDS: Record<string, string> = { Cnt: "Count", Roi: "ROI", Pct: "%", Percent: "%" };
 const formatHeader = (key: string) =>
-  key.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ").map((w) => HEADER_WORDS[w] ?? w).join(" ").replace(" %", " %");
+  key.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ").map((w) => HEADER_WORDS[w] ?? w).join(" ");
 
 function formatCell(value: any, kind: Kind): string {
   if (value === null || value === undefined || value === "") return "—";

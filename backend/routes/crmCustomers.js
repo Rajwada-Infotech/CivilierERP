@@ -4,18 +4,18 @@ const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { cleanPhoneFields } = require("../validation/phone");
 const PHONE_LABELS = { Mobile: "Mobile", AltMobile: "Alternate mobile" };
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a customer opens only if one of their applications is in the user's projects.
 router.param("id", require("../services/projectScope").crmCustomerGuard);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
 const { applyPagination } = require("../services/crmListPagination");
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 // Fields the Application page ("select company/project, auto-fetch

@@ -2,9 +2,10 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, crmViaBookingSql("CrmAfsQueryPayment")); }
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -15,7 +16,6 @@ const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 

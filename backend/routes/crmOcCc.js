@@ -1,9 +1,10 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on records outside their projects.
 { const { crmProjectGuards, crmViaBookingSql } = require("../services/projectScope"); crmProjectGuards(router, "SELECT ProjectId FROM dbo.CrmOccupancyCertificate WHERE Id = @id"); }
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
@@ -11,7 +12,6 @@ const { actorId } = require("../services/saAccess");
 const { rollupBookingTotals } = require("./crmParking");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // A project-wide certificate covers the blocks that exist when it is
 // received (migration 577) - a block added later needs its own certificate,

@@ -1,15 +1,15 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { autoDistribute } = require("../services/saDistributionEngine");
 const { alertAssignedMany } = require("../services/saMessaging");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET all rules with their members
 router.get("/", requirePageRight("sa-lead-distribution", "view"), async (req, res) => {

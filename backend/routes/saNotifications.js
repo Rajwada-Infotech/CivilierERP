@@ -1,11 +1,11 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // Directors' "different supplier chosen" notices are shown as toasts (DirectorAlerts), never in the bell.
 const TOAST_TYPES = "('po_supplier_change')";

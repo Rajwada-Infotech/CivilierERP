@@ -7,6 +7,8 @@ const { getMaintenanceState, setMaintenance } = require("../services/maintenance
 const { isSuperAdmin } = require("../middleware/maintenanceGate");
 
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const MAX_AHEAD_MS = 30 * 24 * 60 * 60 * 1000;

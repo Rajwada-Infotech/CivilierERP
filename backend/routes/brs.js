@@ -859,7 +859,7 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
         crm = await require("../services/crmBouncedPayment").unwindBouncedCrmPayment(pool, parseInt(sourceId), bounceReason, req.user?.userId ?? null);
         if (crm?.crm) for (const k of ["crm-payments", "crm-bookings", "crm-money-receipts", "crm-on-account"]) await bumpCacheVersion(k);
       } catch (crmErr) {
-        console.error(`BRS bounce: CRM unwind for receipt ${sourceId} failed:`, crmErr.message);
+        console.error("BRS bounce: CRM unwind failed for receipt", sourceId, crmErr.message);
         crm = { crm: true, error: crmErr.message };
       }
       for (const k of ["crm-payments", "crm-bookings", "crm-money-receipts", "crm-on-account"]) await bumpCacheVersion(k);

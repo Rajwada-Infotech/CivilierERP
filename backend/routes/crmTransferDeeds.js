@@ -5,16 +5,16 @@
 const express = require("express");
 const multer = require("multer");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { actorId } = require("../services/saAccess");
 const svc = require("../services/crmTransferDeed");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 // Project access: a restricted user only reaches deeds of their projects.
 {
   const { crmProjectGuards, projectParamGuard } = require("../services/projectScope");

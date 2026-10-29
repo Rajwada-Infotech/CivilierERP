@@ -14,6 +14,8 @@ const { createLead } = require("../services/saLeadCreate");
 const { partnerForKey, recordUse, PARTNER_FIELDS, MAX_BATCH, REQUESTS_PER_MINUTE } = require("../services/partnerApiKeys");
 
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 // Counted per API key (a hash of it — the key itself isn't kept in memory) so one partner
 // can't use up another's allowance; requests without a key count by address.

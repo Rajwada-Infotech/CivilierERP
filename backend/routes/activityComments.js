@@ -1,6 +1,8 @@
 const express = require("express");
 const rateLimit = require("../middleware/rateLimiter");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { rungParamGuard } = require("../services/projectScope");
 const { canUseThread, emitComment } = require("../services/activityThread");

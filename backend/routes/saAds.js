@@ -7,7 +7,6 @@ const express = require("express");
 const { getPool, sql } = require("../db");
 const { countedInvoiceSql } = require("../constants/saStatuses");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -21,8 +20,9 @@ const { welcomeLeads } = require("../services/saMessaging");
 const { CONNECTION_JOIN, CONNECTION_COLUMNS, applyConnection } = require("../services/integrationConnections");
 
 const router = express.Router();
-router.use(authMiddleware);
+const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 bumpCacheVersion("sa-ads").catch(() => {});
 

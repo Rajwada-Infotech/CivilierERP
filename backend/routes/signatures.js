@@ -1,12 +1,12 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const allowRoles = require("../middleware/role");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // GET all signatures

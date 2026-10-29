@@ -16,6 +16,8 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB per file
 });
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const rateLimit = require("../middleware/rateLimiter");
 router.use(
   rateLimit({

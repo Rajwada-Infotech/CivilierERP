@@ -9,13 +9,13 @@ const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // tierBrokeragePercent takes the active tier whose range holds the deal value, the highest minimum winning when two
 // overlap — so an overlapping tier silently changed which rate a deal got. Active tiers may not overlap. Returns the

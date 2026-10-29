@@ -3,12 +3,13 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { SA_LEAD_BOOKED } = require("../constants/saStatuses");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 // Project access: a restricted user gets 403 on applications outside their projects.
 const { projectParamGuard, projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.CrmApplication WHERE Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSuperAdminOnly } = require("../services/saAccess");
@@ -49,7 +50,6 @@ async function getApplicationPlotIds(pool, applicationId) {
   return lines.recordset.map((row) => Number(row.PlotId)).filter(Number.isInteger);
 }
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 // Mirrors SaLead.SourceType so source values stay consistent across the

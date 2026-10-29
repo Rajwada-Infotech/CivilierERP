@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET / -- flat join of all active bookings with their CrmLoanDetail row
 // (nullable). A dedicated route file avoids the /:id collision in crmBookings.js.

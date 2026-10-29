@@ -1,9 +1,10 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 const { statusesThatCanMoveTo } = require("../constants/saStatuses");
@@ -24,7 +25,6 @@ async function advanceLead(pool, leadId, to) {
 }
 
 router.use(authMiddleware);
-router.use(apiRateLimit);
 
 // GET / — all site visits (row-level scoped via the joined lead)
 router.get("/", requirePageRight("sa-site-visits", "view"), async (req, res) => {

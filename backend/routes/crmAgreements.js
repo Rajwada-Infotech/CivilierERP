@@ -3,6 +3,8 @@ const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 router.param("bookingId", require("../services/projectScope").projectParamGuard("SELECT ProjectId FROM dbo.CrmBooking WHERE Id = @id"));
 // Project access: an agreement belongs to its booking's project.
 const { projectParamGuard, projectPredicate, projectAllowed } = require("../services/projectScope");
@@ -10,7 +12,6 @@ const { assertBookingProjectScope } = require("../services/assertBookingProjectS
 router.param("id", projectParamGuard("SELECT b.ProjectId FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id"));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
@@ -34,7 +35,6 @@ const AGREEMENT_TRANSITIONS = {
   Cancelled:  [CrmStatus.CANCELLED],
 };
 
-router.use(apiRateLimit);
 router.use(authMiddleware);
 
 const upload = multer({
