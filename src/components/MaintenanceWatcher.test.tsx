@@ -39,8 +39,9 @@ function mount(path = "/") {
   );
 }
 
-// Let the fetches a render starts finish inside act(), so their state updates don't land after the test.
-const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+// Let the status fetch a render starts finish inside act(), so its state update doesn't land after the test. The timers
+// are fake here and React Query hands results over on a timer, so run the clock on a little.
+const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(50); });
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
