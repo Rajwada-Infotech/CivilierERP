@@ -39,6 +39,9 @@ function mount(path = "/") {
   );
 }
 
+// Let the fetches a render starts finish inside act(), so their state updates don't land after the test.
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(new Date("2026-10-09T10:00:00Z"));
@@ -59,6 +62,7 @@ describe("MaintenanceWatcher", () => {
     status.mockResolvedValue(off);
     mount();
     await waitFor(() => expect(status).toHaveBeenCalled());
+    await settle();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("overlay")).not.toBeInTheDocument();
   });
@@ -87,6 +91,7 @@ describe("MaintenanceWatcher", () => {
     status.mockResolvedValue(off);
     mount("/projects");
     await waitFor(() => expect(status).toHaveBeenCalled());
+    await settle();
     act(() => {
       window.dispatchEvent(new CustomEvent(MAINTENANCE_EVENT));
     });
