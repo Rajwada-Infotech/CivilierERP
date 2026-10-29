@@ -6,8 +6,11 @@
  *   findL1Deviations — the quotations (the PO's own SourceQTId, and any raised for its MRs) whose L1 supplier is not
  *                      the PO's supplier. L1 is worked out like the L1 chart: among suppliers who submitted a rate for
  *                      every item, the lowest total. A quotation with no such supplier has no L1 and is skipped.
- *   notifyDirectors  — tells every active user with the "director" role (bell + phone) which MR, which supplier, how
- *                      much, against which L1, and why.
+ *   notifyDirectors  — tells every active user with the "director" role which MR, which supplier, how much, against
+ *                      which L1, and why: a toast on any Civilier page they have open (socket "po:supplier-change"),
+ *                      and a push to their phones (Admin app). Each notice is also kept (dbo.SaNotification, type
+ *                      po_supplier_change — left out of the bell) until the director dismisses it, so a director who
+ *                      wasn't online gets it as a toast on the next login.
  *
  * MRs with no quotation, or whose quotation has no complete submission yet, are not affected: the plain MR → PO flow
  * is unchanged.
@@ -15,12 +18,18 @@
 
 const { sql } = require("../db");
 const { makeColumnProbe } = require("./columnProbe");
-const { emitNotification } = require("./notify");
+const { getIo } = require("../socket");
+const { sendToUsers } = require("./pushNotifications");
 
 const hasReasonColumn = makeColumnProbe("dbo.PurchaseOrders", "SupplierChangeReason");
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const day = (d) => (d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : "");
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const day = (d) => {
+  if (!d) return "";
+  const x = new Date(new Date(d).getTime() + 330 * 60_000); // IST
+  return `${String(x.getUTCDate()).padStart(2, "0")} ${MONTHS[x.getUTCMonth()]} ${x.getUTCFullYear()}`;
+};
 
 async function findL1Deviations(pool, { mrIds = [], qtId = null, supplierId }) {
   const sup = parseInt(supplierId, 10);
@@ -143,9 +152,21 @@ async function notifyDirectors(pool, poId, deviations, reason) {
       ` Reason: ${String(reason || "").trim()}`
     ).slice(0, 500);
     for (const uid of directors) {
-      await emitNotification(pool, uid, "po_supplier_change", title, body, poId, "purchase_order", { push: true, apps: ["admin"] });
-      sent++;
+      const row = (await pool.request()
+        .input("UserId", sql.Int, uid)
+        .input("Title", sql.NVarChar(200), title)
+        .input("Body", sql.NVarChar(500), body)
+        .input("RefId", sql.Int, poId)
+        .query(`
+          INSERT INTO dbo.SaNotification (UserId, Type, Title, Body, RefId, RefType)
+          OUTPUT INSERTED.Id
+          VALUES (@UserId, 'po_supplier_change', @Title, @Body, @RefId, 'purchase_order')`)).recordset[0];
+      try {
+        getIo().to(`user:${uid}`).emit("po:supplier-change", { id: row.Id, title, body, refId: poId });
+      } catch { /* socket may not be initialised in tests */ }
     }
+    await sendToUsers(directors, { title, body, data: { type: "po_supplier_change", refId: poId, refType: "purchase_order" } }, { apps: ["admin"] });
+    sent += directors.length;
   }
   return sent;
 }
