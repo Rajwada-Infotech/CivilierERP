@@ -13,8 +13,8 @@ const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } =
 const { isMilestoneOneCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Once KYC data is on file it's sensitive (bank account, PAN, Aadhaar) and
 // shouldn't be casually editable by any staff member with page rights —

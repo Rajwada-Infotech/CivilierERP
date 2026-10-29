@@ -92,8 +92,8 @@ const {
 const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS } = require("../services/crmApplicationChecklist");
 const { createMoneyReceiptAfterDataReview } = require("../services/crmMoneyReceiptWorkflow");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const upload = multer({
   storage: multer.memoryStorage(),

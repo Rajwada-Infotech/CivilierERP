@@ -6,8 +6,8 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 router.get("/", requirePageRight("crm-construction-updates", "view"), async (req, res) => {
   try {

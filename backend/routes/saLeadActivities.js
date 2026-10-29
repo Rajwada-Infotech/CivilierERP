@@ -7,8 +7,8 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyLeadScope, actorId } = require("../services/saAccess");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const ACTIVITY_TYPES = ["Call","WhatsApp","Email","Meeting","Note","SMS","SiteVisit"];
 

@@ -34,8 +34,8 @@ const AGREEMENT_TRANSITIONS = {
   Cancelled:  [CrmStatus.CANCELLED],
 };
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const upload = multer({
   storage: multer.memoryStorage(),

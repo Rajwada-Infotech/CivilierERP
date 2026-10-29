@@ -41,8 +41,8 @@ const { applyPagination } = require("../services/crmListPagination");
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const multer = require('multer');
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const upload = multer({
   storage: multer.memoryStorage(),

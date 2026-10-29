@@ -7,8 +7,8 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET /projects — mirrors unitMatrix.js
 router.get("/projects", requirePageRight("crm-parking-matrix", "view"), cache("parking-matrix-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {

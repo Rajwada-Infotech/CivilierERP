@@ -12,8 +12,8 @@ const { actorId } = require("../services/saAccess");
 const { requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Standard checklist shown even before any row exists, so staff see what's
 // expected to be collected — not just what's already been uploaded.

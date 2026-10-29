@@ -14,8 +14,8 @@ const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, resolveExtraWorkHsn, getHsnRate, isLandSale } = require("../services/crmGst");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Same re-derive-from-source pattern as crmParking.js's rollup — delegates
 // ParkingTotal/ExtraChargesTotal/GrandTotal AND the fixed HSN-driven GST

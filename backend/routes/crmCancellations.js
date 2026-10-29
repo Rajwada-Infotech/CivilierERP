@@ -29,8 +29,8 @@ const { getIo } = require("../socket");
 const { findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // The set of company banks THIS booking's real payments actually landed in
 // (milestone receipts + on-account deposits, wherever DepositBankId is set).

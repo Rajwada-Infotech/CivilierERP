@@ -7,8 +7,8 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET / — the reusable milestone catalog, sorted for display in the Payment
 // Plan Master's step picker.

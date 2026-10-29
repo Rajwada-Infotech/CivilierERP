@@ -19,8 +19,8 @@ const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Recomputes CrmBooking.ParkingTotal/ExtraChargesTotal/GrandTotal AND the
 // fixed HSN-driven GST (which re-prices every active parking allotment to

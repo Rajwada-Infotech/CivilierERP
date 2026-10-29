@@ -23,8 +23,8 @@ const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
 const { applyPagination } = require("../services/crmListPagination");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const WC_SELECT = `
   SELECT
