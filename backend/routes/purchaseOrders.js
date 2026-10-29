@@ -29,6 +29,7 @@ const {
   recomputeMRFulfillment,
 } = require("../services/materialRequestFulfillment");
 const { multiMrReady, getPoMrIds, savePoMrs, lineMrSources } = require("../services/poMrLinks");
+const supplierDeviation = require("../services/poSupplierDeviation");
 
 // Recompute every MR a PO draws on — after it's created, edited, deleted or rejected. Best-effort.
 async function recomputePoMrs(pool, mrIds, userEmail) {
@@ -1073,6 +1074,27 @@ router.get("/last-rates", async (req, res) => {
   }
 });
 
+// The quotations for these MRs (or this quotation) whose lowest (L1) supplier is not this one — the PO form asks for a
+// reason when there are any. excludeId: an existing PO being edited (its own MRs and quotation are added).
+router.get("/l1-check", async (req, res) => {
+  const ids = (v) => String(v || "").split(",").map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 50);
+  try {
+    const pool = getPool();
+    let mrIds = ids(req.query.mrIds);
+    let qtId = parseInt(req.query.qtId, 10);
+    const poId = parseInt(req.query.excludeId, 10);
+    if (Number.isFinite(poId)) {
+      mrIds = [...mrIds, ...(await getPoMrIds(pool, poId))];
+      const row = (await pool.request().input("id", sql.Int, poId)
+        .query("SELECT SourceQTId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id")).recordset[0];
+      if (!Number.isFinite(qtId) && row?.SourceQTId) qtId = row.SourceQTId;
+    }
+    res.json(await supplierDeviation.findL1Deviations(pool, { mrIds, qtId: Number.isFinite(qtId) ? qtId : null, supplierId: req.query.supplierId }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
@@ -1097,8 +1119,26 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
     const pool = getPool();
+    // A PO for an MR whose quotation has an L1 supplier, going to someone else, needs a reason; the directors are told.
+    const { SourceMRId: firstMr, SourceMRIds: moreMrs, SourceQTId: qtForCheck, SupplierID: supplierForCheck, SupplierChangeReason } = req.body;
+    const deviations = await supplierDeviation.assertReasonIfDeviating(
+      pool,
+      { mrIds: [firstMr, ...(Array.isArray(moreMrs) ? moreMrs : [])], qtId: qtForCheck, supplierId: supplierForCheck },
+      SupplierChangeReason,
+    );
+
     const { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo } =
       await createPurchaseOrderInternal(pool, req.body, userEmail);
+
+    if (deviations.length) {
+      try {
+        await supplierDeviation.saveReason(pool, newId, SupplierChangeReason);
+      } catch (e) {
+        console.error("PO supplier-change reason not saved:", e.message);
+      }
+      supplierDeviation.notifyDirectors(pool, newId, deviations, SupplierChangeReason)
+        .catch((e) => console.error("PO supplier-change notification failed:", e.message));
+    }
 
     await bumpCacheVersion("purchase-orders");
 
@@ -1155,7 +1195,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     });
   } catch (err) {
     console.error("POST PurchaseOrders error:", err);
-    res.status(err.status || 500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, ...(err.code ? { code: err.code, deviations: err.deviations } : {}) });
   }
 });
 
@@ -1193,6 +1233,7 @@ router.put(
       VendorInvoiceDate,
       VendorInvoiceNo,
       PaymentTermId,
+      SupplierChangeReason,
     } = req.body;
 
     const poItemsArray = Array.isArray(POItems)
@@ -1251,6 +1292,18 @@ router.put(
         return res.status(409).json({
           error: `Cannot edit: this Purchase Order has ${blockedBy}. Delete them first, then edit the PO.`,
         });
+
+      // Changing the supplier to one other than the quotation's L1 needs a reason too (as on create).
+      let deviations = [];
+      const prior = (await pool.request().input("id", sql.Int, id)
+        .query("SELECT SupplierID, SourceQTId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id")).recordset[0];
+      if (prior && String(prior.SupplierID) !== String(SupplierID)) {
+        deviations = await supplierDeviation.assertReasonIfDeviating(
+          pool,
+          { mrIds: await getPoMrIds(pool, id), qtId: prior.SourceQTId, supplierId: SupplierID },
+          SupplierChangeReason,
+        );
+      }
       const beforeSnapshot = wasApproved
         ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
         : null;
@@ -1353,6 +1406,16 @@ router.put(
       await syncLineItems(transaction, sql, id, poItemsArray, uomMap, await multiMrReady(pool));
 
       await transaction.commit();
+
+      if (deviations.length) {
+        try {
+          await supplierDeviation.saveReason(pool, id, SupplierChangeReason);
+        } catch (e) {
+          console.error("PO supplier-change reason not saved:", e.message);
+        }
+        supplierDeviation.notifyDirectors(pool, id, deviations, SupplierChangeReason)
+          .catch((e) => console.error("PO supplier-change notification failed:", e.message));
+      }
       await bumpCacheVersion("purchase-orders");
       // Quantities on MR-linked lines may have changed: bring every source MR's status up to date.
       recomputePoMrs(pool, await getPoMrIds(pool, id), userEmail).catch(() => {});
@@ -1420,7 +1483,7 @@ router.put(
         /* ignore */
       }
       console.error("PUT PurchaseOrders error:", err);
-      res.status(err.status || 500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message, ...(err.code ? { code: err.code, deviations: err.deviations } : {}) });
     }
   },
 );
