@@ -157,6 +157,7 @@ function attachmentRowToDto(a) {
 }
 
 /** Link a set of previously-uploaded (unlinked) attachment ids to a VehicleInOutID. */
+// `pool` may be a transaction: create / edit run their writes in one.
 async function linkAttachments(pool, vehicleInOutId, attachmentIds) {
   if (!attachmentIds.length) return;
   for (const attachId of attachmentIds) {
@@ -273,7 +274,12 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
-  if (!poId || submitted.length === 0) return [];
+  // No poId means this is a gate-only record without a PO link (not currently
+  // used but kept for safety). Empty submitted with a poId means the user
+  // submitted the form without entering any received quantities — reject it.
+  if (!poId) return [];
+  if (submitted.length === 0)
+    throw new ValidationError("At least one item with a received quantity greater than zero is required.");
 
   const remaining = await getPOItemsWithRemaining(pool, poId, excludeVehicleInOutId);
   const byId = new Map(remaining.map((r) => [r.poItemId, r]));
@@ -802,6 +808,16 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     // â”€â”€ 0b. Validate received quantities against what's left on the PO â”€â”€â”€â”€â”€â”€
     // before touching the header row, so a rejected submission never
     // creates an orphaned Vehicle In/Out record.
+    // Before the per-line quantity check, gate the whole submission if the PO
+    // already has zero remaining across every line — meaning all ordered goods
+    // have been received and no new VIO entry would record anything meaningful.
+    const poItemsCheck = await getPOItemsWithRemaining(pool, parseInt(poId, 10), null);
+    const totalRemaining = poItemsCheck.reduce((s, r) => s + r.remainingQty, 0);
+    if (poItemsCheck.length > 0 && totalRemaining <= 0) {
+      return res.status(400).json({
+        error: 'This Purchase Order has been fully received — all ordered quantities have been delivered. No further Vehicle In/Out entries are permitted.',
+      });
+    }
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, null);
 
     // â”€â”€ 1. Resolve doc type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -818,7 +834,14 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     });
 
     // â”€â”€ 3. Insert record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const insert = await pool
+    // Header, attachments and item lines are one unit: the header used to be saved on its own, so a failure
+    // while saving the lines (an oversized photo, a PO line changed underneath) left an entry with no items
+    // behind — and the user, seeing the error, saved again and got another one.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    let insert;
+    try {
+    insert = await tx
       .request()
       .input("DocNo", sql.NVarChar(50), finalDocNo)
       .input("DocTypeId", sql.Int, docTypeId)
@@ -861,14 +884,20 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 
     recordId = insert.recordset[0].VehicleInOutID;
 
-    // â”€â”€ 4. Back-patch DocNumberSequence with the real PK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    await backPatchRecordId(pool, sql, finalDocNo, "VehicleInOut", recordId);
-
     // â”€â”€ 5. Link any attachments uploaded while filling out the form â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    await linkAttachments(pool, recordId, parseIdList(attachmentIds));
+    await linkAttachments(tx, recordId, parseIdList(attachmentIds));
 
     // â”€â”€ 6. Persist the validated received-quantity lines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    await saveVehicleInOutItems(pool, recordId, validatedItems);
+    await saveVehicleInOutItems(tx, recordId, validatedItems);
+
+    await tx.commit();
+    } catch (writeErr) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw writeErr;
+    }
+
+    // â”€â”€ 4. Back-patch DocNumberSequence with the real PK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    await backPatchRecordId(pool, sql, finalDocNo, "VehicleInOut", recordId);
 
     await bumpCacheVersion(CACHE_KEY);
 
@@ -942,7 +971,12 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     // own remaining allowance while re-editing it.
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, id);
 
-    await pool
+    // Header, attachments and item lines are saved together or not at all (the lines are replaced: a failure
+    // between the delete and the insert used to leave the entry with no items).
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+    await tx
       .request()
       .input("ID", sql.Int, id)
       .input("DocDate", sql.Date, docDate || new Date())
@@ -980,11 +1014,17 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       `);
 
     // Link any newly-uploaded attachments added during this edit.
-    await linkAttachments(pool, id, parseIdList(attachmentIds));
+    await linkAttachments(tx, id, parseIdList(attachmentIds));
 
     // Persist the validated received-quantity lines (replaces this
     // record's previous item rows).
-    await saveVehicleInOutItems(pool, id, validatedItems);
+    await saveVehicleInOutItems(tx, id, validatedItems);
+
+    await tx.commit();
+    } catch (writeErr) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw writeErr;
+    }
 
     await bumpCacheVersion(CACHE_KEY);
 
