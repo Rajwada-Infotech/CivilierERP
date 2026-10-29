@@ -92,21 +92,27 @@ beforeEach(() => {
   dbMock.__setWorkflow(null);
 });
 
-describe("approvalService: Approval Setup decides who approves", () => {
-  test("no workflow in Approval Setup -> nobody may approve, not even super_admin", async () => {
+describe("approvalService: Approval Setup decides who approves with parallel Super Admin rights", () => {
+  test("no workflow in Approval Setup -> nobody may approve, ask an admin to add one", async () => {
     await expect(
       transition("journal-voucher", 1, "Approved", "user@example.com", "super_admin", null, 1),
     ).rejects.toThrow(/no approval rule is set up/i);
   });
 
   test("a role named on the level may approve", async () => {
-    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["super_admin"], userIds: [] }]);
-    const result = await transition("journal-voucher", 1, "Approved", "user@example.com", "super_admin", null, 1);
+    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["accounts_head"], userIds: [] }]);
+    const result = await transition("journal-voucher", 1, "Approved", "user@example.com", "accounts_head", null, 1);
     expect(result.newStatus).toBe("Approved");
   });
 
-  test.each(["admin", "dba"])("'%s' not named on the level is refused (no admin pass)", async (role) => {
-    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["super_admin"], userIds: [] }]);
+  test("super_admin not explicitly named on the level may approve in parallel", async () => {
+    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["accounts_head"], userIds: [] }]);
+    const result = await transition("journal-voucher", 1, "Approved", "admin@example.com", "super_admin", null, 7);
+    expect(result.newStatus).toBe("Approved");
+  });
+
+  test.each(["store_manager", "site_engineer"])("'%s' not named on the level is refused", async (role) => {
+    dbMock.__setWorkflow([{ id: 1, label: "Approval", roles: ["accounts_head"], userIds: [] }]);
     await expect(
       transition("journal-voucher", 1, "Approved", "user@example.com", role, null, 7),
     ).rejects.toThrow(/not authorized/i);
@@ -121,21 +127,21 @@ describe("approvalService: Approval Setup decides who approves", () => {
   test("someone not named by role or userId is refused", async () => {
     dbMock.__setWorkflow([{ id: 1, label: "Level 1", userIds: [42] }]);
     await expect(
-      transition("journal-voucher", 1, "Approved", "user@example.com", "accounts_head", null, 99),
+      transition("journal-voucher", 1, "Approved", "user@example.com", "store_manager", null, 99),
     ).rejects.toThrow(/not authorized/i);
   });
 
-  test("a level naming nobody admits nobody", async () => {
+  test("a level naming nobody refuses non-superadmin", async () => {
     dbMock.__setWorkflow([{ id: 1, label: "Level 1", roles: [], userIds: [] }]);
     await expect(
-      transition("grn", 1, "Approved", "user@example.com", "admin", null, 2),
+      transition("grn", 1, "Approved", "user@example.com", "store_manager", null, 2),
     ).rejects.toThrow(/not authorized/i);
   });
 
-  test("rejecting follows the same rule", async () => {
+  test("rejecting follows the same rule for non-superadmin", async () => {
     dbMock.__setWorkflow([{ id: 1, label: "Level 1", userIds: [42] }]);
     await expect(
-      transition("grn", 1, "Rejected", "user@example.com", "admin", null, 2),
+      transition("grn", 1, "Rejected", "user@example.com", "store_manager", null, 2),
     ).rejects.toThrow(/not authorized/i);
   });
 });
