@@ -26,10 +26,12 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const allowRoles = require("../middleware/role");
+const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+// The page's own rights (admins always pass). Writes used to be admin-only while the page offered New / Edit /
+// Delete to anyone holding them, so everyone else got "Forbidden".
+const PAGE = "project-type-master";
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -144,7 +146,7 @@ async function switchConflicts(pool, typeId, next) {
   return r.recordset.map((x) => `${x.N} ${x.Reason}`).join(", ");
 }
 
-router.post("/", adminOnly, async (req, res) => {
+router.post("/", requirePageRight(PAGE, "create"), async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || b.Name || "").trim();
   const code = String(b.code || b.Code || "").trim().toUpperCase();
@@ -185,7 +187,7 @@ router.post("/", adminOnly, async (req, res) => {
   }
 });
 
-router.put("/:id", adminOnly, async (req, res) => {
+router.put("/:id", requirePageRight(PAGE, "edit"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const b = req.body || {};
@@ -199,6 +201,16 @@ router.put("/:id", adminOnly, async (req, res) => {
     const dup = await pool.request().input("c", sql.NVarChar(30), code).input("id", sql.Int, id)
       .query("SELECT TOP 1 Id FROM dbo.ProjectTypeMaster WHERE Code = @c AND IsActive = 1 AND Id <> @id");
     if (dup.recordset.length) return res.status(400).json({ error: `Code "${code}" is already in use` });
+
+    // Switching a type off from the edit form is a delete by another road: refused the same way while in use.
+    if (!toBit(b.isActive ?? b.IsActive, 1)) {
+      const used = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT (SELECT COUNT(*) FROM dbo.enterprise WHERE project_type_id = @id) AS Projects,
+               (SELECT COUNT(*) FROM dbo.BlockMaster WHERE ProjectTypeId = @id) AS Blocks`)).recordset[0];
+      if (used.Projects > 0 || used.Blocks > 0) {
+        return res.status(400).json({ error: `In use by ${used.Projects} project(s) and ${used.Blocks} block(s) — reassign them before making this type inactive.` });
+      }
+    }
 
     // The type's switches can't be changed under units / layouts that already depend on them.
     const usageReady = (await pool.request().query("SELECT COL_LENGTH('dbo.ProjectTypeMaster', 'SellsCommercial') AS c")).recordset[0].c != null;
@@ -245,7 +257,7 @@ router.put("/:id", adminOnly, async (req, res) => {
 // Soft delete, and only when nothing references it. A type still in use decides
 // how those projects price and tax their units; removing it under them would
 // silently move them back to the legacy high-rise behaviour.
-router.delete("/:id", adminOnly, async (req, res) => {
+router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {

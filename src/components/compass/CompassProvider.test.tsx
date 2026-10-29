@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 
 const mocks = vi.hoisted(() => ({ user: { id: "u1", role: "super_admin" } }));
@@ -37,6 +37,9 @@ vi.mock("@/contexts/AuthContext", () => ({
 }));
 
 import { CompassProvider } from "./CompassProvider";
+
+// Let the fetches a render starts finish inside act(), so their state updates don't land after the test.
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 // jsdom lacks these; cmdk and Radix expect them.
 beforeAll(() => {
@@ -147,13 +150,16 @@ describe("Compass hotkeys", () => {
     expect(isOpen()).toBe(true); // still open, not toggled closed again
   });
 
-  it("prevents the browser default so Enter+Space doesn't also submit a form or scroll", () => {
+  it("prevents the browser default so Enter+Space doesn't also submit a form or scroll", async () => {
     mount();
     const kdEnter = new KeyboardEvent("keydown", { code: "Enter", key: "Enter", cancelable: true, bubbles: true });
-    window.dispatchEvent(kdEnter);
     const kdSpace = new KeyboardEvent("keydown", { code: "Space", key: " ", cancelable: true, bubbles: true });
-    window.dispatchEvent(kdSpace);
+    act(() => {
+      window.dispatchEvent(kdEnter);
+      window.dispatchEvent(kdSpace);
+    });
     expect(kdSpace.defaultPrevented).toBe(true);
+    await settle(); // the palette it opens finishes animating in
   });
 });
 
@@ -227,6 +233,13 @@ describe("Compass search and navigation", () => {
   });
 });
 
+// An entry under "Recent", by its label. The Finance dashboard (/finance) is labelled "Dashboard", like every module's
+// landing page, so it's looked for inside the Recent group only.
+const recentEntry = (label: string) => {
+  const group = screen.getByText("Recent").closest("[cmdk-group]") as HTMLElement;
+  return within(group).getByText(label);
+};
+
 describe("Compass recent pages", () => {
   it("records visited pages per user and lists them (excluding the current page)", async () => {
     mount("/finance");
@@ -243,7 +256,7 @@ describe("Compass recent pages", () => {
     press();
     await screen.findByRole("dialog");
     expect(screen.getByText("Recent")).toBeInTheDocument();
-    expect(screen.getByText("Proceeding")).toBeInTheDocument(); // /finance's label
+    expect(recentEntry("Dashboard")).toBeInTheDocument(); // /finance
   });
 
   it("ignores stored routes the user can no longer open", async () => {
@@ -259,7 +272,7 @@ describe("Compass recent pages", () => {
     mount("/home");
     press();
     await screen.findByRole("dialog");
-    const latest = screen.getByText("Proceeding").closest("[cmdk-item]")!; // /finance's label
+    const latest = recentEntry("Dashboard").closest("[cmdk-item]")!; // /finance
     await waitFor(() => expect(latest).toHaveAttribute("aria-selected", "true"));
     const list = document.querySelector("[cmdk-list]") as HTMLElement;
     expect(list.scrollTop).toBe(0);

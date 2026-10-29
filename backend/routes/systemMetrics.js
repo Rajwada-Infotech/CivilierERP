@@ -4,7 +4,6 @@ const router = express.Router();
 const { getPool } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const apiRateLimit = require("../middleware/apiRateLimit");
-const allowRoles = require("../middleware/role");
 const worker = require("../worker");
 const {
   getRedis,
@@ -17,7 +16,14 @@ const {
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-const metricsOnly = allowRoles("admin", "super_admin", "dba", "director");
+const { requirePageRight } = require("../middleware/requirePageRight");
+
+// Admin-tier roles and directors always; anyone else holding the Live Metrics page right (metrics-dashboard,
+// ticked in Menu Rights) too — the page itself already opens on that right, so its data should load with it.
+const METRICS_ROLES = new Set(["admin", "super_admin", "dba", "director"]);
+const metricsByRight = requirePageRight("metrics-dashboard", "view");
+const metricsOnly = (req, res, next) =>
+  METRICS_ROLES.has(String(req.user?.role || "").toLowerCase()) ? next() : metricsByRight(req, res, next);
 
 // Engagement is scored per user id; the reply swaps each id for the person's name (flat [name, score, ...] pairs).
 async function getTopEngagedUsers() {

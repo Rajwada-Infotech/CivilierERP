@@ -6,8 +6,8 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET / — CRM Command Centre dashboard.
 // Accepts optional ?projectId=N to scope all KPIs to a single project.

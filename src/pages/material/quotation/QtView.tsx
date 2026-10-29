@@ -8,7 +8,7 @@ const thCls = "px-4 py-2.5 font-semibold";
 
 // One quotation opened for reading: details, items, suppliers, print / send / delete.
 export function QtView({ m }: { m: QtState }) {
-  const { rights, viewingRecord, deleteMutation, sendMutation, goToList, handlePrint } = m;
+  const { rights, viewingRecord, deleteMutation, sendMutation, goToList, handlePrint, paymentTerms, supplierTermMutation } = m;
   if (!viewingRecord) return null;
   const r = viewingRecord;
   const status = r.Status || "Draft";
@@ -117,6 +117,7 @@ export function QtView({ m }: { m: QtState }) {
                 <tr className={`${LBL} text-left`} style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground) / 0.3)" }}>
                   <th className={thCls}>Supplier</th>
                   <th className={thCls}>Status</th>
+                  <th className={thCls}>Payment terms</th>
                   <th className={thCls}>Invited</th>
                 </tr>
               </thead>
@@ -126,6 +127,31 @@ export function QtView({ m }: { m: QtState }) {
                     <td className="px-4 py-2.5 font-medium">{s.SupplierName}</td>
                     <td className="px-4 py-2.5">
                       <SheetMark text={printStatusLabel(s.Status || "Pending")} tone={statusTone(s.Status || "Pending")} />
+                    </td>
+                    <td className="px-4 py-2" title="The purchase order raised for this supplier starts with this term; payment reminders follow it">
+                      {rights.canEdit ? (
+                        <select
+                          value={s.PaymentTermId ? String(s.PaymentTermId) : ""}
+                          disabled={supplierTermMutation.isPending}
+                          onChange={(e) => supplierTermMutation.mutate({ supplierId: s.SupplierLHeadId, termId: e.target.value ? Number(e.target.value) : null })}
+                          className="h-8 min-w-[11rem] rounded-none bg-transparent px-2 text-sm"
+                          style={{ border: "1px solid hsl(var(--foreground) / 0.3)" }}
+                          aria-label={`Payment terms for ${s.SupplierName}`}
+                        >
+                          <option value="">Not set</option>
+                          {/* Keep a term that has since been made inactive selectable as the current value. */}
+                          {s.PaymentTermId && !paymentTerms.some((t) => t.id === s.PaymentTermId) && (
+                            <option value={String(s.PaymentTermId)}>{s.PaymentTermName} ({s.PaymentTermDays} days)</option>
+                          )}
+                          {paymentTerms.map((t) => (
+                            <option key={t.id} value={String(t.id)}>{t.label} ({t.days} days)</option>
+                          ))}
+                        </select>
+                      ) : s.PaymentTermName ? (
+                        <span>{s.PaymentTermName} <span className="text-muted-foreground font-heading tabular-nums">· {s.PaymentTermDays} days</span></span>
+                      ) : (
+                        <span className="text-muted-foreground">Not set</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground tabular-nums">{fmtDate(s.InvitedAt)}</td>
                   </tr>

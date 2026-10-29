@@ -21,8 +21,8 @@ const extraChargesRouter = require("./crmExtraCharges");
 const parkingRouter = require("./crmParking");
 const coApplicantRouter = require("./crmCoApplicant");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const LIST_SELECT = `
   SELECT r.*,

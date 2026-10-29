@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2, Copy, Layers, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, INP } from "./customers/config";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { VILLA_TYPE_API, type VillaType } from "./VillaTypesDialog";
 import { storeyDisplay, storeyRank } from "@/lib/floorLabel";
@@ -20,6 +20,7 @@ type Line = { key: string; storey: string; categoryId: string; quantity: string 
 
 // Floor names and order are shared with every other screen (src/lib/floorLabel.ts).
 const storeyName = storeyDisplay;
+const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 
 let seq = 0;
 const newLine = (storey: string, categoryId = "", quantity = "1"): Line => ({
@@ -256,39 +257,25 @@ export function VillaRoomPlanEditor({
 
   return (
     <>
-    <div className="rounded-lg border border-primary/40 bg-primary/[0.02] p-4 space-y-4">
+    <div className="bg-card p-4 space-y-4" style={{ border: RULE, boxShadow: "inset 3px 0 0 hsl(var(--foreground))" }}>
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold flex items-center gap-1.5">
-            <Layers size={14} className="text-primary" />
-            Rooms by floor — {type.Code} · {type.Name}
-          </p>
+          <p className={HEAD}>Rooms by floor — {type.Code} · {type.Name}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             Each plot converted to this type gets these rooms on these floors, with their DPR steps. Villas already built keep theirs — after saving you can add the new rooms to them.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {siblings.length > 0 && canEdit && (
-            <div className="flex items-center gap-1.5">
-              <Copy size={13} className="text-muted-foreground shrink-0" />
-              <Select value="" onValueChange={(v) => v && copyFrom(Number(v))}>
-                <SelectTrigger className="h-9 w-48 text-xs">
-                  <SelectValue placeholder="Copy from another type…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {siblings.map((s) => (
-                    <SelectItem key={s.Id} value={String(s.Id)}>
-                      {s.Code} — {s.Name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <select value="" onChange={(e) => e.target.value && copyFrom(Number(e.target.value))} className={`${INP} !w-52 !text-xs`} aria-label="Copy rooms from another type">
+              <option value="">Copy from another type…</option>
+              {siblings.map((s) => <option key={s.Id} value={String(s.Id)}>{s.Code} — {s.Name}</option>)}
+            </select>
           )}
           <button
             onClick={onClose}
-            className="h-9 px-3 text-xs border border-border rounded-lg hover:bg-muted"
+            className={`${KEY_LINE} h-9 px-3`}
           >
             Close
           </button>
@@ -297,10 +284,8 @@ export function VillaRoomPlanEditor({
 
       {/* ── Floor Structure Builder ─────────────────────────────── */}
       {canEdit && (
-        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Floor structure
-          </p>
+        <div className="p-3 space-y-3" style={{ border: RULE_SOFT }}>
+          <p className={LBL}>Floor structure</p>
 
           {/* Quick G + N builder */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -312,7 +297,7 @@ export function VillaRoomPlanEditor({
                 max={30}
                 value={upperCount}
                 onChange={(e) => setUpperCount(Math.max(0, Math.min(30, Number(e.target.value) || 0)))}
-                className="h-9 w-16 rounded-lg border border-border bg-background px-2 text-center text-sm tabular-nums outline-none focus:border-primary"
+                className={`${INP} !w-16 text-center font-heading tabular-nums`}
                 title="Number of upper floors above ground"
               />
               <span className="text-sm text-muted-foreground whitespace-nowrap">upper floors</span>
@@ -323,7 +308,7 @@ export function VillaRoomPlanEditor({
                 type="checkbox"
                 checked={hasBasement}
                 onChange={(e) => setHasBasement(e.target.checked)}
-                className="h-4 w-4 rounded"
+                className="h-3.5 w-3.5 accent-foreground"
               />
               <span>+ Basement</span>
             </label>
@@ -333,7 +318,7 @@ export function VillaRoomPlanEditor({
                 type="checkbox"
                 checked={hasRoof}
                 onChange={(e) => setHasRoof(e.target.checked)}
-                className="h-4 w-4 rounded"
+                className="h-3.5 w-3.5 accent-foreground"
               />
               <span>+ Roof terrace</span>
             </label>
@@ -342,35 +327,31 @@ export function VillaRoomPlanEditor({
               onClick={applyFloorBuilder}
               disabled={!isFloorDirty}
               title={isFloorDirty ? "Apply the new floor structure" : "Floor structure is already up to date"}
-              className={`h-9 px-4 text-xs font-semibold rounded-lg border transition-colors ${
-                isFloorDirty
-                  ? "border-primary bg-primary text-white hover:bg-primary/90"
-                  : "border-border bg-muted text-muted-foreground cursor-not-allowed opacity-50"
-              }`}
+              className={`${isFloorDirty ? KEY_INK : KEY_LINE} h-9 px-4`}
             >
-              {isFloorDirty ? "Apply" : "✓ Applied"}
+              {isFloorDirty ? "Apply" : "Applied"}
             </button>
           </div>
 
           {/* Current floors as chips + add custom */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">Floors:</span>
+            <span className={LBL}>Floors</span>
             {floors.map((f) => {
               const hasRooms = lines.some((l) => l.storey === f);
               return (
                 <span
                   key={f}
-                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium border ${
+                  className={`inline-flex items-center gap-1 h-7 px-2.5 text-xs font-medium border ${
                     hasRooms
-                      ? "border-primary/40 bg-primary/10 text-primary"
-                      : "border-border bg-muted text-muted-foreground"
+                      ? "border-foreground bg-primary/10 text-foreground"
+                      : "border-foreground/30 bg-card text-muted-foreground"
                   }`}
                 >
                   {storeyName(f)}
                   <button
                     onClick={() => removeFloor(f)}
                     title={hasRooms ? "Remove floor and its rooms" : "Remove floor"}
-                    className="ml-0.5 rounded-full hover:text-destructive"
+                    className="ml-0.5 hover:text-destructive"
                   >
                     <X size={11} />
                   </button>
@@ -386,11 +367,11 @@ export function VillaRoomPlanEditor({
                 onKeyDown={(e) => e.key === "Enter" && addCustomFloor()}
                 placeholder="e.g. Terrace"
                 maxLength={20}
-                className="h-7 w-28 rounded-full border border-dashed border-border bg-background px-2.5 text-xs outline-none focus:border-primary"
+                className="h-7 w-28 border border-dashed border-foreground/40 bg-card px-2.5 text-xs outline-none focus:border-foreground"
               />
               <button
                 onClick={addCustomFloor}
-                className="inline-flex items-center gap-0.5 text-xs text-primary hover:underline"
+                className="inline-flex items-center gap-0.5 text-xs underline underline-offset-2"
               >
                 <Plus size={11} /> Add
               </button>
@@ -402,16 +383,16 @@ export function VillaRoomPlanEditor({
             {upperCount > 0 ? ` + Floor 1 through Floor ${upperCount}` : " only"}
             {hasBasement ? " + Basement" : ""}
             {hasRoof ? " + Roof terrace" : ""}
-            . Rooms with a blue chip are already filled in.
+            . Floors with a washed tag already have rooms.
           </p>
         </div>
       )}
 
       {/* ── Floors, bottom to top, each full width ─────────────── */}
       {loading ? (
-        <div className="h-32 rounded-lg bg-muted/40 animate-pulse" />
+        <p className="text-xs text-muted-foreground">Loading the room plan…</p>
       ) : floors.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+        <div className="border border-dashed border-foreground/30 p-6 text-center text-sm text-muted-foreground">
           No floors defined yet. Use the floor structure above to add floors.
         </div>
       ) : (
@@ -421,10 +402,10 @@ export function VillaRoomPlanEditor({
             const floorRooms = mine.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
             const usedHere = new Set(mine.map((l) => l.categoryId).filter(Boolean));
             return (
-              <div key={f} className="rounded-lg border border-border bg-background">
-                <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-muted/30 rounded-t-lg">
-                  <p className="text-sm font-semibold">{storeyName(f)}</p>
-                  <span className="text-xs text-muted-foreground tabular-nums">
+              <div key={f} className="bg-card" style={{ border: RULE_SOFT }}>
+                <div className="flex items-center justify-between gap-2 px-3 py-2" style={{ borderBottom: RULE_SOFT }}>
+                  <p className={HEAD}>{storeyName(f)}</p>
+                  <span className="text-xs text-muted-foreground font-heading tabular-nums">
                     {floorRooms} room{floorRooms !== 1 ? "s" : ""}
                   </span>
                 </div>
@@ -432,32 +413,24 @@ export function VillaRoomPlanEditor({
                   {mine.map((l) => {
                     const noDpr = !!l.categoryId && dprReady != null && !dprReady.has(Number(l.categoryId));
                     return (
-                      <div key={l.key} className={`flex items-center gap-2 rounded-lg border p-1.5 ${noDpr ? "border-amber-500/40 bg-amber-500/5" : "border-border"}`}>
+                      <div key={l.key} className={`flex items-center gap-2 border p-1.5 ${noDpr ? "border-foreground" : "border-foreground/20"}`}
+                        style={{ boxShadow: noDpr ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
                         <div className="flex-1 min-w-0">
-                          <Select
-                            value={l.categoryId || "_empty_"}
-                            onValueChange={(v) => set(l.key, { categoryId: v === "_empty_" ? "" : v })}
-                            disabled={!canEdit}
-                          >
-                            <SelectTrigger className="h-9 w-full text-sm">
-                              <SelectValue placeholder="Room type…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {categories.map((c) => (
-                                <SelectItem key={c.id} value={String(c.id)}
-                                  disabled={usedHere.has(String(c.id)) && String(c.id) !== l.categoryId}>
-                                  {c.alias}{dprReady != null && !dprReady.has(c.id) ? "  · no DPR steps yet" : ""}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {noDpr && <p className="mt-1 px-1 text-[0.6875rem] text-amber-700 dark:text-amber-300">No DPR step list for this room type yet — set one in Dependency Master.</p>}
+                          <select value={l.categoryId} onChange={(e) => set(l.key, { categoryId: e.target.value })} disabled={!canEdit} className={`${INP} disabled:opacity-60`}>
+                            <option value="" disabled>Room type…</option>
+                            {categories.map((c) => (
+                              <option key={c.id} value={String(c.id)} disabled={usedHere.has(String(c.id)) && String(c.id) !== l.categoryId}>
+                                {c.alias}{dprReady != null && !dprReady.has(c.id) ? "  · no DPR steps yet" : ""}
+                              </option>
+                            ))}
+                          </select>
+                          {noDpr && <p className="mt-1 px-1 text-[0.6875rem] text-foreground">No DPR step list for this room type yet — set one in Dependency Master.</p>}
                         </div>
                         <input
                           type="number"
                           min={1}
                           max={20}
-                          className="h-9 w-16 shrink-0 rounded-lg border border-border bg-background px-2 text-sm text-center tabular-nums outline-none focus:border-primary self-start"
+                          className={`${INP} !w-16 shrink-0 text-center font-heading tabular-nums self-start disabled:opacity-60`}
                           value={l.quantity}
                           disabled={!canEdit}
                           onChange={(e) => set(l.key, { quantity: e.target.value })}
@@ -467,7 +440,7 @@ export function VillaRoomPlanEditor({
                         {canEdit && (
                           <button
                             onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                            className="p-2 rounded text-destructive hover:bg-destructive/10 shrink-0 self-start"
+                            className="w-9 h-9 inline-flex items-center justify-center border border-transparent text-destructive hover:border-destructive shrink-0 self-start"
                             title="Remove room"
                           >
                             <Trash2 size={14} />
@@ -479,7 +452,7 @@ export function VillaRoomPlanEditor({
                   {canEdit && (
                     <button
                       onClick={() => setLines((ls) => [...ls, newLine(f)])}
-                      className="h-[50px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-sm text-primary hover:bg-primary/5"
+                      className="h-[50px] inline-flex items-center justify-center gap-1.5 border border-dashed border-foreground/40 text-xs font-heading font-semibold uppercase tracking-[0.1em] hover:bg-primary/5"
                     >
                       <Plus size={14} /> Add room on {storeyName(f)}
                     </button>
@@ -491,26 +464,26 @@ export function VillaRoomPlanEditor({
         </div>
       )}
       {behind && canEdit && (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300/60 bg-amber-50/50 dark:bg-amber-950/20 px-3 py-2">
-          <span className="text-xs text-amber-800 dark:text-amber-300">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-card" style={{ border: RULE, boxShadow: "inset 3px 0 0 hsl(var(--foreground))" }}>
+          <span className="text-xs text-foreground">
             {behind.villas} built {type.Code} villa{behind.villas === 1 ? " is" : "s are"} missing {behind.rooms} room{behind.rooms === 1 ? "" : "s"} of this plan.
           </span>
           <button type="button" onClick={updateBuiltVillas} disabled={updatingVillas}
-            className="h-8 px-3 text-xs font-semibold rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">
+            className={`${KEY_INK} h-8 px-3`}>
             {updatingVillas ? "Adding…" : "Add the new rooms to them"}
           </button>
         </div>
       )}
       {/* ── Save footer ────────────────────────────────────────── */}
       {canEdit && (
-        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+        <div className="flex items-center justify-between gap-3 pt-3" style={{ borderTop: RULE_SOFT }}>
           <span className="text-xs text-muted-foreground tabular-nums">
             {total} room{total !== 1 ? "s" : ""} in total across {floors.length} floor{floors.length !== 1 ? "s" : ""}
           </span>
           <button
             onClick={save}
             disabled={saving}
-            className="h-9 px-6 text-sm font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40"
+            className={`${KEY_INK} h-9 px-5`}
           >
             {saving ? "Saving…" : "Save rooms"}
           </button>

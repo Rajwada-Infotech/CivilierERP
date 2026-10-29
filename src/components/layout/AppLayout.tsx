@@ -13,6 +13,7 @@ import { IdleLogoutWatcher } from "@/components/IdleLogoutWatcher";
 import { useLiveData } from "@/hooks/useLiveData";
 import { markAllStale } from "@/lib/queryClient";
 import { LoginRemindersPopup } from "@/components/LoginRemindersPopup";
+import { DirectorAlerts } from "@/components/DirectorAlerts";
 const SlowConnectionBanner = React.lazy(
   () => import("@/components/SlowConnectionBanner"),
 );
@@ -166,9 +167,13 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   // uses; TopNavbar (fixed, full-width) is its only chrome.
   const STRIP_W = 76;
   const NAV_W = 200;
-  const mainML = isMobile || effectiveIsHome
+  // Home's "Open modules" tab is fixed to the left edge; the page keeps clear of it instead of running underneath.
+  const HOME_TAB_W = 20;
+  const mainML = isMobile
     ? 0
-    : hideNavPanel
+    : effectiveIsHome
+      ? (isHome ? HOME_TAB_W : 0)
+      : hideNavPanel
       ? STRIP_W
       : sidebarCollapsed
         ? STRIP_W
@@ -182,6 +187,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         <NavPanelAutoExpand isHome={isHome} homeNavOpen={homeNavOpen} setHomeNavOpen={setHomeNavOpen}>
           <div className="min-h-screen bg-background" data-module={activeModule ?? undefined}>
             <TopNavbar />
+            <DirectorAlerts />
 
             {/* ── Home-only toggle — the only way back to the module strip
                 from a page that otherwise renders with none at all. Once
@@ -194,7 +200,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 title="Open modules"
                 className="fixed z-50 flex items-center justify-center bg-card text-foreground hover:bg-primary/10 transition-colors"
                 // A slim tab on the left edge, half-way down: clear of the Home sheet's title block and its text.
-                style={{ top: "50%", left: 0, width: 20, height: 52, transform: "translateY(-50%)", border: "1px solid hsl(var(--foreground))", borderLeft: 0 }}
+                style={{ top: "50%", left: 0, width: HOME_TAB_W, height: 52, transform: "translateY(-50%)", border: "1px solid hsl(var(--foreground))", borderLeft: 0 }}
               >
                 <ChromeIcons.right size={15} />
               </button>

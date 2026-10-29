@@ -80,7 +80,9 @@ export interface POLineItem {
   amount: number; // qty * rate + taxAmount (inclusive of GST)
   uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
   mrItemId?: number | null; // source MaterialRequestItems row, when this line came from an MR
-  mrPendingQty?: number | null; // cap for this line's quantity — remaining balance on that MR item
+  mrPendingQty?: number | null; // cap for this line's quantity — remaining balance on that MR item (summed over mrSources)
+  // The MR lines this line is summed from when several MRs are merged into one PO — same item, same unit.
+  mrSources?: { mrItemId: number; mrId: number; qty: number }[];
   costCenterId?: string; // from the selected item's own Item Master tag — persisted per-line (not per-PO), since one PO can mix e.g. a fixed-asset item with a consumption item
 }
 

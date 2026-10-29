@@ -9,8 +9,8 @@ const { applyLeadScope, actorId } = require("../services/saAccess");
 const { messagingStatus, PROVIDER_CHANNEL } = require("../services/messageProviders");
 const { LEAD_CHANNELS, messageLead } = require("../services/saMessaging");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const ACTIVITY_TYPES = ["Call","WhatsApp","Email","Meeting","Note","SMS","SiteVisit"];
 

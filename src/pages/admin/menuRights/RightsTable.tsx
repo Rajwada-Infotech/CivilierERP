@@ -8,23 +8,23 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
   const { TIER_ORDER, groupedPages, isChecked, togglePermission, toggleAllForPage, toggleGroup } = m;
   return (
     <>
-      {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="border-b border-foreground font-heading text-[0.5625rem] uppercase tracking-[0.12em]">
-              <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-0 sm:min-w-[240px]">
+      {/* Table — scrolls in its own box so the action bar stays pinned above the rows. */}
+      <div className="overflow-auto max-h-[calc(100dvh-13rem)] min-h-[16rem] thin-scroll">
+        <table className="w-full text-sm border-separate border-spacing-0">
+          <thead className="sticky top-0 z-10 bg-card" style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground))" }}>
+            <tr className="font-heading text-[0.5625rem] uppercase tracking-[0.12em]">
+              <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-[200px] sm:min-w-[240px] bg-card">
                 Menu / Page
               </th>
               {ALL_ACTIONS.map((a) => (
                 <th
                   key={a.key}
-                  className="px-3 py-3 font-heading font-semibold text-muted-foreground text-center min-w-[64px]"
+                  className="px-3 py-3 font-heading font-semibold text-muted-foreground text-center min-w-[64px] whitespace-nowrap bg-card"
                 >
                   {a.label}
                 </th>
               ))}
-              <th className="px-3 py-3 font-heading font-semibold text-muted-foreground text-center min-w-[64px]">
+              <th className="px-3 py-3 font-heading font-semibold text-muted-foreground text-center min-w-[64px] bg-card">
                 All
               </th>
             </tr>
@@ -61,7 +61,7 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                   <tr>
                     <td
                       colSpan={ALL_ACTIONS.length + 2}
-                      className="px-5 py-2 border-y border-foreground/40"
+                      className="px-5 py-2 border-b border-foreground/40"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export function RightsTable({ m }: { m: MenuRightsState }) {
                     return (
                       <tr
                         key={page.key}
-                        className="border-b border-foreground/10 hover:bg-primary/5 transition-colors"
+                        className="hover:bg-primary/5 transition-colors [&>td]:border-b [&>td]:border-foreground/10"
                       >
                         <td className="px-5 py-2.5 text-sm font-body text-foreground pl-10">
                           <span className="flex items-center gap-2">

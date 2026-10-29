@@ -6,7 +6,7 @@ import type { VIOState } from "./useVehicleInOut";
 
 // The purchase order a vehicle delivers against, its supplier and the lines received.
 export function VIOPoSupplier({ m }: { m: VIOState }) {
-  const { errors, setShowCamera, setCameraError, receivedQtyByItem, setReceivedQtyByItem, photoByItem, setPhotoByItem, setCapturingPoItemId, qualityByItem, setQualityByItem, brandByItem, setBrandByItem, form, pf, suppliers, filteredPOs, poItemsRemaining, loadingPOItems } = m;
+  const { errors, setShowCamera, setCameraError, receivedQtyByItem, setReceivedQtyByItem, photoByItem, setPhotoByItem, setCapturingPoItemId, qualityByItem, setQualityByItem, brandByItem, setBrandByItem, setWeightByItem, weightByItem, form, pf, suppliers, filteredPOs, poItemsRemaining, loadingPOItems } = m;
   return (
     <>
       {/* ── Section 2: PO & Supplier ── */}
@@ -54,6 +54,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                   setPhotoByItem({});
                   setQualityByItem({});
                   setBrandByItem({});
+                  setWeightByItem({});
                 }}
                 className={`${inpSel} ${errors.poId ? "border-destructive/60" : ""}`}
               >
@@ -171,6 +172,7 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                       <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
                       <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
                       <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                      <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Weight</th>
                       <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Brand</th>
                       <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
                       <th className="px-4 py-2 text-center text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
@@ -246,6 +248,42 @@ export function VIOPoSupplier({ m }: { m: VIOState }) {
                                 overLimit ? "border-destructive text-destructive" : "border-foreground/30"
                               } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
                             />
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {/* Optional: what this line weighed on arrival. */}
+                            <div className="flex items-center">
+                              <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={weightByItem[it.poItemId]?.value ?? ""}
+                                onChange={(e) =>
+                                  setWeightByItem((prev) => ({
+                                    ...prev,
+                                    [it.poItemId]: { value: e.target.value, unit: prev[it.poItemId]?.unit ?? "kg" },
+                                  }))
+                                }
+                                disabled={entered <= 0}
+                                placeholder="—"
+                                aria-label={`Weight of ${it.itemName || "item"}`}
+                                className={`w-20 px-2 py-1.5 border border-foreground/30 bg-card text-right font-heading text-xs focus:outline-none ${entered <= 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                              />
+                              <select
+                                value={weightByItem[it.poItemId]?.unit ?? "kg"}
+                                onChange={(e) =>
+                                  setWeightByItem((prev) => ({
+                                    ...prev,
+                                    [it.poItemId]: { value: prev[it.poItemId]?.value ?? "", unit: e.target.value as vehApi.VehicleInOutWeightUnit },
+                                  }))
+                                }
+                                disabled={entered <= 0}
+                                aria-label="Weight unit"
+                                className={`px-1.5 py-1.5 border border-l-0 border-foreground/30 bg-card text-xs focus:outline-none ${entered <= 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                              >
+                                <option value="kg">kg</option>
+                                <option value="tonne">tonne</option>
+                              </select>
+                            </div>
                           </td>
                           <td className="px-4 py-2.5">
                             <input

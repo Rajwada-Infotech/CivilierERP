@@ -28,6 +28,19 @@ const {
   getMRItemFulfillment,
   recomputeMRFulfillment,
 } = require("../services/materialRequestFulfillment");
+const { multiMrReady, getPoMrIds, savePoMrs, lineMrSources } = require("../services/poMrLinks");
+const supplierDeviation = require("../services/poSupplierDeviation");
+
+// Recompute every MR a PO draws on — after it's created, edited, deleted or rejected. Best-effort.
+async function recomputePoMrs(pool, mrIds, userEmail) {
+  for (const mrId of mrIds) {
+    try {
+      await recomputeMRFulfillment(pool, mrId, userEmail || null);
+    } catch (e) {
+      console.error(`MR ${mrId} status update failed:`, e.message);
+    }
+  }
+}
 
 // Approve/Reject are exempt — transition() (approvalService.js) is the real
 // authority there (role whitelist / approval-inbox edit right / named
@@ -255,6 +268,7 @@ const syncLineItems = async (
   purchaseOrderID,
   poItems,
   uomMap,
+  multiMr = false,
 ) => {
   if (!Array.isArray(poItems) || poItems.length === 0) return;
 
@@ -278,8 +292,12 @@ const syncLineItems = async (
     const amount = parseFloat(it.amount) || qty * rate;
     const uomName = String(it.unit || "").substring(0, 50);
     const uomId = uomMap[uomName] || null;
+    // The MR lines this PO line draws on. One source keeps MRItemId on the line itself (as before); a line summed
+    // from several MRs records each share in PurchaseOrderItemMRLinks (migration 585).
+    const sources = lineMrSources(it);
+    const singleMrItemId = sources.length === 1 ? sources[0].mrItemId : !multiMr && it.mrItemId ? parseInt(it.mrItemId, 10) : null;
 
-    await transaction
+    const inserted = await transaction
       .request()
       .input("POID", sqlRef.Int, purchaseOrderID)
       .input("ItemId", sqlRef.NVarChar(100), it.itemId || null)
@@ -294,16 +312,27 @@ const syncLineItems = async (
       .input("LineAmt", sqlRef.Decimal(18, 2), amount)
       .input("Sort", sqlRef.Int, i)
       .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
-      .input("MRItemId", sqlRef.Int, it.mrItemId ? parseInt(it.mrItemId, 10) : null)
+      .input("MRItemId", sqlRef.Int, singleMrItemId)
       .input("CostCenterId", sqlRef.Int, it.costCenterId !== undefined && it.costCenterId !== null && it.costCenterId !== "" ? parseInt(it.costCenterId, 10) : null)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
            Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, MRItemId, CostCenterId, CreatedAt)
+        OUTPUT INSERTED.Id
         VALUES
           (@POID, @ItemId, @ItemName, @ItemCode, @Desc,
            @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @MRItemId, @CostCenterId, @Now)
       `);
+    if (multiMr) {
+      for (const src of sources) {
+        await transaction
+          .request()
+          .input("POItemId", sqlRef.Int, inserted.recordset[0].Id)
+          .input("MRItemId", sqlRef.Int, src.mrItemId)
+          .input("Qty", sqlRef.Decimal(18, 4), src.qty)
+          .query("INSERT INTO dbo.PurchaseOrderItemMRLinks (PurchaseOrderItemId, MRItemId, Quantity) VALUES (@POItemId, @MRItemId, @Qty)");
+      }
+    }
   }
 };
 
@@ -343,6 +372,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     SourceWODocNo,
     SourceMRId,
     SourceMRDocNo,
+    SourceMRIds,
     SourceWDId,
     SourceWDDocNo,
     SourceQTId,
@@ -420,47 +450,77 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
     }
   }
 
-  // Enforce: a PO can only be raised against an Approved Material Request.
-  if (SourceMRId) {
-    const mrId = parseInt(SourceMRId, 10);
-    const mrCheck = await pool
-      .request()
-      .input("MRId", sql.Int, mrId)
-      .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
-
-    if (!mrCheck.recordset.length) {
-      const err = new Error("Source Material Request not found.");
-      err.status = 404;
+  // Every Material Request this PO is raised against: SourceMRId (the first) plus SourceMRIds (several MRs merged
+  // into one PO). Each must be Approved / Partially Fulfilled, all of them of one company and one project, and that
+  // the PO's own company and project too — no mixing.
+  const multiMr = await multiMrReady(pool);
+  const mrIds = [...new Set([SourceMRId, ...(Array.isArray(SourceMRIds) ? SourceMRIds : [])]
+    .map((x) => parseInt(x, 10)).filter(Number.isFinite))];
+  if (mrIds.length > 1 && !multiMr) {
+    const err = new Error("Raising one PO from several Material Requests needs migration 585 to be run first.");
+    err.status = 400;
+    throw err;
+  }
+  const taggedMrs = [];
+  if (mrIds.length) {
+    const r = pool.request();
+    mrIds.forEach((id, i) => r.input(`mr${i}`, sql.Int, id));
+    const rows = (await r.query(`
+      SELECT MRId, DocNo, Status, CompanyId, ProjectId FROM dbo.MaterialRequests
+      WHERE MRId IN (${mrIds.map((_, i) => `@mr${i}`).join(", ")})`)).recordset;
+    const byId = new Map(rows.map((m) => [m.MRId, m]));
+    for (const id of mrIds) {
+      const mr = byId.get(id);
+      if (!mr) {
+        const err = new Error("Source Material Request not found.");
+        err.status = 404;
+        throw err;
+      }
+      if (!["Approved", "Partially Fulfilled"].includes(mr.Status)) {
+        const err = new Error(
+          `Cannot create a Purchase Order: Material Request ${mr.DocNo || id} is "${mr.Status}". Only Approved or Partially Fulfilled Material Requests can be used to raise a Purchase Order.`,
+        );
+        err.status = 400;
+        throw err;
+      }
+      taggedMrs.push({ id, docNo: mr.DocNo });
+    }
+    const first = byId.get(mrIds[0]);
+    const mismatch = rows.find((m) => String(m.CompanyId) !== String(first.CompanyId) || String(m.ProjectId) !== String(first.ProjectId));
+    if (mismatch) {
+      const err = new Error(`${mismatch.DocNo} belongs to a different company or project — one PO can only combine Material Requests of the same company and project.`);
+      err.status = 400;
       throw err;
     }
-
-    const mrStatus = mrCheck.recordset[0].Status;
-    if (!["Approved", "Partially Fulfilled"].includes(mrStatus)) {
-      const err = new Error(
-        `Cannot create a Purchase Order: Material Request is "${mrStatus}". Only Approved or Partially Fulfilled Material Requests can be used to raise a Purchase Order.`,
-      );
+    if ((CompanyId && String(CompanyId) !== String(first.CompanyId)) || (ProjectId && String(ProjectId) !== String(first.ProjectId))) {
+      const err = new Error("The PO's company and project must be the ones its Material Requests were raised for.");
       err.status = 400;
       throw err;
     }
 
-    // Per-line cap: this PO's quantity for each MR-linked item, plus whatever
-    // was already ordered against that same MR item, can't exceed what was
-    // requested — prevents over-ordering across repeat partial POs even if
-    // the frontend's own cap gets bypassed (e.g. a stale prefill).
-    const mrItemsWithMrItemId = poItemsArray.filter((it) => it.mrItemId);
-    if (mrItemsWithMrItemId.length > 0) {
-      const fulfillment = await getMRItemFulfillment(pool, mrId);
-      const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
-      for (const it of mrItemsWithMrItemId) {
-        const f = pendingByItem.get(parseInt(it.mrItemId, 10));
-        const qty = parseFloat(it.quantity) || 0;
-        if (f && qty - f.PendingQty > 0.0001) {
-          const err = new Error(
-            `Cannot order ${qty} of "${it.itemDescription || f.ItemName}" — only ${f.PendingQty} still pending on Material Request.`,
-          );
+    // Per MR line cap: what this PO takes from each MR line (a summed line spreads over several), plus what was
+    // already ordered against it, can't exceed what was requested — even if the frontend's own cap is bypassed.
+    const pending = new Map();
+    for (const id of mrIds) {
+      for (const f of await getMRItemFulfillment(pool, id)) pending.set(f.MRItemId, f);
+    }
+    const asked = new Map();
+    for (const it of poItemsArray) {
+      for (const src of lineMrSources(it)) {
+        if (!pending.has(src.mrItemId)) {
+          const err = new Error(`"${it.itemDescription || it.itemName || "A line"}" points at an item that isn't on the tagged Material Requests.`);
           err.status = 400;
           throw err;
         }
+        asked.set(src.mrItemId, (asked.get(src.mrItemId) || 0) + src.qty);
+      }
+    }
+    for (const [mrItemId, qty] of asked) {
+      const f = pending.get(mrItemId);
+      if (qty - f.PendingQty > 0.0001) {
+        const err = new Error(`Cannot order ${qty} of "${f.ItemName}" — only ${f.PendingQty} still pending on its Material Request.`);
+        err.status = 400;
+        throw err;
       }
     }
   }
@@ -536,9 +596,9 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
       .input(
         "SourceMRId",
         sql.Int,
-        SourceMRId ? parseInt(SourceMRId, 10) : null,
+        taggedMrs[0]?.id ?? null,
       )
-      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
+      .input("SourceMRDocNo", sql.NVarChar(100), taggedMrs[0]?.docNo || SourceMRDocNo || null)
       .input(
         "SourceWDId",
         sql.Int,
@@ -573,7 +633,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
             ? "QPO"
             : SourceWOId
             ? "WO_PO"
-            : SourceMRId
+            : taggedMrs.length
             ? "Normal"
             : SourceWDId
             ? "WO_PO"
@@ -630,7 +690,8 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
 
     const newId = result.recordset[0].PurchaseOrderID;
 
-    await syncLineItems(transaction, sql, newId, poItemsArray, uomMap);
+    await syncLineItems(transaction, sql, newId, poItemsArray, uomMap, multiMr);
+    await savePoMrs(pool, transaction, newId, taggedMrs);
 
     if (DocTypeId) {
       await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
@@ -944,6 +1005,21 @@ const getPurchaseOrderDetail = async (req, res) => {
         ORDER BY poi.SortOrder
       `);
 
+    // Every Material Request this PO is raised against (one, or several merged into it).
+    let sourceMRs = [];
+    try {
+      const mrIds = await getPoMrIds(pool, id);
+      if (mrIds.length) {
+        const mr = pool.request();
+        mrIds.forEach((m, i) => mr.input(`m${i}`, sql.Int, m));
+        const rows = (await mr.query(`SELECT MRId, DocNo FROM dbo.MaterialRequests WHERE MRId IN (${mrIds.map((_, i) => `@m${i}`).join(", ")})`)).recordset;
+        const doc = new Map(rows.map((r) => [r.MRId, r.DocNo]));
+        sourceMRs = mrIds.map((m) => ({ MRId: m, DocNo: doc.get(m) || null }));
+      }
+    } catch (e) {
+      console.error("PO source MRs lookup failed:", e.message);
+    }
+
     // Sum of all non-rejected GRNs already submitted against this PO.
     // Used by the GRN form to show the true remaining balance.
     const receivedResult = await pool.request().input("POID2", sql.Int, id)
@@ -960,12 +1036,65 @@ const getPurchaseOrderDetail = async (req, res) => {
       ...mapRow(result.recordset[0]),
       LineItems: lineItems.recordset,
       POTotalReceived: poTotalReceived,
+      SourceMRs: sourceMRs,
     });
   } catch (err) {
     console.error("GET PurchaseOrder by id error:", err);
     res.status(500).json({ error: err.message });
   }
 };
+// GET /last-rates?supplierId=&itemIds=1,2&excludeId= — for each item, the base rate (excl. GST) it was last ordered at
+// from this supplier: the latest PO by date that wasn't rejected or cancelled (the PO being edited is left out). The
+// PO form shows it beside the line's rate. Respects project scope.
+router.get("/last-rates", async (req, res) => {
+  const supplierId = parseInt(req.query.supplierId, 10);
+  const itemIds = String(req.query.itemIds || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 100);
+  const excludeId = parseInt(req.query.excludeId, 10);
+  if (!Number.isFinite(supplierId) || !itemIds.length) return res.json([]);
+  try {
+    const r = getPool().request().input("sup", sql.Int, supplierId).input("ex", sql.Int, Number.isFinite(excludeId) ? excludeId : null);
+    itemIds.forEach((id, i) => r.input(`it${i}`, sql.NVarChar(100), id));
+    const result = await r.query(`
+      SELECT ItemId, Rate, UomName, PurchaseOrderID, DocNo, PODate, Status FROM (
+        SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.Rate, poi.UomName, po.PurchaseOrderID,
+               COALESCE(po.DocNo, po.PurchaseOrderNo) AS DocNo, po.PODate, po.Status,
+               ROW_NUMBER() OVER (PARTITION BY poi.ItemId ORDER BY po.PODate DESC, po.PurchaseOrderID DESC, poi.SortOrder) AS rn
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+        WHERE po.SupplierID = @sup
+          AND ISNULL(po.Status, '') NOT IN ('Rejected', 'Cancelled', 'Deleted')
+          AND (@ex IS NULL OR po.PurchaseOrderID <> @ex)
+          AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${itemIds.map((_, i) => `@it${i}`).join(", ")})
+          ${req.projectScope ? projectPredicate(req.projectScope, "po.ProjectId") : ""}
+      ) x WHERE rn = 1
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// The quotations for these MRs (or this quotation) whose lowest (L1) supplier is not this one — the PO form asks for a
+// reason when there are any. excludeId: an existing PO being edited (its own MRs and quotation are added).
+router.get("/l1-check", async (req, res) => {
+  const ids = (v) => String(v || "").split(",").map((x) => parseInt(x, 10)).filter(Number.isFinite).slice(0, 50);
+  try {
+    const pool = getPool();
+    let mrIds = ids(req.query.mrIds);
+    let qtId = parseInt(req.query.qtId, 10);
+    const poId = parseInt(req.query.excludeId, 10);
+    if (Number.isFinite(poId)) {
+      mrIds = [...mrIds, ...(await getPoMrIds(pool, poId))];
+      const row = (await pool.request().input("id", sql.Int, poId)
+        .query("SELECT SourceQTId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id")).recordset[0];
+      if (!Number.isFinite(qtId) && row?.SourceQTId) qtId = row.SourceQTId;
+    }
+    res.json(await supplierDeviation.findL1Deviations(pool, { mrIds, qtId: Number.isFinite(qtId) ? qtId : null, supplierId: req.query.supplierId }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
@@ -990,25 +1119,40 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     if (!assertProjectAllowed(req, res, req.body?.ProjectId)) return;
 
     const pool = getPool();
+    // A PO for an MR whose quotation has an L1 supplier, going to someone else, needs a reason; the directors are told.
+    const { SourceMRId: firstMr, SourceMRIds: moreMrs, SourceQTId: qtForCheck, SupplierID: supplierForCheck, SupplierChangeReason } = req.body;
+    const deviations = await supplierDeviation.assertReasonIfDeviating(
+      pool,
+      { mrIds: [firstMr, ...(Array.isArray(moreMrs) ? moreMrs : [])], qtId: qtForCheck, supplierId: supplierForCheck },
+      SupplierChangeReason,
+    );
+
     const { PurchaseOrderID: newId, PurchaseOrderNo: finalDocNo } =
       await createPurchaseOrderInternal(pool, req.body, userEmail);
 
+    if (deviations.length) {
+      try {
+        await supplierDeviation.saveReason(pool, newId, SupplierChangeReason);
+      } catch (e) {
+        console.error("PO supplier-change reason not saved:", e.message);
+      }
+      supplierDeviation.notifyDirectors(pool, newId, deviations, SupplierChangeReason)
+        .catch((e) => console.error("PO supplier-change notification failed:", e.message));
+    }
+
     await bumpCacheVersion("purchase-orders");
 
-    const { SourceMRId, SourceQTId } = req.body;
+    const { SourceQTId } = req.body;
 
-    // Recompute the source MR's fulfillment (Approved → Partially Fulfilled
-    // → Completed) from actual ordered-vs-requested quantities, now that
-    // this PO's items (with their MRItemId links) are committed.
-    if (SourceMRId) {
-      (async () => {
-        try {
-          await recomputeMRFulfillment(pool, parseInt(SourceMRId, 10), userEmail);
-        } catch (e) {
-          console.error("MR status update failed:", e.message);
-        }
-      })();
-    }
+    // Recompute every source MR's fulfillment (Approved → Partially Fulfilled → Completed) from actual
+    // ordered-vs-requested quantities, now that this PO's items (with their MR links) are committed.
+    (async () => {
+      try {
+        await recomputePoMrs(pool, await getPoMrIds(pool, newId), userEmail);
+      } catch (e) {
+        console.error("MR status update failed:", e.message);
+      }
+    })();
 
     // Mark the source Quotation as Closed once a PO is raised against it.
     if (SourceQTId) {
@@ -1051,7 +1195,7 @@ router.post("/", requirePageRight("purchase-orders", "create"), validateBody(pur
     });
   } catch (err) {
     console.error("POST PurchaseOrders error:", err);
-    res.status(err.status || 500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message, ...(err.code ? { code: err.code, deviations: err.deviations } : {}) });
   }
 });
 
@@ -1089,6 +1233,7 @@ router.put(
       VendorInvoiceDate,
       VendorInvoiceNo,
       PaymentTermId,
+      SupplierChangeReason,
     } = req.body;
 
     const poItemsArray = Array.isArray(POItems)
@@ -1147,6 +1292,18 @@ router.put(
         return res.status(409).json({
           error: `Cannot edit: this Purchase Order has ${blockedBy}. Delete them first, then edit the PO.`,
         });
+
+      // Changing the supplier to one other than the quotation's L1 needs a reason too (as on create).
+      let deviations = [];
+      const prior = (await pool.request().input("id", sql.Int, id)
+        .query("SELECT SupplierID, SourceQTId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id")).recordset[0];
+      if (prior && String(prior.SupplierID) !== String(SupplierID)) {
+        deviations = await supplierDeviation.assertReasonIfDeviating(
+          pool,
+          { mrIds: await getPoMrIds(pool, id), qtId: prior.SourceQTId, supplierId: SupplierID },
+          SupplierChangeReason,
+        );
+      }
       const beforeSnapshot = wasApproved
         ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
         : null;
@@ -1246,10 +1403,22 @@ router.put(
       }
 
       // Sync normalised child table
-      await syncLineItems(transaction, sql, id, poItemsArray, uomMap);
+      await syncLineItems(transaction, sql, id, poItemsArray, uomMap, await multiMrReady(pool));
 
       await transaction.commit();
+
+      if (deviations.length) {
+        try {
+          await supplierDeviation.saveReason(pool, id, SupplierChangeReason);
+        } catch (e) {
+          console.error("PO supplier-change reason not saved:", e.message);
+        }
+        supplierDeviation.notifyDirectors(pool, id, deviations, SupplierChangeReason)
+          .catch((e) => console.error("PO supplier-change notification failed:", e.message));
+      }
       await bumpCacheVersion("purchase-orders");
+      // Quantities on MR-linked lines may have changed: bring every source MR's status up to date.
+      recomputePoMrs(pool, await getPoMrIds(pool, id), userEmail).catch(() => {});
 
       if (wasApproved && beforeSnapshot) {
         try {
@@ -1314,7 +1483,7 @@ router.put(
         /* ignore */
       }
       console.error("PUT PurchaseOrders error:", err);
-      res.status(err.status || 500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message, ...(err.code ? { code: err.code, deviations: err.deviations } : {}) });
     }
   },
 );
@@ -1524,7 +1693,7 @@ router.delete("/:id", requirePageRight("purchase-orders", "delete"), async (req,
       .query(
         "SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PurchaseOrderID",
       );
-    const sourceMRId = poMeta.recordset[0]?.SourceMRId ?? null;
+    const sourceMRIds = poMeta.recordset[0] ? await getPoMrIds(pool, id) : [];
 
     const result = await pool
       .request()
@@ -1541,13 +1710,7 @@ router.delete("/:id", requirePageRight("purchase-orders", "delete"), async (req,
     // fulfillment now that the deleted PO's items no longer count — drops
     // it back to Approved / Partially Fulfilled as the remaining ordered
     // quantity actually warrants, not just an all-or-nothing reset.
-    if (sourceMRId) {
-      try {
-        await recomputeMRFulfillment(pool, sourceMRId, null);
-      } catch (mrErr) {
-        console.error("MR status reset failed (non-fatal):", mrErr.message);
-      }
-    }
+    await recomputePoMrs(pool, sourceMRIds, null);
 
     res.json({ message: "Purchase order deleted successfully" });
   } catch (err) {
@@ -1629,11 +1792,7 @@ router.put("/:id/reject", async (req, res) => {
     // Fulfilled and can be ordered or transferred again).
     try {
       const pool = getPool();
-      const src = await pool.request().input("id", sql.Int, id)
-        .query("SELECT SourceMRId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id");
-      if (src.recordset[0]?.SourceMRId) {
-        await recomputeMRFulfillment(pool, src.recordset[0].SourceMRId, null);
-      }
+      await recomputePoMrs(pool, await getPoMrIds(pool, id), null);
     } catch (e) {
       console.error("MR status update after PO reject failed:", e.message);
     }

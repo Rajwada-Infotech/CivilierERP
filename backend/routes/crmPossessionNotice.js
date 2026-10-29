@@ -14,8 +14,8 @@ const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkfl
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const PN_SELECT = `
   SELECT n.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,

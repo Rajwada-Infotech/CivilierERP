@@ -17,6 +17,7 @@ import {
 
 // Static imports (needed synchronously for auth shell)
 import Login from "./pages/Login";
+import { withCountUp } from "@/components/CountUpFigures";
 const DownloadAndroidApp = lazy(() => import("./pages/DownloadAndroidApp"));
 import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
@@ -37,7 +38,6 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { TaskProvider } from "./contexts/TaskContext";
 import { FinYearProvider } from "./contexts/FinYearContext";
 import { HsnProvider } from "./contexts/HsnContext";
-import { RecordsProvider } from "./contexts/RecordsContext";
 import { TdsProvider } from "./contexts/TdsContext";
 import { BillingTermsProvider } from "./contexts/BillingTermsContext";
 import { useActivityBrowser } from "./contexts/ActivityBrowserContext";
@@ -92,7 +92,7 @@ function PageSkeleton() {
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
 // Ticket Pages
-const TicketDashboard = lazy(() => import("@/pages/ticket/TicketDashboard"));
+const TicketDashboard = withCountUp(lazy(() => import("@/pages/ticket/TicketDashboard")));
 const CreateTicket = lazy(() => import("@/pages/ticket/CreateTicket"));
 const MyTickets = lazy(() => import("@/pages/ticket/MyTickets"));
 const PendingTickets = lazy(() => import("@/pages/ticket/PendingTickets"));
@@ -114,7 +114,7 @@ const SupplierLayout = lazy(() =>
 );
 
 // Main Pages
-const FinanceDashboard = lazy(() => import("./pages/finance/FinanceDashboard"));
+const FinanceDashboard = withCountUp(lazy(() => import("./pages/finance/FinanceDashboard")));
 const Reports = lazy(() => import("./pages/Reports"));
 const Widgets = lazy(() => import("./pages/Widgets"));
 const CommandCenter = lazy(() => import("./pages/CommandCenter"));
@@ -124,10 +124,10 @@ const Payment = lazy(() => import("./pages/finance/Payment"));
 const Brs = lazy(() => import("./pages/finance/Brs"));
 const ChequeCancellation = lazy(() => import("./pages/finance/ChequeCancellation"));
 const Records = lazy(() => import("./pages/records/Records"));
-const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
+const LoanDashboard = withCountUp(lazy(() => import("./pages/loan/LoanDashboard")));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
-const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
-const HrPayrollDashboard = lazy(() => import("./pages/hrpayroll/HrPayrollDashboard"));
+const MaintenanceDashboard = withCountUp(lazy(() => import("./pages/maintenance/MaintenanceDashboard")));
+const HrPayrollDashboard = withCountUp(lazy(() => import("./pages/hrpayroll/HrPayrollDashboard")));
 const EmployeeMaster = lazy(() => import("./pages/hrpayroll/EmployeeMaster"));
 const DesignationMaster = lazy(() => import("./pages/hrpayroll/DesignationMaster"));
 const CandidateMaster = lazy(() => import("./pages/hrpayroll/CandidateMaster"));
@@ -153,9 +153,9 @@ const MeterReadingMaster = lazy(() => import("./pages/masters/MeterReadingMaster
 const ElectricityProviderMaster = lazy(() => import("./pages/masters/ElectricityProviderMaster"));
 const ElectricityTariffMaster = lazy(() => import("./pages/masters/ElectricityTariffMaster"));
 const ChargeHeadMaster = lazy(() => import("./pages/masters/ChargeHeadMaster"));
-const CivilWorkDprDashboard = lazy(
+const CivilWorkDprDashboard = withCountUp(lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
-);
+));
 const CivilWorkDprWorkDone = lazy(
   () => import("./pages/civilworkdpr/WorkDone"),
 );
@@ -255,7 +255,7 @@ const FinancialYearMaster = lazy(
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
 const GRN = lazy(() => import("./pages/material/GRN"));
-const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
+const FixedAssetDashboard = withCountUp(lazy(() => import("./pages/fixedAsset/FixedAssetDashboard")));
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
 const FixedAssetDepreciationTagStickers = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationTagStickers"));
@@ -285,7 +285,7 @@ const PurchaseOrderMaster = lazy(
 );
 const QuotationPage = lazy(() => import("./pages/material/Quotation"));
 const L1ChartPage = lazy(() => import("./pages/material/L1Chart"));
-const SupplierDashboard = lazy(() => import("./pages/supplier/SupplierDashboard"));
+const SupplierDashboard = withCountUp(lazy(() => import("./pages/supplier/SupplierDashboard")));
 const SupplierLanding = lazy(() => import("./pages/supplier/SupplierLanding"));
 const SupplierLogin = lazy(() => import("./pages/supplier/SupplierLogin"));
 const SupplierQuotationDetail = lazy(
@@ -324,7 +324,7 @@ const StockUpdate = lazy(() => import("./pages/material/StockUpdate"));
 const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
 const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const SaleInvoice = lazy(() => import("./pages/sales/SaleInvoice"));
-const SalesDashboard = lazy(() => import("./pages/sales/SalesDashboard"));
+const SalesDashboard = withCountUp(lazy(() => import("./pages/sales/SalesDashboard")));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
@@ -334,7 +334,7 @@ const DailyProgressReport = lazy(
 );
 
 // Admin Pages
-const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminDashboard = withCountUp(lazy(() => import("./pages/admin/AdminDashboard")));
 const AdminTicketPanel = lazy(() => import("./pages/admin/AdminTicketPanel"));
 const TicketResolution = lazy(() => import("./pages/ticket/TicketResolution"));
 const Users = lazy(() => import("./pages/Users"));
@@ -368,7 +368,7 @@ const SystemMaintenancePage = lazy(() => import("./pages/admin/SystemMaintenance
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
 const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
-const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
+const MetricsDashboard = withCountUp(lazy(() => import("./pages/admin/MetricsDashboard")));
 const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
 );
@@ -406,12 +406,12 @@ const PaymentReasonMaster = lazy(
 );
 
 // New hierarchy pages
-const SuperAdminDashboard = lazy(
+const SuperAdminDashboard = withCountUp(lazy(
   () => import("./pages/superadmin/SuperAdminDashboard"),
-);
+));
 const AdminControlPanel = lazy(() => import("./pages/admin/AdminControlPanel"));
 const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
-const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
+const DBADashboard = withCountUp(lazy(() => import("./pages/dba/DBADashboard")));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
 const FollowUp = lazy(() => import("./pages/followup/FollowUp"));
@@ -419,15 +419,9 @@ const ClosedTasks = lazy(() => import("./pages/followup/ClosedTasks"));
 const CancelledTasks = lazy(() => import("./pages/followup/CancelledTasks"));
 const TaskTransfer = lazy(() => import("./pages/followup/TaskTransfer"));
 const TaskPerformanceReport = lazy(() => import("./pages/followup/TaskPerformanceReport"));
-const TaskDashboard = lazy(() => import("./pages/followup/TaskDashboard"));
+const TaskDashboard = withCountUp(lazy(() => import("./pages/followup/TaskDashboard")));
 const TagPerformanceReport = lazy(() => import("./pages/followup/TagPerformanceReport"));
 const EntryTypeDocFollowUpReport = lazy(() => import("./pages/followup/EntryTypeDocFollowUpReport"));
-const FollowupReminders = lazy(
-  () => import("./pages/admin/masters/Reminders"),
-);
-const PendingTasksPage = lazy(
-  () => import("./pages/admin/masters/PendingTasks"),
-);
 const SaSocialMediaMaster = lazy(() => import("./pages/SalesAutomation/SaSocialMediaMaster"));
 const SaCampaignMaster = lazy(() => import("./pages/SalesAutomation/SaCampaignMaster"));
 const SaAdMaster = lazy(() => import("./pages/SalesAutomation/SaAdMaster"));
@@ -438,10 +432,10 @@ const SaLeadActivities = lazy(() => import("./pages/SalesAutomation/SaLeadActivi
 const SaFollowups = lazy(() => import("./pages/SalesAutomation/SaFollowups"));
 const SaLeadTasks = lazy(() => import("./pages/SalesAutomation/SaLeadTasks"));
 const SaLeadDistribution = lazy(() => import("./pages/SalesAutomation/SaLeadDistribution"));
-const SaInquiryDashboard = lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard"));
+const SaInquiryDashboard = withCountUp(lazy(() => import("./pages/SalesAutomation/SaInquiryDashboard")));
 const SaSiteVisits = lazy(() => import("./pages/SalesAutomation/SaSiteVisits"));
 const SaMarketingInvoices = lazy(() => import("./pages/SalesAutomation/SaMarketingInvoices"));
-const SaDashboard = lazy(() => import("./pages/SalesAutomation/SaDashboard"));
+const SaDashboard = withCountUp(lazy(() => import("./pages/SalesAutomation/SaDashboard")));
 const SaReports = lazy(() => import("./pages/SalesAutomation/SaReports"));
 const SaTeamManagement = lazy(() => import("./pages/SalesAutomation/SaTeamManagement"));
 const SaLeadTransfers = lazy(() => import("./pages/SalesAutomation/SaLeadTransfers"));
@@ -480,7 +474,7 @@ const CrmMutation          = lazy(() => import("./pages/CRM/CrmMutation"));
 const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
 const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
 const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
-const CrmDashboard         = lazy(() => import("./pages/CRM/CrmDashboard"));
+const CrmDashboard         = withCountUp(lazy(() => import("./pages/CRM/CrmDashboard")));
 const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDetails"));
 const CrmBookingAmendments = lazy(() => import("./pages/CRM/CrmBookingAmendments"));
 const CrmBrokerage         = lazy(() => import("./pages/CRM/CrmBrokerage"));
@@ -516,9 +510,9 @@ const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 const GLPostingFailures = lazy(() => import("./pages/dba/GLPostingFailures"));
 
 // Engineering Pages
-const EngineeringDashboard = lazy(
+const EngineeringDashboard = withCountUp(lazy(
   () => import("./pages/engineering/EngineeringDashboard"),
-);
+));
 const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
 const EngineeringAmendment = lazy(() => import("./pages/engineering/EngineeringAmendment"));
 
@@ -556,13 +550,11 @@ function ProtectedProviders({ children }: { children: React.ReactNode }) {
   return (
     <FinYearProvider>
       <HsnProvider>
-        <RecordsProvider>
-          <TdsProvider>
-            <BillingTermsProvider>
-              <TaskProvider>{children}</TaskProvider>
-            </BillingTermsProvider>
-          </TdsProvider>
-        </RecordsProvider>
+        <TdsProvider>
+          <BillingTermsProvider>
+            <TaskProvider>{children}</TaskProvider>
+          </BillingTermsProvider>
+        </TdsProvider>
       </HsnProvider>
     </FinYearProvider>
   );
@@ -2666,8 +2658,6 @@ function AppRoutes() {
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/cancel-template" element={<ProtectedRoute pageKey="followup-cancel-template-master"><CancelTemplateMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/task-master" element={<ProtectedRoute pageKey="task-master"><TaskMaster /></ProtectedRoute>} />
-      <Route path="/crm/setup/pending-tasks"       element={<ProtectedRoute pageKey="followup-pending-tasks"><PendingTasksPage /></ProtectedRoute>} />
-      <Route path="/crm/setup/reminders"           element={<ProtectedRoute pageKey="followup-reminders"><FollowupReminders /></ProtectedRoute>} />
       <Route path="/crm/milestone-master"      element={<ProtectedRoute pageKey="crm-milestone-master"><CrmMilestoneMaster /></ProtectedRoute>} />
       <Route path="/crm/brokerage-rate-tiers"  element={<ProtectedRoute pageKey="crm-brokerage-rate-tiers"><CrmBrokerageRateTiers /></ProtectedRoute>} />
       <Route path="/crm/setup/gst-rules"       element={<ProtectedRoute pageKey="crm-gst-rule-master"><CrmGstRuleMaster /></ProtectedRoute>} />

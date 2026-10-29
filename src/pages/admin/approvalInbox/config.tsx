@@ -66,6 +66,10 @@ export interface InboxItem {
   _canAct?: boolean;
   _currentLevel?: number;
   _totalLevels?: number;
+  /** The step this Pending record is waiting on (any module with an approval setup). */
+  _stage?: { level: number; total: number; label: string };
+  /** This approval cycle's decisions so far, one per approver, oldest first. */
+  _steps?: { level: number; label: string; status: "Approved" | "Rejected"; by: string | null; at: string }[];
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────

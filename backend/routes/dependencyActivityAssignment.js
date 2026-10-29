@@ -99,8 +99,8 @@ const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "C
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 
 // A chain's rungs are strictly linear (dependencyMaster.js's own header
-// comment) — a rung may be allocated or reported on only once every rung
-// before it (by SequenceNo, same DependencyMasterId) is done. "Done" means
+// comment) — a rung may be allocated only once every rung before it
+// (by SequenceNo, same DependencyMasterId) is done. Reporting is not gated. "Done" means
 // Completed, Approved, or Cancelled (a cancelled predecessor can't block
 // the chain forever). Returns a user-facing error string, or null when
 // the rung is clear to proceed (no predecessor, or chain not found).
@@ -401,6 +401,8 @@ router.get(
         dm.Floor AS floor,
         dm.FlatId AS flatId, um.UnitName AS flatName,
         dm.RoomId AS roomId, rm.RoomName AS roomName, rm.Storey AS storey,
+        -- The row's photo badge reads this, instead of each row downloading every photo just to count them.
+        (SELECT COUNT(*) FROM dbo.ActivityPhoto ph WHERE ph.DependencyMasterActivityId = dma.Id) AS photoCount,
         CONCAT(
           ISNULL(bm.BlockName, '—'), CASE WHEN dm.Floor = 'G' OR TRY_CAST(dm.Floor AS INT) IS NOT NULL THEN ' > Floor ' ELSE ' > ' END, dm.Floor,
           ' > ', ISNULL(um.UnitName, '—'), ' > ',
@@ -1652,14 +1654,8 @@ router.patch(
       if (!eng) return res.status(400).json({ error: "Assign an engineer to this step first — nobody has been given this work yet." });
     }
 
-    // Strictly linear chain: the FIRST report of actual work on a rung
-    // (current still PENDING/ALLOCATED) requires every earlier rung in the
-    // same chain to already be done. Once a rung has genuinely started,
-    // later progress/status edits on it aren't re-blocked by this check.
-    if ((hasProgress || (hasStatus && status !== "CANCELLED")) && (current === "PENDING" || current === "ALLOCATED")) {
-      const blockReason = await predecessorBlockReason(pool, rungId);
-      if (blockReason) return res.status(400).json({ error: blockReason });
-    }
+    // Reporting is not tied to the chain's order: work on site happens in whatever order it happens, so any
+    // allocated rung can be reported on whether or not the rungs before it are done.
 
     if (hasProgress) {
       if (current === "COMPLETED") {

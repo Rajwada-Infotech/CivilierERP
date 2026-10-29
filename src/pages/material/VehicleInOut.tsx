@@ -23,7 +23,7 @@ import { VIODeleteDialog } from "./vehicleInOut/VIODeleteDialog";
 
 export default function VehicleInOut() {
   const m = useVehicleInOut();
-  const { rights, activeFinYear, importFileInputRef, importing, showForm, setShowForm, setEditingId, setErrors, setReceivedQtyByItem, setPhotoByItem, setQualityByItem, setBrandByItem, setForm, records, handleDownloadTemplate, handleImportClick, handleImportFileChange } = m;
+  const { rights, activeFinYear, importFileInputRef, importing, showForm, setShowForm, setEditingId, setErrors, setReceivedQtyByItem, setPhotoByItem, setQualityByItem, setBrandByItem, setWeightByItem, setForm, records, handleDownloadTemplate, handleImportClick, handleImportFileChange } = m;
 
   if (m.isLoading) {
     return (
@@ -79,6 +79,7 @@ export default function VehicleInOut() {
                     setPhotoByItem({});
                     setQualityByItem({});
                     setBrandByItem({});
+                    setWeightByItem({});
                     setErrors({});
                   }}
                   className={`${KEY_INK} h-9 px-4`}

@@ -28,6 +28,13 @@ const { projectPredicate, projectParamGuard, assertProjectAllowed } = require(".
 // Any :id route — refuse a Quotation whose project is outside the user's scope.
 router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.Quotations WHERE QuotationId = @id"));
 const authenticateToken = require("../middleware/auth");
+const { makeColumnProbe } = require("../services/columnProbe");
+// Each tagged supplier's own payment term (migration 583); the code keeps working before it is run.
+const hasSupplierTerm = makeColumnProbe("dbo.QuotationSuppliers", "PaymentTermId");
+const termCols = (on) => on
+  ? "qs.PaymentTermId, pt.Description AS PaymentTermName, pt.Days AS PaymentTermDays"
+  : "CAST(NULL AS INT) AS PaymentTermId, CAST(NULL AS NVARCHAR(500)) AS PaymentTermName, CAST(NULL AS INT) AS PaymentTermDays";
+const termJoin = (on) => (on ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = qs.PaymentTermId" : "");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   lockNextDocNumber,
@@ -118,11 +125,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
       ORDER  BY qi.QuotationItemId
     `);
 
+    const withTerm = await hasSupplierTerm(pool);
     const suppliers = await pool.request().input("id", sql.Int, id).query(`
       SELECT qs.Id, qs.SupplierLHeadId, qs.Status, qs.InvitedAt,
-             ISNULL(ah.DisplayName, ah.LHeadName) AS SupplierName
+             ISNULL(ah.DisplayName, ah.LHeadName) AS SupplierName, ${termCols(withTerm)}
       FROM   dbo.QuotationSuppliers qs
       LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = qs.SupplierLHeadId
+      ${termJoin(withTerm)}
       WHERE  qs.QuotationId = @id
       ORDER  BY SupplierName
     `);
@@ -507,6 +516,37 @@ router.delete("/:id/suppliers/:supplierId", authenticateToken, requirePageRight(
   }
 });
 
+// ── PUT /:id/suppliers/:supplierId/payment-term ───────────────────────────────
+// The payment term agreed with one tagged supplier. Settable at any stage — terms are usually settled once the
+// quotes are in. Body: { PaymentTermId } (null clears it).
+router.put("/:id/suppliers/:supplierId/payment-term", authenticateToken, requirePageRight("quotation", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const supplierId = parseInt(req.params.supplierId, 10);
+    if (isNaN(id) || isNaN(supplierId)) return res.status(400).json({ error: "Invalid id" });
+    if (!(await hasSupplierTerm(pool))) return res.status(503).json({ error: "Payment terms per supplier need migration 583 to be run." });
+
+    const raw = req.body?.PaymentTermId;
+    const termId = raw == null || raw === "" ? null : parseInt(raw, 10);
+    if (termId !== null) {
+      if (!Number.isFinite(termId)) return res.status(400).json({ error: "Invalid payment term" });
+      const t = await pool.request().input("t", sql.Int, termId)
+        .query("SELECT 1 AS x FROM dbo.VendorPaymentTerm WHERE PaymentTermId = @t AND IsActive = 1");
+      if (!t.recordset.length) return res.status(400).json({ error: "That payment term doesn't exist or is inactive." });
+    }
+    const r = await pool.request()
+      .input("id", sql.Int, id)
+      .input("s", sql.Int, supplierId)
+      .input("t", sql.Int, termId)
+      .query("UPDATE dbo.QuotationSuppliers SET PaymentTermId = @t WHERE QuotationId = @id AND SupplierLHeadId = @s");
+    if (!r.rowsAffected[0]) return res.status(404).json({ error: "That supplier is not tagged on this quotation." });
+    res.json({ message: "Payment term saved" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id/l1-chart ──────────────────────────────────────────────────────────
 // Comparative data: every item x every tagged supplier's Rate/SupplyDate/Quality.
 router.get("/:id/l1-chart", authenticateToken, async (req, res) => {
@@ -523,11 +563,13 @@ router.get("/:id/l1-chart", authenticateToken, async (req, res) => {
       ORDER  BY qi.QuotationItemId
     `);
 
+    const withTerm = await hasSupplierTerm(pool);
     const suppliers = await pool.request().input("id", sql.Int, id).query(`
       SELECT qs.SupplierLHeadId, qs.Status,
-             ISNULL(ah.DisplayName, ah.LHeadName) AS SupplierName
+             ISNULL(ah.DisplayName, ah.LHeadName) AS SupplierName, ${termCols(withTerm)}
       FROM   dbo.QuotationSuppliers qs
       LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = qs.SupplierLHeadId
+      ${termJoin(withTerm)}
       WHERE  qs.QuotationId = @id
       ORDER  BY SupplierName
     `);
@@ -578,7 +620,8 @@ router.get("/:id/po-prefill", authenticateToken, async (req, res) => {
       .input("id", sql.Int, id)
       .input("supplierId", sql.Int, supplierId)
       .query(
-        "SELECT 1 FROM dbo.QuotationSuppliers WHERE QuotationId=@id AND SupplierLHeadId=@supplierId",
+        `SELECT ${(await hasSupplierTerm(pool)) ? "PaymentTermId" : "CAST(NULL AS INT) AS PaymentTermId"}
+         FROM dbo.QuotationSuppliers WHERE QuotationId=@id AND SupplierLHeadId=@supplierId`,
       );
     if (!supplierCheck.recordset.length)
       return res.status(400).json({ error: "That supplier is not tagged on this quotation." });
@@ -616,6 +659,8 @@ router.get("/:id/po-prefill", authenticateToken, async (req, res) => {
       Remarks: qt.Remarks,
       SupplierId: supplierId,
       SupplierName: supplierName.recordset[0]?.Name || null,
+      // The payment term agreed with this supplier on the quotation — the PO starts with it.
+      PaymentTermId: supplierCheck.recordset[0].PaymentTermId ?? null,
       SourceMRId: qt.SourceMRId ?? null,
       SourceMRDocNo: qt.SourceMRDocNo ?? null,
       items: items.recordset,

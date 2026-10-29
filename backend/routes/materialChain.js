@@ -1,4 +1,5 @@
 const express = require("express");
+const { ebCoversGrnSql, grnIdsOfExpense } = require("../services/expenseGrnLink");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
@@ -6,6 +7,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { ebResolvedProjectSql, projectAllowed } = require("../services/projectScope");
 const { makeColumnProbe } = require("../services/columnProbe");
+const { multiMrReady, poTaggedToMr, getPoMrIds } = require("../services/poMrLinks");
 
 // dbo.MaterialRequests.SourceWOId arrives with migration 545; until then there is simply no Work Order link.
 const hasMRSourceWO = makeColumnProbe("dbo.MaterialRequests", "SourceWOId");
@@ -44,14 +46,15 @@ async function getMR(pool, id) {
   return r.recordset[0] || null;
 }
 
-// POs raised straight from the MR, plus POs raised from one of the MR's quotations.
+// POs raised straight from the MR (alone or merged with other MRs into one PO), plus POs raised from one of the
+// MR's quotations.
 async function getPOsForMR(pool, mrId) {
   const r = await pool.request().input("mrId", sql.Int, mrId).query(`
-    SELECT PurchaseOrderID AS id, PurchaseOrderNo, DocNo, PODate, Status
-    FROM dbo.PurchaseOrders
-    WHERE SourceMRId = @mrId
-       OR SourceQTId IN (SELECT QuotationId FROM dbo.Quotations WHERE SourceMRId = @mrId)
-    ORDER BY PurchaseOrderID
+    SELECT po.PurchaseOrderID AS id, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status
+    FROM dbo.PurchaseOrders po
+    WHERE ${poTaggedToMr(await multiMrReady(pool), "@mrId")}
+       OR po.SourceQTId IN (SELECT QuotationId FROM dbo.Quotations WHERE SourceMRId = @mrId)
+    ORDER BY po.PurchaseOrderID
   `);
   return r.recordset;
 }
@@ -137,6 +140,14 @@ async function getPO(pool, id) {
 // MR -> Quotation.SourceMRId -> PO.SourceQTId -> Quotation. So resolve the
 // MR the PO is ultimately tagged to via either path, preferring the direct
 // link when both happen to be present.
+// A PO merging several MRs (migration 585) has them all; each one is a node upstream of it.
+async function getEffectiveMRs(pool, po) {
+  const ids = await getPoMrIds(pool, po.id);
+  if (ids.length) return (await Promise.all(ids.map((id) => getMR(pool, id)))).filter(Boolean);
+  const mr = await getEffectiveMR(pool, po);
+  return mr ? [mr] : [];
+}
+
 async function getEffectiveMR(pool, po) {
   if (po.SourceMRId) return getMR(pool, po.SourceMRId);
   if (po.SourceQTId) {
@@ -193,11 +204,12 @@ async function getGRN(pool, id) {
   return r.recordset[0] || null;
 }
 
+// Invoices a GRN went into, merged ones included (services/expenseGrnLink.js).
 async function getExpensesForGRN(pool, grnId) {
   const r = await pool.request().input("grnId", sql.Int, parseInt(grnId, 10)).query(`
     SELECT Eid AS id, EDocNo, EDocDate, EStatus, ENetAmount, EVendorInvoiceNo
     FROM dbo.ExpenseBooking
-    WHERE ESourceType = 'GRN' AND ESourceId = @grnId
+    WHERE ${ebCoversGrnSql("", "@grnId")}
     ORDER BY Eid
   `);
   return r.recordset;
@@ -206,7 +218,7 @@ async function getExpensesForGRN(pool, grnId) {
 async function getExpense(pool, id) {
   const r = await pool.request().input("id", sql.Int, id).query(`
     SELECT Eid AS id, EDocNo, EDocDate, EStatus, ENetAmount, EVendorInvoiceNo,
-           ESourceType, ESourceId
+           ESourceType, ESourceId, ELinkedGrnIds
     FROM dbo.ExpenseBooking
     WHERE Eid = @id
   `);
@@ -295,13 +307,15 @@ function expenseNode(eb) {
 // Everything upstream of a PO, in document order: Work Order -> Material Request -> Quotation.
 async function upstreamOfPO(pool, po) {
   const out = [];
-  const mr = await getEffectiveMR(pool, po);
-  const woId = (mr && mr.SourceWOId) || po.SourceWOId || null;
-  if (woId) {
+  const mrs = await getEffectiveMRs(pool, po);
+  // Each distinct Work Order behind those MRs (or the PO's own), then every MR.
+  const mrWoIds = [...new Set(mrs.map((m) => m.SourceWOId).filter(Boolean))];
+  const woIds = mrWoIds.length ? mrWoIds : [po.SourceWOId].filter(Boolean);
+  for (const woId of woIds) {
     const wo = await getWO(pool, woId);
     if (wo) out.push(woNode(wo));
   }
-  if (mr) out.push(mrNode(mr));
+  for (const mr of mrs) out.push(mrNode(mr));
   if (po.SourceQTId) {
     const qt = await getQT(pool, po.SourceQTId);
     if (qt) out.push(qtNode(qt));
@@ -327,8 +341,12 @@ async function downstreamOfWO(pool, woId) {
     vios.push(...(await getVIOsForPO(pool, po.id)));
     grns.push(...(await getGRNsForPO(pool, po.id)));
   }
+  // A merged invoice covers several of these GRNs: list it once.
   const expenses = [];
-  for (const grn of grns) expenses.push(...(await getExpensesForGRN(pool, grn.id)));
+  const seenEB = new Set();
+  for (const grn of grns) {
+    for (const eb of await getExpensesForGRN(pool, grn.id)) if (!seenEB.has(eb.id)) { seenEB.add(eb.id); expenses.push(eb); }
+  }
   return [
     ...mrs.map(mrNode),
     ...qts.map(qtNode),
@@ -423,13 +441,15 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
       if (!eb) return res.status(404).json({ error: "Invoice / Expense Booking not found" });
       current = expenseNode(eb);
       if (eb.ESourceType === "GRN" && eb.ESourceId) {
-        const grn = await getGRN(pool, parseInt(eb.ESourceId, 10));
-        if (grn) {
-          upstream.push(grnNode(grn));
-          if (grn.POID) {
-            const po = await getPO(pool, grn.POID);
-            if (po) upstream = [...(await upstreamOfPO(pool, po)), poNode(po), grnNode(grn)];
-          }
+        // Every GRN merged into this invoice, not just the first (they share one PO).
+        const grns = [];
+        for (const gid of grnIdsOfExpense(eb)) {
+          const g = await getGRN(pool, gid);
+          if (g) grns.push(g);
+        }
+        if (grns.length) {
+          const po = grns[0].POID ? await getPO(pool, grns[0].POID) : null;
+          upstream = po ? [...(await upstreamOfPO(pool, po)), poNode(po), ...grns.map(grnNode)] : grns.map(grnNode);
         }
       } else if ((eb.ESourceType === "PO" || eb.ESourceType === "WO_PO") && eb.ESourceId) {
         const po = await getPO(pool, parseInt(eb.ESourceId, 10));

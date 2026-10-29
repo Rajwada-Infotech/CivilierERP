@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Settings2 } from "lucide-react";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // Unit kinds — Flat, Villa, Shop, Office… — managed from Unit Master. Each kind
@@ -13,13 +13,21 @@ const API = "/api/unit-master/kinds";
 type Kind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean; IsLand?: boolean; IsCommercial?: boolean; BuiltOn?: string | null };
 const empty = { Id: 0, Code: "", Name: "", SortOrder: "100", IsActive: true, IsLand: false, IsCommercial: false, BuiltOn: "" };
 const BUILT_ON: Record<string, string> = { FLOORS: "Floors", PLOTS: "Plots" };
-const fieldCls = "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm";
 
-export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+const RULE = "1px solid hsl(var(--foreground))";
+const RULE_SOFT = "1px solid hsl(var(--foreground) / 0.15)";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed h-8 px-3";
+const fieldCls = "h-9 w-full border border-foreground/40 focus:border-foreground bg-card px-2.5 text-sm text-foreground outline-none disabled:opacity-50";
+const TAG = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] border border-foreground/30 px-1.5 py-0.5";
+
+export function UnitKindsDialog({ open, onOpenChange, canCreate, canEdit }: {
+  open: boolean; onOpenChange: (v: boolean) => void; canCreate: boolean; canEdit: boolean;
+}) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState(empty);
   const [saving, setSaving] = useState(false);
-  const { data: kinds = [] } = useQuery<Kind[]>({
+  const { data: kinds = [], isError, error } = useQuery<Kind[]>({
     queryKey: ["unit-kinds", "manage"],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/manage`);
@@ -32,6 +40,8 @@ export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenC
   const edit = (k?: Kind) => setDraft(k
     ? { Id: k.Id, Code: k.Code, Name: k.Name, SortOrder: String(k.SortOrder ?? 100), IsActive: k.IsActive !== false, IsLand: !!k.IsLand, IsCommercial: !!k.IsCommercial, BuiltOn: k.BuiltOn || "" }
     : empty);
+  // A new kind needs the create right, a change the edit right — the server's own rule.
+  const mayWrite = draft.Id ? canEdit : canCreate;
 
   const save = async () => {
     setSaving(true);
@@ -51,39 +61,61 @@ export function UnitKindsDialog({ open, onOpenChange }: { open: boolean; onOpenC
     } catch (e: any) { toast.error(e.message); } finally { setSaving(false); }
   };
 
+  const check = (checked: boolean, onChange: (v: boolean) => void, label: string, disabled = false) => (
+    <label className={`flex items-center gap-2 text-sm ${disabled ? "opacity-50" : "cursor-pointer"}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="h-3.5 w-3.5 accent-foreground" /> {label}
+    </label>
+  );
+
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) edit(); }}>
-      <DialogContent accent="crm" className="max-w-2xl">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Unit kinds</DialogTitle></DialogHeader>
-        <p className="-mt-2 text-xs text-muted-foreground">What a unit is — flat, villa, shop, office… Commercial kinds use the commercial GST rule; land kinds are outside GST.</p>
-        <div className="grid gap-4 md:grid-cols-[1fr_280px]">
-          <div className="max-h-80 overflow-y-auto divide-y divide-border rounded-lg border border-border">
-            {kinds.map((k) => (
-              <button key={k.Id} onClick={() => edit(k)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40">
-                <span className="font-medium">{k.Name}</span><span className="text-xs text-muted-foreground">{k.Code}</span>
-                {k.IsLand && <span className="rounded bg-emerald-500/10 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-300">Land</span>}
-                {k.IsCommercial && <span className="rounded bg-sky-500/10 px-1.5 text-[10px] text-sky-700 dark:text-sky-300">Commercial</span>}
-                {k.BuiltOn && <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{BUILT_ON[k.BuiltOn] ?? k.BuiltOn}</span>}
-                <span className="ml-auto text-xs text-muted-foreground">{k.IsActive === false ? "Inactive" : "Active"}</span>
+      <DialogContent className="max-w-2xl rounded-none p-5 gap-4" style={{ border: RULE }}>
+        <DialogHeader className="pb-3" style={{ borderBottom: RULE }}>
+          <p className={LBL}>Unit Master</p>
+          <DialogTitle className="font-heading text-lg font-bold tracking-tight">Unit kinds</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            What a unit is — flat, villa, shop, office… Commercial kinds use the commercial GST rule; land kinds are outside GST.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 md:grid-cols-[1fr_260px]">
+          <div className="max-h-80 overflow-y-auto thin-scroll bg-card" style={{ border: RULE }}>
+            {isError ? (
+              <p className="px-3 py-3 text-xs text-destructive">{(error as Error)?.message}</p>
+            ) : kinds.map((k) => (
+              <button key={k.Id} onClick={() => edit(k)}
+                className={`flex w-full flex-wrap items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-primary/5 ${draft.Id === k.Id ? "bg-primary/5" : ""}`}
+                style={{ borderBottom: RULE_SOFT, boxShadow: draft.Id === k.Id ? "inset 3px 0 0 hsl(var(--foreground))" : undefined }}>
+                <span className="font-medium">{k.Name}</span>
+                <span className="font-heading text-xs font-semibold text-muted-foreground">{k.Code}</span>
+                {k.IsLand && <span className={TAG}>Land</span>}
+                {k.IsCommercial && <span className={TAG}>Commercial</span>}
+                {k.BuiltOn && <span className={TAG}>{BUILT_ON[k.BuiltOn] ?? k.BuiltOn}</span>}
+                <span className="ml-auto"><SheetMark text={k.IsActive === false ? "Inactive" : "Active"} tone={k.IsActive === false ? "draft" : "done"} /></span>
               </button>
             ))}
           </div>
           <div className="space-y-3">
-            <div><label className="mb-1 block text-xs text-muted-foreground">Name</label><input value={draft.Name} onChange={(e) => setDraft((d) => ({ ...d, Name: e.target.value }))} className={fieldCls} /></div>
-            <div><label className="mb-1 block text-xs text-muted-foreground">Code</label><input value={draft.Code} onChange={(e) => setDraft((d) => ({ ...d, Code: e.target.value.toUpperCase() }))} className={fieldCls} /></div>
-            <div><label className="mb-1 block text-xs text-muted-foreground">Sort order</label><input type="number" min="0" max="9999" value={draft.SortOrder} onChange={(e) => setDraft((d) => ({ ...d, SortOrder: e.target.value }))} className={fieldCls} /></div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.IsCommercial} onChange={(e) => setDraft((d) => ({ ...d, IsCommercial: e.target.checked, IsLand: e.target.checked ? false : d.IsLand }))} /> Commercial (shop / office)</label>
-            <div><label className="mb-1 block text-xs text-muted-foreground">Built on</label>
+            <p className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{draft.Id ? `Edit ${draft.Name || "kind"}` : "New kind"}</p>
+            <label className="block space-y-1"><span className={`block ${LBL}`}>Name</span><input value={draft.Name} onChange={(e) => setDraft((d) => ({ ...d, Name: e.target.value }))} className={fieldCls} /></label>
+            <label className="block space-y-1"><span className={`block ${LBL}`}>Code</span><input value={draft.Code} onChange={(e) => setDraft((d) => ({ ...d, Code: e.target.value.toUpperCase() }))} className={`${fieldCls} font-heading`} /></label>
+            <label className="block space-y-1"><span className={`block ${LBL}`}>Sort order</span><input type="number" min="0" max="9999" value={draft.SortOrder} onChange={(e) => setDraft((d) => ({ ...d, SortOrder: e.target.value }))} className={`${fieldCls} tabular-nums`} /></label>
+            {check(draft.IsCommercial, (v) => setDraft((d) => ({ ...d, IsCommercial: v, IsLand: v ? false : d.IsLand })), "Commercial (shop / office)")}
+            <label className="block space-y-1"><span className={`block ${LBL}`}>Built on</span>
               <select value={draft.BuiltOn} disabled={draft.IsLand} onChange={(e) => setDraft((d) => ({ ...d, BuiltOn: e.target.value }))} className={fieldCls}>
                 <option value="">Floors or plots</option>
                 <option value="FLOORS">Floors (towers)</option>
                 <option value="PLOTS">Plots (villas, bungalows)</option>
-              </select></div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.IsLand} onChange={(e) => setDraft((d) => ({ ...d, IsLand: e.target.checked, IsCommercial: e.target.checked ? false : d.IsCommercial }))} /> Land (outside GST)</label>
-            {draft.Id > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.IsActive} onChange={(e) => setDraft((d) => ({ ...d, IsActive: e.target.checked }))} /> Active</label>}
-            <div className="flex justify-end gap-2">
-              <button onClick={() => edit()} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">New</button>
-              <button onClick={save} disabled={saving || !draft.Name.trim() || !draft.Code.trim()} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{saving ? "Saving..." : "Save"}</button>
+              </select>
+            </label>
+            {check(draft.IsLand, (v) => setDraft((d) => ({ ...d, IsLand: v, IsCommercial: v ? false : d.IsCommercial })), "Land (outside GST)")}
+            {draft.Id > 0 && check(draft.IsActive, (v) => setDraft((d) => ({ ...d, IsActive: v })), "Active")}
+            <div className="flex justify-end gap-2 pt-3" style={{ borderTop: RULE_SOFT }}>
+              {canCreate && <button onClick={() => edit()} className={`${KEY} border border-foreground text-foreground hover:bg-primary/10`}>New</button>}
+              {mayWrite && (
+                <button onClick={save} disabled={saving || !draft.Name.trim() || !draft.Code.trim()} className={`${KEY} bg-foreground text-card border border-foreground`}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              )}
             </div>
           </div>
         </div>

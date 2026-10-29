@@ -12,8 +12,8 @@ const { requireActiveBooking, requireApprovedBooking, recomputeLegalMilestoneCur
 const { applyPagination } = require("../services/crmListPagination");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 const STEPS = [
   "DocCollection", "LegalReview", "Drafting", "InternalApproval",

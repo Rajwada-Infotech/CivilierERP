@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -12,13 +12,15 @@ import {
   fmt,
   fmtNum,
   share,
+  pct,
+  Tick,
   GRN_COLS,
   PO_COLS,
   EXP_COLS,
   ISSUE_COLS,
   REQUEST_COLS,
 } from "./dashboard/shared";
-import { DrillDialog, type DrillKey } from "./dashboard/DrillDialog";
+import { DrillDialog, type DrillKey, type PipelineKey } from "./dashboard/DrillDialog";
 import { FortnightPlot } from "./dashboard/FortnightPlot";
 
 type Recent = "grns" | "pos" | "expenses" | "issues" | "requests";
@@ -50,7 +52,18 @@ const fillFor = (status: string): React.CSSProperties => {
 export default function MaterialDashboard() {
   usePageRights("material-dashboard");
   const navigate = useNavigate();
-  const [drill, setDrill] = useState<DrillKey | null>(null);
+  // ?drill=<key>: coming back from a record opened in one of these lists — open that list again.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [drill, setDrill] = useState<DrillKey | null>(() => {
+    const k = searchParams.get("drill") || "";
+    return /^((mr|po|grn)-(unapproved|pending|overdue)|items|grns|pos|expenses|stock|issues|requests)$/.test(k) ? (k as DrillKey) : null;
+  });
+  useEffect(() => {
+    if (!searchParams.get("drill")) return;
+    searchParams.delete("drill");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [recent, setRecent] = useState<Recent>("grns");
 
   const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery<DashboardData>({
@@ -71,20 +84,35 @@ export default function MaterialDashboard() {
 
   const readAt = dataUpdatedAt ? new Date(dataUpdatedAt) : new Date();
   const d = data;
-  const netStock = d ? d.stock.totalIn - d.stock.totalOut : 0;
 
-  const figures: { key: DrillKey | null; path?: string; label: string; value: string; sub: string; red?: boolean }[] = d
-    ? [
-        { key: "items", label: "Items", value: fmtNum(d.items.count), sub: `${fmtNum(d.items.groupCount)} item groups` },
-        { key: "grns", label: "GRNs this month", value: fmtNum(d.grns.thisMonth), sub: `${fmtNum(d.grns.today)} today · ${fmt(d.grns.thisMonthValue)}` },
-        { key: "pos", label: "Open purchase orders", value: fmtNum(d.purchaseOrders.open), sub: `${fmt(d.purchaseOrders.openValue)} not yet received` },
-        { key: "expenses", label: "Pending expenses", value: fmtNum(d.expenses.pending), sub: d.expenses.pending ? `${fmt(d.expenses.pendingAmount)} waiting for approval` : "nothing waiting for approval" },
-        { key: "stock", label: "Net stock", value: fmtNum(netStock), sub: `${fmtNum(d.stock.uniqueItems)} items tracked · ${fmtNum(d.stock.totalIn)} in, ${fmtNum(d.stock.totalOut)} out`, red: netStock < 0 },
-        { key: "issues", label: "Issues this month", value: fmtNum(d.materialIssues.thisMonth), sub: `${fmtNum(d.materialIssues.today)} today · ${fmtNum(d.materialIssues.total)} in all` },
-        { key: "requests", label: "Material requests", value: fmtNum(d.materialRequests.total), sub: `${fmtNum(d.materialRequests.thisMonth)} this month · ${fmtNum(d.materialRequests.pending)} pending` },
-        { key: null, path: "/material/uom", label: "Units of measure", value: fmtNum(d.uom.total), sub: "in the UOM master" },
-      ]
-    : [];
+  // One line per document, in the order the work flows: MR -> PO -> GRN. Each line: not approved yet, approved but the
+  // next document isn't made, and late. Every figure opens the records behind it.
+  const pipelineRows: { doc: string; figures: { key: PipelineKey; label: string; sub: string; late?: boolean }[] }[] = [
+    {
+      doc: "Material requests",
+      figures: [
+        { key: "mr-unapproved", label: "Unapproved", sub: "draft or awaiting approval" },
+        { key: "mr-pending", label: "Pending", sub: "no PO made" },
+        { key: "mr-overdue", label: "Overdue", sub: "past required-by date", late: true },
+      ],
+    },
+    {
+      doc: "Purchase orders",
+      figures: [
+        { key: "po-unapproved", label: "Unapproved", sub: "draft or awaiting approval" },
+        { key: "po-pending", label: "Pending", sub: "no GRN made" },
+        { key: "po-overdue", label: "Overdue", sub: "past expected delivery", late: true },
+      ],
+    },
+    {
+      doc: "Goods receipts",
+      figures: [
+        { key: "grn-unapproved", label: "Unapproved", sub: "awaiting approval" },
+        { key: "grn-pending", label: "Pending", sub: "no invoice booked" },
+        { key: "grn-overdue", label: "Overdue", sub: `not invoiced in ${d?.grnInvoiceDays ?? 7} days`, late: true },
+      ],
+    },
+  ];
 
   const requestRows = d
     ? [
@@ -141,16 +169,34 @@ export default function MaterialDashboard() {
         {/* A — figures, each opens the records behind it */}
         <Detail tag="A" title="Right now" note="Open a figure for its records">
           {isLoading ? (
-            <div className="grid4" style={{ gap: 16 }}>{Array.from({ length: 8 }).map((_, i) => <Skel key={i} h={58} />)}</div>
+            <Skel h={200} />
+          ) : !d?.pipeline ? (
+            <p style={{ fontSize: 13, color: "var(--red)" }}>These figures could not be worked out. Use Re-read to try again.</p>
           ) : (
-            <div className="grid4" style={{ rowGap: 22, columnGap: 24 }}>
-              {figures.map((f) => (
-                <button key={f.label} onClick={() => (f.key ? setDrill(f.key) : navigate(f.path!))} style={{ textAlign: "left", minWidth: 0 }}>
-                  <span className="label link" style={{ display: "inline-block", marginBottom: 8, color: f.red ? "var(--red)" : undefined }}>{f.label}</span>
-                  <span className="figure" style={{ display: "block", fontSize: "clamp(22px, 2.4vw, 32px)", color: f.red ? "var(--red)" : undefined }}>{f.value}</span>
-                  <span style={{ display: "block", fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{f.sub}</span>
-                </button>
-              ))}
+            // A compact matrix: a document per row, the three states as columns, headed once.
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(110px, 0.8fr) repeat(3, minmax(130px, 1fr))", minWidth: 520 }}>
+                <span />
+                {pipelineRows[0].figures.map((f) => (
+                  <span key={f.label} className="label" style={{ paddingBottom: 10, fontSize: 11, color: f.late ? "var(--red)" : undefined }}>{f.label}</span>
+                ))}
+                {pipelineRows.map((row) => (
+                  <React.Fragment key={row.doc}>
+                    <span className="label" style={{ color: "var(--ink)", fontSize: 11.5, padding: "16px 0", borderTop: "1px solid var(--rule-soft)", alignSelf: "stretch", display: "flex", alignItems: "center" }}>{row.doc}</span>
+                    {row.figures.map((f) => {
+                      const n = d.pipeline![f.key] ?? 0;
+                      const red = !!f.late && n > 0;
+                      return (
+                        <button key={f.key} onClick={() => setDrill(f.key)} className="pipe-cell"
+                          style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 12, textAlign: "left", minWidth: 0, padding: "16px 8px 16px 0", borderTop: "1px solid var(--rule-soft)" }}>
+                          <span className="figure link" style={{ fontSize: "clamp(28px, 2.8vw, 38px)", lineHeight: 1, color: red ? "var(--red)" : undefined, textDecoration: "underline dotted", textUnderlineOffset: 4, textDecorationThickness: 1 }}><Tick value={n} /></span>
+                          <span style={{ fontSize: 13, color: "var(--graphite)" }}>{f.sub}</span>
+                        </button>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           )}
         </Detail>
@@ -163,11 +209,11 @@ export default function MaterialDashboard() {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 36px", alignItems: "flex-end" }}>
                   <div>
                     <span className="label" style={{ display: "block", marginBottom: 8 }}>Ordered (PO)</span>
-                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)" }}>{fmt(d.purchaseOrders.totalValue)}</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)" }}><Tick value={d.purchaseOrders.totalValue} format={fmt} /></span>
                   </div>
                   <div>
                     <span className="label" style={{ display: "block", marginBottom: 8 }}>Received (GRN)</span>
-                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)", color: "var(--ink-2)" }}>{fmt(d.grns.totalValue)}</span>
+                    <span className="figure" style={{ display: "block", fontSize: "clamp(26px, 3.2vw, 42px)", color: "var(--ink-2)" }}><Tick value={d.grns.totalValue} format={fmt} /></span>
                   </div>
                 </div>
                 <div style={{ marginTop: 20 }}>
@@ -176,20 +222,20 @@ export default function MaterialDashboard() {
                     <span className="grow" style={{ display: "block", height: "100%", width: `${share(d.grns.totalValue, d.purchaseOrders.totalValue)}%`, background: "var(--blue)" }} />
                   </span>
                   <span style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "var(--graphite)" }}>
-                    {Math.round(share(d.grns.totalValue, d.purchaseOrders.totalValue))}% of the value ordered has been received · {fmtNum(d.purchaseOrders.total)} orders, {fmtNum(d.grns.total)} receipts
+                    <Tick value={share(d.grns.totalValue, d.purchaseOrders.totalValue)} format={pct} /> of the value ordered has been received · <Tick value={d.purchaseOrders.total} /> orders, <Tick value={d.grns.total} /> receipts
                   </span>
                 </div>
                 <div style={{ marginTop: 16 }}>
                   {[
-                    { label: "Still open", sub: `${fmtNum(d.purchaseOrders.open)} orders not yet fully received`, value: fmt(d.purchaseOrders.openValue), go: "pos" as DrillKey },
-                    { label: "Expenses booked", sub: `${fmtNum(d.expenses.approved)} approved · ${fmtNum(d.expenses.pending)} pending`, value: fmt(d.expenses.totalAmount), go: "expenses" as DrillKey },
+                    { label: "Still open", sub: <><Tick value={d.purchaseOrders.open} /> orders not yet fully received</>, value: d.purchaseOrders.openValue, go: "pos" as DrillKey },
+                    { label: "Expenses booked", sub: <><Tick value={d.expenses.approved} /> approved · <Tick value={d.expenses.pending} /> pending</>, value: d.expenses.totalAmount, go: "expenses" as DrillKey },
                   ].map((s) => (
                     <button key={s.label} onClick={() => setDrill(s.go)} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "12px 0", borderTop: "1px solid var(--rule-soft)", width: "100%" }}>
                       <span style={{ minWidth: 0, textAlign: "left" }}>
                         <span className="label link" style={{ color: "var(--ink)" }}>{s.label}</span>
                         <span style={{ display: "block", fontSize: 12, color: "var(--graphite)", marginTop: 4 }}>{s.sub}</span>
                       </span>
-                      <span className="figure" style={{ fontSize: 22, whiteSpace: "nowrap" }}>{s.value}</span>
+                      <span className="figure" style={{ fontSize: 22, whiteSpace: "nowrap" }}><Tick value={s.value} format={fmt} /></span>
                     </button>
                   ))}
                 </div>
@@ -197,7 +243,7 @@ export default function MaterialDashboard() {
             )}
           </Detail>
 
-          <Detail tag="C" title="Material requests" note={d ? `${fmtNum(d.materialRequests.total)} in all` : undefined}>
+          <Detail tag="C" title="Material requests" note={d ? <><Tick value={d.materialRequests.total} /> in all</> : undefined}>
             {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /><Skel h={26} /></>) : d.materialRequests.total === 0 ? (
               <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No material requests yet.</p>
             ) : (
@@ -208,8 +254,8 @@ export default function MaterialDashboard() {
                     <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
                       <span className="label link" style={{ color: "var(--ink)" }}>{r.label}</span>
                       <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>
-                        <span className="figure" style={{ fontSize: 15, marginRight: 8 }}>{fmtNum(r.count)}</span>
-                        {Math.round(share(r.count, d.materialRequests.total))}%
+                        <span className="figure" style={{ fontSize: 15, marginRight: 8 }}><Tick value={r.count} /></span>
+                        <Tick value={share(r.count, d.materialRequests.total)} format={pct} />
                       </span>
                     </span>
                     <span className="hatch" style={{ display: "block", height: 7, marginTop: 7, border: "1px solid var(--ink)" }}>
@@ -217,7 +263,7 @@ export default function MaterialDashboard() {
                     </span>
                   </button>
                 ))}
-                <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--graphite)" }}>{fmtNum(d.materialRequests.thisMonth)} raised this month</p>
+                <p style={{ margin: "10px 0 0", fontSize: 11.5, color: "var(--graphite)" }}><Tick value={d.materialRequests.thisMonth} /> raised this month</p>
               </div>
             )}
           </Detail>
@@ -232,7 +278,7 @@ export default function MaterialDashboard() {
 
         {/* E + F */}
         <div className="grid2">
-          <Detail tag="E" title="Purchase orders by status" note={d ? `${fmtNum(poTotal)} orders` : undefined}>
+          <Detail tag="E" title="Purchase orders by status" note={d ? <><Tick value={poTotal} /> orders</> : undefined}>
             {isLoading || !d ? (<><Skel h={26} /><Skel h={26} /></>) : d.poStatusBreakdown.length === 0 ? (
               <p style={{ fontSize: 13, color: "var(--graphite)", margin: 0 }}>No purchase orders yet.</p>
             ) : (
@@ -241,8 +287,8 @@ export default function MaterialDashboard() {
                   <div key={r.Status} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--rule-soft)" }}>
                     <i className={statusTone(r.Status || "Draft") === "waiting" ? "hatch" : ""} style={{ width: 10, height: 10, flexShrink: 0, border: "1px solid var(--ink)", ...fillFor(r.Status || "Draft") }} />
                     <span className="label" style={{ color: "var(--ink)", flex: 1, minWidth: 0 }}>{r.Status || "Draft"}</span>
-                    <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>{fmtNum(r.Count)} · {Math.round(share(r.Count, poTotal))}%</span>
-                    <span className="figure" style={{ fontSize: 15, minWidth: 110, textAlign: "right" }}>{fmt(Number(r.TotalValue))}</span>
+                    <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}><Tick value={r.Count} /> · <Tick value={share(r.Count, poTotal)} format={pct} /></span>
+                    <span className="figure" style={{ fontSize: 15, minWidth: 110, textAlign: "right" }}><Tick value={Number(r.TotalValue)} format={fmt} /></span>
                   </div>
                 ))}
               </div>
@@ -263,7 +309,7 @@ export default function MaterialDashboard() {
                         <span className="label" style={{ width: 16 }}>{idx + 1}</span>
                         <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.ItemName || "Unnamed item"}</span>
                         <span style={{ fontSize: 12, color: "var(--graphite)", whiteSpace: "nowrap" }}>
-                          {fmtNum(inQty)} in · {fmtNum(outQty)} out
+                          <Tick value={inQty} /> in · <Tick value={outQty} /> out
                         </span>
                       </span>
                       {/* in measured against the busiest item; the issued share of it drawn over in ink */}

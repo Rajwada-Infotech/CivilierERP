@@ -4,7 +4,7 @@ import { parseJsonArray } from "@/utils/parseJsonArray";
 import { OrderChat } from "@/components/orders/OrderChat";
 import { X, Paperclip, FileWarning, Edit3, MessageCircle, Printer, FileDown } from "lucide-react";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { AttachmentThumb, fmtServerDateTime } from "./config";
+import { AttachmentThumb, LinePhotoThumb, fmtServerDateTime } from "./config";
 import { bridge } from "./config";
 import type { VIOState } from "./useVehicleInOut";
 
@@ -186,6 +186,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                         <tr>
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Item</th>
                           <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Received</th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Weight</th>
                           <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide"></th>
                         </tr>
                       </thead>
@@ -194,6 +195,7 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                           <tr key={it.VehicleInOutItemID}>
                             <td className="px-3 py-2 font-medium text-foreground">
                               <span className="inline-flex items-center gap-1.5">
+                                <LinePhotoThumb src={it.PhotoBase64} alt={`${it.ItemName || "Item"} photo`} />
                                 {it.ItemName || "—"}
                                 {it.Brand && (
                                   <span className="text-[0.625rem] font-normal text-muted-foreground">
@@ -217,6 +219,9 @@ export function VIOViewModal({ m }: { m: VIOState }) {
                             </td>
                             <td className="px-3 py-2 text-right font-heading text-foreground">
                               {it.ReceivedQty} {it.UomName || ""}
+                            </td>
+                            <td className="px-3 py-2 text-right font-heading text-foreground whitespace-nowrap">
+                              {Number(it.Weight) > 0 ? `${Number(it.Weight).toLocaleString("en-IN")} ${it.WeightUnit || "kg"}` : <span className="text-muted-foreground">—</span>}
                             </td>
                             <td className="px-3 py-2 text-right">
                               {rights.canEdit && (

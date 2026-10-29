@@ -891,23 +891,43 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     />
                   ) : field.type === "toggle" ? (
                     <div className="flex items-center gap-3 pt-7">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateField(field.name, !form[field.name], field)
-                        }
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${sx("focus:ring-2 focus:ring-primary/30", "")} ${form[field.name] ? sx("bg-emerald-500", "bg-foreground") : "bg-muted-foreground/30"}`}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full ${sx("bg-white shadow", "bg-card")} transition-transform ${form[field.name] ? "translate-x-4" : "translate-x-0.5"}`}
-                        />
-                      </button>
-                      <span className={sx("text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider", "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground")}>
-                        {field.label} —{" "}
-                        <span className={form[field.name] ? sx("text-emerald-600", "text-foreground") : "text-foreground"}>
-                          {form[field.name] ? "Active" : "Inactive"}
+                      {sheet ? (
+                        // On the sheet: the square on / off key every sheet form uses (Broker Master, Project Type…).
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={!!form[field.name]}
+                          onClick={() => updateField(field.name, !form[field.name], field)}
+                          className={`relative h-4 w-7 shrink-0 border border-foreground transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 ${form[field.name] ? "bg-foreground" : "bg-card"}`}
+                        >
+                          <span className={`absolute top-[2px] h-2.5 w-2.5 transition-all ${form[field.name] ? "left-[14px] bg-card" : "left-[2px] bg-foreground"}`} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateField(field.name, !form[field.name], field)
+                          }
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${form[field.name] ? "bg-emerald-500" : "bg-muted-foreground/30"}`}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${form[field.name] ? "translate-x-4" : "translate-x-0.5"}`}
+                          />
+                        </button>
+                      )}
+                      {sheet ? (
+                        <span className="text-xs">
+                          <span className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-foreground">{field.label}</span>
+                          <span className="text-muted-foreground"> — {form[field.name] ? "Active" : "Inactive"}</span>
                         </span>
-                      </span>
+                      ) : (
+                        <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                          {field.label} —{" "}
+                          <span className={form[field.name] ? "text-emerald-600" : "text-foreground"}>
+                            {form[field.name] ? "Active" : "Inactive"}
+                          </span>
+                        </span>
+                      )}
                     </div>
                   ) : field.type === "multiselect" ? (
                     <div className="flex flex-wrap gap-2">

@@ -35,6 +35,7 @@ const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { makeColumnProbe } = require("../services/columnProbe");
 const { poExistsForMR } = require("../utils/materialChainGuard");
+const { multiMrReady, mrQtySource, poTaggedToMr } = require("../services/poMrLinks");
 const {
   getMRItemFulfillment,
   summarize,
@@ -417,7 +418,10 @@ router.get("/", authenticateToken, async (req, res) => {
       LEFT JOIN  dbo.FinYear     fy  WITH (NOLOCK) ON fy.FId = mr.FinYearId
       LEFT JOIN  dbo.MaterialRequestItems mri WITH (NOLOCK) ON mri.MRId = mr.MRId
       WHERE (@search = '%%' OR mr.DocNo LIKE @search OR ec.name LIKE @search OR mr.Status LIKE @search)
-        AND (@statusFilter = '' OR mr.Status = @statusFilter)
+        AND (@statusFilter = '' OR mr.Status = @statusFilter
+             -- "Overdue" tab: past its required-by date and not yet fully ordered (same rule as the Material dashboard).
+             OR (@statusFilter = 'Overdue' AND mr.RequiredByDate < CAST(GETDATE() AS DATE) AND mr.ShortClosedAt IS NULL
+                 AND ISNULL(mr.Status, '') IN ('', 'Draft', 'Pending', 'Approved', 'Partially Fulfilled', 'Partially Ordered')))
         AND (@companyId IS NULL OR mr.CompanyId = @companyId)
         AND (@projectId IS NULL OR mr.ProjectId = @projectId)${projectPredicate(req.projectScope, "mr.ProjectId")}
       GROUP BY mr.MRId, mr.DocNo, mr.Status, mr.Priority,
@@ -677,6 +681,7 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
 router.get("/pending-summary", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    const poQty = mrQtySource(await multiMrReady(pool));
     // SQL Server refuses SUM(ISNULL((SELECT SUM(...) ... WHERE correlated), 0))
     // outright — "Cannot perform an aggregate function on an expression
     // containing an aggregate or a subquery" — even though the inner
@@ -695,7 +700,7 @@ router.get("/pending-summary", authenticateToken, async (req, res) => {
       JOIN dbo.MaterialRequests mr ON mr.MRId = mri.MRId
       OUTER APPLY (
         SELECT SUM(poi.Quantity) AS OrderedQty
-        FROM dbo.PurchaseOrderItems poi
+        FROM ${poQty} poi
         JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
         WHERE poi.MRItemId = mri.MRItemId
           AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
@@ -730,6 +735,8 @@ router.get("/pending-summary", authenticateToken, async (req, res) => {
 router.get("/pending-report", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    const multiMr = await multiMrReady(pool);
+    const poQty = mrQtySource(multiMr);
     const request = pool.request();
     const conditions = [
       "mr.Status IN ('Approved', 'Partially Fulfilled')",
@@ -768,7 +775,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
         mri.MRItemId, mri.ItemName, mri.UOMCode, mri.Quantity AS RequestedQty,
         ISNULL((
           SELECT SUM(poi.Quantity)
-          FROM dbo.PurchaseOrderItems poi
+          FROM ${poQty} poi
           JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
           WHERE poi.MRItemId = mri.MRItemId
             AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
@@ -784,7 +791,7 @@ router.get("/pending-report", authenticateToken, async (req, res) => {
         (
           SELECT STRING_AGG(po2.DocNo, ', ')
           FROM dbo.PurchaseOrders po2
-          WHERE po2.SourceMRId = mr.MRId
+          WHERE ${poTaggedToMr(multiMr, "mr.MRId", "po2")}
             AND ISNULL(po2.Status, '') NOT IN ('Deleted', 'Rejected')
         ) AS LinkedPOs,
         (
@@ -1407,7 +1414,7 @@ router.delete("/:id", authenticateToken, requirePageRight("material-request", "d
       .request()
       .input("id", sql.Int, id)
       .query(
-        "SELECT TOP 1 DocNo FROM dbo.PurchaseOrders WHERE SourceMRId = @id",
+        `SELECT TOP 1 DocNo FROM dbo.PurchaseOrders po WHERE ${poTaggedToMr(await multiMrReady(pool), "@id")}`,
       );
     if (poCheck.recordset.length)
       return res.status(409).json({
@@ -1644,14 +1651,17 @@ router.get("/:id/linked-pos", authenticateToken, async (req, res) => {
     );
     const totalRequested = Number(totalReqRes.recordset[0]?.TotalRequested) || 0;
 
+    // A PO may draw on several MRs (migration 585): only what it takes from THIS MR's lines counts here.
+    const multiMr = await multiMrReady(pool);
     const poRes = await pool.request().input("MRId", sql.Int, id).query(`
       SELECT
         po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status,
         ISNULL(SUM(poi.Quantity), 0) AS OrderedQty
       FROM dbo.PurchaseOrders po
-      LEFT JOIN dbo.PurchaseOrderItems poi
-        ON poi.PurchaseOrderID = po.PurchaseOrderID AND poi.MRItemId IS NOT NULL
-      WHERE po.SourceMRId = @MRId
+      LEFT JOIN ${mrQtySource(multiMr)} poi
+        ON poi.PurchaseOrderID = po.PurchaseOrderID
+       AND poi.MRItemId IN (SELECT MRItemId FROM dbo.MaterialRequestItems WHERE MRId = @MRId)
+      WHERE ${poTaggedToMr(multiMr, "@MRId")}
       GROUP BY po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.PODate, po.Status
       ORDER BY po.PurchaseOrderID ASC
     `);

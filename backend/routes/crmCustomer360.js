@@ -10,8 +10,8 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { applyPagination } = require("../services/crmListPagination");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET / — the Applicant Ledger's customer list: every customer with a
 // rolled-up application/booking count and financial position, searchable by

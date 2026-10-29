@@ -7,7 +7,7 @@ import type { POState } from "./usePurchaseOrder";
 
 // Header details: supplier, company, project, dates, delivery and payment terms.
 export function POHeaderDetails({ m }: { m: POState }) {
-  const { viewMode, poDocTypeId, form, errors, paymentTerms, suppliers, companies, allProjects, filteredFormProjects, items, maxDaysOfSupply, minExpectedDate, setField, isReadOnly } = m;
+  const { viewMode, poDocTypeId, form, errors, paymentTerms, suppliers, companies, allProjects, filteredFormProjects, items, maxDaysOfSupply, minExpectedDate, setField, isReadOnly, supplierDeviations, supplierChangeReason, setSupplierChangeReason } = m;
   return (
     <>
       {/* ── Header Details Card ───────────────────────────────────────────── */}
@@ -118,6 +118,39 @@ export function POHeaderDetails({ m }: { m: POState }) {
               </div>
             )}
           </div>
+
+          {/* Not the quotation's L1 supplier: why (required; the directors are told). Read-only: the saved reason. */}
+          {(isReadOnly ? !!supplierChangeReason : supplierDeviations.length > 0) && (
+            <div className="sm:col-span-2 lg:col-span-3 border border-destructive/60 bg-destructive/5 p-3">
+              {!isReadOnly && (
+                <p className="text-xs text-foreground mb-2 leading-relaxed">
+                  {supplierDeviations.map((d) => (
+                    <span key={d.quotationId} className="block">
+                      <b>{d.l1SupplierName || "Another supplier"}</b> is the lowest (L1) on {d.quotationDocNo}
+                      {d.mrDocNo ? ` for ${d.mrDocNo}` : ""} at ₹{d.l1Total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {d.chosenQuoteTotal != null
+                        ? `; this supplier quoted ₹${d.chosenQuoteTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : "; this supplier didn't quote on it"}
+                      .
+                    </span>
+                  ))}
+                  The directors will be notified of this PO.
+                </p>
+              )}
+              <FieldLabel required={!isReadOnly}>Reason for choosing a different supplier</FieldLabel>
+              {isReadOnly ? (
+                <p className="text-sm text-foreground whitespace-pre-wrap">{supplierChangeReason}</p>
+              ) : (
+                <textarea
+                  value={supplierChangeReason}
+                  onChange={(e) => setSupplierChangeReason(e.target.value.slice(0, 1000))}
+                  rows={2}
+                  placeholder="e.g. L1 can't deliver before the slab casting date"
+                  className={`${inputCls} h-auto py-2 ${errors.supplierChangeReason ? "border-destructive" : ""}`}
+                />
+              )}
+            </div>
+          )}
 
           {/* PO Number */}
           <div>

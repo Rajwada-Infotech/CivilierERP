@@ -13,8 +13,8 @@ const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkfl
 const { assertBookingProjectScope } = require("../services/assertBookingProjectScope");
 const { bookingFullyFundedSql } = require("../services/crmPaymentFunding");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // DuesClearedCheck is computed live from net booking funding; the stored BIT
 // column is intentionally not read. OutstandingDemandCount lets the frontend

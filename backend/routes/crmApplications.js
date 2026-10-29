@@ -49,8 +49,8 @@ async function getApplicationPlotIds(pool, applicationId) {
   return lines.recordset.map((row) => Number(row.PlotId)).filter(Number.isInteger);
 }
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Mirrors SaLead.SourceType so source values stay consistent across the
 // whole system, not just this module.

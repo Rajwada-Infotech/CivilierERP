@@ -8,8 +8,8 @@ const { requirePageRight, requireAnyPageRight } = require("../middleware/require
 const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { cache } = require("../middleware/cache");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET /projects — project dropdown (mirrors unitMaster.js /projects)
 router.get("/projects", requirePageRight("crm-unit-matrix", "view"), cache("unit-matrix-projects", 600, { dropOnAnyWrite: true }), async (req, res) => {

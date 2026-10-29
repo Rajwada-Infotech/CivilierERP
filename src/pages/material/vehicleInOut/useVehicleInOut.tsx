@@ -79,6 +79,8 @@ export function useVehicleInOut() {
   // receivedQtyByItem/photoByItem/qualityByItem — reset/prefilled alongside
   // them everywhere those are. Not mandatory.
   const [brandByItem, setBrandByItem] = useState<Record<number, string>>({});
+  // Optional weight per line: the number as typed, and kg or tonne. Reset/prefilled alongside the others.
+  const [weightByItem, setWeightByItem] = useState<Record<number, { value: string; unit: vehApi.VehicleInOutWeightUnit }>>({});
 
   // Quality-rejection debit note modal — raised against a single received
   // line item (VehicleInOutItemID) from the view modal.
@@ -278,6 +280,7 @@ export function useVehicleInOut() {
     setPhotoByItem({});
     setQualityByItem({});
     setBrandByItem({});
+    setWeightByItem({});
     setErrors({});
     setSearchParams(
       (prev) => {
@@ -304,6 +307,7 @@ export function useVehicleInOut() {
       setPhotoByItem({});
       setQualityByItem({});
       setBrandByItem({});
+      setWeightByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -324,6 +328,7 @@ export function useVehicleInOut() {
       setPhotoByItem({});
       setQualityByItem({});
       setBrandByItem({});
+      setWeightByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -369,9 +374,11 @@ export function useVehicleInOut() {
           photoBase64: photoByItem[Number(poItemId)] || null,
           quality: qualityByItem[Number(poItemId)] || null,
           brand: brandByItem[Number(poItemId)]?.trim() || null,
+          weight: parseFloat(weightByItem[Number(poItemId)]?.value ?? "") || null,
+          weightUnit: weightByItem[Number(poItemId)]?.unit ?? "kg",
         }))
         .filter((it) => it.receivedQty > 0),
-    [receivedQtyByItem, photoByItem, qualityByItem, brandByItem],
+    [receivedQtyByItem, photoByItem, qualityByItem, brandByItem, weightByItem],
   );
 
   // ── Validate ──────────────────────────────────────────────────────────────────
@@ -438,6 +445,7 @@ export function useVehicleInOut() {
     setPhotoByItem({});
     setQualityByItem({});
     setBrandByItem({});
+    setWeightByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -493,6 +501,16 @@ export function useVehicleInOut() {
       Array.isArray(full.Items)
         ? Object.fromEntries(
             full.Items.filter((it: any) => it.Brand).map((it: any) => [it.POItemId, it.Brand]),
+          )
+        : {},
+    );
+    setWeightByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.filter((it: any) => Number(it.Weight) > 0).map((it: any) => [
+              it.POItemId,
+              { value: String(Number(it.Weight)), unit: it.WeightUnit === "tonne" ? "tonne" : "kg" },
+            ]),
           )
         : {},
     );
@@ -753,6 +771,8 @@ export function useVehicleInOut() {
     setQualityByItem,
     brandByItem,
     setBrandByItem,
+    weightByItem,
+    setWeightByItem,
     debitNoteItem,
     setDebitNoteItem,
     debitNoteQty,

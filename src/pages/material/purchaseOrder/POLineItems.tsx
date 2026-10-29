@@ -9,7 +9,7 @@ import type { POState } from "./usePurchaseOrder";
 
 // The PO's line items and their totals.
 export function POLineItems({ m }: { m: POState }) {
-  const { lineItems, errors, itemUomAlternates, uoms, items, hasMixedItemTypes, availableSupplyDays, pickableItems, subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal, updateLine, addLine, removeLine, handleItemSelect, isReadOnly } = m;
+  const { lastRates, lineItems, errors, itemUomAlternates, uoms, items, hasMixedItemTypes, availableSupplyDays, pickableItems, subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal, updateLine, addLine, removeLine, handleItemSelect, isReadOnly } = m;
   return (
     <>
       {/* ── Line Items Card ───────────────────────────────────────────────── */}
@@ -385,6 +385,32 @@ export function POLineItems({ m }: { m: POState }) {
                         className={`${cellInput} text-right font-heading`}
                       />
                     )}
+                    {/* Last ordered from this supplier: rate, unit, which PO and when. */}
+                    {!isReadOnly && li.itemId && lastRates[String(li.itemId).toLowerCase()] && (() => {
+                      const lr = lastRates[String(li.itemId).toLowerCase()];
+                      const diff = lr.Rate > 0 && li.rate > 0 ? ((li.rate - lr.Rate) / lr.Rate) * 100 : 0;
+                      return (
+                        <div
+                          className="mt-1.5 px-2 py-1 text-[0.65rem] leading-tight bg-card min-w-[9.5rem]"
+                          style={{ border: "1px dashed hsl(var(--foreground) / 0.35)" }}
+                          title={`Last ordered from this supplier on ${new Date(lr.PODate).toLocaleDateString("en-IN")} in ${lr.DocNo || `PO #${lr.PurchaseOrderID}`}${lr.Status ? ` (${lr.Status})` : ""} at ₹${Number(lr.Rate).toLocaleString("en-IN")} per ${lr.UomName || "unit"}, before GST`}
+                        >
+                          <span className="block font-heading font-semibold uppercase tracking-[0.1em] text-[0.55rem] text-muted-foreground">Last from supplier</span>
+                          <span className="font-heading font-semibold tabular-nums text-foreground">
+                            ₹{Number(lr.Rate).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-muted-foreground">{lr.UomName ? ` / ${lr.UomName}` : ""}</span>
+                          {Math.abs(diff) >= 0.5 && (
+                            <span className={`ml-1 font-heading font-semibold tabular-nums ${diff > 0 ? "text-destructive" : "text-primary"}`}>
+                              {diff > 0 ? "+" : ""}{diff.toFixed(1)}%
+                            </span>
+                          )}
+                          <span className="block text-muted-foreground truncate">
+                            {lr.DocNo || `PO #${lr.PurchaseOrderID}`} · {new Date(lr.PODate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </td>
 
                   {/* GST % */}

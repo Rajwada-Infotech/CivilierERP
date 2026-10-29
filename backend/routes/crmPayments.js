@@ -20,8 +20,8 @@ const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = 
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // Spec: "BROKER PAYMENT -> NEXT MILESTONE DUE". Business confirmed this should
 // be a soft warning, not a hard block (a customer's payment must never be

@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Minus, Move, Network, Plus, RotateCcw, Save, Sparkles, Trash2 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { SheetMark } from "@/components/sheet/Sheet";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -27,12 +28,16 @@ type Mode = "arrange" | "neighbours";
 
 const linkKey = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
+// A plot's state on the sheet: booked edged red, applied / held tinted, converted washed, available plain.
 function tone(plot: LayoutPlot) {
-  if (plot.ConvertedUnitId) return "border-violet-500/50 bg-violet-500/10";
-  if (plot.LockBookingNo) return "border-red-500/50 bg-red-500/10";
-  if (plot.LockApplicationNo || plot.LockHoldId) return "border-sky-500/50 bg-sky-500/10";
-  return "border-emerald-500/50 bg-emerald-500/10";
+  if (plot.ConvertedUnitId) return "border-foreground/40 bg-primary/10";
+  if (plot.LockBookingNo) return "border-destructive bg-destructive/10";
+  if (plot.LockApplicationNo || plot.LockHoldId) return "border-foreground/40 bg-muted/60";
+  return "border-foreground/30 bg-card";
 }
+const RULE = "1px solid hsl(var(--foreground))";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 async function fetchLayout(blockId: number): Promise<LayoutResponse> {
   const response = await fetchWithAuth(`${PLOT_API}/layout/${blockId}`);
@@ -237,11 +242,12 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
         onDragEnd={() => setDragId(null)}
         onClick={(event) => { event.stopPropagation(); onChipClick(plot); }}
         title={mode === "arrange" ? "Drag to a cell, or click then click a cell" : "Click to link / unlink as a neighbour"}
-        className={`flex h-full w-full select-none flex-col justify-between rounded-md border px-1.5 py-1 text-left ${tone(plot)} ${mode === "arrange" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
-          ${isFocus ? "ring-2 ring-primary" : ""} ${isNeighbour ? "ring-2 ring-sky-500 bg-sky-500/20" : ""} ${isPicked ? "ring-2 ring-primary" : ""} ${dimmed ? "opacity-40" : ""} ${dragId === plot.Id ? "opacity-40" : ""}`}
+        style={{ boxShadow: isFocus || isPicked ? "inset 0 0 0 2px hsl(var(--foreground))" : isNeighbour ? "inset 0 0 0 2px hsl(var(--primary))" : undefined }}
+        className={`flex h-full w-full select-none flex-col justify-between border px-1.5 py-1 text-left ${tone(plot)} ${mode === "arrange" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
+          ${isNeighbour ? "!bg-primary/20" : ""} ${dimmed ? "opacity-40" : ""} ${dragId === plot.Id ? "opacity-40" : ""}`}
       >
-        <span className="block truncate text-xs font-semibold">{plot.PlotName}</span>
-        <span className="block truncate text-[0.625rem] text-muted-foreground">{plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}</span>
+        <span className="block truncate text-xs font-semibold font-heading tabular-nums">{plot.PlotName}</span>
+        <span className="block truncate text-[0.625rem] text-muted-foreground tabular-nums">{plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area pending"}</span>
         <span className="block truncate text-[0.625rem] text-muted-foreground">{links ? `${links} neighbour${links === 1 ? "" : "s"}` : "no neighbours"}</span>
       </div>
     );
@@ -260,34 +266,35 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
     onClick: () => { if (mode === "arrange" && picked != null) placeAt(picked, r, c); },
   });
 
-  const btn = "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted disabled:opacity-40";
+  const btn = `${KEY} h-8 px-2.5 border border-foreground text-foreground hover:bg-primary/10`;
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent accent="crm" className="max-w-6xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Network size={17} className="text-primary" /> Layout &amp; neighbours · {title}</DialogTitle>
-        </DialogHeader>
+      <DialogContent className="max-w-6xl rounded-none p-5 gap-4" style={{ border: RULE }}>
+        <div className="pb-3" style={{ borderBottom: RULE }}>
+          <p className={LBL}>Plot Master · {title}</p>
+          <DialogTitle className="mt-1 font-heading text-lg font-bold tracking-tight">Layout &amp; neighbours</DialogTitle>
+        </div>
 
         {error ? <p className="p-6 text-sm text-destructive">Could not load this block&apos;s layout. Close and try again.</p>
           : (isLoading || (isFetching && initialised.current === null)) ? <p className="p-6 text-sm text-muted-foreground">Loading layout...</p> : (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex h-8 overflow-hidden rounded-lg border border-border" role="group" aria-label="Editor mode">
-                <button onClick={() => { setMode("arrange"); setFocusId(null); }} className={`inline-flex items-center gap-1.5 px-3 text-xs font-medium ${mode === "arrange" ? "bg-muted text-foreground" : "text-muted-foreground"}`}><Move size={13} /> Arrange</button>
-                <button onClick={() => { setMode("neighbours"); setPicked(null); }} className={`inline-flex items-center gap-1.5 border-l border-border px-3 text-xs font-medium ${mode === "neighbours" ? "bg-muted text-foreground" : "text-muted-foreground"}`}><Network size={13} /> Neighbours</button>
+              <div className="inline-flex h-8" style={{ border: RULE }} role="group" aria-label="Editor mode">
+                <button onClick={() => { setMode("arrange"); setFocusId(null); }} className={`${KEY} px-3 ${mode === "arrange" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}><Move size={12} /> Arrange</button>
+                <button onClick={() => { setMode("neighbours"); setPicked(null); }} className={`${KEY} px-3 border-l border-foreground ${mode === "neighbours" ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground"}`}><Network size={12} /> Neighbours</button>
               </div>
 
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <div className={`flex items-center gap-1 ${LBL}`}>
                 Rows
                 <button className={btn + " !px-1.5"} onClick={() => resize("rows", -1)} aria-label="Remove a row"><Minus size={13} /></button>
-                <span className="w-6 text-center tabular-nums text-foreground">{rows}</span>
+                <span className="w-6 text-center font-heading tabular-nums text-foreground">{rows}</span>
                 <button className={btn + " !px-1.5"} onClick={() => resize("rows", 1)} aria-label="Add a row"><Plus size={13} /></button>
               </div>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <div className={`flex items-center gap-1 ${LBL}`}>
                 Columns
                 <button className={btn + " !px-1.5"} onClick={() => resize("cols", -1)} aria-label="Remove a column"><Minus size={13} /></button>
-                <span className="w-6 text-center tabular-nums text-foreground">{cols}</span>
+                <span className="w-6 text-center font-heading tabular-nums text-foreground">{cols}</span>
                 <button className={btn + " !px-1.5"} onClick={() => resize("cols", 1)} aria-label="Add a column"><Plus size={13} /></button>
               </div>
 
@@ -299,38 +306,38 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
               ) : (
                 <>
                   <button className={btn} onClick={autoLink}><Sparkles size={13} /> Auto-link from grid</button>
-                  <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={diagonals} onChange={(event) => setDiagonals(event.target.checked)} /> include diagonals</label>
+                  <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" className="h-3.5 w-3.5 accent-foreground" checked={diagonals} onChange={(event) => setDiagonals(event.target.checked)} /> include diagonals</label>
                   <button className={btn} onClick={clearLinks} disabled={!pairs.size}><RotateCcw size={13} /> Remove all links</button>
                 </>
               )}
-              <span className="ml-auto text-xs text-muted-foreground">{placedCount} of {plots.length} placed{unplaced.length ? ` · ${unplaced.length} in tray` : ""}</span>
+              <span className="ml-auto text-xs text-muted-foreground tabular-nums">{placedCount} of {plots.length} placed{unplaced.length ? ` · ${unplaced.length} in tray` : ""}</span>
             </div>
 
             {mode === "arrange" ? (
               <p className="text-xs text-muted-foreground">Drag a plot onto any cell. Dropping on an occupied cell swaps the two. On touch screens, tap a plot, then tap the cell. Empty cells stay empty (roads, parks, gaps).</p>
             ) : focusPlot ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-center gap-2 bg-primary/5 px-3 py-2 text-xs" style={{ border: RULE, boxShadow: "inset 3px 0 0 hsl(var(--foreground))" }}>
                 <span>Neighbours of <span className="font-semibold">{focusPlot.PlotName}</span>: {focusNeighbours.length ? focusNeighbours.map((plot) => plot.PlotName).join(", ") : "none yet"}.</span>
-                <span className="text-muted-foreground">Click a plot to link it, click a blue one to unlink.</span>
-                <button className="ml-auto text-primary hover:underline" onClick={() => setFocusId(null)}>Pick another plot</button>
+                <span className="text-muted-foreground">Click a plot to link it, click a linked one (washed) to unlink.</span>
+                <button className="ml-auto underline underline-offset-2" onClick={() => setFocusId(null)}>Pick another plot</button>
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">Click the plot whose neighbours you want to set. Only linked neighbours can be combined into one unit. &ldquo;Auto-link from grid&rdquo; links every plot that touches side by side.</p>
             )}
 
-            <div className="max-h-[52vh] overflow-auto rounded-lg border border-border bg-muted/20 p-3">
+            <div className="max-h-[52vh] overflow-auto thin-scroll bg-card p-3" style={{ border: RULE }}>
               <div className="inline-grid gap-1.5" style={{ gridTemplateColumns: `28px repeat(${cols}, 104px)` }}>
                 <div />
-                {Array.from({ length: cols }, (_, c) => <div key={`h${c}`} className="text-center text-[0.625rem] text-muted-foreground">{c + 1}</div>)}
+                {Array.from({ length: cols }, (_, c) => <div key={`h${c}`} className="text-center text-[0.625rem] font-heading tabular-nums text-muted-foreground">{c + 1}</div>)}
                 {Array.from({ length: rows }, (_, r) => (
                   <React.Fragment key={`r${r}`}>
-                    <div className="flex items-center justify-center text-[0.625rem] text-muted-foreground">{r + 1}</div>
+                    <div className="flex items-center justify-center text-[0.625rem] font-heading tabular-nums text-muted-foreground">{r + 1}</div>
                     {Array.from({ length: cols }, (_, c) => {
                       const id = cellMap.get(`${r}:${c}`);
                       const plot = id != null ? byId.get(id) : undefined;
                       return (
                         <div key={`c${r}:${c}`} {...dropProps(r, c)}
-                          className={`h-[64px] rounded-md ${plot ? "" : `border border-dashed border-border/70 ${mode === "arrange" && (picked != null || dragId != null) ? "bg-primary/5" : ""}`}`}>
+                          className={`h-[64px] ${plot ? "" : `border border-dashed border-foreground/25 ${mode === "arrange" && (picked != null || dragId != null) ? "bg-primary/5" : ""}`}`}>
                           {plot && renderChip(plot)}
                         </div>
                       );
@@ -344,8 +351,8 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
               onDragOver={(event) => { if (mode === "arrange") event.preventDefault(); }}
               onDrop={(event) => { if (mode !== "arrange") return; event.preventDefault(); const id = dragId ?? Number(event.dataTransfer.getData("text/plain")); if (byId.has(id)) toTray(id); setDragId(null); }}
               onClick={() => { if (mode === "arrange" && picked != null && pos[picked]) toTray(picked); }}
-              className="rounded-lg border border-dashed border-border p-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Unplaced plots ({unplaced.length}){mode === "arrange" ? " - drop a plot here to take it off the grid" : ""}</p>
+              className="border border-dashed border-foreground/40 p-3">
+              <p className={`mb-2 ${LBL}`}>Unplaced plots · <span className="tabular-nums">{unplaced.length}</span>{mode === "arrange" ? " — drop a plot here to take it off the grid" : ""}</p>
               {unplaced.length === 0 ? <p className="text-xs text-muted-foreground">Every plot has a cell.</p> : (
                 <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
                   {unplaced.map((plot) => <div key={plot.Id} className="h-[64px]">{renderChip(plot)}</div>)}
@@ -353,17 +360,16 @@ export function PlotLayoutEditor({ open, onOpenChange, blockId, title, plots, in
               )}
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-muted-foreground">
-                <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-emerald-500" /> Available</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-sky-500" /> Applied / held</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-red-500" /> Booked</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-violet-500" /> Converted</span>
-                {mode === "neighbours" && <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-sky-500" /> Neighbour</span>}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3" style={{ borderTop: RULE }}>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                <SheetMark text="Available" tone="done" />
+                <SheetMark text="Applied / held" tone="waiting" />
+                <SheetMark text="Booked" tone="stopped" />
+                <SheetMark text="Converted" tone="moving" />
               </div>
               <div className="flex gap-2">
-                <button onClick={() => close(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button>
-                <button onClick={save} disabled={saving || !dirty} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40"><Save size={13} /> {saving ? "Saving..." : "Save layout"}</button>
+                <button onClick={() => close(false)} className={`${KEY} h-9 px-4 border border-foreground text-foreground hover:bg-primary/10`}>Cancel</button>
+                <button onClick={save} disabled={saving || !dirty} className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}><Save size={13} /> {saving ? "Saving…" : "Save layout"}</button>
               </div>
             </div>
           </div>

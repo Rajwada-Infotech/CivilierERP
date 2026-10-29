@@ -2,6 +2,7 @@
 // prefills from MR / quotation / work order / work done, totals, print and the
 // mutations. The page and its parts read from this one object.
 import { generateUUID } from "../../../utils/cryptoPolyfill";
+import { useReturnAfterView } from "@/hooks/useReturnAfterView";
 import { DM_SANS_FACE_CSS, printWhenFontsReady } from "@/utils/documentFont";
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -21,6 +22,20 @@ import { type MRPOPrefill, getMRPOPrefill, getApprovedMRList } from "@/api/mater
 import { type WDPOPrefill } from "@/api/engineeringApi";
 import { type WOPOPrefill } from "@/api/workOrderApi";
 import { type QTPOPrefill } from "@/api/quotationApi";
+
+/** A quotation (for this PO's MR) whose lowest (L1) supplier isn't the PO's — GET /api/purchase-orders/l1-check. */
+export type L1Deviation = {
+  quotationId: number;
+  quotationDocNo: string;
+  mrId: number | null;
+  mrDocNo: string | null;
+  mrDate: string | null;
+  l1SupplierId: number;
+  l1SupplierName: string | null;
+  l1Total: number;
+  chosenQuoteTotal: number | null;
+};
+export type LastRate = { ItemId: string; Rate: number; UomName: string | null; PurchaseOrderID: number; DocNo: string | null; PODate: string; Status: string | null };
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -163,17 +178,24 @@ export function usePurchaseOrder() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
-  // Source MR reference — set when form is opened from a Material Request
-  const [sourceMR, setSourceMR] = useState<{
-    id: number;
-    docNo: string;
-  } | null>(null);
+  // Source MRs — the first is the one the PO was opened from; more of the same company and project can be added,
+  // their items summed into the same lines. `sourceMR` / `setSourceMR` keep meaning "the (first) MR".
+  const [sourceMRs, setSourceMRs] = useState<{ id: number; docNo: string }[]>([]);
+  const sourceMR = sourceMRs[0] ?? null;
+  const setSourceMR = (mr: { id: number; docNo: string } | null) => setSourceMRs(mr ? [mr] : []);
+  const [addMrValue, setAddMrValue] = useState("");
+  const [addMrLoading, setAddMrLoading] = useState(false);
 
   // Source Quotation reference — set when form is opened from the L1 Chart
   const [sourceQT, setSourceQT] = useState<{
     id: number;
     docNo: string;
   } | null>(null);
+
+  // Why the PO goes to a supplier other than the lowest (L1) on the MR's quotation — required then, and the
+  // directors are told. originalSupplierId: the supplier an edited PO was saved with (no reason asked unless changed).
+  const [supplierChangeReason, setSupplierChangeReason] = useState("");
+  const [originalSupplierId, setOriginalSupplierId] = useState<string | null>(null);
 
   // ── Approved MR dropdown ──────────────────────────────────────────────────
   const [mrDropdownValue, setMrDropdownValue] = useState<string>("");
@@ -866,6 +888,8 @@ export function usePurchaseOrder() {
         ? String(qtPrefill.SupplierId)
         : prev.supplierId,
       remarks: qtPrefill.Remarks ?? prev.remarks,
+      // The payment term agreed with this supplier on the quotation.
+      paymentTermId: qtPrefill.PaymentTermId ? String(qtPrefill.PaymentTermId) : prev.paymentTermId,
     }));
 
     const prefillLines: POLineItem[] = qtPrefill.items.map((it) => {
@@ -1119,6 +1143,7 @@ export function usePurchaseOrder() {
         amount: qty * rate + taxAmount,
         mrItemId: it.MRItemId ?? null,
         mrPendingQty: pendingQty,
+        mrSources: it.MRItemId ? [{ mrItemId: it.MRItemId, mrId: prefill.MRId, qty: pendingQty }] : undefined,
       };
     });
     if (prefillLines.length > 0) setLineItems(prefillLines);
@@ -1148,6 +1173,129 @@ export function usePurchaseOrder() {
     } finally {
       setMrDropdownLoading(false);
     }
+  };
+
+  // ── More Material Requests on the same PO ────────────────────────────────
+  // Only MRs of the PO's own company and project are offered. An item already on the PO (same item, same unit)
+  // has the new MR's pending quantity added to its line; anything else becomes a new line.
+  const { data: moreMRs = [], isLoading: moreMRsLoading } = useQuery({
+    queryKey: ["approvedMRList", form.companyId, form.projectId],
+    queryFn: () => getApprovedMRList({ companyId: String(form.companyId), projectId: String(form.projectId) }),
+    enabled: viewMode === "create" && !!sourceMR && !!form.companyId && !!form.projectId,
+    staleTime: 30_000,
+  });
+  const addableMRs = useMemo(
+    () => moreMRs.filter((m) => !sourceMRs.some((s) => s.id === m.MRId)),
+    [moreMRs, sourceMRs],
+  );
+
+  const lineSources = (li: POLineItem) =>
+    li.mrSources?.length
+      ? li.mrSources
+      : li.mrItemId && sourceMR
+        ? [{ mrItemId: li.mrItemId, mrId: sourceMR.id, qty: li.mrPendingQty ?? li.quantity }]
+        : [];
+  const reprice = (li: POLineItem): POLineItem => {
+    const taxAmount = (li.quantity * li.rate * li.gstRate) / 100;
+    return { ...li, taxAmount, amount: li.quantity * li.rate + taxAmount };
+  };
+
+  const addMR = async (mrId: string) => {
+    setAddMrValue(mrId);
+    if (!mrId) return;
+    setAddMrLoading(true);
+    try {
+      const prefill = await getMRPOPrefill(Number(mrId));
+      if (String(prefill.CompanyId) !== String(form.companyId) || String(prefill.ProjectId) !== String(form.projectId)) {
+        toast.error(`${prefill.DocNo} is for a different company or project — only MRs of this PO's company and project can be combined.`);
+        return;
+      }
+      const next = [...lineItems];
+      let added = 0;
+      for (const it of prefill.items) {
+        const pending = Number(it.PendingQty ?? it.Quantity ?? 0);
+        if (!it.MRItemId || pending <= 0) continue;
+        const uom = uoms.find(
+          (u) =>
+            (it.UOMCode && u.code.toLowerCase() === String(it.UOMCode).trim().toLowerCase()) ||
+            (it.UOMName && u.name.toLowerCase() === String(it.UOMName).trim().toLowerCase()),
+        );
+        const unit = uom?.name ?? it.UOMName ?? it.UOMCode ?? "";
+        const src = { mrItemId: it.MRItemId, mrId: prefill.MRId, qty: pending };
+        const at = next.findIndex(
+          (l) => l.itemId && String(l.itemId) === String(it.ItemId) && l.unit.toLowerCase() === String(unit).toLowerCase() && lineSources(l).length > 0,
+        );
+        if (at >= 0) {
+          const l = next[at];
+          next[at] = reprice({
+            ...l,
+            quantity: l.quantity + pending,
+            mrPendingQty: (l.mrPendingQty ?? l.quantity) + pending,
+            mrSources: [...lineSources(l), src],
+            mrItemId: null,
+          });
+        } else {
+          const cgst = Number(it.M_CGST ?? 0);
+          const sgst = Number(it.M_SGST ?? 0);
+          const igst = Number(it.M_IGST ?? 0);
+          const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(cgst, sgst, igst, 0, isIntraState);
+          next.push({
+            id: uid(),
+            itemId: it.ItemId ?? "",
+            itemName: it.ItemName ?? "",
+            itemDescription: "",
+            quantity: pending,
+            uomId: uom?.id ?? null,
+            unit,
+            rate: 0,
+            cgstRate,
+            sgstRate,
+            igstRate,
+            gstRate,
+            taxAmount: 0,
+            amount: 0,
+            mrItemId: it.MRItemId,
+            mrPendingQty: pending,
+            mrSources: [src],
+          });
+        }
+        added++;
+      }
+      if (!added) {
+        toast.error(`${prefill.DocNo} has nothing left to order.`);
+        return;
+      }
+      setLineItems(next.filter((l) => l.itemId || l.itemName));
+      setSourceMRs((prev) => [...prev, { id: prefill.MRId, docNo: prefill.DocNo }]);
+      toast.success(`${prefill.DocNo} added — its items are summed into this PO.`);
+    } catch (err: any) {
+      toast.error(err.message ?? "Could not load that Material Request.");
+    } finally {
+      setAddMrValue("");
+      setAddMrLoading(false);
+    }
+  };
+
+  // Takes an added MR back out: its share comes off each summed line; lines that came only from it go.
+  const removeMR = (mrId: number) => {
+    setLineItems((prev) =>
+      prev.flatMap((l) => {
+        const srcs = lineSources(l);
+        const mine = srcs.filter((s) => s.mrId === mrId);
+        if (!mine.length) return [l];
+        const rest = srcs.filter((s) => s.mrId !== mrId);
+        if (!rest.length) return [];
+        const less = mine.reduce((a, s) => a + s.qty, 0);
+        return [reprice({
+          ...l,
+          quantity: Math.max(0, l.quantity - less),
+          mrPendingQty: rest.reduce((a, s) => a + s.qty, 0),
+          mrSources: rest,
+          mrItemId: rest.length === 1 ? rest[0].mrItemId : null,
+        })];
+      }),
+    );
+    setSourceMRs((prev) => prev.filter((m) => m.id !== mrId));
   };
 
   const filteredList = useMemo(() => {
@@ -1430,11 +1578,12 @@ export function usePurchaseOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceWO, selectedFinYear]);
 
-  // ── Auto-switch doc type between PO (MR/Sale Invoice) and DPO (Direct) ───
+  // ── Auto-switch doc type: QPO (from a quotation), PO (MR/Sale Invoice), DPO (Direct) ───
   useEffect(() => {
     if (viewMode !== "create" || sourceWO) return; // WO has its own effect
     const hasMROrSI = !!(sourceMR || sourceSaleInvoice);
-    const targetPrefix = hasMROrSI ? "PO" : "DPO";
+    // A quotation-sourced PO stays QPO even when the quotation came from an MR.
+    const targetPrefix = sourceQT || qtPrefill ? "QPO" : hasMROrSI ? "PO" : "DPO";
     const target = poDocTypes.find(
       (dt) => (dt.DocNoPrefix ?? dt.Prefix) === targetPrefix,
     );
@@ -1445,7 +1594,7 @@ export function usePurchaseOrder() {
       (docNo) => applyPoDocNumber(target.TypeOfDocId, docNo),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceMR, sourceSaleInvoice, sourceWO, viewMode, poDocTypes]);
+  }, [sourceMR, sourceSaleInvoice, sourceWO, sourceQT, qtPrefill, viewMode, poDocTypes]);
 
   // ── Line item helpers ─────────────────────────────────────────────────────
   const updateLine = (idx: number, patch: Partial<POLineItem>) => {
@@ -1575,12 +1724,17 @@ export function usePurchaseOrder() {
       toast.error("Please fill in all required fields.");
       return false;
     }
+    if (supplierDeviations.length && !supplierChangeReason.trim()) {
+      setErrors({ supplierChangeReason: true });
+      toast.error("Give a reason for choosing a supplier other than the L1.");
+      return false;
+    }
 
     // MR-sourced lines can't exceed what's still pending on that MR item —
     // a repeat PO off the same MR must stay within the remaining balance.
     const overCap = lineItems.find(
       (li) =>
-        li.mrItemId != null &&
+        (li.mrItemId != null || !!li.mrSources?.length) &&
         li.mrPendingQty != null &&
         li.quantity - li.mrPendingQty > 0.0001,
     );
@@ -1647,6 +1801,8 @@ export function usePurchaseOrder() {
         gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
         mrItemId: li.mrItemId ?? null,
+        // Several MR lines summed into this one — the server splits the quantity across them.
+        mrSources: li.mrSources?.length ? li.mrSources.map((s) => ({ mrItemId: s.mrItemId, qty: s.qty })) : undefined,
         costCenterId: li.costCenterId || null,
       })),
       PaymentTerms:
@@ -1668,8 +1824,10 @@ export function usePurchaseOrder() {
       // Source tracking
       SourceMRId: sourceMR?.id ?? null,
       SourceMRDocNo: sourceMR?.docNo ?? null,
+      SourceMRIds: sourceMRs.map((m) => m.id),
       SourceQTId: sourceQT?.id ?? null,
       SourceQTDocNo: sourceQT?.docNo ?? null,
+      SupplierChangeReason: supplierChangeReason.trim() || null,
       SourceWDId: sourceWD?.id ?? null,
       SourceWDDocNo: sourceWD?.docNo ?? null,
       SourceWOId: sourceWO?.id ?? null,
@@ -1917,6 +2075,8 @@ export function usePurchaseOrder() {
     setCompanyDetails(null);
     setMrDropdownValue("");
     setMrDropdownError(null);
+    setSupplierChangeReason("");
+    setOriginalSupplierId(null);
     setViewMode("create");
   };
 
@@ -1951,6 +2111,8 @@ export function usePurchaseOrder() {
     setPoDocTypeId(docTypeId);
     setPoDocNo(docNo);
 
+    setSupplierChangeReason(raw.SupplierChangeReason ?? "");
+    setOriginalSupplierId(supplier?.id ?? String(raw.SupplierID ?? ""));
     setForm({
       poNumber: raw.PurchaseOrderNo ?? "",
       poDate: raw.PODate ? raw.PODate.slice(0, 10) : "",
@@ -2048,6 +2210,9 @@ export function usePurchaseOrder() {
             taxAmount,
             amount: qty * rate + taxAmount,
             costCenterId: pi.costCenterId ? String(pi.costCenterId) : (pi.CostCenterId ? String(pi.CostCenterId) : ""),
+            // Kept so saving an edit doesn't cut the line off from its Material Request(s).
+            mrItemId: pi.mrItemId ?? pi.MRItemId ?? null,
+            mrSources: Array.isArray(pi.mrSources) && pi.mrSources.length ? pi.mrSources : undefined,
           };
         }),
       );
@@ -2141,7 +2306,55 @@ export function usePurchaseOrder() {
 
   const isReadOnly = viewMode === "view";
 
+  // The base rate each item was last ordered at from this supplier (any earlier PO, direct or MR-tagged) — shown
+  // beside the line's rate so a changed price is noticed. Keyed by item id.
+  const lastRateItemIds = useMemo(
+    () => [...new Set(lineItems.map((l) => l.itemId).filter(Boolean))].sort(),
+    [lineItems],
+  );
+  const { data: lastRates = {} } = useQuery<Record<string, LastRate>>({
+    queryKey: ["po-last-rates", form.supplierId, lastRateItemIds.join(","), editingId],
+    enabled: !!form.supplierId && lastRateItemIds.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const qs = new URLSearchParams({ supplierId: String(form.supplierId), itemIds: lastRateItemIds.join(",") });
+      if (editingId) qs.set("excludeId", String(editingId));
+      const r = await fetchWithAuth(`/api/purchase-orders/last-rates?${qs}`);
+      if (!r.ok) return {};
+      const rows: LastRate[] = await r.json().catch(() => []);
+      return Object.fromEntries(rows.map((x) => [String(x.ItemId).toLowerCase(), x]));
+    },
+  });
+
+  // The MR's quotation(s) whose L1 supplier isn't the one chosen — asks for a reason (POHeaderDetails).
+  const l1MrIds = [...new Set([sourceMR?.id, ...sourceMRs.map((x) => x.id)].filter((x): x is number => x != null))];
+  const l1CheckOn =
+    (viewMode === "create" || viewMode === "edit") &&
+    !!form.supplierId &&
+    (viewMode === "create" ? l1MrIds.length > 0 || !!sourceQT : form.supplierId !== originalSupplierId);
+  const { data: l1Deviations = [] } = useQuery<L1Deviation[]>({
+    queryKey: ["po-l1-check", form.supplierId, l1MrIds.join(","), sourceQT?.id ?? null, viewMode === "edit" ? editingId : null],
+    enabled: l1CheckOn,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const qs = new URLSearchParams({ supplierId: String(form.supplierId), mrIds: l1MrIds.join(",") });
+      if (sourceQT) qs.set("qtId", String(sourceQT.id));
+      if (viewMode === "edit" && editingId) qs.set("excludeId", String(editingId));
+      const r = await fetchWithAuth(`/api/purchase-orders/l1-check?${qs}`);
+      if (!r.ok) return [];
+      return r.json().catch(() => []);
+    },
+  });
+  const supplierDeviations = l1CheckOn ? l1Deviations : [];
+
+  // Opened from the Material dashboard: back to that list once the record is closed.
+  useReturnAfterView(viewMode !== "list");
+
   return {
+    supplierDeviations,
+    supplierChangeReason,
+    setSupplierChangeReason,
+    lastRates,
     importFileInputRef,
     importing,
     setImporting,
@@ -2217,6 +2430,13 @@ export function usePurchaseOrder() {
     setTcDropdownOpen,
     sourceMR,
     setSourceMR,
+    sourceMRs,
+    addableMRs,
+    moreMRsLoading,
+    addMrValue,
+    addMrLoading,
+    addMR,
+    removeMR,
     sourceQT,
     setSourceQT,
     mrDropdownValue,

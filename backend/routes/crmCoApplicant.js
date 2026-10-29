@@ -12,8 +12,8 @@ const { actorId } = require("../services/saAccess");
 const { isLegalWorkStarted, requireApprovedBooking, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 
-router.use(authMiddleware);
 router.use(apiRateLimit);
+router.use(authMiddleware);
 
 // GET /names — the co-applicants (Applicant 2, 3 …) of every booking and
 // application, in applicant order, so every CRM screen can show a booking as

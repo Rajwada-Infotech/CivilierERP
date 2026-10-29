@@ -3,26 +3,32 @@ import { useIsFetching } from "@tanstack/react-query";
 
 // Lightweight CSS signal-bars icon — a full Lottie animation engine (~300KB)
 // is too heavy to ship to users who are, by definition, on a slow connection.
+// Drawn on the sheet: square ink bars, the tallest one hatched while it waits.
 function SignalLottie() {
   return (
     <div
+      aria-hidden="true"
       style={{
         display: "flex",
         alignItems: "flex-end",
         gap: "2px",
-        width: 20,
+        width: 18,
         height: 16,
         flexShrink: 0,
       }}
     >
-      {[6, 10, 16].map((h, i) => (
+      {[6, 11, 16].map((h, i) => (
         <div
           key={i}
+          className="scb-bar"
           style={{
             width: "4px",
             height: `${h}px`,
-            borderRadius: "1px",
-            background: "rgba(255,180,0,0.85)",
+            border: "1px solid hsl(var(--foreground))",
+            background:
+              i === 2
+                ? "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)"
+                : "hsl(var(--foreground))",
             animation: `scb-bar 1s ease-in-out ${i * 0.15}s infinite`,
             transformOrigin: "bottom",
           }}
@@ -145,56 +151,67 @@ export default function SlowConnectionBanner() {
           0%,100% { transform: scaleY(0.5); opacity:0.5; }
           50%      { transform: scaleY(1);   opacity:1;   }
         }
+        @media (prefers-reduced-motion: reduce) {
+          .scb-bar, .scb-dot { animation: none !important; opacity: 1 !important; transform: none !important; }
+        }
       `}</style>
 
+      {/* On the drawing sheet: a square card in the theme's own colours, ruled in ink with the sheet's offset
+          outline, a lettered label and a plain line under it. */}
       <div
+        role="status"
+        aria-live="polite"
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "10px",
-          padding: "10px 18px 10px 14px",
-          borderRadius: "12px",
-          background: "rgba(15,15,20,0.92)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,180,0,0.25)",
-          boxShadow:
-            "0 4px 24px rgba(0,0,0,0.4),0 0 0 1px rgba(255,180,0,0.08)",
-          color: "#fff",
-          fontFamily: "'DM Sans','Geist',system-ui,sans-serif",
-          fontSize: "13px",
-          fontWeight: 500,
-          letterSpacing: "0.01em",
-          whiteSpace: "nowrap",
+          gap: "12px",
+          padding: "10px 16px 10px 14px",
+          background: "hsl(var(--card))",
+          color: "hsl(var(--foreground))",
+          border: "1.5px solid hsl(var(--foreground))",
+          outline: "1px solid hsl(var(--border))",
+          outlineOffset: "4px",
+          boxShadow: "0 8px 24px hsl(var(--foreground) / 0.12)",
+          fontFamily: "'DM Sans',system-ui,sans-serif",
+          maxWidth: "calc(100vw - 32px)",
           userSelect: "none",
         }}
       >
         <SignalLottie />
 
-        <span style={{ color: "rgba(255,255,255,0.85)" }}>
-          Slow or spotty connection — hang in there
-        </span>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "2px",
-            marginLeft: "2px",
-          }}
-        >
-          {["0s", "0.2s", "0.4s"].map((delay, i) => (
-            <div
-              key={i}
-              style={{
-                width: "3px",
-                height: "3px",
-                borderRadius: "50%",
-                background: "rgba(255,180,0,0.7)",
-                animation: `scb-dot 1.2s ease-in-out ${delay} infinite`,
-              }}
-            />
-          ))}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              fontFamily: "'Sora',sans-serif",
+              fontWeight: 600,
+              fontSize: "10px",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Slow or spotty connection
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "2px" }} aria-hidden="true">
+              {["0s", "0.2s", "0.4s"].map((delay, i) => (
+                <span
+                  key={i}
+                  className="scb-dot"
+                  style={{
+                    width: "3px",
+                    height: "3px",
+                    background: "hsl(var(--foreground))",
+                    animation: `scb-dot 1.2s ease-in-out ${delay} infinite`,
+                  }}
+                />
+              ))}
+            </span>
+          </div>
+          <div style={{ marginTop: "3px", fontSize: "12px", color: "hsl(var(--muted-foreground))" }}>
+            Hang in there
+          </div>
         </div>
       </div>
     </div>

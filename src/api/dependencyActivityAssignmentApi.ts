@@ -278,6 +278,8 @@ export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
+  /** Photos taken for this activity (all days, before + after) — counted by the server with the list. */
+  photoCount?: number;
   engineerNames: string | null;
   qcNames: string | null;
   startDate: string | null;
