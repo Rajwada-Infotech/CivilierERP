@@ -14,6 +14,7 @@ const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupRe
 const { startSiteVisitReminderEngine } = require("./services/saSiteVisitReminders");
 const { startAutoDepreciationEngine } = require("./services/fixedAssetAutoDepreciation");
 const { startPoPaymentReminderEngine } = require("./services/poPaymentReminders");
+const { startDueDemandEngine } = require("./services/crmDemandScheduler");
 const authMiddleware = require("./middleware/auth");
 const { attachRateLimitUser, rateLimitKey, loginRateLimitKey } = require("./middleware/rateLimitIdentity");
 const { attachProjectScope } = require("./services/projectScope");
@@ -748,6 +749,7 @@ async function startServer() {
       startSiteVisitReminderEngine();
       startAutoDepreciationEngine();
       startPoPaymentReminderEngine();
+      startDueDemandEngine();
     });
 
     setupGracefulShutdown(server, worker);

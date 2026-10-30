@@ -328,16 +328,21 @@ async function autoApplyOnAccount(pool, bookingId, actorUserId, actorEmail) {
     if (!deposit.recordset.length) break;
 
     const milestone = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT TOP 1 Id, DemandStatus FROM dbo.CrmPaymentMilestone
+      SELECT TOP 1 Id, DemandStatus,
+             CASE WHEN DueDate <= CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END AS IsDue
+      FROM dbo.CrmPaymentMilestone
       WHERE BookingId = @bid AND Status NOT IN ('${CrmStatus.PAID}', 'Waived') AND AmountDue > ISNULL(AmountPaid, 0)
       ORDER BY MilestoneNo ASC
     `);
     if (!milestone.recordset.length) break;
     // Only reached once the full price is in (autoApplyOnAccountIfFullyFunded).
-    // A milestone whose demand was never raised would stall the settlement
-    // forever, so raise it now — the trail stays Payment -> Demand ->
-    // Adjustment -> Invoice. Internal only: staff are notified, not the customer.
+    // A demand is raised when its milestone falls due (crmDemandScheduler.js), so
+    // a milestone not yet demanded and not yet due stops the sweep: the rest of
+    // the money stays On Account until that milestone's due date. A due one whose
+    // demand the hourly run has not reached yet is raised here — the trail stays
+    // Payment -> Demand -> Adjustment -> Invoice.
     if (milestone.recordset[0].DemandStatus === CrmStatus.PENDING) {
+      if (!milestone.recordset[0].IsDue) break;
       try { await raiseDemandForMilestone(pool, milestone.recordset[0].Id, "Auto-raised — full booking amount received"); }
       catch (e) { console.error("[crm-payments] autoApplyOnAccount: demand auto-raise failed —", e.message, `| milestoneId=${milestone.recordset[0].Id}`); break; }
     }
@@ -577,15 +582,14 @@ async function raiseDemandForMilestone(pool, milestoneId, notes) {
 }
 
 // Shared side-effects for "this milestone just became Paid" — auto-create
-// the Sales Deed / Brokerage where applicable, auto-raise the NEXT
-// milestone's demand if it's still Pending, and surface the broker-unpaid
-// warning. Previously this whole block only lived inline inside
+// the Sales Deed / Brokerage where applicable and surface the broker-unpaid
+// warning. The NEXT milestone's demand is not raised here: demands are raised
+// when a milestone falls due (services/crmDemandScheduler.js), not when the
+// previous one is paid. Previously this whole block only lived inline inside
 // applyCrmMilestonePaymentApproval, so a milestone settled via the
 // on-account sweep (applyOnAccountToMilestone / autoApplyOnAccount) — a
 // manual deposit, an overpayment overflow, or a manual on-account apply —
-// never triggered any of it. That meant the next milestone's demand simply
-// never got raised on that path, and nobody was notified: a bug, not
-// intentional behavior. Both settlement paths now call this exact same
+// never triggered any of it. Both settlement paths now call this exact same
 // function so the outcome can't depend on which one happened to clear the
 // balance.
 async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestoneNo, actorUserId }) {
@@ -596,22 +600,6 @@ async function handleMilestoneBecamePaid(pool, { bookingId, bookingNo, milestone
   // Sync parking PaymentStatus — only triggers transition if all milestones now settled
   try { await syncParkingPaymentStatus(pool, bookingId); } catch (e) {
     console.error("[crm-payments] syncParkingPaymentStatus failed:", e.message);
-  }
-  try {
-    const next = await pool.request()
-      .input("bid", sql.Int, bookingId)
-      .input("mno", sql.Int, milestoneNo)
-      .query(`
-        SELECT TOP 1 Id, DemandStatus, Status FROM dbo.CrmPaymentMilestone
-        WHERE BookingId = @bid AND MilestoneNo > @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-        ORDER BY MilestoneNo
-      `);
-    const nextRow = next.recordset[0];
-    if (nextRow && nextRow.DemandStatus === CrmStatus.PENDING) {
-      await raiseDemandForMilestone(pool, nextRow.Id, `Auto-raised — milestone #${milestoneNo} payment settled for Booking ${bookingNo || bookingId}`);
-    }
-  } catch (demandErr) {
-    console.error("[crm-payments] next-milestone demand auto-raise failed:", demandErr.message);
   }
   const brokerWarning = await warnIfBrokerUnpaid(pool, bookingId, actorUserId);
   return { brokerWarning };
