@@ -1,4 +1,4 @@
-import { CrmStatus } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed } from "@/constants/crmStatuses";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
@@ -775,12 +775,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectRemark, setRejectRemark] = useState("");
   const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
-  const stageLabels: Record<string, string> = {
-    Review: "Data Review",
-    MarketingHeadApproval: "Marketing Head Approval (L1)",
-    DirectorApproval: "Director Approval (L2 — Final)",
-    Confirmed: "Confirmed",
-  };
+  // A cancelled / rejected / expired / transferred booking has no stage left to work on:
+  // nothing to verify, submit or approve, and nothing is overdue on it.
+  const closed = isBookingClosed(booking?.Status);
   // Who may act at this stage is decided on the server from Approval Setup
   // (the booking workflow's levels: roles and named people).
   const canActOnStage = booking?.Status === CrmStatus.PENDING && !!stageState?.CanActOnStage;
@@ -1011,7 +1008,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const renderChecklistItem = (itemKey: string) => {
     const it = checklistItems.find((c: any) => c.ItemKey === itemKey);
     if (!it) return null;
-    const interactive = currentStage === "Review";
+    const interactive = currentStage === "Review" && !closed;
 
     return (
       <div className=" border border-border/70 px-3 py-2 bg-muted/10">
@@ -1112,7 +1109,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <div className="bg-card px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ border: RULE }}>
               <div className="min-w-0">
                 <div className={LBL}>Current stage</div>
-                <div className="text-sm font-semibold">{stageLabels[currentStage] || currentStage}</div>
+                <div className={`text-sm font-semibold ${closed ? "text-destructive" : ""}`}>
+                  {closed ? `${booking.Status} — no further steps` : bookingWorkflowStageLabel[currentStage] || currentStage}
+                </div>
                 {booking.StageRemarks && (
                   <div className="mt-1 px-2 py-1.5 text-xs text-foreground" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
                     <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
@@ -1147,7 +1146,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   cleared={totalCleared}
                   pendingReceipts={Math.max(0, mrReceived - totalCleared - approvedOnAcc)}
                   approvedOnAccount={approvedOnAcc}
-                  overdueCount={milestoneList.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length}
+                  overdueCount={closed ? 0 : milestoneList.filter((m: any) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length}
                 />
               );
             })()}
@@ -1187,7 +1186,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 before, so staff had no way to tell it existed without
                 clicking into the Payment & Invoice tab. This chip answers
                 "where is the payment record" directly from the summary. */}
-            {booking.Status !== CrmStatus.APPROVED && (() => {
+            {booking.Status !== CrmStatus.APPROVED && !closed && (() => {
               const latestReceipt = (moneyReceipts as any[])[0];
               const mrStatus: string = latestReceipt?.Status
                 || (currentStage !== "Review" ? "Not created yet" : "Available once submitted for approval");
@@ -1231,7 +1230,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 the specific tab/card whose data they verify (see
                 renderChecklistItem calls below), not dumped here as one
                 block. */}
-            {currentStage === "Review" && checklistItems.length > 0 && (
+            {currentStage === "Review" && !closed && checklistItems.length > 0 && (
               <div className="flex items-center justify-between border border-border px-3 py-2 text-xs">
                 <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-foreground" /> Data Review Checklist</span>
                 <span className="text-muted-foreground">
@@ -1746,7 +1745,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <div className=" border border-border px-3 py-2"><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">On-account cover</span><span className="font-semibold text-foreground">{fmt(bookingAmountOnAccountCover)}</span></div>
                     <div className=" border border-border px-3 py-2"><span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block">Due Remaining</span><span className="font-semibold text-foreground">{bookingAmountDue > 0 ? fmt(bookingAmountBalance) : "—"}</span></div>
                     {firstMilestone?.DueDate && (() => {
-                      const isM1Overdue = bookingAmountBalance > 0 && firstMilestone.Status !== CrmStatus.PAID
+                      const isM1Overdue = !closed && bookingAmountBalance > 0 && firstMilestone.Status !== CrmStatus.PAID
                         && firstMilestone.Status !== "Waived" && new Date(firstMilestone.DueDate) < new Date();
                       return (
                         <div className={` border px-3 py-2 ${isM1Overdue ? "border-destructive/40 bg-destructive/5" : "border-border"}`}>
@@ -1851,6 +1850,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
                     return null; // Approved — reflected in AmountPaid already
                   })()}
+                  {/* Token and Booking Amount are different numbers: the token is what was paid, the
+                      Booking Amount is milestone 1. Once Finance approves, the whole token goes On
+                      Account and settles the Booking Amount first; the rest waits for the next milestones. */}
+                  {!closed && Number(booking?.TokenValue) > 0 && bookingAmountDue > 0 && Number(booking.TokenValue) !== bookingAmountDue && (
+                    <p className="text-[0.6875rem] text-muted-foreground">
+                      {Number(booking.TokenValue) > bookingAmountDue
+                        ? `Token ${fmt(Number(booking.TokenValue))} is more than the Booking Amount ${fmt(bookingAmountDue)}: once Finance approves, ${fmt(bookingAmountDue)} settles the Booking Amount and ${fmt(Number(booking.TokenValue) - bookingAmountDue)} stays on account for the next payments.`
+                        : `Token ${fmt(Number(booking.TokenValue))} is less than the Booking Amount ${fmt(bookingAmountDue)}: ${fmt(bookingAmountDue - Number(booking.TokenValue))} will still be due on it after Finance approves the token.`}
+                    </p>
+                  )}
                   {bookingAmountDue <= 0 && (
                     <p className="text-[0.6875rem] text-muted-foreground">Booking Amount not set on the payment plan — open the Payment Plan Master and set a fixed Booking Amount.</p>
                   )}
@@ -2816,7 +2825,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 "Approved & Booked" once Confirmed. No separate Close button
                 here either — the dialog's own "X" (top-right) covers that. */}
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-border mt-4">
-              {isLastTab && !mandatoryReady && booking.Status !== CrmStatus.APPROVED && pendingStepMessage && (
+              {isLastTab && !closed && !mandatoryReady && booking.Status !== CrmStatus.APPROVED && pendingStepMessage && (
                 <button onClick={() => setTab(pendingStepMessage.tab)}
                   className="flex-1 text-left text-xs text-foreground bg-card border border-foreground/30 px-3 py-2 hover:bg-primary/10">
                   {pendingStepMessage.text}
@@ -2836,6 +2845,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <button disabled
                     className="px-4 py-1.5 text-sm bg-foreground text-card font-medium cursor-default flex items-center gap-1">
                     <Check size={14} /> Approved &amp; Booked
+                  </button>
+                ) : closed ? (
+                  <button disabled
+                    className="px-4 py-1.5 text-sm bg-card text-destructive font-medium cursor-default flex items-center gap-1">
+                    Booking {booking.Status.toLowerCase()}
                   </button>
                 ) : canEdit && currentStage === "Review" && !canVerify ? (
                   <button disabled
