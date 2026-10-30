@@ -764,20 +764,28 @@ router.get("/:lheadId/transactions", async (req, res) => {
     // without this, a party whose balance is entirely on-account credit
     // showed a real balance up top but "No transactions found" here.
     let directOnAccount = [];
-    if (isSupplierOrContractor) {
-      const partyType = head.type === "S" ? "Supplier" : "Contractor";
+    {
+      // The same rows the main report adds to this ledger (its onAccountRes query, above): any Supplier / Vendor /
+      // Contractor party, inside the same company / enterprise / project filters. This used to run only for ledger
+      // types S and C and look up party types Supplier / Contractor — a Vendor entry (ledger type V, party type
+      // Vendor) was skipped, so the report showed its advance as a debit while this list said "No transactions".
       const oaRes = await pool
         .request()
         .input("PartyId", sql.Int, lheadId)
-        .input("PartyType", sql.NVarChar(20), partyType)
         .input("from", sql.Date, from)
         .input("to", sql.Date, to)
+        .input("companyId", sql.Int, companyId)
+        .input("enterpriseId", sql.Int, enterpriseId)
+        .input("projectId", sql.Int, projectId)
         .query(`
           SELECT OAId, TxnDate, TxnType, Amount, RefType, RefDocNo, Notes
           FROM dbo.OnAccountLedger
-          WHERE PartyId = @PartyId AND PartyType = @PartyType
+          WHERE PartyId = @PartyId AND PartyType IN ('Supplier', 'Vendor', 'Contractor')
             AND TxnType = 'CREDIT'
             AND TxnDate >= @from AND TxnDate <= @to
+            AND (@companyId IS NULL OR CompanyId = @companyId)
+            AND (@enterpriseId IS NULL OR CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
+            AND (@projectId IS NULL OR ProjectId = @projectId)
           ORDER BY TxnDate DESC
         `);
 

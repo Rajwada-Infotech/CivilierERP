@@ -15,6 +15,7 @@ import { getHsn } from "@/api/hsnApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import { suggestFreeShortCode } from "../itemShortCodes";
 import { exportToCsv, parseCsv } from "@/lib/export";
+import { buildWorkbook, downloadBlob, type XlsxCell } from "@/lib/xlsxBook";
 import { Checkbox } from "@/components/ui/checkbox";
 import { type AlternateUomRow } from "../ItemUomAlternatesEditor";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
@@ -441,6 +442,60 @@ export function useItemMaster() {
   };
 
   // ── CSV template download ───────────────────────────────────────────────────
+  // Every item as an Excel sheet, item-group wise: a heading row per group (with its item count), its items under
+  // it by name. Groups in name order; items without a group last.
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    if (!data.length) return toast.info("There are no items to export.");
+    setExporting(true);
+    try {
+      const byId = new Map((dbItems ?? []).map((r) => [r.M_Id, r]));
+      const groupName = (id: string) => itemGroups.find((g) => g.id === id)?.description || "";
+      const uomName = (code: string) => uomOptions.find((u: { value: string; label: string }) => u.value === code)?.label || code;
+      const supplierName = (id: string) => supplierOptions.find((s) => s.value === id)?.label || "";
+      const costCentreName = (id: string) => costCenterOptions.find((c) => c.value === id)?.label || "";
+      const groups = new Map<string, Item[]>();
+      for (const it of data) {
+        const g = groupName(it.belongsTo) || "(No group)";
+        groups.set(g, [...(groups.get(g) ?? []), it]);
+      }
+      const names = [...groups.keys()].sort((a, b) =>
+        a === "(No group)" ? 1 : b === "(No group)" ? -1 : a.localeCompare(b, undefined, { sensitivity: "base" }),
+      );
+      const H = (v: string): XlsxCell => ({ v, s: "header" });
+      const rows: XlsxCell[][] = [
+        [{ v: `Item Master — ${data.length} items in ${names.length} groups`, s: "title" }],
+        [],
+        ["Item Group", "Item Name", "Short Code", "Type", "UOM", "HSN / SAC", "CGST %", "SGST %", "IGST %",
+          "Default Supplier", "GL Account", "Cost Centre", "Days of Supply", "Description"].map(H),
+      ];
+      for (const g of names) {
+        const items = (groups.get(g) ?? []).sort((a, b) => a.itemName.localeCompare(b.itemName, undefined, { sensitivity: "base" }));
+        rows.push([{ v: `${g}  (${items.length})`, s: "label" }]);
+        for (const it of items) {
+          rows.push([
+            g, it.itemName, it.shortCode, it.itemType, uomName(it.uomCode), { v: it.hsnCode, s: "text" },
+            Number(it.cgst) || 0, Number(it.sgst) || 0, Number(it.igst) || 0,
+            supplierName(it.defaultSupplierId), byId.get(it._id)?.GLHeadName || "", costCentreName(it.costCenterId),
+            it.daysOfSupply === "" ? "" : Number(it.daysOfSupply), it.description,
+          ]);
+        }
+      }
+      const blob = await buildWorkbook([{
+        name: "Items by group",
+        rows,
+        widths: [24, 36, 12, 12, 16, 12, 8, 8, 8, 28, 28, 20, 10, 40],
+        freezeBelowRow: 4,
+      }]);
+      downloadBlob(blob, `item-master-by-group-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success(`Exported ${data.length} items.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleDownloadTemplate = () => {
     exportToCsv([], ITEM_CSV_TEMPLATE_COLUMNS, "item-master-template");
     toast.success("Template downloaded — fill it in and use Import.");
@@ -985,6 +1040,8 @@ export function useItemMaster() {
     handleReset,
     handleItemPrint,
     handleDownloadTemplate,
+    handleExport,
+    exporting,
     handleImportClick,
     handleImportFileChange,
     filtered,

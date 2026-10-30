@@ -3,7 +3,8 @@
 // downloads folder before the APK Manager existed is still offered, without a version, as long as its file is there.
 import React, { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Download } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ArrowLeft, Download } from "lucide-react";
 import { SheetShell } from "@/components/sheet/Sheet";
 import { apiUrl } from "@/lib/apiBase";
 
@@ -104,6 +105,10 @@ export default function DownloadAndroidApp() {
   const [apps, setApps] = useState<PublicApp[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const navigate = useNavigate();
+  // Back to where they came from (usually the sign-in page); opened directly (a shared link), to sign in.
+  const goBack = () => (window.history.length > 1 ? navigate(-1) : navigate("/login"));
+
   useEffect(() => {
     fetch(apiUrl("/api/app-releases/public"), { cache: "no-store" })
       .then(async (r) => {
@@ -121,6 +126,15 @@ export default function DownloadAndroidApp() {
           eyebrow="CivilierERP · Android"
           title="Get the apps"
           subtitle="Scan a code with the phone's camera, or open this page on the phone and tap Download. Each app checks for a newer build when it opens."
+          action={
+            <button
+              type="button"
+              onClick={goBack}
+              className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center gap-1.5 h-9 px-3 border border-foreground text-foreground hover:bg-primary/10 transition-colors"
+            >
+              <ArrowLeft size={13} /> Back
+            </button>
+          }
         >
           {error ? (
             <p className="py-10 text-center text-sm text-destructive">{error}</p>
