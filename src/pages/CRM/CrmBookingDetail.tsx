@@ -119,6 +119,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // Who approves amendments is set in Approval Setup (crm-booking-amendment).
   const isAmendmentApprover = useCanApprove("crm-booking-amendment");
   const canEdit = canDoAction("crm-bookings", "edit");
+  // Data Review (tick / flag the checklist, Verify & Send for Approval) is done by whoever
+  // Approval Setup names for "CRM Booking — Data Verification" (a super admin always can).
+  const canVerify = useCanApprove("crm-booking-verification") && canEdit;
   const navigate = useNavigate();
   const canRaiseDemand = canDoAction("crm-payments", "edit");
   const [tab, setTab] = useState<Tab>("Booking");
@@ -1015,7 +1018,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         <div className="flex items-start gap-2">
           <button
             type="button"
-            disabled={!interactive || !canEdit || checklistBusyKey === it.ItemKey}
+            disabled={!interactive || !canVerify || checklistBusyKey === it.ItemKey}
             onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
             className={`mt-0.5 w-4 h-4 border-2 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
               it.CheckStatus === "Checked" ? "bg-foreground border-foreground/30"
@@ -1040,7 +1043,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {it.CheckStatus === "NeedsRecheck" ? "Flagged: " : "Remark: "}{it.Remarks}
               </p>
             )}
-            {interactive && canEdit && it.CheckStatus !== "NeedsRecheck" && (
+            {interactive && canVerify && it.CheckStatus !== "NeedsRecheck" && (
               checklistFlaggingKey === it.ItemKey ? (
                 <div className="mt-1.5 space-y-1">
                   <textarea value={checklistFlagRemark} onChange={(e) => setChecklistFlagRemark(e.target.value)}
@@ -2834,7 +2837,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     className="px-4 py-1.5 text-sm bg-foreground text-card font-medium cursor-default flex items-center gap-1">
                     <Check size={14} /> Approved &amp; Booked
                   </button>
-                ) : canEdit && currentStage === "Review" ? (
+                ) : canEdit && currentStage === "Review" && !canVerify ? (
+                  <button disabled
+                    className="px-4 py-1.5 text-sm bg-card text-foreground font-medium cursor-default flex items-center gap-1">
+                    Waiting for data verification
+                  </button>
+                ) : canVerify && currentStage === "Review" ? (
                   <button onClick={handleFinalBook} disabled={bookingRequesting || !mandatoryReady || !checklistAllChecked}
                     title={!mandatoryReady || !checklistAllChecked ? pendingStepMessage?.text : undefined}
                     className="px-4 py-1.5 text-sm bg-foreground text-card font-medium hover:bg-foreground/80 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1">

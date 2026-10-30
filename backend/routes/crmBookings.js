@@ -38,6 +38,10 @@ const { transition: approvalTransition } = require("../services/approvalService"
 const { createCrmBookingRecord, CrmCreationError, generateMilestonesForBooking, resolveApplicationPaymentPlan, reallocateBookingLines, rebuildLandSchedule } = require("../services/crmEntityCreation");
 const { logStatusChange, advanceApplicationStatus } = require("../services/crmApplicationWorkflow");
 const { getBookingFunding, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
+const { requireApprover } = require("../middleware/requireApprover");
+// Data Review (checklist + Verify & Send for Approval): whoever Approval Setup names for
+// "crm-booking-verification", or a super admin. Fixing a flagged item (resubmit) stays with Edit.
+const VERIFY = requireApprover("crm-booking-verification", "a booking's data review");
 
 // Keep the fixed Booking Amount line aligned with CrmBooking.BookingAmount.
 // recalculateRemainingMilestones intentionally excludes Milestone 1, so this
@@ -1095,7 +1099,7 @@ async function checkBookingApprovalReadiness(pool, id) {
 // now requires before it will even list a Pending booking — see
 // approvalInbox.js), and notifies every
 // admin/super_admin/marketing_head that a booking is waiting on them.
-router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), VERIFY, async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1226,7 +1230,7 @@ router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (re
 
 // PUT /:id/checklist/:itemKey/check — reviewer ticks one item. Only valid
 // while the Booking is at the Review stage. remarks optional (confirming note).
-router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "edit"), VERIFY, async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
@@ -1260,7 +1264,7 @@ router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "ed
 });
 
 // PUT /:id/checklist/:itemKey/uncheck — reviewer retracts their own check.
-router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "edit"), VERIFY, async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
@@ -1288,7 +1292,7 @@ router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "
 // Remark mandatory. Logged to CrmApplicationStatusLog (against the
 // booking's own ApplicationId) so it's visible in the same Status History
 // panel other flags already show up in.
-router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edit"), VERIFY, async (req, res) => {
   const id = parseId(req.params.id);
   if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
