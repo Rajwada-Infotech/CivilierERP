@@ -619,6 +619,63 @@ const CrmApplication: React.FC = () => {
     setPaymentLocked(false);
   };
 
+  // ── Wizard autosave ── Everything typed is kept in this browser as it is
+  // typed (per application, or "new" before step 1 creates the record), whether
+  // or not Next/Submit was pressed, and offered back when the wizard reopens.
+  // A successful Submit clears it.
+  const draftKey = (id: number | null) => `crm-app-draft:${id ?? "new"}`;
+  const readDraft = (id: number | null): { form: typeof EMPTY_FORM; step: number; savedAt: number } | null => {
+    try { const raw = localStorage.getItem(draftKey(id)); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  };
+  const clearDraft = (id: number | null) => { try { localStorage.removeItem(draftKey(id)); } catch { /* storage unavailable */ } };
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const t = setTimeout(() => {
+      try { localStorage.setItem(draftKey(applicationId), JSON.stringify({ form, step, savedAt: Date.now() })); } catch { /* storage unavailable */ }
+    }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogOpen, form, step, applicationId]);
+  // Once step 1 has created the record, the "new" draft lives on under its id.
+  useEffect(() => { if (applicationId != null) clearDraft(null); }, [applicationId]);
+
+  // `saved` is what the server already holds: a draft identical to it is not news.
+  const offerDraft = (id: number | null, saved?: typeof EMPTY_FORM) => {
+    const d = readDraft(id);
+    if (!d?.form) return;
+    const merged = { ...(saved || EMPTY_FORM), ...d.form };
+    if (JSON.stringify(merged) === JSON.stringify(saved || EMPTY_FORM)) { clearDraft(id); return; }
+    setForm((f) => ({ ...f, ...d.form }));
+    if (id == null) setStep(1);
+    toast.info("Unsaved entry restored", {
+      action: { label: "Discard", onClick: () => { clearDraft(id); if (id == null) { setForm({ ...EMPTY_FORM }); } else { loadApplicationIntoWizard(id); } } },
+    });
+  };
+  const openNewWizard = () => { resetWizard(); setDialogOpen(true); offerDraft(null); };
+
+  // The open wizard lives in the URL (?edit=<id>&step=<n>, or ?new=1), so a
+  // refresh or a shared link comes back to the same application and step.
+  useEffect(() => {
+    setSearchParams((sp) => {
+      sp.delete("edit"); sp.delete("new"); sp.delete("step");
+      if (dialogOpen) {
+        if (applicationId != null) sp.set("edit", String(applicationId)); else sp.set("new", "1");
+        sp.set("step", String(step));
+      }
+      return sp;
+    }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogOpen, applicationId, step]);
+  const [wizardLinkOpened, setWizardLinkOpened] = useState(false);
+  useEffect(() => {
+    if (wizardLinkOpened) return;
+    const edit = Number(searchParams.get("edit"));
+    const wantStep = Number(searchParams.get("step")) || undefined;
+    if (edit) { setWizardLinkOpened(true); loadApplicationIntoWizard(edit, wantStep); }
+    else if (searchParams.get("new")) { setWizardLinkOpened(true); openNewWizard(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, wizardLinkOpened]);
+
   // Deep-link from CrmLeads.tsx's "View Application" link (a converted lead
   // whose linked Customer already has an Application) — opens the read-only
   // detail dialog directly instead of the list-only page. One-shot guard
@@ -660,7 +717,7 @@ const CrmApplication: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, villaOfferOpened]);
 
-  const loadApplicationIntoWizard = async (id: number) => {
+  const loadApplicationIntoWizard = async (id: number, wantStep?: number) => {
     setLoadingApplication(true);
     try {
       const res = await fetchWithAuth(`${API}/${id}`);
@@ -685,8 +742,8 @@ const CrmApplication: React.FC = () => {
 
       setApplicationId(app.Id);
       setApplicationNo(app.ApplicationNo || null);
-      setForm((f) => ({
-        ...f,
+      const loadedForm = {
+        ...form,
         CustomerId: app.CustomerId != null ? String(app.CustomerId) : "",
         CompanyId: app.CompanyId != null ? String(app.CompanyId) : "",
         ProjectId: app.ProjectId != null ? String(app.ProjectId) : "",
@@ -713,7 +770,8 @@ const CrmApplication: React.FC = () => {
         ChequeNo: bankDetail?.ChequeNo || "",
         ChequeDate: bankDetail?.ChequeDate ? String(bankDetail.ChequeDate).slice(0, 10) : "",
         TransactionRef: bankDetail?.TransactionRef || "",
-      }));
+      };
+      setForm(loadedForm);
       setWizardAppStatus(app.Status || null);
 
       const hasProject = app.CompanyId != null && app.ProjectId != null && (app.PreferredUnitId != null || !!app.PreferredPlotIdsCsv);
@@ -746,9 +804,10 @@ const CrmApplication: React.FC = () => {
       // is already done), never above 6, never above 1 without one.
       const savedStep = Number(app.CurrentStep) || 1;
       const resumeStep = hasProject ? Math.min(6, Math.max(firstStepAfterProject, savedStep)) : 1;
-      setStep(resumeStep);
+      setStep(wantStep ? Math.min(resumeStep, Math.max(1, wantStep)) : resumeStep);
       setMaxStepReached(resumeStep);
       setDialogOpen(true);
+      offerDraft(app.Id, loadedForm);
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -926,6 +985,7 @@ const CrmApplication: React.FC = () => {
       const subRes = await fetchWithAuth(`${API}/${applicationId}/submit`, { method: "PUT" });
       const subData = await subRes.json().catch(() => ({}));
       if (!subRes.ok) throw new Error(subData.error || "Submit failed");
+      clearDraft(applicationId);
       setDialogOpen(false);
       resetWizard();
       qc.invalidateQueries({ queryKey: ["crm-apps"] });
@@ -1367,7 +1427,7 @@ const CrmApplication: React.FC = () => {
         subtitle="Every detail captured once, here. Bookings is review-only from this point on."
         action={
           canCreateApplications && (
-            <button onClick={() => { resetWizard(); setDialogOpen(true); }} className={`${KEY_INK} h-9 px-4 shrink-0`}>
+            <button onClick={openNewWizard} className={`${KEY_INK} h-9 px-4 shrink-0`}>
               <Plus size={13} /> New application
             </button>
           )
