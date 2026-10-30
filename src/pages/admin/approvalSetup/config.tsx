@@ -187,6 +187,12 @@ export const MODULE_OPTIONS = [
     desc: "Unit booking confirmation",
   },
   {
+    id: "crm-booking-verification",
+    label: "CRM Booking — Data Verification",
+    icon: "🔍",
+    desc: "Ticks the Data Review checklist and sends the booking for approval (Verify & Send for Approval)",
+  },
+  {
     id: "crm-booking-amendment",
     label: "CRM Booking Amendment",
     icon: "✏️",
@@ -387,6 +393,7 @@ export const MODULE_GROUPS = [
     icon: "🏠",
     modules: [
       "crm-applications",
+      "crm-booking-verification",
       "crm-bookings",
       "crm-booking-amendment",
       "crm-agreements",
