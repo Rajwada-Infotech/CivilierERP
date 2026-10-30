@@ -1,4 +1,3 @@
-const allowRoles = require("../middleware/role");
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
@@ -7,6 +6,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { requireApprover } = require("../middleware/requireApprover");
 
 // Checks shared by create and update. Returns the reason the activity can't be saved, or null.
 //  - an Activity belongs to an existing Group (BOQ and Work Order pick the group first, so an ungrouped
@@ -285,7 +285,7 @@ router.put("/:id", requirePageRight("engineering-activity-master", "edit"), asyn
 });
 
 // ─── PATCH (Approve) ──────────────────────────────────────────────────────────
-router.patch("/:id/approve", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/approve", requireApprover("engineering-activity-master", "engineering activities"), async (req, res) => {
   try {
     const pool = getPool();
     const now = new Date();

@@ -11,6 +11,7 @@ import { SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 import { localDay } from "./salesDeed/config";
+import { useCanApprove } from "@/hooks/useCanApprove";
 
 // The detail of one TRANSFER DEED (a resale's deed of assignment: seller +
 // buyer + us; a buy-back's cancellation deed: seller + us), laid out like the
@@ -90,6 +91,9 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
 
   const finished = !!d && ["Registered", "Cancelled"].includes(d.Status);
   const canEdit = canEditRight && !finished;
+  // Who signs off each step is set in Approval Setup (a super admin always can) — the server says.
+  const canApproveLegal = useCanApprove("crm-transfer-deeds", id, d?.Status === "UnderReview");
+  const canApproveDate = useCanApprove("crm-transfer-deed-date", id, d?.DateApprovalStatus === "Pending");
   const apply = (out: any) => {
     if (out?.steps) qc.setQueryData(["crm-transfer-deed", id], out); else qc.invalidateQueries({ queryKey: ["crm-transfer-deed", id] });
     qc.invalidateQueries({ queryKey: ["crm-transfer-deeds"] });
@@ -297,7 +301,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
             <div className="flex items-center justify-between gap-2"><div className={head}>Legal Head approval</div><span className="text-[0.6875rem] text-muted-foreground">{steps[1].ok ? "Approved" : d.SeniorApprovalStatus === "Pending" ? "Waiting" : "Not sent yet"}</span></div>
             {d.SeniorRemarks && <p className="text-xs text-muted-foreground">{d.SeniorRemarks}</p>}
             {canEdit && d.Status === "Draft" && <button className={primary} disabled={busy === "submit"} onClick={() => call("submit", "submit", {}, "Sent to the Legal Head")}>Send to the Legal Head</button>}
-            {canEdit && d.Status === "UnderReview" && (
+            {canEdit && canApproveLegal && d.Status === "UnderReview" && (
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex-1 min-w-[200px]"><span className={label}>Remarks</span><input className={input} value={remarks.legal || ""} onChange={(e) => setRemarks({ ...remarks, legal: e.target.value })} /></div>
                 <button className={primary} disabled={!!busy} onClick={() => call("legal", "legal/approve", { remarks: remarks.legal }, "Approved")}>Approve</button>
@@ -363,7 +367,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
                 </div>
               );
             })}
-            {canEdit && d.DateApprovalStatus === "Pending" && (
+            {canEdit && canApproveDate && d.DateApprovalStatus === "Pending" && (
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex-1 min-w-[200px]"><span className={label}>Remarks</span><input className={input} value={remarks.date || ""} onChange={(e) => setRemarks({ ...remarks, date: e.target.value })} /></div>
                 <button className={primary} disabled={!!busy} onClick={() => call("dateok", "date/approve", { remarks: remarks.date }, "Date approved")}>Approve the date</button>

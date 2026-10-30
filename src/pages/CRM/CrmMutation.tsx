@@ -21,6 +21,7 @@ import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 import { downloadFile, fetchFileBlob, fmtDate, localDay, roleKey } from "./salesDeed/config";
 import { DocRow, Panel } from "./salesDeed/parts";
+import { useCanApprove } from "@/hooks/useCanApprove";
 
 const API = "/api/crm/mutation";
 const STATUS_LABEL: Record<string, string> = { Applied: "Applied", QueryRaised: "Query raised", Approved: "Approved" };
@@ -50,7 +51,6 @@ async function fetchEligible(): Promise<any[]> {
   return r.json();
 }
 
-const CRM_MUTATION_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
 const emptyStart = () => ({ ApplicationNo: "", ApplicationDate: localDay(), Authority: "", OldKhataNo: "", MutationFee: "" });
 
 const CrmMutation: React.FC = () => {
@@ -58,8 +58,8 @@ const CrmMutation: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("crm-mutation");
   const { currentUser, canDoAction } = useAuth();
-  const canApproveMutation = rights.canEdit && (
-    CRM_MUTATION_APPROVER_ROLES.includes(roleKey(currentUser?.role)) || canDoAction("approval-inbox" as any, "edit"));
+  // Approval Setup ("CRM Mutation Approve") names who approves; a super admin always can. The server says.
+  const canApproveMutation = useCanApprove("crm-mutation-approve") && rights.canEdit;
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
   const mutationIdParam = sp.get("mutationId");

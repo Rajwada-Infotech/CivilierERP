@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApprovalWorkflow, SquareSwitch, MODULE_OPTIONS, fetchWorkflows, apiSave, apiToggle, apiDelete } from "./approvalSetup/config";
 import { ConfigForm } from "./approvalSetup/ConfigForm";
-import { RaiserRules } from "./approvalSetup/RaiserRules";
 
 // The page is split into parts under ./approvalSetup. The workflow types and the module selector are
 // re-exported here because the approval workflows API and the module-group test import them from this file.
@@ -310,7 +309,6 @@ export default function ApprovalSetup() {
             )}
           </div>
         )}
-        {mode === "list" && <RaiserRules canEdit={canEdit} />}
       </SheetShell>
     </>
   );

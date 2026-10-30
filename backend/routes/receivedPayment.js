@@ -16,17 +16,14 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting, isApproverFor } = require("../services/approvalService");
+const { recordGLPosting } = require("../services/approvalService");
 const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { requireApprover } = require("../middleware/requireApprover");
 
 // Approve/Reject gate: who approves received payments is set in Approval
-// Setup ("received-payment") — its roles or named people, nothing else.
-async function allowApprover(req, res, next) {
-  const userId = Number(req.user?.userId ?? req.user?.id) || null;
-  if (await isApproverFor("received-payment", userId, req.user?.role)) return next();
-  return res.status(403).json({ error: "You are not a Received Payments approver in Approval Setup" });
-}
+// Setup ("received-payment") — its roles or named people, or a super admin.
+const allowApprover = requireApprover("received-payment", "received payments");
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
