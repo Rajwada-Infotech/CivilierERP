@@ -130,19 +130,19 @@ export const MODULE_OPTIONS = [
     id: "JournalVoucher",
     label: "Journal Voucher",
     icon: "📒",
-    desc: "Forceful account-head mismatch correction — approval is always restricted to super_admin regardless of who's assigned here",
+    desc: "Forceful account-head mismatch correction",
   },
   {
     id: "InterCompanyTransfer",
     label: "Inter-Company Transfer",
     icon: "🏭",
-    desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment) — restricted to super_admin regardless of who's assigned here",
+    desc: "Approving fires the full auto-generated document chain (SO→SI→Payment→PO→GRN→Expense→Payment)",
   },
   {
     id: "FundTransfer",
     label: "Fund Transfer",
     icon: "🏦",
-    desc: "Bank-to-bank cash movement — inter-company transfers book as a loan on approval. Approval is always restricted to super_admin regardless of who's assigned here",
+    desc: "Bank-to-bank cash movement — inter-company transfers book as a loan on approval",
   },
   {
     id: "Contract",
@@ -166,13 +166,13 @@ export const MODULE_OPTIONS = [
     id: "crm-agreements",
     label: "CRM Agreement (Senior Approval)",
     icon: "📝",
-    desc: "Before an agreement is sent to the customer portal — approver roles here are always restricted to admin/super_admin/marketing_head regardless of who's assigned",
+    desc: "Before an agreement is sent to the customer portal",
   },
   {
     id: "crm-agreement-date",
     label: "CRM Agreement (Date Approval)",
     icon: "📅",
-    desc: "Once both sides' proposed dates match, before the Agreement Date is locked — restricted to super_admin regardless of who's assigned here",
+    desc: "Once both sides' proposed dates match, before the Agreement Date is locked",
   },
   {
     id: "crm-applications",
@@ -202,7 +202,7 @@ export const MODULE_OPTIONS = [
     id: "crm-sales-deed-director",
     label: "CRM Sale Deed (Director Approval)",
     icon: "🖋️",
-    desc: "Before Sale Deed registration proceeds — restricted to super_admin regardless of who's assigned here",
+    desc: "Before Sale Deed registration proceeds",
   },
   {
     id: "crm-registry-complete",
@@ -318,6 +318,30 @@ export const MODULE_OPTIONS = [
     icon: "📎",
     desc: "Who besides the assigned legal executive may upload a sale deed's documents",
   },
+  {
+    id: "account-heads",
+    label: "Account Head",
+    icon: "📒",
+    desc: "A new account head before it can be used",
+  },
+  {
+    id: "activity-master",
+    label: "Activity Master",
+    icon: "🧱",
+    desc: "A project activity before it can be used",
+  },
+  {
+    id: "engineering-activity-master",
+    label: "Engineering Activity Master",
+    icon: "📏",
+    desc: "An engineering activity before it can be used",
+  },
+  {
+    id: "sa-lead-transfers",
+    label: "SA Lead Transfer",
+    icon: "🔀",
+    desc: "A team lead's request to move leads to another team",
+  },
 ] as const;
 
 export type ModuleId = (typeof MODULE_OPTIONS)[number]["id"];
@@ -343,19 +367,19 @@ export const MODULE_GROUPS = [
     id: "engineering",
     label: "Engineering",
     icon: "⚙️",
-    modules: ["WorkOrderHeader", "BOQ", "WorkDone"],
+    modules: ["WorkOrderHeader", "BOQ", "WorkDone", "activity-master", "engineering-activity-master"],
   },
   {
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "received-payment", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
+    modules: ["NewPayment", "received-payment", "account-heads", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "sales",
     label: "Sales",
     icon: "🛍️",
-    modules: ["SaleOrder"],
+    modules: ["SaleOrder", "sa-lead-transfers"],
   },
   {
     id: "crm",

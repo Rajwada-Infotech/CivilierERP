@@ -1,5 +1,5 @@
 // CRM Booking Amendments: parking and extra-charge changes requested on a booking after its Agreement was executed.
-// Each needs an approver (admin, super admin, marketing head, or the amendment workflow's level) before it is applied.
+// Each needs an approver — whoever Approval Setup names for booking amendments, or a super admin — before it is applied.
 import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -17,10 +17,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fmtIstDateTime } from "@/lib/istTime";
 import { translateError } from "@/lib/translateError";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
+import { useCanApprove } from "@/hooks/useCanApprove";
 
-// The roles the server always lets approve; others need the Approval Inbox edit right and the workflow's level (the
-// server decides).
-const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 const BASE = "/api/crm/booking-amendments";
 const PAGE_SIZE = 20;
 
@@ -90,8 +88,7 @@ export default function CrmBookingAmendments() {
   // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
 
-  const role = String(currentUser?.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  const isApprover = AMENDMENT_APPROVER_ROLES.includes(role) || canDoAction("approval-inbox" as any, "edit");
+  const isApprover = useCanApprove("crm-booking-amendment");
 
   const listFilters: AmendmentListFilters = useMemo(() => ({
     status: statusFilter === "All" ? undefined : statusFilter,

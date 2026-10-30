@@ -110,7 +110,8 @@ async function dprApprovalLevels(rungId) {
 async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
   const r = await whoMayAct(item, viewerRole, viewerUserId, workflowCache);
   const role = (viewerRole || "").toLowerCase();
-  if (!r.visible && (role === "admin" || isSuperAdminRole(role))) return { ...r, visible: true, canAct: false };
+  if (isSuperAdminRole(role)) return { ...r, visible: true, canAct: true };
+  if (!r.visible && role === "admin") return { ...r, visible: true, canAct: false };
   return r;
 }
 
@@ -123,7 +124,8 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
   // role or Approval Setup workflow — there's no meaningful way to "name" a
   // whichever-engineer-happens-to-be-on-this-row approver in Approval Setup.
   if (item.Module === "work-allocation-engineer") {
-    const visible = viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId);
+    const isSA = isSuperAdminRole(role);
+    const visible = isSA || (viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId));
     return { visible, canAct: visible };
   }
 
@@ -137,8 +139,11 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
   // "isNamedOnWorkflow" fallback below); actionable only for the level
   // that's actually next in line.
   if (item.Module === "civilworkdpr-approval") {
+    const isSA = isSuperAdminRole(role);
     const rungId = parseInt(item.RecordId, 10);
-    if (!Number.isFinite(rungId) || viewerUserId == null) return { visible: false, canAct: false };
+    if (!Number.isFinite(rungId)) return { visible: false, canAct: false };
+    if (isSA) return { visible: true, canAct: true };
+    if (viewerUserId == null) return { visible: false, canAct: false };
     try {
       const dpr = await dprApprovalLevels(rungId);
       if (!dpr) return { visible: false, canAct: false };

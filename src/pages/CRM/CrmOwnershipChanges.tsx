@@ -15,11 +15,11 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 import { localDay } from "./salesDeed/config";
+import { useCanApprove } from "@/hooks/useCanApprove";
 
 // Ownership Changes — after a property's sale deed is registered it is its
 // owner's; if they sell it on, the sale is between owners and we only RECORD
-// the new owner from their own registered sale deed. Approved (by someone
-// other than whoever entered it), the booking moves to the new owner, so
+// the new owner from their own registered sale deed. Once approved, the booking moves to the new owner, so
 // maintenance, service tickets and the portal follow them. Before conveyance
 // a change of owner is a resale (Cases), not this.
 
@@ -105,6 +105,8 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
   useEffect(() => {
     if (o) setF({ ToCustomerId: String(o.ToCustomerId || ""), DeedNo: o.DeedNo || "", DeedDate: o.DeedDate ? String(o.DeedDate).slice(0, 10) : "", RegOffice: o.RegOffice || "", ConsiderationValue: o.ConsiderationValue ?? "", Notes: o.Notes || "" });
   }, [o]);
+  // Approval Setup ("Ownership Change") names who approves this record now; a super admin always can.
+  const canApprove = useCanApprove("crm-ownership-changes", id, o?.Status === "Pending");
   if (isLoading || !o || !f) return <div className="bg-card p-10 text-center text-sm text-muted-foreground" style={{ border: RULE }}>Loading…</div>;
   const editable = canEdit && ["Draft", "Rejected"].includes(o.Status);
   const refresh = () => { qc.invalidateQueries({ queryKey: ["crm-ownership-change", id] }); qc.invalidateQueries({ queryKey: ["crm-ownership-change-log", id] }); onChanged(); };
@@ -144,7 +146,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
 
   const banner =
     o.Status === "Approved" ? `${o.ToName} is now the owner — since ${fmtDate(o.ApprovedAt)}. Maintenance, service tickets and the portal follow them.`
-    : o.Status === "Pending" ? "Waiting for approval in the Approval Inbox. Whoever entered it can't approve it."
+    : o.Status === "Pending" ? "Waiting for approval — here or in the Approval Inbox."
     : o.Status === "Cancelled" ? `Cancelled — ${o.RejectionNote || ""}`
     : o.Status === "Rejected" ? `Sent back: ${o.RejectionNote || "—"}. Fix it and send it again.`
     : ready ? "Everything is in — send it for approval." : "Complete the list on the right — the new owner's KYC and application, the sale deed's details and its registered copy — then send it for approval.";
@@ -246,7 +248,7 @@ function Detail({ id, canEdit, onChanged }: { id: number; canEdit: boolean; onCh
               <h3 className={head} style={{ borderBottom: RULE }}>{o.Status === "Pending" ? "Approve or send back" : "Cancel"}</h3>
               <div className="p-4 space-y-2">
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder={o.Status === "Pending" ? "Remarks (needed to send back)" : "Why it is being cancelled"} className={TEXTAREA} />
-              {o.Status === "Pending" && (
+              {o.Status === "Pending" && canApprove && (
                 <div className="flex gap-2">
                   <button disabled={!!busy} onClick={() => run("approve", () => send("PUT", `${API}/${id}/approve`, { note }), "Approved")} className={`${KEY_INK} flex-1 h-9`}>Approve</button>
                   <button disabled={!!busy || !note.trim()} onClick={() => run("reject", () => send("PUT", `${API}/${id}/reject`, { note }), "Sent back")} className={`${KEY_LINE} flex-1 h-9`}>Send back</button>
@@ -313,7 +315,7 @@ const CrmOwnershipChanges: React.FC = () => {
       <SheetShell
         eyebrow="CivilierERP · CRM · Resale"
         title="Ownership Changes"
-        subtitle="A new owner after the sale deed is registered, recorded from their own registered sale deed. Approved by someone other than whoever entered it, the booking — with its maintenance, tickets and portal — moves to them."
+        subtitle="A new owner after the sale deed is registered, recorded from their own registered sale deed. Once approved, the booking — with its maintenance, tickets and portal — moves to them."
         action={
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button onClick={reload} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>

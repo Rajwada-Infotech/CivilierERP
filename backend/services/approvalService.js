@@ -28,31 +28,6 @@ const GL_POSTERS = {
   "debit-note": postDebitNoteApproval,
 };
 
-// Modules that record who raised a request, and the column holding that user
-// (an int user id). Whether the raiser may also approve it is a setting per
-// module — dbo.ApprovalRaiserRule, set in Approval Setup (migration 571);
-// with no row the raiser may not.
-const MAKER_COLUMNS = {
-  "crm-cancellations": "RequestedBy",
-  "crm-refunds": "RequestedBy",
-  "crm-resales": "CreatedBy",
-  "crm-brokerage": "CreatedBy",
-  // Not money, but the same separation: whoever prepared a transfer deed
-  // can't give it the Legal Head's sign-off too.
-  "crm-transfer-deeds": "CreatedBy",
-  // Whoever recorded a new owner can't approve the record too.
-  "crm-ownership-changes": "CreatedBy",
-  "crm-credit-notes": "CreatedBy",
-  "crm-credit-note-cancel": "CancelRequestedById",
-};
-
-// Checks outside the approval levels that follow the same setting: who
-// verifies a paper they uploaded themselves.
-const RAISER_RULE_EXTRA = {
-  "crm-transfer-deed-papers": "Transfer deed papers (verify what you uploaded)",
-  "crm-resale-case-papers": "Resale case papers (verify what you uploaded)",
-};
-
 /**
  * Super Admin check: Super Admin has approval rights for every approval in parallel.
  * Matches super_admin, superadmin, sa.
@@ -63,14 +38,6 @@ function isSuperAdmin(role) {
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
   return r === "super_admin" || r === "superadmin" || r === "sa";
-}
-
-/**
- * Whether the raiser of a request in this module may approve it.
- * Work guard removed: creator/raiser can always approve their own request.
- */
-async function raiserMayApprove(_module) {
-  return true;
 }
 
 // Map module slug → { table, pkCol, statusCol }
@@ -456,6 +423,28 @@ function currentCycleCutoffSql(tableName, recordId) {
  *  - anything else (undefined, "any"): today's original behavior — a
  *    single Approved entry at this level is enough.
  */
+/**
+ * Whether a specific user has already recorded an approval for this level
+ * in the current cycle. Prevents the same user signing off twice on an
+ * "everyone must approve" level.
+ */
+async function hasUserApprovedLevel(tableName, recordId, level, userId, executor = null) {
+  const exec = executor || getPool();
+  const cutoff = currentCycleCutoffSql(tableName, recordId);
+  const result = await exec
+    .request()
+    .input("TableName", sql.NVarChar(100), tableName)
+    .input("RecordId", sql.Int, recordId)
+    .input("Level", sql.Int, level)
+    .input("UserId", sql.Int, userId).query(`
+      SELECT TOP 1 1 AS found FROM dbo.ApprovalAuditLog
+      WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
+        AND ActionStatus = 'Approved' AND UserId = @UserId
+        AND ActionAt >= ${cutoff}
+    `);
+  return result.recordset.length > 0;
+}
+
 async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
   const exec = executor || getPool();
   const cutoff = currentCycleCutoffSql(tableName, recordId);
@@ -465,12 +454,18 @@ async function isLevelSatisfied(tableName, recordId, level, levelDef, executor =
       .input("TableName", sql.NVarChar(100), tableName)
       .input("RecordId", sql.Int, recordId)
       .input("Level", sql.Int, level).query(`
-        SELECT DISTINCT UserId FROM dbo.ApprovalAuditLog
+        SELECT DISTINCT UserId, Role FROM dbo.ApprovalAuditLog
         WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
-          AND ActionStatus = 'Approved' AND UserId IS NOT NULL
+          AND ActionStatus = 'Approved'
           AND ActionAt >= ${cutoff}
       `);
-    const approvedUserIds = new Set(result.recordset.map((r) => r.UserId));
+    // Super Admin parallel sign-off immediately satisfies any multi-user level
+    if (result.recordset.some((r) => isSuperAdmin(r.Role))) {
+      return true;
+    }
+    const approvedUserIds = new Set(
+      result.recordset.filter((r) => r.UserId != null).map((r) => r.UserId),
+    );
     return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
   }
   const result = await exec
@@ -682,7 +677,7 @@ async function transition(
       authErr.status = 403;
       throw authErr;
     }
-    // Work guard removed: creator/raiser can approve their own request.
+    // Whoever raised a request may approve it too — no maker-checker rule.
   }
 
   // ── Status change + audit write happen atomically under a row lock ────────
@@ -789,9 +784,7 @@ async function transition(
         // requirement twice — without this, the same director re-approving
         // would look like a second, distinct sign-off.
         if (levelDef.mode === "all" && userId != null) {
-          const alreadyApproved = await isLevelSatisfied(
-            tableName, id, nextLevel, { mode: "all", userIds: [userId] }, tx,
-          );
+          const alreadyApproved = await hasUserApprovedLevel(tableName, id, nextLevel, userId, tx);
           if (alreadyApproved) {
             const dupErr = new Error("You have already approved this step.");
             dupErr.status = 409;
@@ -972,9 +965,6 @@ const canApproveBookingAmendment = (userId, userRole) => isApproverFor("crm-book
 
 module.exports = {
   transition,
-  MAKER_COLUMNS,
-  RAISER_RULE_EXTRA,
-  raiserMayApprove,
   guardEdit,
   guardEditAnyStage,
   restartApprovalCycle,
@@ -1000,4 +990,5 @@ module.exports = {
   WORKFLOW_ID_MAP,
   resolveCurrentLevel,
   isLevelSatisfied,
+  hasUserApprovedLevel,
 };
