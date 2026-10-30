@@ -68,6 +68,8 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                       ? "🔧 Maintenance"
                     : activeModule === "hr-payroll"
                       ? "🧑‍💼 HR and Payroll"
+                    : activeModule === "legal"
+                      ? "⚖️ Legal"
                     : activeModule === "admin"
                       ? "🔧 Admin"
                       : "No Module Selected";

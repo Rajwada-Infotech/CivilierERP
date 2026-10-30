@@ -1,5 +1,6 @@
 export type { PageKey, PageAction, PagePermission } from "./types";
 
+import { LEGAL_PAGE_KEYS } from "@/pages/legal/legalMasters";
 import type {
   UserRole,
   PageKey,
@@ -144,6 +145,12 @@ export const LEGAL_HEAD_ACCESS: PagePermission[] = [
   { page: "crm-legal-milestones", actions: ["view", "create", "edit"] },
   { page: "crm-noc", actions: ["view", "create", "edit"] },
   { page: "crm-sales-deed", actions: ["view", "create", "edit"] },
+  // Legal module: the head maintains every master.
+  { page: "legal-dashboard", actions: ["view"] },
+  ...LEGAL_PAGE_KEYS.map((page) => ({
+    page,
+    actions: (page === "legal-land-master" ? ["view", "create", "edit", "delete", "approve", "print", "export"] : ["view", "create", "edit", "delete", "print", "export"]) as PageAction[],
+  })),
 ];
 
 // Legal Person: the drafter/preparer — "arranges/prepares the papers work"
@@ -151,6 +158,14 @@ export const LEGAL_HEAD_ACCESS: PagePermission[] = [
 // approve rights (approvalService.js's role check on crm-agreements only
 // allows legal_head, not legal_person) and no NOC/Sale Deed access (that's
 // the head's closure-stage oversight).
+// Masters the legal person keeps up to date: land records, locations and people.
+const LEGAL_PERSON_EDITABLE = [
+  "legal-mouza-master", "legal-rs-khatian-master", "legal-rs-plot-master", "legal-lr-ror-master", "legal-land-master",
+  "legal-district-master", "legal-municipality-master", "legal-police-station-master", "legal-village-master",
+  "legal-party-master", "legal-buyer-master", "legal-seller-master", "legal-owner-master", "legal-customer-master",
+  "legal-witness-master", "legal-advocate-master", "legal-land-enquiry", "legal-sub-division-master", "legal-block-master",
+];
+
 export const LEGAL_PERSON_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
   { page: "crm-dashboard", actions: ["view"] },
@@ -158,6 +173,15 @@ export const LEGAL_PERSON_ACCESS: PagePermission[] = [
   { page: "crm-agreements", actions: ["view", "create", "edit"] },
   { page: "crm-documents", actions: ["view", "create", "edit"] },
   { page: "crm-legal-milestones", actions: ["view", "create", "edit"] },
+  // Legal module: the drafter keeps land records and parties up to date; the rules (checklists,
+  // workflows, SLAs) stay with the head.
+  { page: "legal-dashboard", actions: ["view"] },
+  ...LEGAL_PAGE_KEYS.map((page) => ({
+    page,
+    actions: (LEGAL_PERSON_EDITABLE.includes(page)
+      ? ["view", "create", "edit", "export"]
+      : ["view"]) as PageAction[],
+  })),
 ];
 
 // marketing_head: full CRUD on all SA + Sales pages, plus dashboard access.

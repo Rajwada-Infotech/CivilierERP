@@ -1,3 +1,5 @@
+import { LEGAL_PAGE_KEYS } from "@/pages/legal/legalMasters";
+
 // Non-component exports for ModuleContext, split out so ModuleContext.tsx
 // only exports the provider/hook — mixing component and non-component
 // exports in one file breaks Vite's Fast Refresh (forces a full page reload
@@ -18,6 +20,7 @@ export type Module =
   | "loan"
   | "maintenance"
   | "hr-payroll"
+  | "legal"
   | "admin"
   | null;
 
@@ -37,6 +40,7 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   loan: "/loan",
   maintenance: "/maintenance",
   "hr-payroll": "/hr-payroll",
+  legal: "/legal",
   admin: "/admin/dashboard",
 };
 
@@ -108,6 +112,8 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
   admin:       ADMIN_PAGE_KEYS,
   loan:        ["loan-dashboard", "loan-sanction"],
   "hr-payroll": ["hr-payroll-dashboard"],
+  // Every page of the module, so a user granted only one master still sees (and can reach) it.
+  legal:       ["legal-dashboard", ...LEGAL_PAGE_KEYS],
   records:     ["records"],
   crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
 };

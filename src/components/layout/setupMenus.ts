@@ -47,6 +47,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
+import { LEGAL_SETUP_MASTERS, legalMasterPath } from "@/pages/legal/legalMasters";
 
 // ─── Setup Items ──────────────────────────────────────────────────────────────
 export type SetupItem = {
@@ -570,6 +571,15 @@ export const crmSetupItems: SetupItem[] = [
     pageKey: "followup-extra-charge-master",
   },
 ];
+
+// Legal: the Setup masters, grouped Locations → Land records → Ownership → Legal & Financial → Deed & Registration → Workflow → Parties.
+export const legalSetupItems: SetupItem[] = LEGAL_SETUP_MASTERS.map((m) => ({
+  icon: m.icon,
+  label: m.label,
+  path: legalMasterPath(m.key),
+  color: "text-rose-700",
+  pageKey: m.pageKey,
+}));
 
 export const adminSetupItems: SetupItem[] = [
   {

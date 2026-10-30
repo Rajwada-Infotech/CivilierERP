@@ -963,6 +963,7 @@
 [data-module="crm"]              { --mod-from: #1990e6; --mod-via: #3c8bec; --mod-to: #5f8df2; --mod-shadow: rgba(25,144,230,.28); }
 [data-module="maintenance"]      { --mod-from: #88a512; --mod-via: #8fcc14; --mod-to: #8ced1d; --mod-shadow: rgba(136,165,18,.28); }
 [data-module="hr-payroll"]       { --mod-from: #ca19e6; --mod-via: #ec3cec; --mod-to: #f25fde; --mod-shadow: rgba(202,25,230,.28); }
+[data-module="legal"]            { --mod-from: #9b2335; --mod-via: #b8344a; --mod-to: #d4566a; --mod-shadow: rgba(155,35,53,.28); }
 [data-module="records"]          { --mod-from: #e61919; --mod-via: #ec533c; --mod-to: #f2865f; --mod-shadow: rgba(230,25,25,.28); }
 [data-module="admin"]            { --mod-from: #1957e6; --mod-via: #3c59ec; --mod-to: #5f64f2; --mod-shadow: rgba(25,87,230,.28); }
 

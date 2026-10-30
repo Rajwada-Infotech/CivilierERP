@@ -23,6 +23,7 @@ const PREFIX_MODULES: [string, NonNullable<Module>][] = [
   ["/loan", "loan"],
   ["/maintenance", "maintenance"],
   ["/hr-payroll", "hr-payroll"],
+  ["/legal", "legal"],
   ["/finance", "finance"],
   ["/brs", "finance"],
   ["/payments", "finance"],
@@ -47,7 +48,7 @@ export function moduleFromPath(pathname: string): PathModule {
 
 const MODULE_IDS = new Set<string>([
   "finance", "material", "fixed-asset", "followup", "engineering", "ticket", "sales",
-  "records", "civilworkdpr", "sales-automation", "crm", "loan", "maintenance", "hr-payroll", "admin",
+  "records", "civilworkdpr", "sales-automation", "crm", "loan", "maintenance", "hr-payroll", "legal", "admin",
 ]);
 
 /** Ids that ModuleContext accepts as an active module (Compass also has dba/super_admin). */

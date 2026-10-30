@@ -28,7 +28,7 @@ import {
 } from "iconsax-react";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 import { ChromeIcons } from "@/components/icons/moduleIcons";
-import { type SetupItem, financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems, fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems, salesAutomationSetupItems, crmSetupItems, adminSetupItems } from "./setupMenus";
+import { type SetupItem, financeSetupItems, salesSetupItems, maintenanceSetupItems, hrPayrollSetupItems, materialSetupItems, fixedAssetSetupItems, followupSetupItems, engineeringSetupItems, civilWorkDprSetupItems, salesAutomationSetupItems, crmSetupItems, legalSetupItems, adminSetupItems } from "./setupMenus";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
 
@@ -480,6 +480,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(hrPayrollSetupItems),
         label: "HR and Payroll",
         colorStyle: makeColorStyle("hr-payroll"),
+        available: true,
+      };
+    if (activeModule === "legal")
+      return {
+        items: filterSetupItems(legalSetupItems),
+        label: "Legal",
+        colorStyle: makeColorStyle("legal"),
         available: true,
       };
     return {

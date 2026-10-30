@@ -51,6 +51,7 @@ import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
 import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
 
 import { hrPayrollNavItems } from "./sidebars/HrPayrollSidebar";
+import { legalNavItems } from "./sidebars/LegalSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -167,6 +168,13 @@ const MODULE_HEADER: Record<
     color: "#ca19e6",
     from: "from-[#ca19e6]/30",
     to: "to-[#ca19e6]/0",
+  },
+  legal: {
+    label: "Legal",
+    icon: ModuleIcons.legal,
+    color: "#9b2335",
+    from: "from-[#9b2335]/30",
+    to: "to-[#9b2335]/0",
   },
   admin: {
     label: "Admin",
@@ -448,6 +456,9 @@ export const AppSidebar = () => {
         break;
       case "hr-payroll":
         raw = hrPayrollNavItems;
+        break;
+      case "legal":
+        raw = legalNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);

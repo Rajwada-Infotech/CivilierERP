@@ -10,6 +10,7 @@ import { buildFinanceNavItems } from "@/components/layout/sidebars/FinanceSideba
 import { fixedAssetNavItems } from "@/components/layout/sidebars/FixedAssetSidebar";
 import { followupNavItems } from "@/components/layout/sidebars/FollowupSidebar";
 import { hrPayrollNavItems } from "@/components/layout/sidebars/HrPayrollSidebar";
+import { legalNavItems } from "@/components/layout/sidebars/LegalSidebar";
 import { loanNavItems } from "@/components/layout/sidebars/LoanSidebar";
 import { maintenanceNavItems } from "@/components/layout/sidebars/MaintenanceSidebar";
 import { materialNavItems } from "@/components/layout/sidebars/MaterialSidebar";
@@ -28,6 +29,7 @@ import {
   fixedAssetSetupItems,
   followupSetupItems,
   hrPayrollSetupItems,
+  legalSetupItems,
   maintenanceSetupItems,
   materialSetupItems,
   salesAutomationSetupItems,
@@ -129,6 +131,7 @@ const SOURCES: ModuleSource[] = [
   { id: "fixed-asset", label: "Fixed Asset", nav: () => fixedAssetNavItems, setup: fixedAssetSetupItems },
   { id: "maintenance", label: "Maintenance", nav: () => maintenanceNavItems, setup: maintenanceSetupItems },
   { id: "hr-payroll", label: "HR and Payroll", nav: () => hrPayrollNavItems, setup: hrPayrollSetupItems },
+  { id: "legal", label: "Legal", nav: () => legalNavItems, setup: legalSetupItems },
   { id: "admin", label: "Admin", nav: () => buildAdminNavItems(0), setup: adminSetupItems },
   { id: "dba", label: "DBA", nav: () => dbaNavItems },
   { id: "super_admin", label: "Super Admin", nav: () => superAdminNavItems },
