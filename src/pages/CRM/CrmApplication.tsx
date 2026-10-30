@@ -2220,9 +2220,9 @@ const CrmApplication: React.FC = () => {
           actions that actually change something (Resume, Approve/Reject,
           View Booking) stay on the row itself, not here. ── */}
       <Dialog open={viewingAppId != null} onOpenChange={(o) => { if (!o) closeApplication(); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-none" style={{ border: RULE }}>
-          <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
+        <DialogContent className="w-[96vw] max-w-6xl max-h-[92vh] overflow-y-auto rounded-none p-0 gap-0" style={{ border: RULE }}>
+          <DialogHeader className="sticky top-0 z-10 bg-background px-6 pt-5 pb-4 border-b border-border">
+            <DialogTitle className="font-heading flex flex-wrap items-center gap-2 text-lg pr-8">
               {viewingAppDetail ? (
                 <>
                   <span className="font-heading tabular-nums text-primary">{viewingAppDetail.application.ApplicationNo}</span>
@@ -2232,6 +2232,7 @@ const CrmApplication: React.FC = () => {
               ) : "Application Details"}
             </DialogTitle>
           </DialogHeader>
+          <div className="px-6 py-5">
           {!viewingAppDetail ? (
             <div className="py-8 text-center text-sm text-muted-foreground">Loading...</div>
           ) : (() => {
@@ -2262,7 +2263,25 @@ const CrmApplication: React.FC = () => {
             );
 
             return (
-              <div className="space-y-3 text-sm">
+              <div className="space-y-4 text-sm">
+
+                {/* ── At a glance ── */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 border border-border divide-x divide-border bg-muted/20">
+                  {[
+                    { label: isPlotSale ? "Plots" : "Unit", value: isPlotSale ? a.PlotNames : (a.PreferredUnitName || a.InterestedUnit) },
+                    { label: "Project", value: a.ProjectMasterName || a.InterestedProject },
+                    { label: "Payment Plan", value: isPlotSale ? "Booking, then balance" : a.PaymentPlanName },
+                    { label: "Total Value", value: grandTotal > 0 ? `₹${grandTotal.toLocaleString("en-IN")}` : null },
+                  ].map((k) => (
+                    <div key={k.label} className="px-4 py-3 min-w-0">
+                      <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-1">{k.label}</p>
+                      <p className="text-sm font-semibold truncate tabular-nums">{k.value || <span className="text-muted-foreground/60 font-normal">—</span>}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+                <div className="lg:col-span-3 space-y-4 min-w-0">
 
                 {/* ── 1. Applicant ── */}
                 <section className=" border border-border overflow-hidden">
@@ -2333,77 +2352,6 @@ const CrmApplication: React.FC = () => {
                       ))}
                     </div>
                   )}
-                </section>
-
-                {/* ── 3. Financials (compact) ── */}
-                <section className=" border border-border overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                    <IndianRupee size={13} className="text-foreground shrink-0" />
-                    <span className="text-xs font-semibold uppercase tracking-wide">Financials</span>
-                    {grandTotal > 0 && (
-                      <span className="ml-auto text-xs font-bold text-foreground">₹{grandTotal.toLocaleString("en-IN")}</span>
-                    )}
-                  </div>
-                  <div className="px-4 py-3 space-y-1.5">
-                    {unitTotal > 0 && (
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">{isPlotSale ? `Land (${unitArea.toLocaleString("en-IN")} sqft, no GST)` : `Unit (${unitArea} sqft)`}</span>
-                        <span className="font-medium">₹{unitTotal.toLocaleString("en-IN")}</span>
-                      </div>
-                    )}
-                    {parkingBase > 0 && (
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Parking</span>
-                        <span className="font-medium">₹{parkingBase.toLocaleString("en-IN")}</span>
-                      </div>
-                    )}
-                    {extraChargesTotal > 0 && (
-                      <div className="flex justify-between text-xs">
-                        <span className="text-muted-foreground">Extra Charges</span>
-                        <span className="font-medium">₹{extraChargesTotal.toLocaleString("en-IN")}</span>
-                      </div>
-                    )}
-                    {unitParkingGst && (
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>GST</span>
-                        <span>₹{(unitParkingGst.total - unitTotal - parkingBase).toLocaleString("en-IN")}</span>
-                      </div>
-                    )}
-                    {grandTotal > 0 && (
-                      <div className="flex justify-between text-xs font-semibold border-t border-border pt-1.5 mt-0.5">
-                        <span>Total</span>
-                        <span>₹{grandTotal.toLocaleString("en-IN")}</span>
-                      </div>
-                    )}
-                    {/* Payment plan milestone strip */}
-                    {plan && planMilestones.length > 0 && grandTotal > 0 && (
-                      <div className="pt-2 border-t border-border space-y-1">
-                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Payment Schedule</p>
-                        <div className="flex justify-between text-[0.6875rem]">
-                          <span className="text-muted-foreground">Booking (fixed)</span>
-                          <span className="font-medium">₹{planBookingAmount.toLocaleString("en-IN")}</span>
-                        </div>
-                        {planMilestones.slice(1).map((m, i) => (
-                          <div key={i} className="flex justify-between text-[0.6875rem]">
-                            <span className="text-muted-foreground truncate pr-2">{m.name} ({m.pct}%)</span>
-                            <span className="font-medium shrink-0">₹{Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {/* Extra work detail */}
-                    {extraChargeRows.length > 0 && (
-                      <div className="pt-2 border-t border-border space-y-1">
-                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Extra Charges</p>
-                        {extraChargeRows.map((c: any) => (
-                          <div key={c.Id} className="flex justify-between text-[0.6875rem]">
-                            <span className="text-muted-foreground truncate pr-2">{c.Description}</span>
-                            <span className="font-medium shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 </section>
 
                 {/* ── 4. Payment + Source in a 2-col row ── */}
@@ -2505,6 +2453,87 @@ const CrmApplication: React.FC = () => {
                   </section>
                 )}
 
+                </div>
+
+                {/* Right column: money and history */}
+                <div className="lg:col-span-2 space-y-4 min-w-0 lg:sticky lg:top-0">
+                {/* ── 3. Financials (compact) ── */}
+                <section className=" border border-border overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                    <IndianRupee size={13} className="text-foreground shrink-0" />
+                    <span className="text-xs font-semibold uppercase tracking-wide">Financials</span>
+                    {grandTotal > 0 && (
+                      <span className="ml-auto text-sm font-bold text-foreground tabular-nums">₹{grandTotal.toLocaleString("en-IN")}</span>
+                    )}
+                  </div>
+                  <div className="px-4 py-3 space-y-1.5 tabular-nums">
+                    {unitTotal > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">{isPlotSale ? `Land (${unitArea.toLocaleString("en-IN")} sqft, no GST)` : `Unit (${unitArea} sqft)`}</span>
+                        <span className="font-medium">₹{unitTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {parkingBase > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">Parking</span>
+                        <span className="font-medium">₹{parkingBase.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {extraChargesTotal > 0 && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">Extra Charges</span>
+                        <span className="font-medium">₹{extraChargesTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {unitParkingGst && (
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>GST</span>
+                        <span>₹{(unitParkingGst.total - unitTotal - parkingBase).toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {grandTotal > 0 && (
+                      <div className="flex justify-between text-sm font-semibold border-t border-border pt-2 mt-1">
+                        <span>Total</span>
+                        <span>₹{grandTotal.toLocaleString("en-IN")}</span>
+                      </div>
+                    )}
+                    {/* Payment plan milestone schedule */}
+                    {plan && planMilestones.length > 0 && grandTotal > 0 && (
+                      <div className="pt-3 mt-1 border-t border-border">
+                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-1.5">Payment Schedule · {plan.PlanName || a.PaymentPlanName}</p>
+                        <table className="w-full text-xs tabular-nums">
+                          <tbody>
+                            <tr className="border-b border-border/60">
+                              <td className="py-1.5 text-muted-foreground">Booking</td>
+                              <td className="py-1.5 text-right text-muted-foreground w-14">fixed</td>
+                              <td className="py-1.5 text-right font-medium w-28">₹{planBookingAmount.toLocaleString("en-IN")}</td>
+                            </tr>
+                            {planMilestones.slice(1).map((m, i) => (
+                              <tr key={i} className="border-b border-border/60 last:border-0">
+                                <td className="py-1.5 text-muted-foreground pr-2">{m.name}</td>
+                                <td className="py-1.5 text-right text-muted-foreground w-14">{m.pct}%</td>
+                                <td className="py-1.5 text-right font-medium w-28">₹{Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {/* Extra work detail */}
+                    {extraChargeRows.length > 0 && (
+                      <div className="pt-2 border-t border-border space-y-1">
+                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Extra Charges</p>
+                        {extraChargeRows.map((c: any) => (
+                          <div key={c.Id} className="flex justify-between text-[0.6875rem]">
+                            <span className="text-muted-foreground truncate pr-2">{c.Description}</span>
+                            <span className="font-medium shrink-0">₹{Number(c.TotalAmount).toLocaleString("en-IN")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
                 {/* ── 8. Status timeline ── */}
                 {(viewingAppDetail.statusLog || []).length > 0 && (
                   <section className=" border border-border overflow-hidden">
@@ -2529,11 +2558,15 @@ const CrmApplication: React.FC = () => {
                   </section>
                 )}
 
+                </div>
+                </div>
+
               </div>
             );
           })()}
-          <div className="flex justify-end gap-2 pt-3 border-t border-border">
-            <button onClick={() => closeApplication()} className={`${KEY_LINE} h-9 px-3`}>
+          </div>
+          <div className="sticky bottom-0 z-10 bg-background flex flex-wrap items-center justify-end gap-2 px-6 py-3 border-t border-border">
+            <button onClick={() => closeApplication()} className={`${KEY_LINE} h-9 px-3 mr-auto`}>
               Close
             </button>
             {viewingAppDetail && canCancelApplication(viewingAppDetail.application) && (
