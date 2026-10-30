@@ -304,7 +304,7 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
           <ol className="relative ml-2 border-l border-border">
             {changes.map(([d, evs]) => (
               <li key={d} className="mb-5 ml-5 last:mb-0">
-                <span className="absolute -left-[7px] mt-1 rounded-full bg-card"><Circle size={13} className="fill-rose-700 text-rose-700" /></span>
+                <span className="absolute -left-[7px] mt-1 rounded-full bg-card"><Circle size={13} className="fill-[#7c4a2e] text-[#7c4a2e]" /></span>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-semibold text-foreground">{fmt(d)}</span>
                   <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs">{String(evs[0].TransferTypeId__label ?? "")}</span>

@@ -12,7 +12,7 @@ import {
   type LegalFieldMeta, type LegalOption, type LegalRow,
 } from "@/api/legalMastersApi";
 import type { LegalMasterEntry } from "./legalMasters";
-import { LegalFileLink, previewLegalFile, showLegalDetails } from "@/components/legal/LegalDocumentPreview";
+import { LegalFileLink, LegalLinkChip, previewLegalFile, showLegalDetails } from "@/components/legal/LegalDocumentPreview";
 
 // One page for every Legal Setup master: the form, table, export and detail view are all built from the
 // master's field definitions (GET /api/legal/masters/meta), so a new column only needs the backend config.
@@ -280,6 +280,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   const columnRenderers = useMemo(
     () => Object.fromEntries([
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
+      ...fields.filter((f) => f.type === "url").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalLinkChip url={v} name={String(row[fields[0]?.name ? displayKey(fields[0]) : ""] ?? "")} />]),
       ...fields.filter((f) => f.type === "textarea").map((f) => [displayKey(f), (v: unknown) => (v
         ? <span className="block max-w-[260px] truncate" title={String(v)}>{String(v)}</span>
         : <span className="text-muted-foreground">—</span>)]),
@@ -302,7 +303,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         label: f.label,
         value: String(row[displayKey(f)] ?? ""),
         fileId: f.type === "file" ? (row[f.name] ? String(row[f.name]) : undefined) : undefined,
-        wide: f.type === "textarea",
+        wide: f.type === "textarea" || f.type === "url",
+        url: f.type === "url",
       })),
       { label: "Created by", value: String(row.createdBy ?? "") },
       { label: "Last updated by", value: String(row.updatedBy ?? "") },
@@ -342,6 +344,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       onDataEvent={handleDataEvent}
       onFieldChange={(form, name) => linkFields(form, name, fields, lookups)}
       gridCols={fields.length > 8 ? 3 : 2}
+      fluid
       exportConfig={{ title: entry.label, filename: `legal-${entry.key}`, columns: exportColumns }}
       requestEditId={requestEditId}
       requestEditKey={requestEditId}

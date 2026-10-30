@@ -172,9 +172,9 @@ const MODULE_HEADER: Record<
   legal: {
     label: "Legal",
     icon: ModuleIcons.legal,
-    color: "#9b2335",
-    from: "from-[#9b2335]/30",
-    to: "to-[#9b2335]/0",
+    color: "#7c4a2e",
+    from: "from-[#7c4a2e]/30",
+    to: "to-[#7c4a2e]/0",
   },
   admin: {
     label: "Admin",

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ArrowLeft, Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, FileText, Globe, Loader2, X } from "lucide-react";
 import { fetchLegalFile } from "@/api/legalMastersApi";
 
 // The Legal side panel, docked on the right of the page — not a modal: the table stays usable beside it.
@@ -19,16 +19,35 @@ export interface LegalDetailItem {
   fileId?: string;
   /** Long text: shown across the full panel width. */
   wide?: boolean;
+  /** A web link: opens in the panel. */
+  url?: boolean;
 }
 
 type Details = { kind: "details"; title: string; items: LegalDetailItem[] };
+type Site = { kind: "site"; url: string; name: string; back?: Details };
 type Doc = { kind: "doc"; id: string; name: string; back?: Details };
-type Panel = Details | Doc;
+type Panel = Details | Doc | Site;
 
 const show = (detail: Panel) => window.dispatchEvent(new CustomEvent(EVENT, { detail }));
 
 /** Show an uploaded document in the right-side panel. */
 export const previewLegalFile = (id: unknown, name?: string) => show({ kind: "doc", id: String(id), name: name || "Document" });
+
+/** Open a website (an office or portal link) in the right-side panel. */
+export const openLegalLink = (url: string, name?: string) => show({ kind: "site", url, name: name || url });
+
+/** A link cell: opens the site in the side panel. */
+export const LegalLinkChip: React.FC<{ url: unknown; name?: string; onOpen?: () => void }> = ({ url, name, onOpen }) =>
+  url ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); if (onOpen) onOpen(); else openLegalLink(String(url), name); }}
+      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted"
+      title={String(url)}
+    >
+      <Globe size={13} className="shrink-0 text-sky-600" /> <span className="truncate">{String(url).replace(/^https?:\/\//, "")}</span>
+    </button>
+  ) : <span className="text-muted-foreground">—</span>;
 
 /** Show a record's details in the right-side panel. */
 export const showLegalDetails = (title: string, items: LegalDetailItem[]) => show({ kind: "details", title, items });
@@ -42,7 +61,7 @@ export const LegalFileLink: React.FC<{ id: unknown; name?: string; className?: s
       className={`inline-flex max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted ${className}`}
       title={`Preview ${name || "document"}`}
     >
-      <FileText size={13} className="shrink-0 text-rose-700" /> <span className="truncate">{name || "Document"}</span>
+      <FileText size={13} className="shrink-0 text-[#7c4a2e] dark:text-[#c48e5c]" /> <span className="truncate">{name || "Document"}</span>
     </button>
   ) : <span className="text-muted-foreground">—</span>;
 
@@ -86,7 +105,19 @@ const DocView: React.FC<{ doc: Doc }> = ({ doc }) => {
   );
 };
 
-const DetailsView: React.FC<{ details: Details; openDoc: (d: Doc) => void }> = ({ details, openDoc }) => (
+const SiteView: React.FC<{ site: Site }> = ({ site }) => (
+  <>
+    <div className="flex flex-wrap gap-2">
+      <a className={btn} href={site.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} /> Open in new tab</a>
+    </div>
+    <p className="text-[0.6875rem] text-muted-foreground">If the page stays blank, the site does not allow being shown inside another page — use Open in new tab.</p>
+    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-white">
+      <iframe title={site.name} src={site.url} className="h-full w-full" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" referrerPolicy="no-referrer" />
+    </div>
+  </>
+);
+
+const DetailsView: React.FC<{ details: Details; openDoc: (d: Doc | Site) => void }> = ({ details, openDoc }) => (
   <div className="min-h-0 flex-1 overflow-y-auto pr-1">
     <dl className="grid grid-cols-1 gap-x-4 gap-y-3 min-[420px]:grid-cols-2">
       {details.items.map((it) => (
@@ -95,7 +126,9 @@ const DetailsView: React.FC<{ details: Details; openDoc: (d: Doc) => void }> = (
           <dd className="mt-0.5 break-words text-sm text-foreground whitespace-pre-line">
             {it.fileId !== undefined
               ? <LegalFileLink id={it.fileId} name={it.value} onOpen={() => openDoc({ kind: "doc", id: it.fileId!, name: it.value || "Document", back: details })} />
-              : it.value || <span className="text-muted-foreground">—</span>}
+              : it.url && it.value
+                ? <LegalLinkChip url={it.value} onOpen={() => openDoc({ kind: "site", url: it.value, name: it.label, back: details })} />
+                : it.value || <span className="text-muted-foreground">—</span>}
           </dd>
         </div>
       ))}
@@ -132,6 +165,9 @@ export const LegalDocumentPreview: React.FC<{ dock: boolean }> = ({ dock }) => {
 
   if (!panel) return null;
   const isDoc = panel.kind === "doc";
+  const isSite = panel.kind === "site";
+  const back = panel.kind === "details" ? undefined : panel.back;
+  const title = panel.kind === "details" ? panel.title : panel.name;
   return (
     <>
     {/* Not enough room to dock: dim the page behind the sliding panel; tap it to close. */}
@@ -146,18 +182,18 @@ export const LegalDocumentPreview: React.FC<{ dock: boolean }> = ({ dock }) => {
     >
       {!dock && <div className="mx-auto -mt-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30" aria-hidden />}
       <div className="flex items-start gap-2">
-        {isDoc && panel.back ? (
-          <button type="button" onClick={() => setPanel(panel.back!)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Back to details" title="Back to details">
+        {back ? (
+          <button type="button" onClick={() => setPanel(back)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Back to details" title="Back to details">
             <ArrowLeft size={16} />
           </button>
-        ) : isDoc ? <FileText size={16} className="mt-0.5 shrink-0 text-rose-700" /> : null}
+        ) : isDoc ? <FileText size={16} className="mt-0.5 shrink-0 text-[#7c4a2e] dark:text-[#c48e5c]" /> : isSite ? <Globe size={16} className="mt-0.5 shrink-0 text-sky-600" /> : null}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground" title={isDoc ? panel.name : panel.title}>{isDoc ? panel.name : panel.title}</p>
-          <p className="text-[0.6875rem] text-muted-foreground">{isDoc ? (panel.back ? `Document of ${panel.back.title}` : "Document preview") : "Details"}</p>
+          <p className="truncate text-sm font-semibold text-foreground" title={title}>{title}</p>
+          <p className="text-[0.6875rem] text-muted-foreground">{isSite ? (panel.kind === "site" ? panel.url : "") : isDoc ? (back ? `Document of ${back.title}` : "Document preview") : "Details"}</p>
         </div>
         <button type="button" onClick={() => setPanel(null)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Close panel"><X size={16} /></button>
       </div>
-      {isDoc ? <DocView doc={panel} /> : <DetailsView details={panel} openDoc={setPanel} />}
+      {panel.kind === "doc" ? <DocView doc={panel} /> : panel.kind === "site" ? <SiteView site={panel} /> : <DetailsView details={panel} openDoc={setPanel} />}
     </aside>
     </>
   );

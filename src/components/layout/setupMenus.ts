@@ -577,7 +577,7 @@ export const legalSetupItems: SetupItem[] = LEGAL_SETUP_MASTERS.map((m) => ({
   icon: m.icon,
   label: m.label,
   path: legalMasterPath(m.key),
-  color: "text-rose-700",
+  color: "text-[#7c4a2e] dark:text-[#c48e5c]",
   pageKey: m.pageKey,
 }));
 

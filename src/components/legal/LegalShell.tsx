@@ -6,11 +6,11 @@ import { useElementWidth } from "./useElementWidth";
 
 // Single source of truth for the Legal module's accent — change this one value (and its twins in
 // moduleDefs.tsx / AppSidebar.tsx / index.css) to re-theme the whole module.
-// "Seal maroon" — the deep red of a court seal; darker than Records' red and Sales Automation's rose,
-// so it reads as its own module.
-export const LEGAL_ACCENT = "#9b2335";
-/** Maroon → crimson → rose glow, for hero / call-to-action surfaces. */
-export const LEGAL_GRADIENT = "linear-gradient(135deg, #9b2335 0%, #b8344a 60%, #d4566a 100%)";
+// "Law-book walnut" — the brown of leather-bound law reports. No other module uses brown (Projects' gold
+// is a mustard yellow), so it reads as its own module. Red stays for statuses only (rejected, cancelled…).
+export const LEGAL_ACCENT = "#7c4a2e";
+/** Walnut → saddle → tan, for hero / call-to-action surfaces. */
+export const LEGAL_GRADIENT = "linear-gradient(135deg, #7c4a2e 0%, #a06a3f 60%, #c48e5c 100%)";
 
 interface LegalShellProps {
   title: string;
