@@ -456,6 +456,28 @@ function currentCycleCutoffSql(tableName, recordId) {
  *  - anything else (undefined, "any"): today's original behavior — a
  *    single Approved entry at this level is enough.
  */
+/**
+ * Whether a specific user has already recorded an approval for this level
+ * in the current cycle. Prevents the same user signing off twice on an
+ * "everyone must approve" level.
+ */
+async function hasUserApprovedLevel(tableName, recordId, level, userId, executor = null) {
+  const exec = executor || getPool();
+  const cutoff = currentCycleCutoffSql(tableName, recordId);
+  const result = await exec
+    .request()
+    .input("TableName", sql.NVarChar(100), tableName)
+    .input("RecordId", sql.Int, recordId)
+    .input("Level", sql.Int, level)
+    .input("UserId", sql.Int, userId).query(`
+      SELECT TOP 1 1 AS found FROM dbo.ApprovalAuditLog
+      WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
+        AND ActionStatus = 'Approved' AND UserId = @UserId
+        AND ActionAt >= ${cutoff}
+    `);
+  return result.recordset.length > 0;
+}
+
 async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
   const exec = executor || getPool();
   const cutoff = currentCycleCutoffSql(tableName, recordId);
@@ -465,12 +487,18 @@ async function isLevelSatisfied(tableName, recordId, level, levelDef, executor =
       .input("TableName", sql.NVarChar(100), tableName)
       .input("RecordId", sql.Int, recordId)
       .input("Level", sql.Int, level).query(`
-        SELECT DISTINCT UserId FROM dbo.ApprovalAuditLog
+        SELECT DISTINCT UserId, Role FROM dbo.ApprovalAuditLog
         WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
-          AND ActionStatus = 'Approved' AND UserId IS NOT NULL
+          AND ActionStatus = 'Approved'
           AND ActionAt >= ${cutoff}
       `);
-    const approvedUserIds = new Set(result.recordset.map((r) => r.UserId));
+    // Super Admin parallel sign-off immediately satisfies any multi-user level
+    if (result.recordset.some((r) => isSuperAdmin(r.Role))) {
+      return true;
+    }
+    const approvedUserIds = new Set(
+      result.recordset.filter((r) => r.UserId != null).map((r) => r.UserId),
+    );
     return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
   }
   const result = await exec
@@ -789,9 +817,7 @@ async function transition(
         // requirement twice — without this, the same director re-approving
         // would look like a second, distinct sign-off.
         if (levelDef.mode === "all" && userId != null) {
-          const alreadyApproved = await isLevelSatisfied(
-            tableName, id, nextLevel, { mode: "all", userIds: [userId] }, tx,
-          );
+          const alreadyApproved = await hasUserApprovedLevel(tableName, id, nextLevel, userId, tx);
           if (alreadyApproved) {
             const dupErr = new Error("You have already approved this step.");
             dupErr.status = 409;
@@ -1000,4 +1026,5 @@ module.exports = {
   WORKFLOW_ID_MAP,
   resolveCurrentLevel,
   isLevelSatisfied,
+  hasUserApprovedLevel,
 };

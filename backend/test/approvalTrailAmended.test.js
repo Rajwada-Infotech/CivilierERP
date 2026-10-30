@@ -84,3 +84,24 @@ test("A Pending record part-way through approval is left as it is", async () => 
   expect(levels(res.body)[0].approverEmail).toBe("l1@x.com");
   expect(res.body.currentLevel).toBe(2);
 });
+
+test("JournalVoucher and CRM modules trail lookups succeed", async () => {
+  mock.audit = [approved(1, "2026-09-30T10:00:00Z")];
+  mock.status = "Approved";
+
+  // JournalVoucher PascalCase table name
+  const resJV = await request(app).get("/api/approval-workflows/trail").query({ module: "JournalVoucher", id: 5 });
+  expect(resJV.status).toBe(200);
+  expect(resJV.body.fullyApproved).toBe(true);
+
+  // crm-bookings slug alias
+  const resCRM = await request(app).get("/api/approval-workflows/trail").query({ module: "crm-bookings", id: 101 });
+  expect(resCRM.status).toBe(200);
+  expect(resCRM.body.fullyApproved).toBe(true);
+});
+
+test("Unknown module table returns 400", async () => {
+  const res = await request(app).get("/api/approval-workflows/trail").query({ module: "UnknownModuleXYZ", id: 1 });
+  expect(res.status).toBe(400);
+  expect(res.body.error).toMatch(/Unknown module table/i);
+});
