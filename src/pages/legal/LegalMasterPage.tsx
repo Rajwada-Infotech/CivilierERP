@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
-import { Eye, FileText, Upload, X } from "lucide-react";
+import { FileText, Upload, X } from "lucide-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -293,7 +293,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       queryClient.invalidateQueries({ queryKey: ["legal-summary"] }),
     ]);
 
-  // Details open in the docked side panel (not a pop-up), documents included.
+  // Clicking a row opens its details in the docked side panel (not a pop-up), documents included.
   const showDetails = (row: RecordWithId) =>
     showLegalDetails(`${master?.title ?? entry.label} details`, [
       ...fields.map((f) => ({
@@ -342,22 +342,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       exportConfig={{ title: entry.label, filename: `legal-${entry.key}`, columns: exportColumns }}
       requestEditId={requestEditId}
       requestEditKey={requestEditId}
-      rowActions={(row) => {
-        const raw = rawById.get(row._id);
-        return (
-          <>
-            {raw && rowActions?.(raw)}
-            <button
-              type="button"
-              onClick={() => showDetails(row)}
-              className="rounded-lg p-1.5 text-sky-500 transition-colors hover:bg-sky-500/10"
-              title="View details"
-            >
-              <Eye size={13} />
-            </button>
-          </>
-        );
-      }}
+      rowActions={rowActions ? (row) => { const raw = rawById.get(row._id); return raw ? rowActions(raw) : null; } : undefined}
+      onRowClick={showDetails}
     />
   );
 }

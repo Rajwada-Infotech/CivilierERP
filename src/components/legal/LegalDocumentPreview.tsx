@@ -109,10 +109,19 @@ export const LegalDocumentPreview: React.FC = () => {
     return () => window.removeEventListener(EVENT, open);
   }, []);
 
+  // Bring the whole panel into view when it opens or changes (it sits beside a page that may be scrolled).
+  const ref = React.useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    if (top < 72 || top > window.innerHeight - 120) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [panel]);
+
   if (!panel) return null;
   const isDoc = panel.kind === "doc";
   return (
-    <aside className="order-first flex h-[70vh] flex-col gap-3 rounded-2xl border border-border bg-card/90 p-4 shadow-sm backdrop-blur-lg lg:order-none lg:sticky lg:top-4 lg:h-[calc(100vh-7rem)] lg:w-[40%] lg:shrink-0">
+    <aside ref={ref} className="order-first flex h-[70vh] flex-col gap-3 rounded-2xl border border-border bg-card/90 p-4 shadow-sm backdrop-blur-lg lg:order-none lg:sticky lg:top-[4.5rem] lg:h-[calc(100vh-5.5rem)] lg:w-[40%] lg:shrink-0">
       <div className="flex items-start gap-2">
         {isDoc && panel.back ? (
           <button type="button" onClick={() => setPanel(panel.back!)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Back to details" title="Back to details">
