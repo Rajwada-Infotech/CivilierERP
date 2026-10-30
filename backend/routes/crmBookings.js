@@ -30,7 +30,7 @@ const { normalizeRole } = require("../middleware/role");
 const { recalculateBookingGst } = require("../services/crmGst");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const { postCrmInvoiceToGL } = require("../services/crmLedger");
-const { recordGLPosting } = require("../services/approvalService");
+const { recordGLPosting, getWorkflow } = require("../services/approvalService");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -1155,7 +1155,19 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
       JOIN dbo.Role r ON r.RId = u.RoleId
       WHERE LOWER(r.RName) IN ('admin', 'super_admin', 'marketing_head') AND u.discontinue = 0
     `);
-    for (const a of admins.recordset) {
+    // In parallel: whoever Approval Setup names for the booking's first approval step
+    // (its roles or named people) is told too — each person once.
+    const notify = new Set(admins.recordset.map((a) => a.id));
+    const firstStep = (await getWorkflow("crm-bookings"))?.LevelDefs?.[0];
+    const stepRoles = (firstStep?.roles || []).map((r) => String(r).toLowerCase());
+    (firstStep?.userIds || []).map(Number).filter(Boolean).forEach((uid) => notify.add(uid));
+    if (stepRoles.length) {
+      const req0 = pool.request();
+      const names = stepRoles.map((r, i) => { req0.input(`r${i}`, sql.NVarChar(100), r); return `@r${i}`; });
+      (await req0.query(`SELECT u.id FROM dbo.Users u JOIN dbo.Role r ON r.RId = u.RoleId
+        WHERE LOWER(r.RName) IN (${names.join(", ")}) AND u.discontinue = 0`)).recordset.forEach((u) => notify.add(u.id));
+    }
+    for (const a of [...notify].map((id) => ({ id }))) {
       await emitNotification(pool, a.id, "crm_booking_ready_for_approval",
         "Booking Ready for Approval",
         `Booking ${bookingNo} has cleared its checklist and is ready for approval.`,
