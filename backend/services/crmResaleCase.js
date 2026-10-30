@@ -472,15 +472,13 @@ async function addDocument(db, id, type, file, remarks, actorUserId) {
   return r.recordset[0].Id;
 }
 
-/** Verify / reject a case document. Whether the uploader may verify their own
- *  is the Approval Setup switch "crm-resale-case-papers" (off unless set). */
+/** Verify / reject a case document — anyone with the right may, the uploader included. */
 async function reviewDocument(db, id, docId, decision, remarks, actorUserId) {
   const d = (await db.request().input("d", sql.Int, docId).input("id", sql.Int, id)
     .query("SELECT Id, CreatedBy, Status FROM dbo.CrmResaleDocument WHERE Id = @d AND ResaleId = @id AND IsActive = 1")).recordset[0];
   if (!d) throw new CaseError("Document not found", 404);
   if (!["Verified", "Rejected"].includes(decision)) throw new CaseError("decision must be Verified or Rejected");
   if (decision === "Rejected" && !String(remarks || "").trim()) throw new CaseError("Say why it's rejected");
-  // Work guard removed: creator/uploader may also verify.
   await db.request().input("d", sql.Int, docId).input("s", sql.NVarChar(20), decision).input("rem", sql.NVarChar(1000), remarks || null).input("by", sql.Int, actorUserId)
     .query("UPDATE dbo.CrmResaleDocument SET Status = @s, Remarks = ISNULL(@rem, Remarks), VerifiedBy = @by, VerifiedAt = SYSDATETIME() WHERE Id = @d");
   return caseState(db, id);

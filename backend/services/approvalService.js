@@ -28,31 +28,6 @@ const GL_POSTERS = {
   "debit-note": postDebitNoteApproval,
 };
 
-// Modules that record who raised a request, and the column holding that user
-// (an int user id). Whether the raiser may also approve it is a setting per
-// module — dbo.ApprovalRaiserRule, set in Approval Setup (migration 571);
-// with no row the raiser may not.
-const MAKER_COLUMNS = {
-  "crm-cancellations": "RequestedBy",
-  "crm-refunds": "RequestedBy",
-  "crm-resales": "CreatedBy",
-  "crm-brokerage": "CreatedBy",
-  // Not money, but the same separation: whoever prepared a transfer deed
-  // can't give it the Legal Head's sign-off too.
-  "crm-transfer-deeds": "CreatedBy",
-  // Whoever recorded a new owner can't approve the record too.
-  "crm-ownership-changes": "CreatedBy",
-  "crm-credit-notes": "CreatedBy",
-  "crm-credit-note-cancel": "CancelRequestedById",
-};
-
-// Checks outside the approval levels that follow the same setting: who
-// verifies a paper they uploaded themselves.
-const RAISER_RULE_EXTRA = {
-  "crm-transfer-deed-papers": "Transfer deed papers (verify what you uploaded)",
-  "crm-resale-case-papers": "Resale case papers (verify what you uploaded)",
-};
-
 /**
  * Super Admin check: Super Admin has approval rights for every approval in parallel.
  * Matches super_admin, superadmin, sa.
@@ -63,14 +38,6 @@ function isSuperAdmin(role) {
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
   return r === "super_admin" || r === "superadmin" || r === "sa";
-}
-
-/**
- * Whether the raiser of a request in this module may approve it.
- * Work guard removed: creator/raiser can always approve their own request.
- */
-async function raiserMayApprove(_module) {
-  return true;
 }
 
 // Map module slug → { table, pkCol, statusCol }
@@ -710,7 +677,7 @@ async function transition(
       authErr.status = 403;
       throw authErr;
     }
-    // Work guard removed: creator/raiser can approve their own request.
+    // Whoever raised a request may approve it too — no maker-checker rule.
   }
 
   // ── Status change + audit write happen atomically under a row lock ────────
@@ -998,9 +965,6 @@ const canApproveBookingAmendment = (userId, userRole) => isApproverFor("crm-book
 
 module.exports = {
   transition,
-  MAKER_COLUMNS,
-  RAISER_RULE_EXTRA,
-  raiserMayApprove,
   guardEdit,
   guardEditAnyStage,
   restartApprovalCycle,

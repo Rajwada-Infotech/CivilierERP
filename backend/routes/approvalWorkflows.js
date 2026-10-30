@@ -21,9 +21,6 @@ function parseJson(val, fallback = []) {
   }
 }
 
-// ── Raiser may approve their own request (migration 571) ─────────────────────
-// GET  /api/approval-workflows/raiser-rules           — every module that records its raiser
-// PUT  /api/approval-workflows/raiser-rules/:module   { raiserMayApprove: bool }
 // May the signed-in user approve/reject this record now? Approval Setup
 // decides (approvalService.canUserAct — the same check transition() makes);
 // the Approve / Reject buttons ask here instead of keeping role lists.
@@ -38,39 +35,6 @@ router.get("/can-act", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("[approval-workflows] can-act error:", err.message);
     res.status(500).json({ error: "Couldn't check approval rights" });
-  }
-});
-
-router.get("/raiser-rules", authMiddleware, async (_req, res) => {
-  try {
-    const { MAKER_COLUMNS, RAISER_RULE_EXTRA } = require("../services/approvalService");
-    const rows = (await getPool().request().query("SELECT Module, RaiserMayApprove, UpdatedBy, UpdatedAt FROM dbo.ApprovalRaiserRule")).recordset;
-    const byModule = new Map(rows.map((r) => [r.Module, r]));
-    res.json([...Object.keys(MAKER_COLUMNS), ...Object.keys(RAISER_RULE_EXTRA)].map((module) => {
-      const r = byModule.get(module);
-      return { module, label: RAISER_RULE_EXTRA[module] || null, raiserMayApprove: !!r?.RaiserMayApprove, updatedBy: r?.UpdatedBy || null, updatedAt: r?.UpdatedAt || null };
-    }));
-  } catch (err) {
-    console.error("[approval-workflows] GET /raiser-rules:", err.message);
-    res.status(500).json({ error: "Could not load the setting" });
-  }
-});
-
-router.put("/raiser-rules/:module", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { MAKER_COLUMNS, RAISER_RULE_EXTRA } = require("../services/approvalService");
-  const module = String(req.params.module || "");
-  if (!Object.prototype.hasOwnProperty.call(MAKER_COLUMNS, module) && !Object.prototype.hasOwnProperty.call(RAISER_RULE_EXTRA, module)) return res.status(404).json({ error: "That approval doesn't record who raised it" });
-  if (typeof req.body?.raiserMayApprove !== "boolean") return res.status(400).json({ error: "raiserMayApprove must be true or false" });
-  try {
-    await getPool().request().input("m", sql.NVarChar(100), module).input("v", sql.Bit, req.body.raiserMayApprove ? 1 : 0)
-      .input("by", sql.NVarChar(100), req.user?.email || req.user?.name || null)
-      .query(`MERGE dbo.ApprovalRaiserRule AS t USING (SELECT @m AS Module) AS s ON t.Module = s.Module
-              WHEN MATCHED THEN UPDATE SET RaiserMayApprove = @v, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-              WHEN NOT MATCHED THEN INSERT (Module, RaiserMayApprove, UpdatedBy) VALUES (@m, @v, @by);`);
-    res.json({ success: true, module, raiserMayApprove: req.body.raiserMayApprove });
-  } catch (err) {
-    console.error("[approval-workflows] PUT /raiser-rules:", err.message);
-    res.status(500).json({ error: "Could not save the setting" });
   }
 });
 
