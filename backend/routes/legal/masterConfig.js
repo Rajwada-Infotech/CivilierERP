@@ -20,7 +20,9 @@
 //   `derived` keeps an older text column in step with a picked row ({ name: "District", from: "DistrictId", column: "DistrictName" });
 //   `noDelete` records are never physically deleted (mark them inactive or cancel them instead);
 //   `guard(pool, id, values)` returns an error message to refuse an update (a converted enquiry is read-only);
-//   `lookupOnly` masters only feed pickers (no page of their own).
+//   `lookupOnly` masters only feed pickers (no page of their own);
+//   `review: { field, by, at }` — setting `field` off Pending needs the approve right and stamps who / when.
+// A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
 
 const LAND_CLASSES = ["Sali", "Suna", "Danga", "Bastu", "Doba", "Pukur", "Bagan", "Khamar", "Karkhana", "Commercial", "Others"];
@@ -50,6 +52,14 @@ const lookup = (key, title, group, desc) => ({
 });
 
 const VERIFICATION = { name: "VerificationStatus", label: "Verification", type: "select", required: true, options: ["Pending", "Verified", "Rejected", "Needs Correction"], default: "Pending" };
+const REVIEW = { field: "VerificationStatus", by: "VerifiedBy", at: "VerifiedAt" };
+const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true };
+// A land's own records (opened from the land's page): the parent column, the page right and the group.
+const landChild = (title, table, pk, desc, rest) => ({
+  title, group: "Land Management", pageKey: "legal-land-master", table, pk, parent: "LandId", desc, ...rest,
+});
+const OWNERSHIP_CHECKS = ["Identity document checked", "Previous ownership document checked", "Transfer document checked",
+  "Relationship document checked", "Ownership share checked", "Date continuity checked", "Current ownership checked"];
 
 // Buyer, Seller, Owner, Customer and Witness: the same person record, kept apart by PersonRole.
 const person = (role, title, desc, { landDocs = true } = {}) => ({
@@ -207,6 +217,7 @@ const MASTERS = {
       { name: "LocationTypeId", label: "Location type", type: "ref", ref: "location-type" },
       { name: "ProjectId", label: "Project", type: "ref", ref: "project" },
       { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "Dropped"], default: "Identified" },
+      { name: "ChecklistTemplateId", label: "Document checklist", type: "ref", ref: "checklist-template" },
       { name: "LocationAddress", label: "Land location (full address)", type: "textarea", max: 1000 },
       { name: "NorthBoundary", label: "North boundary", type: "text", max: 300 },
       { name: "SouthBoundary", label: "South boundary", type: "text", max: 300 },
@@ -255,7 +266,7 @@ const MASTERS = {
   },
   // One land property's RS and LR records and its parties (opened from the property's page).
   "land-rs-record": {
-    title: "RS Record", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandRsRecord", pk: "RsRecordId", parent: "LandId",
+    title: "RS Record", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandRsRecord", pk: "RsRecordId", parent: "LandId", review: REVIEW,
     desc: "Revisional Survey Khatian / Dag references of this land.",
     label: "'RS Kh ' + RsKhatianNo + ' / Dag ' + RsDagNo", orderBy: "RsKhatianNo, RsDagNo",
     unique: [["LandId", "MouzaId", "RsKhatianNo", "RsDagNo"], "This RS Khatian and Dag are already recorded for this land"],
@@ -279,7 +290,7 @@ const MASTERS = {
     ],
   },
   "land-lr-record": {
-    title: "LR Record of Rights", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandLrRecord", pk: "LrRecordId", parent: "LandId",
+    title: "LR Record of Rights", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandLrRecord", pk: "LrRecordId", parent: "LandId", review: REVIEW,
     desc: "Land Reforms Khatian / Dag (RoR) references of this land, optionally matched to an RS record.",
     label: "'LR Kh ' + LrKhatianNo + ' / Dag ' + LrDagNo", orderBy: "LrKhatianNo, LrDagNo",
     unique: [["LandId", "MouzaId", "LrKhatianNo", "LrDagNo"], "This LR Khatian and Dag are already recorded for this land"],
@@ -308,7 +319,7 @@ const MASTERS = {
   "land-party": {
     title: "Land Party", group: "Land Management", pageKey: "legal-land-master", table: "LegalLandParty", pk: "LandPartyId", parent: "LandId",
     desc: "Owners, joint owners, heirs, sellers, buyers and signatories of this land, from the Party masters.",
-    label: "(SELECT FullName FROM dbo.LegalPerson p WHERE p.PersonId = LegalLandParty.PersonId) + ' (' + LandRole + ')'", orderBy: "LandRole, LandPartyId",
+    label: "(SELECT FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PersonId) + ' (' + LandRole + ')'", orderBy: "LandRole, LandPartyId",
     unique: [["LandId", "PersonId", "LandRole"], "This person is already linked to this land in this role"],
     fields: [
       { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true },
@@ -320,6 +331,113 @@ const MASTERS = {
       ACTIVE,
     ],
   },
+  // ── Phase 2: ownership history ──
+  "ownership-event": landChild("Ownership Transfer", "LegalOwnershipEvent", "EventId",
+    "Each transfer in the chain — sale, inheritance, gift, partition, court order — from previous owner to new owner.", {
+      label: "CONVERT(NVARCHAR(10), r.EventDate, 105) + ' ' + ISNULL((SELECT x.Name FROM dbo.LegalLookupValue x WHERE x.LookupId = r.TransferTypeId), '') + ': ' + ISNULL((SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PreviousOwnerId), '?') + N' → ' + (SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.NewOwnerId)",
+      orderBy: "EventDate, EventId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "TransferTypeId", label: "Transfer type", type: "ref", ref: "transfer-type", required: true },
+        { name: "EventDate", label: "Transfer date", type: "date", required: true },
+        { name: "PreviousOwnerId", label: "Previous owner", type: "ref", ref: "person" },
+        { name: "NewOwnerId", label: "New owner", type: "ref", ref: "person", required: true },
+        { name: "DeedNo", label: "Deed number", type: "text", max: 60 },
+        { name: "RegistrationOfficeId", label: "Registration office", type: "ref", ref: "registration-office" },
+        { name: "RegistrationDate", label: "Registration date", type: "date" },
+        { name: "TransferArea", label: "Transfer area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "TransferArea" },
+        { name: "TransferSharePct", label: "Transfer share (%)", type: "decimal", maxValue: 100 },
+        { name: "TransferValue", label: "Transfer value (₹)", type: "decimal" },
+        { name: "DocFileId", label: "Supporting deed / document", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "ownership-record": landChild("Ownership Record", "LegalOwnershipRecord", "RecordId",
+    "Who owned what share, from when to when. A new owner is a new record; earlier records keep their end date.", {
+      label: "(SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PersonId) + ' ' + CAST(CAST(r.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + '% from ' + CONVERT(NVARCHAR(10), r.ValidFrom, 105)",
+      orderBy: "ValidFrom, RecordId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "PersonId", label: "Owner", type: "ref", ref: "person", required: true },
+        { name: "OwnershipTypeId", label: "Ownership type", type: "ref", ref: "ownership-type", required: true },
+        { name: "RelationshipTypeId", label: "Relationship", type: "ref", ref: "relationship-type" },
+        { name: "SharePct", label: "Ownership share (%)", type: "decimal", required: true, maxValue: 100 },
+        { name: "ValidFrom", label: "Ownership start date", type: "date", required: true },
+        { name: "ValidTo", label: "Ownership end date (blank = current)", type: "date", after: "ValidFrom" },
+        { name: "EventId", label: "Created by transfer", type: "ref", ref: "ownership-event", filterBy: "LandId" },
+        { name: "PreviousPersonId", label: "Previous owner", type: "ref", ref: "person" },
+        { name: "TransferDocFileId", label: "Transfer document", type: "file" },
+        VERIFICATION,
+        { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "ownership-check": landChild("Ownership Verification", "LegalOwnershipCheck", "CheckId",
+    "The reviewer's result for each check on each ownership record — never just a tick box.", {
+      label: "r.CheckItem", orderBy: "RecordId, CheckItem",
+      unique: [["RecordId", "CheckItem"], "This check is already recorded for this ownership record"],
+      review: { field: "Result", by: "VerifiedBy", at: "VerifiedAt" },
+      fields: [
+        LAND_ID,
+        { name: "RecordId", label: "Ownership record", type: "ref", ref: "ownership-record", filterBy: "LandId", required: true },
+        { name: "CheckItem", label: "Check", type: "select", required: true, options: OWNERSHIP_CHECKS },
+        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Verified", "Rejected", "Needs Correction", "Reattachment Required", "Not Applicable"], default: "Pending" },
+        { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  inheritance: landChild("Inheritance", "LegalInheritance", "InheritanceId",
+    "A deceased owner's share passing to legal heirs, with the death and heirship evidence.", {
+      label: "'Estate of ' + (SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.DeceasedPersonId)",
+      orderBy: "InheritanceId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "DeceasedPersonId", label: "Deceased owner", type: "ref", ref: "person", required: true },
+        { name: "DateOfDeath", label: "Date of death", type: "date" },
+        { name: "DeathCertFileId", label: "Death certificate", type: "file" },
+        { name: "HeirCertFileId", label: "Legal heir certificate", type: "file" },
+        { name: "SupportingType", label: "Other supporting record", type: "select", required: true, options: ["None", "Will", "Probate", "Succession Certificate", "Court Order"], default: "None" },
+        { name: "SupportingFileId", label: "Supporting record copy", type: "file" },
+        { name: "MutationRecordNo", label: "Mutation record number", type: "text", max: 60 },
+        VERIFICATION,
+        { name: "Remarks", label: "Verification remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "inheritance-heir": landChild("Legal Heir", "LegalInheritanceHeir", "HeirId",
+    "The heirs of one inheritance and the share each receives.", {
+      label: "(SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PersonId)", orderBy: "InheritanceId, HeirId",
+      unique: [["InheritanceId", "PersonId"], "This heir is already listed for this inheritance"],
+      fields: [
+        LAND_ID,
+        { name: "InheritanceId", label: "Inheritance", type: "ref", ref: "inheritance", filterBy: "LandId", required: true },
+        { name: "PersonId", label: "Legal heir", type: "ref", ref: "person", required: true },
+        { name: "RelationshipTypeId", label: "Relationship with deceased", type: "ref", ref: "relationship-type" },
+        { name: "SharePct", label: "Inheritance share (%)", type: "decimal", required: true, maxValue: 100 },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+        ACTIVE,
+      ],
+    }),
+  partition: landChild("Partition", "LegalPartition", "PartitionId",
+    "A division of the land among co-owners, with the new Dag / Khatian references.", {
+      label: "r.PartitionType + ' ' + CONVERT(NVARCHAR(10), r.PartitionDate, 105)", orderBy: "PartitionDate", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "PartitionType", label: "Partition type", type: "select", required: true, options: ["Mutual / Amicable", "Family Settlement", "Court Decree"], default: "Mutual / Amicable" },
+        { name: "PartitionDate", label: "Partition date", type: "date", required: true },
+        { name: "PartiesInvolved", label: "Original owner(s) and parties involved", type: "textarea", required: true, max: 1000 },
+        { name: "ShareDetails", label: "Individual share / area", type: "textarea", max: 1000 },
+        { name: "NewReferences", label: "New Dag / Khatian references", type: "text", max: 300 },
+        { name: "DeedFileId", label: "Partition deed / court order", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+
   // Every person of every role, for the land's party picker.
   person: {
     title: "Party", group: "Parties", pageKey: "legal-land-master", table: "LegalPerson", pk: "PersonId", lookupOnly: true,

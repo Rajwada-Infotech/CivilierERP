@@ -10,6 +10,8 @@ import { LandPipelineSidebar, StatusBadge } from "@/components/legal/land/LandPi
 import { usePageRights } from "@/hooks/usePageRights";
 import { getLandAudit, getLandPipeline, holdLand, moveLandStep, resumeLand, type PipelineStep, type StepStatus } from "@/api/legalLandApi";
 import { LegalMasterTable } from "../LegalMasterPage";
+import { OwnershipStep } from "./steps/OwnershipStep";
+import { DocumentsStep } from "./steps/DocumentsStep";
 
 // One land property: header, the pipeline on the left, the selected step on the right.
 // Every move is checked again by the server (order, gates, hold, rights).
@@ -18,7 +20,7 @@ const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shado
 const eyebrow = "mb-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground";
 const btn = "inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50";
 
-const PHASES: Record<number, string> = { 2: "Ownership & Documents", 3: "Legal Verification", 4: "Purchase & Sale", 5: "Deed & Registration", 6: "Mutation & Closure" };
+const PHASES: Record<number, string> = { 3: "Legal Verification", 4: "Purchase & Sale", 5: "Deed & Registration", 6: "Mutation & Closure" };
 
 export default function LandPropertyDetailPage() {
   const id = Number(useParams().id);
@@ -92,6 +94,8 @@ export default function LandPropertyDetailPage() {
               {land.EnquiryNo && <span><span className="text-muted-foreground">Enquiry:</span> {land.EnquiryNo}</span>}
               <span><span className="text-muted-foreground">Parties:</span> {data.counts.parties}</span>
               <span><span className="text-muted-foreground">RS / LR records:</span> {data.counts.rs} / {data.counts.lr} ({data.counts.recordsVerified} verified)</span>
+              <span><span className="text-muted-foreground">Ownership records:</span> {data.counts.ownershipRecords}</span>
+              <span><span className="text-muted-foreground">Required documents:</span> {data.counts.docsDone} / {data.counts.docsRequired} done</span>
               {!land.IsActive && <span className="text-rose-600">Inactive</span>}
             </div>
             <div className="mt-3 flex items-center gap-3">
@@ -244,6 +248,10 @@ const StepContent: React.FC<{
           <div className={card}><LegalMasterTable entry={{ ...land, key: "land-lr-record", label: "LR Records of Rights" }} parentId={landId} defaults={defaults} onSaved={onSaved} /></div>
         </div>
       );
+    case "OWNERSHIP":
+      return <OwnershipStep landId={landId} onSaved={onSaved} />;
+    case "DOCUMENTS":
+      return <DocumentsStep landId={landId} onSaved={onSaved} />;
     default:
       return null;
   }

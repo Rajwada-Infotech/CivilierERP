@@ -19,6 +19,7 @@ const { getPool, sql } = require("../../db");
 const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
+const { documentGate } = require("./landDocuments");
 
 const router = express.Router();
 router.use(apiRateLimit);
@@ -26,7 +27,8 @@ router.use(apiRateLimit);
 const LAND_PAGE = "legal-land-master";
 const ENQUIRY_PAGE = "legal-land-enquiry";
 // Steps whose screens and gates exist today; later steps arrive phase by phase.
-const LIVE_PHASE = 1;
+const LIVE_PHASE = 2;
+const CHECKS_PER_RECORD = 7;
 const DONE = new Set(["Completed", "Skipped"]);
 const STATUSES = ["In Progress", "Pending Verification", "Completed", "Correction Required", "Skipped"];
 const HOLD_CATEGORIES = ["Legal Dispute", "Ownership Mismatch", "Document Missing", "Mortgage / Loan Issue", "Court Case", "Buyer / Seller Issue", "Financial Issue", "Management Decision", "Other"];
@@ -67,7 +69,7 @@ async function gates(conn, land) {
     SELECT 'RS' AS Kind, VerificationStatus FROM dbo.LegalLandRsRecord WHERE LandId = @Id AND IsActive = 1
     UNION ALL SELECT 'LR', VerificationStatus FROM dbo.LegalLandLrRecord WHERE LandId = @Id AND IsActive = 1;`);
   const [parties, records] = r.recordsets;
-  const need = { ENQUIRY: [], PROPERTY: [], PARTIES: [], RECORD_MAPPING: [] };
+  const need = { ENQUIRY: [], PROPERTY: [], PARTIES: [], RECORD_MAPPING: [], OWNERSHIP: [], DOCUMENTS: [] };
   const warnings = [];
 
   if (!land.EnquiryId) need.ENQUIRY.push("No enquiry is linked. If the land was entered directly, skip this step with a reason.");
@@ -95,7 +97,37 @@ async function gates(conn, land) {
   const open = records.filter((x) => x.VerificationStatus !== "Verified");
   if (open.length) need.RECORD_MAPPING.push(`${open.length} RS / LR record(s) are not verified yet`);
 
+  // Step 5: the ownership chain — every record, transfer, inheritance and partition verified, current shares
+  // adding to 100%, and each ownership record's seven checks reviewed (Verified or Not Applicable).
+  const o = (await conn.request().input("Id", sql.Int, land.LandId).query(`
+    SELECT
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1) AS records,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND ValidTo IS NULL) AS currentOwners,
+      (SELECT SUM(SharePct) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND ValidTo IS NULL) AS currentShare,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> 'Verified') AS recordsOpen,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipEvent WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> 'Verified') AS eventsOpen,
+      (SELECT COUNT(*) FROM dbo.LegalInheritance WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> 'Verified') AS inheritOpen,
+      (SELECT COUNT(*) FROM dbo.LegalPartition WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> 'Verified') AS partitionOpen,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord r WHERE r.LandId = @Id AND r.IsActive = 1 AND
+         (SELECT COUNT(*) FROM dbo.LegalOwnershipCheck c WHERE c.RecordId = r.RecordId AND c.IsActive = 1 AND c.Result IN ('Verified', 'Not Applicable')) < ${CHECKS_PER_RECORD}) AS checksOpen,
+      (SELECT COUNT(*) FROM dbo.LegalOwnershipCheck WHERE LandId = @Id AND IsActive = 1 AND Result IN ('Rejected', 'Needs Correction', 'Reattachment Required')) AS checksFailed`)).recordset[0];
+  if (!o.currentOwners) need.OWNERSHIP.push("Add the current owner(s) as ownership records (no end date)");
+  else if (Math.abs(Number(o.currentShare) - 100) > 0.0001) need.OWNERSHIP.push(`Current owners' shares add up to ${Number(Number(o.currentShare).toFixed(4))}%, not 100%`);
+  if (o.recordsOpen) need.OWNERSHIP.push(`${o.recordsOpen} ownership record(s) not verified`);
+  if (o.eventsOpen) need.OWNERSHIP.push(`${o.eventsOpen} ownership transfer(s) not verified`);
+  if (o.inheritOpen) need.OWNERSHIP.push(`${o.inheritOpen} inheritance record(s) not verified`);
+  if (o.partitionOpen) need.OWNERSHIP.push(`${o.partitionOpen} partition record(s) not verified`);
+  if (o.checksFailed) need.OWNERSHIP.push(`${o.checksFailed} verification check(s) rejected or needing correction`);
+  else if (o.checksOpen) need.OWNERSHIP.push(`${o.checksOpen} ownership record(s) without all ${CHECKS_PER_RECORD} checks reviewed`);
+
+  // Step 6: required documents from the land's checklist.
+  const docs = await documentGate(conn, land.LandId);
+  need.DOCUMENTS.push(...docs.missing);
+
   const counts = {
+    ownershipRecords: o.records,
+    docsRequired: docs.counts.required,
+    docsDone: docs.counts.done,
     parties: parties.length,
     owners: owners.length,
     rs: records.filter((x) => x.Kind === "RS").length,

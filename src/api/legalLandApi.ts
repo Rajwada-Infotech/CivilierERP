@@ -33,7 +33,7 @@ export interface LandPipeline {
   };
   hold: { HoldCategory: string; HoldReason: string; HoldDate: string; ExpectedReviewDate: string | null; HeldByName: string | null } | null;
   steps: PipelineStep[];
-  counts: { parties: number; owners: number; rs: number; lr: number; recordsVerified: number };
+  counts: { parties: number; owners: number; rs: number; lr: number; recordsVerified: number; ownershipRecords: number; docsRequired: number; docsDone: number };
   warnings: string[];
   progress: number;
   holdCategories: string[];

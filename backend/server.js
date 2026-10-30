@@ -178,6 +178,7 @@ const ALL_ROUTES = [
   { path: "/api/shift-master", file: "./routes/shiftMaster" },
   { path: "/api/legal/masters", file: "./routes/legal/legalMasters" },
   { path: "/api/legal/land", file: "./routes/legal/landPipeline" },
+  { path: "/api/legal/land-docs", file: "./routes/legal/landDocuments" },
   { path: "/api/legal", file: "./routes/legal/legalOperations" },
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/holiday-master", file: "./routes/holidayMaster" },

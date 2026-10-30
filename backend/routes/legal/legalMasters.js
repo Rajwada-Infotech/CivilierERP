@@ -212,6 +212,31 @@ const derivedSql = (cfg) => (cfg.derived || []).map((d) => {
   return { name: d.name, expr: `(SELECT ${d.column} FROM dbo.${target.table} WHERE ${target.pk} = @${d.from})` };
 });
 
+// ── Review (verification) fields ──────────────────────────────────────────────────────────────────
+// `review: { field, by, at }` on a master: moving `field` off "Pending" (Verified, Rejected…) needs the
+// approve right on its page and stamps who and when. A reviewed row whose other data is then edited by
+// someone without that right goes back to Pending, so a change is never left carrying an old approval.
+const isReviewer = (req, cfg) => hasAnyPageAction(req, cfg.pageKey, ["approve"]);
+
+async function reviewCols(req, cfg, values, before) {
+  const rv = cfg.review;
+  if (!rv) return { cols: [] };
+  const next = values[rv.field];
+  const prev = before ? before[rv.field] : "Pending";
+  if (next === prev) return { cols: [] };
+  if (next !== "Pending" && !(await isReviewer(req, cfg))) {
+    const label = cfg.fields.find((f) => f.name === rv.field).label;
+    return { error: `Only a reviewer (approve right) can set ${label} to ${next}` };
+  }
+  const stamp = next === "Pending" ? "NULL" : null;
+  return {
+    cols: [
+      ...(rv.by ? [{ name: rv.by, expr: stamp ?? "@UserId" }] : []),
+      ...(rv.at ? [{ name: rv.at, expr: stamp ?? "SYSUTCDATETIME()" }] : []),
+    ],
+  };
+}
+
 /** The land property a row belongs to, for the audit trail. */
 const landOf = (cfg, id, row) => (cfg.table === "LegalLand" ? id : row?.LandId ?? null);
 
@@ -288,7 +313,7 @@ router.get("/lookup/:ref", anyLegalView, listCache, async (req, res) => {
     // The columns other masters filter on or fill from come along (RS Khatian's Mouza, an RS plot's area).
     const parents = [...LOOKUP_COLUMNS[ref]].map((c) => `, ${c}`).join("");
     const rows = (await pool.request().query(
-      `SELECT ${m.pk} AS value, ${m.label} AS label, IsActive AS active${parents} FROM dbo.${m.table} WHERE 1 = 1${scopeSql(m)} ORDER BY ${m.orderBy}`,
+      `SELECT r.${m.pk} AS value, ${m.label} AS label, r.IsActive AS active${parents.replace(/, /g, ", r.")} FROM dbo.${m.table} r WHERE 1 = 1${scopeSql(m, "r")} ORDER BY ${m.orderBy.split(",").map((c) => `r.${c.trim()}`).join(", ")}`,
     )).recordset;
     res.json(rows);
   } catch (err) {
@@ -375,6 +400,8 @@ router.post("/:master", withRight("create"), async (req, res) => {
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     if (Object.values(values).includes(KEEP)) return res.status(400).json({ error: "Enter the full Aadhaar number" });
+    const review = await reviewCols(req, cfg, values, null);
+    if (review.error) return res.status(403).json({ error: review.error });
     const request = pool.request();
     bindValues(request, cfg, values);
     request.input("UserId", sql.Int, req.user?.userId || null);
@@ -383,7 +410,7 @@ router.post("/:master", withRight("create"), async (req, res) => {
       request.input(`Prefix_${f.name}`, sql.NVarChar(20), codePrefix(f.auto));
       cols.push({ name: f.name, expr: nextCodeSql(cfg.table, f.name, `@Prefix_${f.name}`) });
     }
-    cols.push(...derivedSql(cfg));
+    cols.push(...derivedSql(cfg), ...review.cols);
     if (cfg.scope) {
       request.input("ScopeValue", sql.NVarChar(40), cfg.scope.value);
       cols.push({ name: cfg.scope.column, expr: "@ScopeValue" });
@@ -417,24 +444,35 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     const before = (await pool.request().input("Id", sql.Int, id)
       .query(`SELECT * FROM dbo.${cfg.table} WHERE ${cfg.pk} = @Id${scopeSql(cfg)}`)).recordset[0];
     if (!before) return res.status(404).json({ error: `${cfg.title} not found` });
+    const review = await reviewCols(req, cfg, values, before);
+    if (review.error) return res.status(403).json({ error: review.error });
     const written = writtenFields(cfg, values);
     const request = pool.request();
     bindValues(request, { fields: written }, values);
     request.input("Id", sql.Int, id).input("UserId", sql.Int, req.user?.userId || null);
     const result = await request.query(`
       UPDATE dbo.${cfg.table}
-      SET ${[...written.map((f) => `${f.name} = @${f.name}`), ...derivedSql(cfg).map((d) => `${d.name} = ${d.expr}`)].join(", ")}, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+      SET ${[...written.map((f) => `${f.name} = @${f.name}`), ...[...derivedSql(cfg), ...review.cols].map((d) => `${d.name} = ${d.expr}`)].join(", ")}, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
       OUTPUT INSERTED.*
       WHERE ${cfg.pk} = @Id${scopeSql(cfg)}`);
     if (!result.recordset.length) return res.status(404).json({ error: `${cfg.title} not found` });
-    const after = result.recordset[0];
+    let after = result.recordset[0];
     // Only the columns that changed go into the trail.
     const changed = Object.keys(after).filter((k) => !["UpdatedAt", "UpdatedBy"].includes(k) && String(before[k] ?? "") !== String(after[k] ?? ""));
+    const rv = cfg.review;
+    if (rv && after[rv.field] !== "Pending" && after[rv.field] === before[rv.field]
+        && changed.some((k) => ![rv.field, rv.by, rv.at].includes(k)) && !(await isReviewer(req, cfg))) {
+      after = (await pool.request().input("Id", sql.Int, id).query(`
+        UPDATE dbo.${cfg.table} SET ${[`${rv.field} = N'Pending'`, ...(rv.by ? [`${rv.by} = NULL`] : []), ...(rv.at ? [`${rv.at} = NULL`] : [])].join(", ")}
+        OUTPUT INSERTED.* WHERE ${cfg.pk} = @Id`)).recordset[0];
+      changed.push(rv.field);
+    }
     if (changed.length) {
       const pick = (r) => Object.fromEntries(changed.map((k) => [k, r[k]]));
       await writeAudit(pool, req, { action: "Updated", entityType: cfg.title, entityId: id, landId: landOf(cfg, id, after), oldValue: auditCopy(cfg, pick(before)), newValue: auditCopy(cfg, pick(after)) });
     }
-    res.json({ message: `${cfg.title} updated` });
+    res.json({ message: rv && changed.includes(rv.field) && after[rv.field] === "Pending" && before[rv.field] !== "Pending"
+      ? `${cfg.title} updated — sent back for verification` : `${cfg.title} updated` });
   } catch (err) {
     sendDbError(res, cfg, err, "update");
   }
