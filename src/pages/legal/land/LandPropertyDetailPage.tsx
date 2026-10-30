@@ -3,15 +3,23 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Global } from "iconsax-react";
-import { AlertTriangle, ChevronLeft, ChevronRight, Lock, Pause, Play } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Lock, Pause, Play, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell, LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 import { LandPipelineSidebar, StatusBadge } from "@/components/legal/land/LandPipelineSidebar";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getLandAudit, getLandPipeline, holdLand, moveLandStep, resumeLand, type PipelineStep, type StepStatus } from "@/api/legalLandApi";
+import { cancelLand, getLandAudit, getLandPipeline, holdLand, moveLandStep, resumeLand, type LandPipeline, type PipelineStep, type StepStatus } from "@/api/legalLandApi";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { DocumentsStep } from "./steps/DocumentsStep";
+import { CaseMortgageStep, ClearanceStep, DueDiligenceStep } from "./steps/LegalVerificationSteps";
+import {
+  AgreementStep, AppointmentStep, DeedPrepStep, DraftVerifyStep, PartyApprovalStep, PaymentStep, PurchaseSaleStep, RegisteredDeedStep,
+  RegistrationStep, StampDutyStep, ValuationStep,
+} from "./steps/PurchaseDeedSteps";
+import {
+  AuditReportsStep, ClosedStep, FinalVerifyStep, MutationStep, NewKhatianStep, OwnershipTransferStep, RegisterUpdateStep, SettlementStep,
+} from "./steps/ClosureSteps";
 
 // One land property: header, the pipeline on the left, the selected step on the right.
 // Every move is checked again by the server (order, gates, hold, rights).
@@ -20,7 +28,7 @@ const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shado
 const eyebrow = "mb-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground";
 const btn = "inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50";
 
-const PHASES: Record<number, string> = { 3: "Legal Verification", 4: "Purchase & Sale", 5: "Deed & Registration", 6: "Mutation & Closure" };
+const PHASES: Record<number, string> = { 6: "Mutation & Closure" };
 
 export default function LandPropertyDetailPage() {
   const id = Number(useParams().id);
@@ -44,6 +52,7 @@ export default function LandPropertyDetailPage() {
     queryClient.invalidateQueries({ queryKey: ["legal-land", id] }),
     queryClient.invalidateQueries({ queryKey: ["legal-land-audit", id] }),
     queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] }),
+    queryClient.invalidateQueries({ queryKey: ["legal-land-finance", id] }),
   ]);
 
   const act = async (fn: () => Promise<{ message: string; reverify?: string[] }>) => {
@@ -79,10 +88,15 @@ export default function LandPropertyDetailPage() {
         title={`${land.LandCode} · ${land.LandName}`}
         subtitle={[land.MouzaName && `${land.MouzaName} (J.L. ${land.JLNo ?? "-"})`, land.DistrictName, land.Area != null && `${Number(land.Area)} ${land.UnitName ?? ""}`].filter(Boolean).join(" · ")}
         icon={Global}
-        action={rights.canApprove ? (
-          land.IsOnHold
-            ? <button className={btn} disabled={busy} onClick={() => { const r = window.prompt("Why is this land resumed?"); if (r?.trim()) act(() => resumeLand(id, r.trim())); }}><Play size={13} /> Resume</button>
-            : <button className={btn} disabled={busy} onClick={() => setHoldOpen((v) => !v)}><Pause size={13} /> Put on hold</button>
+        action={rights.canApprove && !land.IsCancelled ? (
+          <div className="flex flex-wrap justify-end gap-1.5 sm:gap-2">
+          {!data.milestones.transactionClosed && (
+            <button className={btn} disabled={busy} title="Cancel transaction" onClick={() => { const r = window.prompt("Why is this land's transaction cancelled? Every record is kept."); if (r?.trim()) act(() => cancelLand(id, r.trim())); }}><X size={13} /><span className="hidden sm:inline">Cancel</span></button>
+          )}
+          {land.IsOnHold
+            ? <button className={btn} disabled={busy} title="Resume" onClick={() => { const r = window.prompt("Why is this land resumed?"); if (r?.trim()) act(() => resumeLand(id, r.trim())); }}><Play size={13} /><span className="hidden sm:inline">Resume</span></button>
+            : <button className={btn} disabled={busy} title="Put on hold" onClick={() => setHoldOpen((v) => !v)}><Pause size={13} /><span className="hidden sm:inline">Put on hold</span></button>}
+          </div>
         ) : undefined}
       >
         <div className="space-y-4">
@@ -102,6 +116,11 @@ export default function LandPropertyDetailPage() {
               <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${data.progress}%`, background: LEGAL_GRADIENT }} /></div>
               <span className="text-xs tabular-nums text-muted-foreground">{data.progress}%</span>
             </div>
+            {land.IsCancelled && (
+              <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-400">
+                <b>Cancelled</b>{land.CancelledAt ? ` on ${new Date(land.CancelledAt).toLocaleDateString("en-IN")}` : ""}: {land.CancelReason} — every record is kept, read-only.
+              </div>
+            )}
             {data.hold && (
               <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
                 <b>On hold — {data.hold.HoldCategory}:</b> {data.hold.HoldReason}
@@ -130,8 +149,24 @@ export default function LandPropertyDetailPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-            <div className={`${card} p-2 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto`}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+            {/* Phones and small tablets: pick the step from a list; the pipeline sidebar shows from laptop width. */}
+            <div className={`${card} p-3 lg:hidden`}>
+              <label className="text-[0.6875rem] uppercase tracking-[0.14em] text-muted-foreground" htmlFor="legal-step-picker">Pipeline step</label>
+              <select
+                id="legal-step-picker"
+                className="mt-1 w-full rounded-lg border border-border bg-muted px-2.5 py-2 text-sm"
+                value={step.code}
+                onChange={(e) => { setSelected(e.target.value); setTab("step"); }}
+              >
+                {data.steps.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.stepNo}. {s.name} — {s.live ? s.status : `Phase ${s.phase}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className={`${card} hidden p-2 lg:block lg:sticky lg:top-[4.5rem] lg:self-start lg:max-h-[calc(100vh-5.5rem)] lg:overflow-y-auto`}>
               <LandPipelineSidebar steps={data.steps} selected={step.code} onSelect={(c) => { setSelected(c); setTab("step"); }} />
             </div>
 
@@ -155,12 +190,12 @@ export default function LandPropertyDetailPage() {
                   </ul>
                 )}
 
-                {step.live && rights.canEdit && !land.IsOnHold && tab === "step" && (
+                {step.live && rights.canEdit && !land.IsOnHold && !land.IsCancelled && tab === "step" && (
                   <StepActions step={step} busy={busy} canApprove={rights.canApprove} remarks={remarks} setRemarks={setRemarks} move={move} />
                 )}
               </div>
 
-              {tab === "audit" ? <AuditTrail id={id} /> : <StepContent step={step} landId={id} mouzaId={land.MouzaId} onSaved={refresh} navigate={navigate} enquiryNo={land.EnquiryNo} />}
+              {tab === "audit" ? <AuditTrail id={id} /> : <StepContent step={step} landId={id} mouzaId={land.MouzaId} onSaved={refresh} navigate={navigate} enquiryNo={land.EnquiryNo} milestones={data.milestones} />}
 
               <div className="flex justify-between">
                 <button className={btn} disabled={idx <= 0} onClick={() => setSelected(data.steps[idx - 1].code)}><ChevronLeft size={13} /> Back</button>
@@ -214,7 +249,8 @@ const StepActions: React.FC<{
 
 const StepContent: React.FC<{
   step: PipelineStep; landId: number; mouzaId: number | null; onSaved: () => void; navigate: (p: string) => void; enquiryNo: string | null;
-}> = ({ step, landId, mouzaId, onSaved, navigate, enquiryNo }) => {
+  milestones?: LandPipeline["milestones"];
+}> = ({ step, landId, mouzaId, onSaved, navigate, enquiryNo, milestones }) => {
   const defaults = mouzaId ? { MouzaId: String(mouzaId) } : {};
   const land = { pageKey: "legal-land-master" };
   if (!step.live) {
@@ -235,8 +271,11 @@ const StepContent: React.FC<{
     case "PROPERTY":
       return (
         <div className={`${card} p-5 text-sm`}>
-          Land details, location, boundaries, GPS and map are kept on the Land Property Master.
+          Land details, location, boundaries, GPS, map and document checklist are kept on the Land Property Master.
           <button className={`${btn} ml-3`} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>Edit land property</button>
+          <div className="mt-4 -mx-5 -mb-5 border-t border-border">
+            <LegalMasterTable entry={{ ...land, key: "land-photo", label: "Land Photos" }} parentId={landId} onSaved={onSaved} />
+          </div>
         </div>
       );
     case "PARTIES":
@@ -252,6 +291,34 @@ const StepContent: React.FC<{
       return <OwnershipStep landId={landId} onSaved={onSaved} />;
     case "DOCUMENTS":
       return <DocumentsStep landId={landId} onSaved={onSaved} />;
+    case "CASE_MORTGAGE":
+      return <CaseMortgageStep landId={landId} onSaved={onSaved} />;
+    case "DUE_DILIGENCE":
+      return <DueDiligenceStep landId={landId} onSaved={onSaved} />;
+    case "CLEARANCE":
+      return <ClearanceStep landId={landId} onSaved={onSaved} />;
+    case "PURCHASE_SALE": return <PurchaseSaleStep landId={landId} onSaved={onSaved} />;
+    case "VALUATION": return <ValuationStep landId={landId} onSaved={onSaved} />;
+    case "AGREEMENT": return <AgreementStep landId={landId} onSaved={onSaved} />;
+    case "PARTY_APPROVAL": return <PartyApprovalStep landId={landId} onSaved={onSaved} />;
+    case "PAYMENT": return <PaymentStep landId={landId} onSaved={onSaved} />;
+    case "DEED_PREP": return <DeedPrepStep landId={landId} onSaved={onSaved} />;
+    case "DRAFT_VERIFY": return <DraftVerifyStep landId={landId} onSaved={onSaved} />;
+    case "STAMP_DUTY": return <StampDutyStep landId={landId} onSaved={onSaved} />;
+    case "APPOINTMENT": return <AppointmentStep landId={landId} onSaved={onSaved} />;
+    case "SRO_REGISTRATION":
+    case "REGISTRATION_RESULT": return <RegistrationStep landId={landId} onSaved={onSaved} />;
+    case "REGISTERED_DEED":
+    case "DEED_APPROVAL": return <RegisteredDeedStep landId={landId} onSaved={onSaved} />;
+    case "OWNERSHIP_TRANSFER": return <OwnershipTransferStep landId={landId} onSaved={onSaved} />;
+    case "MUTATION_APPLY":
+    case "MUTATION_RESULT": return <MutationStep landId={landId} onSaved={onSaved} />;
+    case "NEW_KHATIAN": return <NewKhatianStep landId={landId} onSaved={onSaved} />;
+    case "FINAL_VERIFY": return <FinalVerifyStep landId={landId} onSaved={onSaved} milestones={milestones} />;
+    case "SETTLEMENT": return <SettlementStep landId={landId} onSaved={onSaved} />;
+    case "REGISTER_UPDATE": return <RegisterUpdateStep landId={landId} onSaved={onSaved} />;
+    case "AUDIT_REPORTS": return <AuditReportsStep landId={landId} onSaved={onSaved} />;
+    case "CLOSED": return <ClosedStep landId={landId} onSaved={onSaved} milestones={milestones} />;
     default:
       return null;
   }

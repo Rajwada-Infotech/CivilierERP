@@ -156,6 +156,9 @@ async function validate(pool, cfg, body) {
     values[field.name] = value;
   }
   for (const field of cfg.fields) {
+    if (field.requiredWhen && values[field.requiredWhen.field] !== null && field.requiredWhen.values.includes(values[field.requiredWhen.field]) && values[field.name] === null) {
+      return { error: `${field.label} is required when ${cfg.fields.find((f) => f.name === field.requiredWhen.field).label} is ${values[field.requiredWhen.field]}` };
+    }
     if (field.requiredWith && values[field.requiredWith] !== null && values[field.name] === null) {
       return { error: `${field.label} is required when ${cfg.fields.find((f) => f.name === field.requiredWith).label} is entered` };
     }
@@ -213,22 +216,24 @@ const derivedSql = (cfg) => (cfg.derived || []).map((d) => {
 });
 
 // ── Review (verification) fields ──────────────────────────────────────────────────────────────────
-// `review: { field, by, at }` on a master: moving `field` off "Pending" (Verified, Rejected…) needs the
-// approve right on its page and stamps who and when. A reviewed row whose other data is then edited by
-// someone without that right goes back to Pending, so a change is never left carrying an old approval.
+// `review: { field, by, at, free }` on a master: setting `field` to anything outside `free` (default
+// ["Pending"]) — Verified, Rejected, Approved… — needs the approve right on its page and stamps who and when.
+// A reviewed row whose other data is then edited by someone without that right goes back to free[0], so a
+// change is never left carrying an old approval.
 const isReviewer = (req, cfg) => hasAnyPageAction(req, cfg.pageKey, ["approve"]);
 
 async function reviewCols(req, cfg, values, before) {
   const rv = cfg.review;
   if (!rv) return { cols: [] };
+  const free = rv.free || ["Pending"];
   const next = values[rv.field];
-  const prev = before ? before[rv.field] : "Pending";
+  const prev = before ? before[rv.field] : free[0];
   if (next === prev) return { cols: [] };
-  if (next !== "Pending" && !(await isReviewer(req, cfg))) {
+  if (!free.includes(next) && !(await isReviewer(req, cfg))) {
     const label = cfg.fields.find((f) => f.name === rv.field).label;
     return { error: `Only a reviewer (approve right) can set ${label} to ${next}` };
   }
-  const stamp = next === "Pending" ? "NULL" : null;
+  const stamp = free.includes(next) ? "NULL" : null;
   return {
     cols: [
       ...(rv.by ? [{ name: rv.by, expr: stamp ?? "@UserId" }] : []),
@@ -399,6 +404,11 @@ router.post("/:master", withRight("create"), async (req, res) => {
     const pool = getPool();
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
+    // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
+    if (cfg.check) {
+      const refused = await cfg.check(pool, values, req.params.id ? Number(req.params.id) : null);
+      if (refused) return res.status(409).json({ error: refused });
+    }
     if (Object.values(values).includes(KEEP)) return res.status(400).json({ error: "Enter the full Aadhaar number" });
     const review = await reviewCols(req, cfg, values, null);
     if (review.error) return res.status(403).json({ error: review.error });
@@ -421,6 +431,7 @@ router.post("/:master", withRight("create"), async (req, res) => {
       SELECT ${cols.map((c) => c.expr).join(", ")}, @UserId, SYSUTCDATETIME()`);
     const row = result.recordset[0];
     const id = row[cfg.pk];
+    if (cfg.afterWrite) await cfg.afterWrite(pool, req, row, null);
     await writeAudit(pool, req, { action: "Created", entityType: cfg.title, entityId: id, landId: landOf(cfg, id, row), newValue: auditCopy(cfg, row) });
     const code = cfg.fields.find((f) => f.auto);
     res.status(201).json({ id, message: code ? `${cfg.title} ${row[code.name]} added` : `${cfg.title} added` });
@@ -437,6 +448,11 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     const pool = getPool();
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
+    // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
+    if (cfg.check) {
+      const refused = await cfg.check(pool, values, req.params.id ? Number(req.params.id) : null);
+      if (refused) return res.status(409).json({ error: refused });
+    }
     if (cfg.guard) {
       const refused = await cfg.guard(pool, id, values);
       if (refused) return res.status(409).json({ error: refused });
@@ -460,10 +476,11 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
     // Only the columns that changed go into the trail.
     const changed = Object.keys(after).filter((k) => !["UpdatedAt", "UpdatedBy"].includes(k) && String(before[k] ?? "") !== String(after[k] ?? ""));
     const rv = cfg.review;
-    if (rv && after[rv.field] !== "Pending" && after[rv.field] === before[rv.field]
+    const free = rv?.free || ["Pending"];
+    if (rv && !free.includes(after[rv.field]) && after[rv.field] === before[rv.field]
         && changed.some((k) => ![rv.field, rv.by, rv.at].includes(k)) && !(await isReviewer(req, cfg))) {
-      after = (await pool.request().input("Id", sql.Int, id).query(`
-        UPDATE dbo.${cfg.table} SET ${[`${rv.field} = N'Pending'`, ...(rv.by ? [`${rv.by} = NULL`] : []), ...(rv.at ? [`${rv.at} = NULL`] : [])].join(", ")}
+      after = (await pool.request().input("Id", sql.Int, id).input("Free", sql.NVarChar(40), free[0]).query(`
+        UPDATE dbo.${cfg.table} SET ${[`${rv.field} = @Free`, ...(rv.by ? [`${rv.by} = NULL`] : []), ...(rv.at ? [`${rv.at} = NULL`] : [])].join(", ")}
         OUTPUT INSERTED.* WHERE ${cfg.pk} = @Id`)).recordset[0];
       changed.push(rv.field);
     }
@@ -471,7 +488,8 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
       const pick = (r) => Object.fromEntries(changed.map((k) => [k, r[k]]));
       await writeAudit(pool, req, { action: "Updated", entityType: cfg.title, entityId: id, landId: landOf(cfg, id, after), oldValue: auditCopy(cfg, pick(before)), newValue: auditCopy(cfg, pick(after)) });
     }
-    res.json({ message: rv && changed.includes(rv.field) && after[rv.field] === "Pending" && before[rv.field] !== "Pending"
+    if (cfg.afterWrite) await cfg.afterWrite(pool, req, after, before);
+    res.json({ message: rv && changed.includes(rv.field) && free.includes(after[rv.field]) && !free.includes(before[rv.field])
       ? `${cfg.title} updated — sent back for verification` : `${cfg.title} updated` });
   } catch (err) {
     sendDbError(res, cfg, err, "update");

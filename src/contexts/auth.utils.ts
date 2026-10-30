@@ -147,6 +147,7 @@ export const LEGAL_HEAD_ACCESS: PagePermission[] = [
   { page: "crm-sales-deed", actions: ["view", "create", "edit"] },
   // Legal module: the head maintains every master.
   { page: "legal-dashboard", actions: ["view"] },
+  { page: "legal-land-reports", actions: ["view", "export"] },
   ...LEGAL_PAGE_KEYS.map((page) => ({
     page,
     actions: (page === "legal-land-master" ? ["view", "create", "edit", "delete", "approve", "print", "export"] : ["view", "create", "edit", "delete", "print", "export"]) as PageAction[],
@@ -176,6 +177,7 @@ export const LEGAL_PERSON_ACCESS: PagePermission[] = [
   // Legal module: the drafter keeps land records and parties up to date; the rules (checklists,
   // workflows, SLAs) stay with the head.
   { page: "legal-dashboard", actions: ["view"] },
+  { page: "legal-land-reports", actions: ["view", "export"] },
   ...LEGAL_PAGE_KEYS.map((page) => ({
     page,
     actions: (LEGAL_PERSON_EDITABLE.includes(page)

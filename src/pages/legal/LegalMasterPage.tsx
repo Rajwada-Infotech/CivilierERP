@@ -222,9 +222,11 @@ interface TableProps {
   onSaved?: () => void;
   /** Open this row's edit form once the rows are loaded (a link from the land property's page). */
   requestEditId?: string | null;
+  /** Hide the "Add" form: rows are created elsewhere (e.g. the ownership chain) and only edited / verified here. */
+  noAdd?: boolean;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const queryClient = useQueryClient();
 
@@ -329,7 +331,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   return (
     <MasterPage
       title={master.title}
-      canCreate={rights.canCreate}
+      canCreate={rights.canCreate && !noAdd}
+      collapsibleAddForm={noAdd}
       canEdit={rights.canEdit}
       canDelete={rights.canDelete && !master.noDelete}
       fields={formFields}

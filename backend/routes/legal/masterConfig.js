@@ -21,7 +21,10 @@
 //   `noDelete` records are never physically deleted (mark them inactive or cancel them instead);
 //   `guard(pool, id, values)` returns an error message to refuse an update (a converted enquiry is read-only);
 //   `lookupOnly` masters only feed pickers (no page of their own);
-//   `review: { field, by, at }` — setting `field` off Pending needs the approve right and stamps who / when.
+//   `review: { field, by, at, free }` — setting `field` outside `free` (default ["Pending"]) needs the approve
+//   right and stamps who / when; `requiredWhen: { field, values }` makes a field required for those values;
+//   `afterWrite(pool, req, row, before)` runs after a successful add / update (a clearance putting the land on hold).
+//   `check(pool, values, id)` returns a message to refuse an add / update on a business rule (id null on add).
 // A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
 
@@ -58,6 +61,21 @@ const LAND_ID = { name: "LandId", label: "Land property", type: "ref", ref: "lan
 const landChild = (title, table, pk, desc, rest) => ({
   title, group: "Land Management", pageKey: "legal-land-master", table, pk, parent: "LandId", desc, ...rest,
 });
+const MORTGAGE_STATUSES = ["No Mortgage Found", "Mortgage Active", "Loan Outstanding", "Loan Closed", "Release Pending", "Release Verified", "Needs Investigation"];
+const VERIFICATION_CHECKS = ["Encumbrance Search", "Court Case Verification", "Land Dispute Verification", "Government Acquisition Check",
+  "Land Classification Verification", "Boundary Verification", "Co-owner Consent Verification", "Title Search", "Ownership Chain Verification"];
+const DUE_DILIGENCE_CHECKS = ["Title Search", "Ownership Chain", "Previous Deed Verification", "Current Owner Verification", "Encumbrance Search",
+  "Court Case Verification", "Mortgage Verification", "Government Acquisition Check", "Land Classification Verification", "Boundary Verification",
+  "Co-owner Consent", "RS/LR Record Mapping"];
+const DEED_STATUSES = ["Not Started", "Drafting", "Draft Under Review", "Awaiting Payment", "Payment Completed", "Appointment Scheduled", "Submitted",
+  "Registration Pending", "Correction Required", "Successfully Registered", "Registered Deed Awaiting", "Completed"];
+const DRAFT_CHECKS = ["Buyer details correct", "Seller details correct", "Ownership shares correct", "Land area correct", "Mouza and JL Number correct",
+  "RS Khatian and Dag correct", "LR Khatian and Dag correct", "Boundary details correct", "Consideration amount correct", "Deed type correct",
+  "Registration office correct", "Required attachments available"];
+const MUTATION_STATUSES = ["Not Applied", "Draft", "Submitted", "Under Process", "Hearing Scheduled", "Objection Raised", "Correction Required", "Approved", "Rejected"];
+const FINAL_CHECKS = ["Registered deed uploaded and approved", "Ownership transfer recorded", "Mutation application status recorded",
+  "New Khatian / RoR uploaded where applicable", "Identity and ownership documents verified", "Legal documents verified",
+  "Purchase / sale financial records reconciled", "Outstanding blocking issues resolved", "Final checklist completed"];
 const OWNERSHIP_CHECKS = ["Identity document checked", "Previous ownership document checked", "Transfer document checked",
   "Relationship document checked", "Ownership share checked", "Date continuity checked", "Current ownership checked"];
 
@@ -231,6 +249,17 @@ const MASTERS = {
       ACTIVE,
     ],
   },
+  "land-photo": landChild("Land Photo", "LegalLandPhoto", "PhotoId", "Photographs of the land property — as many as needed.", {
+    label: "r.Caption", orderBy: "TakenOn, PhotoId",
+    fields: [
+      LAND_ID,
+      { name: "Caption", label: "Caption", type: "text", required: true, max: 200 },
+      { name: "PhotoFileId", label: "Photo", type: "file", required: true },
+      { name: "TakenOn", label: "Taken on", type: "date" },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+      ACTIVE,
+    ],
+  }),
   "land-enquiry": {
     title: "Land Enquiry", group: "Land Management", pageKey: "legal-land-enquiry", table: "LegalLandEnquiry", pk: "EnquiryId",
     desc: "A new land opportunity, before the full property record. Convert it to create the Land ID.",
@@ -334,14 +363,21 @@ const MASTERS = {
   // ── Phase 2: ownership history ──
   "ownership-event": landChild("Ownership Transfer", "LegalOwnershipEvent", "EventId",
     "Each transfer in the chain — sale, inheritance, gift, partition, court order — from previous owner to new owner.", {
-      label: "CONVERT(NVARCHAR(10), r.EventDate, 105) + ' ' + ISNULL((SELECT x.Name FROM dbo.LegalLookupValue x WHERE x.LookupId = r.TransferTypeId), '') + ': ' + ISNULL((SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PreviousOwnerId), '?') + N' → ' + (SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.NewOwnerId)",
+      label: "CONVERT(NVARCHAR(10), r.EventDate, 105) + ' ' + ISNULL((SELECT x.Name FROM dbo.LegalLookupValue x WHERE x.LookupId = r.TransferTypeId), '') + ': ' + ISNULL(r.PreviousOwnerName, '?') + N' → ' + r.NewOwnerName",
       orderBy: "EventDate, EventId", review: REVIEW,
       fields: [
         LAND_ID,
         { name: "TransferTypeId", label: "Transfer type", type: "ref", ref: "transfer-type", required: true },
         { name: "EventDate", label: "Transfer date", type: "date", required: true },
-        { name: "PreviousOwnerId", label: "Previous owner", type: "ref", ref: "person" },
-        { name: "NewOwnerId", label: "New owner", type: "ref", ref: "person", required: true },
+        // Earlier owners are history, typed in by name; linking a Party master entry is optional and fills the name.
+        { name: "PreviousOwnerName", label: "From — previous owner name", type: "text", max: 200 },
+        { name: "PreviousOwnerGuardian", label: "Previous owner's father / husband", type: "text", max: 200 },
+        { name: "PreviousOwnerId", label: "Previous owner in Party master (optional)", type: "ref", ref: "person", fill: { PreviousOwnerName: "FullName", PreviousOwnerGuardian: "GuardianName" } },
+        { name: "NewOwnerName", label: "To — new owner name", type: "text", required: true, max: 200 },
+        { name: "NewOwnerGuardian", label: "New owner's father / husband", type: "text", max: 200 },
+        { name: "NewOwnerId", label: "New owner in Party master (optional)", type: "ref", ref: "person", fill: { NewOwnerName: "FullName", NewOwnerGuardian: "GuardianName" } },
+        { name: "DocTypeId", label: "Transfer document type", type: "ref", ref: "document-type" },
+        { name: "DocumentNo", label: "Document number", type: "text", max: 100 },
         { name: "DeedNo", label: "Deed number", type: "text", max: 60 },
         { name: "RegistrationOfficeId", label: "Registration office", type: "ref", ref: "registration-office" },
         { name: "RegistrationDate", label: "Registration date", type: "date" },
@@ -357,18 +393,20 @@ const MASTERS = {
     }),
   "ownership-record": landChild("Ownership Record", "LegalOwnershipRecord", "RecordId",
     "Who owned what share, from when to when. A new owner is a new record; earlier records keep their end date.", {
-      label: "(SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PersonId) + ' ' + CAST(CAST(r.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + '% from ' + CONVERT(NVARCHAR(10), r.ValidFrom, 105)",
+      label: "r.OwnerName + ' ' + CAST(CAST(r.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + '% from ' + CONVERT(NVARCHAR(10), r.ValidFrom, 105)",
       orderBy: "ValidFrom, RecordId", review: REVIEW,
       fields: [
         LAND_ID,
-        { name: "PersonId", label: "Owner", type: "ref", ref: "person", required: true },
+        { name: "OwnerName", label: "Owner name", type: "text", required: true, max: 200 },
+        { name: "OwnerGuardian", label: "Father / husband name", type: "text", max: 200 },
+        { name: "PersonId", label: "Owner in Party master (optional)", type: "ref", ref: "person", fill: { OwnerName: "FullName", OwnerGuardian: "GuardianName" } },
         { name: "OwnershipTypeId", label: "Ownership type", type: "ref", ref: "ownership-type", required: true },
         { name: "RelationshipTypeId", label: "Relationship", type: "ref", ref: "relationship-type" },
         { name: "SharePct", label: "Ownership share (%)", type: "decimal", required: true, maxValue: 100 },
         { name: "ValidFrom", label: "Ownership start date", type: "date", required: true },
         { name: "ValidTo", label: "Ownership end date (blank = current)", type: "date", after: "ValidFrom" },
         { name: "EventId", label: "Created by transfer", type: "ref", ref: "ownership-event", filterBy: "LandId" },
-        { name: "PreviousPersonId", label: "Previous owner", type: "ref", ref: "person" },
+        { name: "PreviousOwnerName", label: "Previous owner name", type: "text", max: 200 },
         { name: "TransferDocFileId", label: "Transfer document", type: "file" },
         VERIFICATION,
         { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000 },
@@ -391,11 +429,13 @@ const MASTERS = {
     }),
   inheritance: landChild("Inheritance", "LegalInheritance", "InheritanceId",
     "A deceased owner's share passing to legal heirs, with the death and heirship evidence.", {
-      label: "'Estate of ' + (SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.DeceasedPersonId)",
+      label: "'Estate of ' + r.DeceasedName",
       orderBy: "InheritanceId", review: REVIEW,
       fields: [
         LAND_ID,
-        { name: "DeceasedPersonId", label: "Deceased owner", type: "ref", ref: "person", required: true },
+        { name: "DeceasedName", label: "Deceased owner name", type: "text", required: true, max: 200 },
+        { name: "DeceasedGuardian", label: "Deceased's father / husband", type: "text", max: 200 },
+        { name: "DeceasedPersonId", label: "Deceased in Party master (optional)", type: "ref", ref: "person", fill: { DeceasedName: "FullName", DeceasedGuardian: "GuardianName" } },
         { name: "DateOfDeath", label: "Date of death", type: "date" },
         { name: "DeathCertFileId", label: "Death certificate", type: "file" },
         { name: "HeirCertFileId", label: "Legal heir certificate", type: "file" },
@@ -409,12 +449,14 @@ const MASTERS = {
     }),
   "inheritance-heir": landChild("Legal Heir", "LegalInheritanceHeir", "HeirId",
     "The heirs of one inheritance and the share each receives.", {
-      label: "(SELECT p.FullName FROM dbo.LegalPerson p WHERE p.PersonId = r.PersonId)", orderBy: "InheritanceId, HeirId",
-      unique: [["InheritanceId", "PersonId"], "This heir is already listed for this inheritance"],
+      label: "r.HeirName", orderBy: "InheritanceId, HeirId",
+      unique: [["InheritanceId", "HeirName"], "This heir is already listed for this inheritance"],
       fields: [
         LAND_ID,
         { name: "InheritanceId", label: "Inheritance", type: "ref", ref: "inheritance", filterBy: "LandId", required: true },
-        { name: "PersonId", label: "Legal heir", type: "ref", ref: "person", required: true },
+        { name: "HeirName", label: "Legal heir name", type: "text", required: true, max: 200 },
+        { name: "HeirGuardian", label: "Heir's father / husband", type: "text", max: 200 },
+        { name: "PersonId", label: "Heir in Party master (optional)", type: "ref", ref: "person", fill: { HeirName: "FullName", HeirGuardian: "GuardianName" } },
         { name: "RelationshipTypeId", label: "Relationship with deceased", type: "ref", ref: "relationship-type" },
         { name: "SharePct", label: "Inheritance share (%)", type: "decimal", required: true, maxValue: 100 },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
@@ -433,6 +475,604 @@ const MASTERS = {
         { name: "NewReferences", label: "New Dag / Khatian references", type: "text", max: 300 },
         { name: "DeedFileId", label: "Partition deed / court order", type: "file" },
         VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+
+  // ── Phase 3: legal verification ──
+  "legal-case": landChild("Court Case", "LegalCase", "CaseId",
+    "Court cases and disputes touching this land: parties, court, status, next hearing and result.", {
+      label: "r.CaseNumber + ' - ' + r.CourtName", orderBy: "FilingDate, CaseId", review: REVIEW,
+      unique: [["LandId", "CaseNumber"], "This case number is already recorded for this land"],
+      fields: [
+        LAND_ID,
+        { name: "CaseNumber", label: "Case number", type: "text", required: true, max: 80, upper: true },
+        { name: "CaseTypeId", label: "Case type", type: "ref", ref: "case-type", required: true },
+        { name: "CourtName", label: "Court", type: "text", required: true, max: 200 },
+        { name: "FilingDate", label: "Filing date", type: "date" },
+        { name: "Plaintiff", label: "Plaintiff", type: "text", max: 500 },
+        { name: "Defendant", label: "Defendant", type: "text", max: 500 },
+        { name: "CaseSubject", label: "Case subject", type: "textarea", required: true, max: 1000 },
+        { name: "AdvocateId", label: "Advocate", type: "ref", ref: "advocate" },
+        { name: "LegalStatusId", label: "Case status", type: "ref", ref: "legal-status", required: true },
+        { name: "NextHearingDate", label: "Next hearing date", type: "date" },
+        { name: "CaseResult", label: "Case result", type: "textarea", max: 1000 },
+        { name: "DocFileId", label: "Case documents", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "case-hearing": landChild("Hearing", "LegalCaseHearing", "HearingId",
+    "The hearing history of each court case.", {
+      label: "CONVERT(NVARCHAR(10), r.HearingDate, 105)", orderBy: "CaseId, HearingDate",
+      fields: [
+        LAND_ID,
+        { name: "CaseId", label: "Court case", type: "ref", ref: "legal-case", filterBy: "LandId", required: true },
+        { name: "HearingDate", label: "Hearing date", type: "date", required: true },
+        { name: "Purpose", label: "Purpose", type: "text", max: 300 },
+        { name: "Outcome", label: "Outcome", type: "textarea", max: 1000 },
+        { name: "NextDate", label: "Next date", type: "date", after: "HearingDate" },
+        { name: "DocFileId", label: "Order / record", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+        ACTIVE,
+      ],
+    }),
+  mortgage: landChild("Mortgage & Loan", "LegalMortgage", "MortgageId",
+    "Mortgages, loans and charges on this land, and their release.", {
+      label: "r.LenderName + ' - ' + r.MortgageStatus", orderBy: "LoanStartDate, MortgageId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "LenderName", label: "Lender", type: "text", required: true, max: 200 },
+        { name: "BorrowerName", label: "Borrower", type: "text", max: 200 },
+        { name: "MortgageTypeId", label: "Mortgage type", type: "ref", ref: "mortgage-type", required: true },
+        { name: "LoanAccountRef", label: "Loan account reference", type: "text", max: 80 },
+        { name: "LoanAmount", label: "Loan amount (₹)", type: "decimal" },
+        { name: "OutstandingAmount", label: "Outstanding amount (₹)", type: "decimal" },
+        { name: "LoanStartDate", label: "Loan start date", type: "date" },
+        { name: "LoanEndDate", label: "Loan end date", type: "date", after: "LoanStartDate" },
+        { name: "RegistrationDetails", label: "Mortgage registration details", type: "text", max: 500 },
+        { name: "ChargeDetails", label: "Security / charge details", type: "text", max: 500 },
+        { name: "ReleaseDocFileId", label: "NOC / release document", type: "file" },
+        { name: "ClearanceDate", label: "Clearance date", type: "date" },
+        { name: "MortgageStatus", label: "Mortgage status", type: "select", required: true, options: MORTGAGE_STATUSES, default: "Needs Investigation" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "verification-check": landChild("Legal Verification Check", "LegalVerificationCheck", "CheckId",
+    "Encumbrance, title, acquisition, boundary and other searches. \"Not Found\" is a result; \"Not Checked\" and \"Search Failed\" are not.", {
+      label: "r.CheckType + ' - ' + r.Result", orderBy: "CheckType, SearchDate", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "CheckType", label: "Verification type", type: "select", required: true, options: VERIFICATION_CHECKS },
+        { name: "SearchDate", label: "Search / verification date", type: "date" },
+        { name: "PeriodFrom", label: "Search period from", type: "date" },
+        { name: "PeriodTo", label: "Search period to", type: "date", after: "PeriodFrom" },
+        { name: "SearchSource", label: "Search source", type: "text", max: 300 },
+        { name: "Result", label: "Result", type: "select", required: true, options: ["Not Checked", "Not Found", "Found - Clear", "Found - Issue", "Search Failed"], default: "Not Checked" },
+        { name: "DocFileId", label: "Supporting document", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "due-diligence": landChild("Due Diligence Check", "LegalDueDiligence", "DiligenceId",
+    "The legal executive's / advocate's result for each due diligence check.", {
+      label: "r.CheckItem + ' - ' + r.Result", orderBy: "DiligenceId",
+      unique: [["LandId", "CheckItem"], "This check is already on the list for this land"],
+      review: { field: "Result", by: "ReviewedBy", at: "ReviewedAt" },
+      fields: [
+        LAND_ID,
+        { name: "CheckItem", label: "Check", type: "select", required: true, options: DUE_DILIGENCE_CHECKS },
+        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Clear", "Issue Found"], default: "Pending" },
+        { name: "Findings", label: "Findings", type: "textarea", max: 1000, requiredWhen: { field: "Result", values: ["Issue Found"] } },
+        { name: "DocFileId", label: "Supporting document", type: "file" },
+        ACTIVE,
+      ],
+    }),
+  "advocate-assignment": landChild("Advocate Assignment", "LegalAdvocateAssignment", "AssignmentId",
+    "Advocates assigned to this land, for what and by when.", {
+      label: "(SELECT a.AdvocateName FROM dbo.LegalAdvocate a WHERE a.AdvocateId = r.AdvocateId) + ' - ' + r.Purpose", orderBy: "AssignedDate",
+      fields: [
+        LAND_ID,
+        { name: "AdvocateId", label: "Advocate", type: "ref", ref: "advocate", required: true },
+        { name: "Purpose", label: "Purpose", type: "select", required: true, options: ["Title Verification", "Legal Opinion", "Due Diligence", "Court Case", "Deed Review", "Other"], default: "Legal Opinion" },
+        { name: "AssignedDate", label: "Assigned date", type: "date", required: true, default: "today" },
+        { name: "DueDate", label: "Due date", type: "date", after: "AssignedDate" },
+        { name: "AssignmentStatus", label: "Status", type: "select", required: true, options: ["Assigned", "In Progress", "Completed", "Withdrawn"], default: "Assigned" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "legal-opinion": landChild("Legal Opinion", "LegalOpinion", "OpinionId",
+    "The advocate's opinion on title. The system never declares a title valid — an authorised reviewer approves the opinion.", {
+      label: "r.OpinionNo + ' - ' + r.FinalOpinion + ' (' + r.OpinionStatus + ')'", orderBy: "OpinionDate, OpinionId",
+      unique: [["OpinionNo"], "This opinion number already exists"],
+      review: { field: "OpinionStatus", by: "ApprovedBy", at: "ApprovedAt", free: ["Draft", "Under Review"] },
+      fields: [
+        LAND_ID,
+        { name: "OpinionNo", label: "Opinion number", type: "text", max: 30, auto: "OPN" },
+        { name: "AdvocateId", label: "Advocate", type: "ref", ref: "advocate", required: true },
+        { name: "OpinionDate", label: "Opinion date", type: "date", required: true, default: "today" },
+        { name: "ReviewedFrom", label: "Reviewed period from", type: "date" },
+        { name: "ReviewedTo", label: "Reviewed period to", type: "date", after: "ReviewedFrom" },
+        { name: "Findings", label: "Findings", type: "textarea", required: true, max: 2000 },
+        { name: "IdentifiedRisks", label: "Identified risks", type: "textarea", max: 2000 },
+        { name: "MissingDocuments", label: "Missing documents", type: "textarea", max: 1000 },
+        { name: "Recommendations", label: "Recommendations", type: "textarea", max: 2000 },
+        { name: "FinalOpinion", label: "Final opinion", type: "select", required: true, options: ["Title Clear", "Clear with Conditions", "Title Defective", "Further Verification Required"] },
+        { name: "Conditions", label: "Conditions", type: "textarea", max: 2000, requiredWhen: { field: "FinalOpinion", values: ["Clear with Conditions"] } },
+        { name: "DocFileId", label: "Signed opinion", type: "file" },
+        { name: "SignatureRef", label: "Advocate signature / approval reference", type: "text", max: 100 },
+        { name: "OpinionStatus", label: "Opinion status", type: "select", required: true, options: ["Draft", "Under Review", "Approved", "Rejected", "Revised"], default: "Draft" },
+        ACTIVE,
+      ],
+    }),
+  "legal-clearance": landChild("Legal Clearance", "LegalClearance", "ClearanceId",
+    "The clearance decision on an approved opinion. Not Cleared or On Hold puts the land on hold.", {
+      label: "r.ClearanceNo + ' - ' + r.Decision", orderBy: "ClearanceId",
+      unique: [["ClearanceNo"], "This clearance number already exists"],
+      review: { field: "Decision", by: "DecidedBy", at: "DecidedAt", free: ["Pending Decision"] },
+      // Not Cleared → legal hold; On Hold → management hold. The land keeps every record while it waits.
+      afterWrite: async (pool, req, row, before) => {
+        const hold = { "Not Cleared": "Legal Dispute", "On Hold": "Management Decision" }[row.Decision];
+        if (!hold || before?.Decision === row.Decision || !row.IsActive) return;
+        const r = await pool.request().input("Land", row.LandId).input("Cat", hold).input("UserId", req.user?.userId || null)
+          .input("Reason", `Legal clearance ${row.ClearanceNo}: ${row.Decision}${row.BlockingIssues ? ` — ${row.BlockingIssues}` : ""}`.slice(0, 1000))
+          .query(`
+            UPDATE dbo.LegalLand SET IsOnHold = 1, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE LandId = @Land AND IsOnHold = 0;
+            IF @@ROWCOUNT = 1
+              INSERT INTO dbo.LegalHold (LandId, HoldCategory, HoldReason, HoldDate, HeldBy)
+              OUTPUT INSERTED.HoldId AS id
+              VALUES (@Land, @Cat, @Reason, CAST(SYSDATETIME() AS DATE), @UserId);`);
+        if (r.recordset?.length) {
+          await require("./legalAudit").writeAudit(pool, req, { action: "Land put on hold", entityType: "Land Property", entityId: row.LandId, landId: row.LandId, newValue: { category: hold }, remarks: `From legal clearance ${row.ClearanceNo}` });
+        }
+      },
+      fields: [
+        LAND_ID,
+        { name: "ClearanceNo", label: "Clearance number", type: "text", max: 30, auto: "CLR" },
+        { name: "OpinionId", label: "Legal opinion", type: "ref", ref: "legal-opinion", filterBy: "LandId", required: true },
+        { name: "Decision", label: "Decision", type: "select", required: true, options: ["Pending Decision", "Cleared", "Cleared with Conditions", "Not Cleared", "On Hold", "Further Verification Required"], default: "Pending Decision" },
+        { name: "Conditions", label: "Conditions", type: "textarea", max: 2000, requiredWhen: { field: "Decision", values: ["Cleared with Conditions"] } },
+        { name: "ConditionsMet", label: "All mandatory conditions met / approved", type: "bit", default: false },
+        { name: "BlockingIssues", label: "Blocking issues", type: "textarea", max: 2000, requiredWhen: { field: "Decision", values: ["Not Cleared", "Further Verification Required"] } },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+
+  // ── Phase 4: purchase & sale ──
+  "land-transaction": landChild("Purchase / Sale", "LegalLandTransaction", "TransactionId",
+    "Purchase and sale transactions of this land. Expenses never change the land value; the balance is value minus verified payments.", {
+      label: "r.TransactionNo + ' - ' + r.TxnType + ' - ' + r.BuyerName", orderBy: "TransactionId",
+      unique: [["TransactionNo"], "This transaction number already exists"],
+      // The same area cannot be sold twice: live sales (not cancelled) may not exceed the land's area.
+      check: async (pool, values, id) => {
+        if (values.TxnType !== "Sale" || values.TxnStatus === "Cancelled") return null;
+        const r = (await pool.request().input("Land", values.LandId).input("Id", id || 0).input("Area", values.TxnArea).input("Unit", values.AreaUnitId).query(`
+          SELECT l.Area * lu.SqFtFactor AS landSqft,
+                 ISNULL((SELECT SUM(t.TxnArea * tu.SqFtFactor) FROM dbo.LegalLandTransaction t JOIN dbo.LegalAreaUnit tu ON tu.AreaUnitId = t.AreaUnitId
+                          WHERE t.LandId = @Land AND t.TxnType = N'Sale' AND t.TxnStatus <> N'Cancelled' AND t.IsActive = 1 AND t.TransactionId <> @Id), 0) AS soldSqft,
+                 @Area * (SELECT SqFtFactor FROM dbo.LegalAreaUnit WHERE AreaUnitId = @Unit) AS thisSqft
+          FROM dbo.LegalLand l LEFT JOIN dbo.LegalAreaUnit lu ON lu.AreaUnitId = l.AreaUnitId WHERE l.LandId = @Land`)).recordset[0];
+        if (!r?.landSqft) return null;
+        const left = r.landSqft - r.soldSqft;
+        return r.thisSqft > left + 0.01 ? `Only ${Math.max(left, 0).toFixed(0)} sq ft of this land is still unsold; the same area cannot be sold twice` : null;
+      },
+      fields: [
+        LAND_ID,
+        { name: "TransactionNo", label: "Transaction number", type: "text", max: 30, auto: "TXN" },
+        { name: "TxnType", label: "Purchase or sale", type: "select", required: true, options: ["Purchase", "Sale"], default: "Purchase" },
+        { name: "BuyerName", label: "Buyer / company", type: "text", required: true, max: 200 },
+        { name: "BuyerId", label: "Buyer in Party master (optional)", type: "ref", ref: "person", fill: { BuyerName: "FullName" } },
+        { name: "SellerNames", label: "Seller(s)", type: "text", required: true, max: 500 },
+        { name: "TxnArea", label: "Area (selling / buying)", type: "decimal", required: true, min: 0.000001 },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", required: true },
+        { name: "RatePerUnit", label: "Rate per unit (₹)", type: "decimal" },
+        { name: "TotalValue", label: "Total land value (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "AdvanceAmount", label: "Advance amount (₹)", type: "decimal" },
+        { name: "AgreementDate", label: "Agreement date", type: "date" },
+        { name: "ExpectedRegistrationDate", label: "Expected registration date", type: "date" },
+        { name: "PaymentTerms", label: "Payment terms", type: "textarea", max: 1000 },
+        { name: "BrokerName", label: "Broker", type: "text", max: 200 },
+        { name: "BrokerCommission", label: "Broker commission (₹)", type: "decimal" },
+        { name: "AdvocateFees", label: "Advocate fees (₹)", type: "decimal" },
+        { name: "OtherExpenses", label: "Other expenses (₹)", type: "decimal" },
+        { name: "AgreementFileId", label: "Agreement document", type: "file" },
+        { name: "TxnStatus", label: "Status", type: "select", required: true, options: ["Draft", "Negotiation", "Agreement Signed", "Payment in Progress", "Registered", "Completed", "Cancelled"], default: "Draft" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  payment: landChild("Payment", "LegalPayment", "PaymentId",
+    "Each payment or receipt on its own record, verified separately. Editing a verified payment sends it back for verification.", {
+      label: "CONVERT(NVARCHAR(10), r.PaymentDate, 105) + ' ₹' + CONVERT(NVARCHAR(30), r.Amount)", orderBy: "PaymentDate, PaymentId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId", required: true },
+        { name: "PaymentDate", label: "Payment date", type: "date", required: true, default: "today" },
+        { name: "TxnTypeId", label: "Payment purpose", type: "ref", ref: "txn-type", required: true },
+        { name: "Amount", label: "Amount (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "PaymentModeId", label: "Payment mode", type: "ref", ref: "payment-mode", required: true },
+        { name: "Payer", label: "Payer", type: "text", max: 200 },
+        { name: "Payee", label: "Payee", type: "text", max: 200 },
+        { name: "BankRef", label: "Bank / account reference", type: "text", max: 100 },
+        { name: "TransactionRef", label: "Transaction ID / cheque no.", type: "text", max: 100 },
+        { name: "ReceiptNo", label: "Receipt number", type: "text", max: 60 },
+        { name: "ReceiptFileId", label: "Receipt", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  expense: landChild("Expense", "LegalExpense", "ExpenseId",
+    "Broker, advocate, survey and government expenses — tracked apart from the land value.", {
+      label: "CONVERT(NVARCHAR(10), r.ExpenseDate, 105) + ' ₹' + CONVERT(NVARCHAR(30), r.Amount)", orderBy: "ExpenseDate",
+      fields: [
+        LAND_ID,
+        { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId" },
+        { name: "ExpenseTypeId", label: "Expense type", type: "ref", ref: "expense-type", required: true },
+        { name: "ExpenseDate", label: "Date", type: "date", required: true, default: "today" },
+        { name: "Amount", label: "Amount (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "PaidTo", label: "Paid to", type: "text", max: 200 },
+        { name: "PaymentModeId", label: "Payment mode", type: "ref", ref: "payment-mode" },
+        { name: "ReceiptFileId", label: "Receipt", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  valuation: landChild("Valuation & Survey", "LegalValuation", "ValuationId",
+    "Market and government valuation, from a stated source (never an assumed fixed rate), and the survey findings.", {
+      label: "CONVERT(NVARCHAR(10), r.ValuationDate, 105) + ' - ' + r.ValuationSource", orderBy: "ValuationDate", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "ValuationDate", label: "Valuation date", type: "date", required: true },
+        { name: "LandArea", label: "Land area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "LandArea" },
+        { name: "MarketRate", label: "Market rate per unit (₹)", type: "decimal" },
+        { name: "EstimatedMarketValue", label: "Estimated market value (₹)", type: "decimal" },
+        { name: "GovernmentValuation", label: "Government valuation (₹)", type: "decimal" },
+        { name: "ValuationSource", label: "Valuation source", type: "text", required: true, max: 300 },
+        { name: "ValuationFileId", label: "Valuation report", type: "file" },
+        { name: "Surveyor", label: "Surveyor", type: "text", max: 200 },
+        { name: "SurveyDate", label: "Survey date", type: "date" },
+        { name: "SurveyFileId", label: "Survey report", type: "file" },
+        { name: "GpsLatitude", label: "GPS latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
+        { name: "GpsLongitude", label: "GPS longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
+        { name: "BoundaryFindings", label: "Boundary findings", type: "textarea", max: 1000 },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  agreement: landChild("Agreement", "LegalAgreement", "AgreementId",
+    "The purchase / sale agreement. Signed, Cancelled and Expired are set by a reviewer.", {
+      label: "r.AgreementNo + ' - ' + r.AgreementStatus", orderBy: "AgreementDate, AgreementId",
+      unique: [["AgreementNo"], "This agreement number already exists"],
+      review: { field: "AgreementStatus", by: "ApprovedBy", at: "ApprovedAt", free: ["Draft", "Under Review", "Awaiting Signature"] },
+      check: async (_pool, values) =>
+        values.AgreementStatus === "Signed" && (values.BuyerSignature !== "Signed" || values.SellerSignature !== "Signed")
+          ? "An agreement is Signed only when both the buyer's and the seller's signatures are Signed" : null,
+      fields: [
+        LAND_ID,
+        { name: "AgreementNo", label: "Agreement number", type: "text", max: 30, auto: "AGR" },
+        { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId", required: true, fill: { TotalValue: "TotalValue", AdvanceAmount: "AdvanceAmount", AgreedArea: "TxnArea", AreaUnitId: "AreaUnitId", AgreedRate: "RatePerUnit" } },
+        { name: "AgreementType", label: "Agreement type", type: "select", required: true, options: ["Agreement for Sale", "Purchase Agreement", "MoU", "Other"], default: "Agreement for Sale" },
+        { name: "AgreedArea", label: "Agreed area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "AgreedArea" },
+        { name: "AgreedRate", label: "Agreed rate (₹)", type: "decimal" },
+        { name: "TotalValue", label: "Total agreement value (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "AdvanceAmount", label: "Advance amount (₹)", type: "decimal" },
+        { name: "PaymentSchedule", label: "Payment schedule", type: "textarea", max: 1000 },
+        { name: "AgreementDate", label: "Agreement date", type: "date", required: true },
+        { name: "ExpectedRegistrationDate", label: "Expected registration date", type: "date", after: "AgreementDate" },
+        { name: "ExpiryDate", label: "Agreement expiry date", type: "date", after: "AgreementDate" },
+        { name: "Terms", label: "Terms & conditions", type: "textarea", max: 2000 },
+        { name: "BrokerDetails", label: "Broker details", type: "text", max: 300 },
+        { name: "AdvocateId", label: "Advocate", type: "ref", ref: "advocate" },
+        { name: "AgreementFileId", label: "Agreement document", type: "file" },
+        { name: "BuyerSignature", label: "Buyer signature", type: "select", required: true, options: ["Pending", "Signed"], default: "Pending" },
+        { name: "SellerSignature", label: "Seller signature", type: "select", required: true, options: ["Pending", "Signed"], default: "Pending" },
+        { name: "AgreementStatus", label: "Agreement status", type: "select", required: true, options: ["Draft", "Under Review", "Awaiting Signature", "Signed", "Cancelled", "Expired"], default: "Draft" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "party-approval": landChild("Buyer & Seller Approval", "LegalPartyApproval", "ApprovalId",
+    "Each buyer, seller and co-owner's consent to the agreement, listed separately.", {
+      label: "r.PartyName + ' (' + r.PartyRole + ') - ' + r.ConsentStatus", orderBy: "AgreementId, PartyRole",
+      unique: [["AgreementId", "PartyName", "PartyRole"], "This party is already listed on this agreement in this role"],
+      review: { field: "ConsentStatus", by: "RecordedBy", at: "RecordedAt", free: ["Pending", "Signature Pending"] },
+      fields: [
+        LAND_ID,
+        { name: "AgreementId", label: "Agreement", type: "ref", ref: "agreement", filterBy: "LandId", required: true },
+        { name: "PartyName", label: "Party name", type: "text", required: true, max: 200 },
+        { name: "PersonId", label: "Party in Party master (optional)", type: "ref", ref: "person", fill: { PartyName: "FullName" } },
+        { name: "PartyRole", label: "Role", type: "select", required: true, options: ["Buyer", "Seller", "Co-owner", "Legal Heir", "Authorized Signatory"] },
+        { name: "OwnershipSharePct", label: "Ownership share (%)", type: "decimal", maxValue: 100 },
+        { name: "ConsentStatus", label: "Consent", type: "select", required: true, options: ["Pending", "Approved", "Rejected", "Signature Pending", "Not Applicable"], default: "Pending" },
+        { name: "ApprovalDate", label: "Approval date", type: "date" },
+        { name: "SignatureFileId", label: "Signature / consent document", type: "file" },
+        { name: "IdVerification", label: "Identity verification", type: "select", required: true, options: ["Pending", "Verified", "Not Verified"], default: "Pending" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+
+  // ── Phase 5: deed & registration ──
+  "land-deed": landChild("Deed", "LegalLandDeed", "DeedId",
+    "The deed for this land: type, consideration, writer, advocate and registration office. It is marked registered only from a successful registration.", {
+      label: "r.DeedCode + ' - ' + r.RegistrationStatus", orderBy: "DeedId",
+      unique: [["DeedCode"], "This deed code already exists"],
+      check: async (pool, values, id) => {
+        if (!["Successfully Registered", "Registered Deed Awaiting", "Completed"].includes(values.RegistrationStatus)) return null;
+        if (!id) return "A new deed cannot start as registered";
+        const ok = (await pool.request().input("Id", id).query("SELECT TOP 1 1 AS ok FROM dbo.LegalRegAttempt WHERE DeedId = @Id AND Result = N'Successful' AND IsActive = 1")).recordset[0];
+        return ok ? null : "Record a successful registration attempt before marking the deed registered";
+      },
+      fields: [
+        LAND_ID,
+        { name: "DeedCode", label: "Deed ID", type: "text", max: 30, auto: "DEED" },
+        { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId", fill: { ConsiderationAmount: "TotalValue" } },
+        { name: "DeedTypeId", label: "Deed type", type: "ref", ref: "deed-type", required: true },
+        { name: "ConsiderationAmount", label: "Consideration amount (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "LandDescription", label: "Land description (schedule)", type: "textarea", max: 2000 },
+        { name: "DeedWriter", label: "Deed writer", type: "text", max: 200 },
+        { name: "DeedWriterDueDate", label: "Draft expected by", type: "date" },
+        { name: "AdvocateId", label: "Reviewing advocate", type: "ref", ref: "advocate" },
+        { name: "RegistrationOfficeId", label: "Registration office", type: "ref", ref: "registration-office", required: true },
+        { name: "RegisteredDeedNo", label: "Registered deed number", type: "text", max: 60 },
+        { name: "RegistrationStatus", label: "Registration status", type: "select", required: true, options: DEED_STATUSES, default: "Not Started" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "deed-draft": landChild("Deed Draft", "LegalDeedDraft", "DraftId",
+    "Every draft version is kept. A correction is a new version; each version gets its own 12-point check.", {
+      label: "'Draft v' + CAST(r.VersionNo AS NVARCHAR(10)) + ' - ' + r.ReviewStatus", orderBy: "DeedId, VersionNo",
+      unique: [["DeedId", "VersionNo"], "This draft version already exists for this deed"],
+      review: { field: "ReviewStatus", by: "ReviewedBy", at: "ReviewedAt" },
+      check: async (pool, values, id) => {
+        if (values.ReviewStatus !== "Approved") return null;
+        if (!id) return "Check the draft before approving it";
+        const r = (await pool.request().input("Id", id).query(`SELECT COUNT(*) AS n, SUM(CASE WHEN Result IN (N'Correct', N'Not Applicable') THEN 1 ELSE 0 END) AS ok FROM dbo.LegalDeedDraftCheck WHERE DraftId = @Id AND IsActive = 1`)).recordset[0];
+        return r.n < DRAFT_CHECKS.length || r.ok < r.n ? "Every draft check must be Correct or Not Applicable before the draft is approved" : null;
+      },
+      // A new draft comes with its twelve checks, all Pending.
+      afterWrite: async (pool, req, row, before) => {
+        if (before) return;
+        await pool.request().input("Land", row.LandId).input("Draft", row.DraftId).input("UserId", req.user?.userId || null)
+          .input("Items", JSON.stringify(DRAFT_CHECKS))
+          .query("INSERT INTO dbo.LegalDeedDraftCheck (LandId, DraftId, CheckItem, Result, CreatedBy) SELECT @Land, @Draft, j.value, N'Pending', @UserId FROM OPENJSON(@Items) j");
+      },
+      fields: [
+        LAND_ID,
+        { name: "DeedId", label: "Deed", type: "ref", ref: "land-deed", filterBy: "LandId", required: true },
+        { name: "VersionNo", label: "Version", type: "int", required: true, min: 1, default: 1 },
+        { name: "DraftDate", label: "Draft date", type: "date", required: true, default: "today" },
+        { name: "DraftFileId", label: "Draft document", type: "file", required: true },
+        { name: "ChangeNotes", label: "What changed", type: "textarea", max: 1000 },
+        { name: "ReviewStatus", label: "Verification", type: "select", required: true, options: ["Pending", "Approved", "Correction Required", "Rejected"], default: "Pending" },
+        { name: "ReviewRemarks", label: "Reviewer remarks", type: "textarea", max: 1000, requiredWhen: { field: "ReviewStatus", values: ["Correction Required", "Rejected"] } },
+        ACTIVE,
+      ],
+    }),
+  "deed-draft-check": landChild("Draft Check", "LegalDeedDraftCheck", "CheckId",
+    "The twelve checks of each draft version.", {
+      label: "r.CheckItem", orderBy: "DraftId, CheckId",
+      unique: [["DraftId", "CheckItem"], "This check is already on the draft"],
+      review: { field: "Result", by: "CheckedBy", at: "CheckedAt" },
+      fields: [
+        LAND_ID,
+        { name: "DraftId", label: "Draft", type: "ref", ref: "deed-draft", filterBy: "LandId", required: true },
+        { name: "CheckItem", label: "Check", type: "select", required: true, options: DRAFT_CHECKS },
+        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Correct", "Incorrect", "Not Applicable"], default: "Pending" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 500, requiredWhen: { field: "Result", values: ["Incorrect"] } },
+        ACTIVE,
+      ],
+    }),
+  "stamp-duty": landChild("Stamp Duty & Fees", "LegalStampDuty", "CalculationId",
+    "Stamp duty and registration fee as calculated by an approved source (never a hard-coded rate), with its source and verification.", {
+      label: "CONVERT(NVARCHAR(10), r.CalculationDate, 105) + ' ₹' + CONVERT(NVARCHAR(30), r.TotalPayable)", orderBy: "CalculationDate", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "DeedId", label: "Deed", type: "ref", ref: "land-deed", filterBy: "LandId", required: true },
+        { name: "GovtMarketValue", label: "Government market value (₹)", type: "decimal" },
+        { name: "ConsiderationValue", label: "Consideration value (₹)", type: "decimal" },
+        { name: "ValuationBasis", label: "Valuation basis", type: "text", max: 300 },
+        { name: "StampDuty", label: "Stamp duty (₹)", type: "decimal" },
+        { name: "RegistrationFee", label: "Registration fee (₹)", type: "decimal" },
+        { name: "ScanningFee", label: "Scanning fee (₹)", type: "decimal" },
+        { name: "OtherCharges", label: "Other government charges (₹)", type: "decimal" },
+        { name: "TotalPayable", label: "Total payable (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "CalculationDate", label: "Calculation date", type: "date", required: true, default: "today" },
+        { name: "CalculationSource", label: "Calculation source", type: "text", required: true, max: 300 },
+        { name: "SupportingFileId", label: "Supporting document", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "reg-payment": landChild("Registration Payment", "LegalRegPayment", "RegPaymentId",
+    "Stamp duty, registration and other fees paid for the deed (GRN / challan).", {
+      label: "CONVERT(NVARCHAR(10), r.PaymentDate, 105) + ' ₹' + CONVERT(NVARCHAR(30), r.Amount)", orderBy: "PaymentDate", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "DeedId", label: "Deed", type: "ref", ref: "land-deed", filterBy: "LandId", required: true },
+        { name: "FeeTypeId", label: "Fee type", type: "ref", ref: "fee-type", required: true },
+        { name: "Amount", label: "Amount (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "PaymentDate", label: "Payment date", type: "date", required: true, default: "today" },
+        { name: "PaymentRef", label: "Payment reference (GRN / challan)", type: "text", max: 100 },
+        { name: "ReceiptFileId", label: "Receipt", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "reg-appointment": landChild("Registration Appointment", "LegalRegAppointment", "AppointmentId",
+    "Appointment at the registration office, attendance and witnesses.", {
+      label: "CONVERT(NVARCHAR(10), r.AppointmentDate, 105) + ISNULL(' ' + r.AppointmentTime, '') + ' - ' + r.AppointmentStatus", orderBy: "AppointmentDate",
+      fields: [
+        LAND_ID,
+        { name: "DeedId", label: "Deed", type: "ref", ref: "land-deed", filterBy: "LandId", required: true },
+        { name: "RegistrationOfficeId", label: "Registration office", type: "ref", ref: "registration-office", required: true },
+        { name: "AppointmentDate", label: "Appointment date", type: "date", required: true },
+        { name: "AppointmentTime", label: "Time (e.g. 11:30)", type: "text", max: 10, pattern: "^([01]?[0-9]|2[0-3]):[0-5][0-9]$", patternMsg: "Time must look like 11:30" },
+        { name: "TokenNo", label: "Registration token number", type: "text", max: 60 },
+        { name: "BuyerAttendance", label: "Buyer attendance", type: "select", required: true, options: ["Pending", "Present", "Absent"], default: "Pending" },
+        { name: "SellerAttendance", label: "Seller attendance", type: "select", required: true, options: ["Pending", "Present", "Absent"], default: "Pending" },
+        { name: "WitnessDetails", label: "Witness details", type: "textarea", max: 1000 },
+        { name: "AppointmentStatus", label: "Status", type: "select", required: true, options: ["Scheduled", "Rescheduled", "Completed", "Cancelled", "Missed"], default: "Scheduled" },
+        { name: "SlipFileId", label: "Appointment slip", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "reg-attempt": landChild("Registration Attempt", "LegalRegAttempt", "AttemptId",
+    "Each attempt at the Sub-Registrar office. A failed attempt stays in the history; the next one is a new record.", {
+      label: "CONVERT(NVARCHAR(10), r.AttemptDate, 105) + ' - ' + r.Result", orderBy: "AttemptDate, AttemptId",
+      // The deed follows the latest attempt: successful → registered with its number; otherwise correction required.
+      afterWrite: async (pool, req, row) => {
+        const ok = row.Result === "Successful";
+        await pool.request().input("Deed", row.DeedId).input("No", row.RegisteredDeedNo).input("UserId", req.user?.userId || null)
+          .input("Status", ok ? "Successfully Registered" : row.Result === "Adjourned" ? "Registration Pending" : "Correction Required")
+          .query(`UPDATE dbo.LegalLandDeed SET RegistrationStatus = @Status, RegisteredDeedNo = CASE WHEN @Status = N'Successfully Registered' THEN @No ELSE RegisteredDeedNo END,
+                  UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE DeedId = @Deed`);
+      },
+      fields: [
+        LAND_ID,
+        { name: "DeedId", label: "Deed", type: "ref", ref: "land-deed", filterBy: "LandId", required: true },
+        { name: "AppointmentId", label: "Appointment", type: "ref", ref: "reg-appointment", filterBy: "LandId" },
+        { name: "AttemptDate", label: "Attempt date", type: "date", required: true, default: "today" },
+        { name: "Result", label: "Registration successful?", type: "select", required: true, options: ["Successful", "Failed", "Correction Required", "Adjourned"] },
+        { name: "RegisteredDeedNo", label: "Registered deed number", type: "text", max: 60, requiredWhen: { field: "Result", values: ["Successful"] } },
+        { name: "FailureReason", label: "Reason / correction needed", type: "textarea", max: 1000, requiredWhen: { field: "Result", values: ["Failed", "Correction Required", "Adjourned"] } },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "registered-deed": landChild("Registered Deed", "LegalRegisteredDeed", "RegisteredId",
+    "The final registered deed and its approval.", {
+      label: "r.RegisteredDeedNo", orderBy: "RegistrationDate",
+      review: { field: "ApprovalStatus", by: "ApprovedBy", at: "ApprovedAt" },
+      check: async (pool, values) => {
+        const ok = (await pool.request().input("Deed", values.DeedId).query("SELECT TOP 1 1 AS ok FROM dbo.LegalRegAttempt WHERE DeedId = @Deed AND Result = N'Successful' AND IsActive = 1")).recordset[0];
+        return ok ? null : "Record the successful registration attempt first";
+      },
+      fields: [
+        LAND_ID,
+        { name: "DeedId", label: "Deed", type: "ref", ref: "land-deed", filterBy: "LandId", required: true, fill: { RegisteredDeedNo: "RegisteredDeedNo", RegistrationOfficeId: "RegistrationOfficeId" } },
+        { name: "RegisteredDeedNo", label: "Registered deed number", type: "text", required: true, max: 60 },
+        { name: "RegistrationDate", label: "Registration date", type: "date", required: true },
+        { name: "RegistrationOfficeId", label: "Registration office", type: "ref", ref: "registration-office" },
+        { name: "DeedFileId", label: "Registered deed (PDF)", type: "file", required: true },
+        { name: "ReceiptFileId", label: "Registration receipt", type: "file" },
+        { name: "CertifiedCopyStatus", label: "Certified copy", type: "select", required: true, options: ["Not Applied", "Applied", "Received"], default: "Not Applied" },
+        { name: "ApprovalStatus", label: "Deed approval", type: "select", required: true, options: ["Pending", "Verified", "Approved", "Correction Required", "Rejected"], default: "Pending" },
+        { name: "ApprovalRemarks", label: "Approval remarks", type: "textarea", max: 1000, requiredWhen: { field: "ApprovalStatus", values: ["Correction Required", "Rejected"] } },
+        ACTIVE,
+      ],
+    }),
+
+  // ── Phase 6: mutation & closure ──
+  mutation: landChild("Mutation", "LegalMutation", "MutationId",
+    "The mutation application at the BL&LRO, tracked apart from registration: a registered deed is not a completed mutation.", {
+      label: "ISNULL(r.ApplicationNo, 'Mutation ' + CAST(r.MutationId AS NVARCHAR(10))) + ' - ' + r.ApplicationStatus", orderBy: "MutationId",
+      review: { field: "ApplicationStatus", by: "DecidedBy", at: "DecidedAt", free: ["Not Applied", "Draft", "Submitted", "Under Process", "Hearing Scheduled", "Objection Raised", "Correction Required"] },
+      fields: [
+        LAND_ID,
+        { name: "RegisteredDeedId", label: "Registered deed", type: "ref", ref: "registered-deed", filterBy: "LandId" },
+        { name: "ApplicationNo", label: "Mutation application number", type: "text", max: 80 },
+        { name: "ApplicationDate", label: "Application date", type: "date" },
+        { name: "OfficeName", label: "BL&LRO office", type: "text", required: true, max: 200 },
+        { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
+        { name: "DagNo", label: "Dag number", type: "text", max: 60 },
+        { name: "PreviousKhatian", label: "Previous Khatian", type: "text", max: 60 },
+        { name: "PreviousOwner", label: "Previous owner(s)", type: "text", max: 300 },
+        { name: "NewOwner", label: "New owner(s)", type: "text", required: true, max: 300 },
+        { name: "ApplicationStatus", label: "Application status", type: "select", required: true, options: MUTATION_STATUSES, default: "Draft" },
+        { name: "HearingDate", label: "Hearing date", type: "date" },
+        { name: "ObjectionDetails", label: "Objection details", type: "textarea", max: 1000, requiredWhen: { field: "ApplicationStatus", values: ["Objection Raised"] } },
+        { name: "OrderNo", label: "Mutation order number", type: "text", max: 80, requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "OrderDate", label: "Mutation order date", type: "date", requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
+        { name: "DocFileId", label: "Application copy", type: "file" },
+        { name: "OrderFileId", label: "Mutation order", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "mutation-hearing": landChild("Mutation Hearing", "LegalMutationHearing", "HearingId",
+    "Hearings, objections and follow-up of the mutation.", {
+      label: "CONVERT(NVARCHAR(10), r.HearingDate, 105)", orderBy: "MutationId, HearingDate",
+      fields: [
+        LAND_ID,
+        { name: "MutationId", label: "Mutation", type: "ref", ref: "mutation", filterBy: "LandId", required: true },
+        { name: "HearingDate", label: "Hearing date", type: "date", required: true },
+        { name: "ObjectionRaised", label: "Objection raised", type: "select", required: true, options: ["No", "Yes"], default: "No" },
+        { name: "Outcome", label: "Outcome", type: "textarea", max: 1000 },
+        { name: "NextDate", label: "Next date", type: "date", after: "HearingDate" },
+        { name: "DocFileId", label: "Hearing record", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+        ACTIVE,
+      ],
+    }),
+  "mutation-record": landChild("New Khatian / RoR", "LegalMutationRecord", "RecordId",
+    "The new LR Khatian and Dag after mutation. The old RS / LR records stay as history.", {
+      label: "'LR Kh ' + r.NewLrKhatianNo + ' / Dag ' + r.NewLrDagNo", orderBy: "RecordId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "MutationId", label: "Mutation", type: "ref", ref: "mutation", filterBy: "LandId", required: true },
+        { name: "NewLrKhatianNo", label: "New LR Khatian number", type: "text", required: true, max: 30 },
+        { name: "NewLrDagNo", label: "New LR Dag number", type: "text", required: true, max: 30 },
+        { name: "RecordedHolder", label: "Recorded holder", type: "text", required: true, max: 300 },
+        { name: "NewSharePct", label: "New ownership share (%)", type: "decimal", maxValue: 100 },
+        { name: "LandTypeId", label: "Land classification", type: "ref", ref: "land-type" },
+        { name: "UpdatedArea", label: "Updated area", type: "decimal" },
+        { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "UpdatedArea" },
+        { name: "RorDate", label: "RoR date", type: "date" },
+        { name: "MutationOrderNo", label: "Mutation order number", type: "text", max: 80 },
+        { name: "MutationOrderDate", label: "Mutation order date", type: "date" },
+        { name: "RorFileId", label: "Updated RoR copy", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "final-check": landChild("Final Verification", "LegalFinalCheck", "CheckId",
+    "The final reviewer's confirmation of each closing item.", {
+      label: "r.CheckItem + ' - ' + r.Result", orderBy: "CheckId",
+      unique: [["LandId", "CheckItem"], "This check is already on the list"],
+      review: { field: "Result", by: "CheckedBy", at: "CheckedAt" },
+      fields: [
+        LAND_ID,
+        { name: "CheckItem", label: "Check", type: "select", required: true, options: FINAL_CHECKS },
+        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Confirmed", "Issue Found", "Not Applicable"], default: "Pending" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000, requiredWhen: { field: "Result", values: ["Issue Found", "Not Applicable"] } },
+        ACTIVE,
+      ],
+    }),
+  settlement: landChild("Financial Settlement", "LegalSettlement", "SettlementId",
+    "The final financial settlement of a purchase / sale. Only a reviewer can approve it.", {
+      label: "CONVERT(NVARCHAR(10), r.SettlementDate, 105) + ' - ' + r.SettlementStatus", orderBy: "SettlementDate",
+      review: { field: "SettlementStatus", by: "ApprovedBy", at: "ApprovedAt", free: ["Draft", "Submitted"] },
+      fields: [
+        LAND_ID,
+        { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId", required: true, fill: { AgreementValue: "TotalValue" } },
+        { name: "AgreementValue", label: "Agreement value (₹)", type: "decimal", required: true },
+        { name: "TotalReceived", label: "Total received (₹)", type: "decimal" },
+        { name: "TotalPaid", label: "Total paid (₹)", type: "decimal" },
+        { name: "RemainingBalance", label: "Remaining balance (₹)", type: "decimal", signed: true },
+        { name: "BrokerCommission", label: "Broker commission (₹)", type: "decimal" },
+        { name: "AdvocateFees", label: "Advocate fees (₹)", type: "decimal" },
+        { name: "RegistrationCharges", label: "Registration charges (₹)", type: "decimal" },
+        { name: "OtherExpenses", label: "Other expenses (₹)", type: "decimal" },
+        { name: "Refunds", label: "Refunds (₹)", type: "decimal" },
+        { name: "SettlementDate", label: "Settlement date", type: "date", required: true, default: "today" },
+        { name: "SettlementStatus", label: "Settlement status", type: "select", required: true, options: ["Draft", "Submitted", "Approved", "Rejected"], default: "Draft" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -762,4 +1402,4 @@ const EXTERNAL_REFS = {
   user: { sql: "SELECT id AS value, name AS label FROM dbo.users ORDER BY name", exists: "SELECT 1 FROM dbo.users WHERE id = @v" },
 };
 
-module.exports = { MASTERS, EXTERNAL_REFS };
+module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS };

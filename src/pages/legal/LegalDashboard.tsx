@@ -93,13 +93,15 @@ export default function LegalDashboard() {
                   All land properties <ChevronRight size={13} />
                 </button>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
                 {([
                   ["Land properties", land.totalLands, Global, "/legal/land/properties"],
                   ["Active enquiries", land.activeEnquiries, MessageQuestion, "/legal/land/enquiries"],
                   ["In progress", land.inProgress, Timer1, "/legal/land/properties"],
                   ["Pending verification", land.pendingVerification, ShieldTick, "/legal/land/properties"],
                   ["On hold", land.onHold, PauseCircle, "/legal/land/properties"],
+                  ["Pending registration", land.pendingRegistration, DocumentText, "/legal/land/reports"],
+                  ["Mutation pending", land.mutationPending, Map1, "/legal/land/reports"],
                   ["Completed", land.completed, TickCircle, "/legal/land/properties"],
                 ] as const).map(([label, value, Icon, path]) => (
                   <button key={label} onClick={() => navigate(path)} className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3 text-left transition-transform hover:-translate-y-0.5">
@@ -124,6 +126,36 @@ export default function LegalDashboard() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── Land Management work lists ── */}
+          {land && (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {([
+                ["Waiting for a reviewer", land.approvals.map((a) => ({ k: a.Kind, main: a.Kind, side: String(a.N), land: null as number | null })), "Nothing to review"],
+                ["Upcoming registration appointments", land.appointments.map((a, i) => ({ k: String(i), main: `${a.LandCode} · ${a.OfficeName ?? ""}`, side: `${fmtDate(a.AppointmentDate)} ${a.AppointmentTime ?? ""}`, land: a.LandId })), "None scheduled"],
+                ["Payments awaiting verification", land.payments.map((p, i) => ({ k: String(i), main: `${p.LandCode} · ${p.TransactionRef ?? ""}`, side: `₹${Number(p.Amount).toLocaleString("en-IN")}`, land: p.LandId })), "None pending"],
+                ["Open legal cases & disputes", land.cases.map((c) => ({ k: c.CaseNumber, main: `${c.LandCode} · ${c.CaseNumber}`, side: c.NextHearingDate ? `Hearing ${fmtDate(c.NextHearingDate)}` : c.Status, land: c.LandId })), "No open cases"],
+                ["Recent ownership transfers", land.transfers.map((t, i) => ({ k: String(i), main: `${t.LandCode} · ${t.FromName} → ${t.ToName}`, side: fmtDate(t.EventDate), land: t.LandId })), "No transfers yet"],
+              ] as const).map(([title, items, empty]) => (
+                <div key={title} className={`${card} p-4`}>
+                  <p className={eyebrow}>{title}</p>
+                  {!items.length ? <p className="text-sm text-muted-foreground">{empty}</p> : (
+                    <ul className="space-y-1">
+                      {items.map((it) => (
+                        <li key={it.k}>
+                          <button disabled={!it.land} onClick={() => it.land && navigate(`/legal/land/properties/${it.land}`)}
+                            className="flex w-full items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left text-sm hover:bg-muted/40 disabled:hover:bg-transparent">
+                            <span className="min-w-0 truncate text-foreground">{it.main}</span>
+                            <span className="shrink-0 text-xs text-muted-foreground">{it.side}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 

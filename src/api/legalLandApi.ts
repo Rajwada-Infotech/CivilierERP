@@ -29,7 +29,7 @@ export interface LandPipeline {
   land: {
     LandId: number; LandCode: string; LandName: string; DistrictName: string | null; MouzaId: number | null; MouzaName: string | null;
     JLNo: string | null; Area: number | null; UnitName: string | null; LandStatus: string; WorkflowStatus: string | null;
-    IsOnHold: boolean; IsActive: boolean; EnquiryNo: string | null;
+    IsOnHold: boolean; IsActive: boolean; EnquiryNo: string | null; IsCancelled: boolean; CancelReason: string | null; CancelledAt: string | null;
   };
   hold: { HoldCategory: string; HoldReason: string; HoldDate: string; ExpectedReviewDate: string | null; HeldByName: string | null } | null;
   steps: PipelineStep[];
@@ -37,11 +37,19 @@ export interface LandPipeline {
   warnings: string[];
   progress: number;
   holdCategories: string[];
+  milestones: { deedRegistered: boolean; mutationCompleted: boolean; settlementApproved: boolean; transactionClosed: boolean };
 }
 
 export interface LandStats {
   totalLands: number; activeEnquiries: number; inProgress: number; onHold: number; pendingVerification: number; completed: number;
   recent: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null; IsOnHold: boolean; MouzaName: string | null; JLNo: string | null }[];
+  pendingRegistration: number;
+  mutationPending: number;
+  approvals: { Kind: string; N: number }[];
+  appointments: { AppointmentDate: string; AppointmentTime: string | null; TokenNo: string | null; OfficeName: string | null; LandId: number; LandCode: string; LandName: string }[];
+  payments: { PaymentDate: string; Amount: number; TransactionRef: string | null; LandId: number; LandCode: string; LandName: string }[];
+  cases: { CaseNumber: string; CourtName: string; NextHearingDate: string | null; Status: string; LandId: number; LandCode: string }[];
+  transfers: { EventDate: string; FromName: string; ToName: string; TransferType: string | null; LandId: number; LandCode: string }[];
 }
 
 export interface AuditEvent {
@@ -65,5 +73,48 @@ export const holdLand = async (id: number, body: { category: string; reason: str
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/hold`, post(body)));
 export const resumeLand = async (id: number, remarks: string) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/resume`, post({ remarks })));
+export interface LandFinance {
+  transactions: { TransactionId: number; TransactionNo: string; TxnType: string; BuyerName: string; SellerNames: string; TotalValue: number; AdvanceAmount: number | null; TxnStatus: string; Verified: number; Unverified: number; Balance: number }[];
+  expenses: { ExpenseType: string; Amount: number }[];
+  registrationFees: number;
+}
+export const getLandFinance = async (id: number) => handle<LandFinance>(await fetchWithAuth(`${BASE}/${id}/finance`));
+export interface LandRegister {
+  landCode: string; landName: string; mouza: string | null; area: string | null; remainingArea: string | null;
+  owners: { name: string; guardian: string | null; sharePct: number; since: string; verification: string }[];
+  rsReferences: string[]; lrReferences: string[];
+  latestDeed: { number: string; date: string; approval: string } | null;
+  mutationStatus: string; legalStatus: string; settlementStatus: string; workflowStatus: string | null;
+}
+export const getLandRegister = async (id: number) =>
+  handle<{ current: LandRegister; snapshots: { SnapshotId: number; CreatedAt: string; Remarks: string | null; CreatedByName: string | null; snapshot: LandRegister }[] }>(await fetchWithAuth(`${BASE}/${id}/register`));
+export const updateLandRegister = async (id: number, remarks?: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/register/snapshot`, post({ remarks })));
+export const initFinalChecks = async (id: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/final-checks/init`, post({})));
+export const cancelLand = async (id: number, reason: string) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/cancel`, post({ reason })));
+export const recordOwnershipTransfer = async (id: number, body: {
+  registeredDeedId: number; transferDate: string; sellers: { recordId: number; sharePct: number }[]; buyers: { name: string; guardian?: string; sharePct: number }[]; remarks?: string;
+}) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/ownership-transfer`, post(body)));
+
+export const getLandReports = async () => handle<{ key: string; group: string; title: string }[]>(await fetchWithAuth(`/api/legal/land-reports`));
+export const getLandReport = async (key: string) =>
+  handle<{ title: string; columns: string[]; rows: Record<string, unknown>[] }>(await fetchWithAuth(`/api/legal/land-reports/${key}`));
+
+export interface OwnershipChange {
+  first?: boolean;
+  date: string;
+  transferTypeId?: number;
+  from?: { recordId: number; sharePct: number }[];
+  to: { name: string; guardian?: string; relationshipTypeId?: number; sharePct: number }[];
+  docTypeId?: number; documentNo?: string; deedNo?: string; fileId?: number;
+  registrationOfficeId?: number; registrationDate?: string; transferValue?: number;
+  inheritance?: { dateOfDeath?: string; deathCertFileId?: number; heirCertFileId?: number; supportingType?: string; supportingFileId?: number; mutationRecordNo?: string };
+  partitionNewReferences?: string;
+  remarks?: string;
+}
+export const recordOwnershipChange = async (id: number, body: OwnershipChange) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/ownership/change`, post(body)));
+export const undoOwnershipChange = async (id: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/ownership/undo`, post({})));
+
+export const initDueDiligence = async (id: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/due-diligence/init`, post({})));
 export const convertEnquiry = async (id: number, landName?: string) =>
   handle<{ landId: number; landCode: string; message: string }>(await fetchWithAuth(`${BASE}/enquiries/${id}/convert`, post({ landName })));

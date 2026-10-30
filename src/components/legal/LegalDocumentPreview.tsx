@@ -9,6 +9,9 @@ import { fetchLegalFile } from "@/api/legalMastersApi";
 
 const EVENT = "legal:side-panel";
 
+/** Below this page-area width (phones) the panel is a bottom sheet; from here up it docks on the right. */
+export const PANEL_DOCK_MIN_WIDTH = 640;
+
 export interface LegalDetailItem {
   label: string;
   value: string;
@@ -63,7 +66,7 @@ const DocView: React.FC<{ doc: Doc }> = ({ doc }) => {
   return (
     <>
       {file && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <a className={btn} href={file.url} download={doc.name}><Download size={13} /> Download</a>
           <a className={btn} href={file.url} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open in new tab</a>
         </div>
@@ -85,7 +88,7 @@ const DocView: React.FC<{ doc: Doc }> = ({ doc }) => {
 
 const DetailsView: React.FC<{ details: Details; openDoc: (d: Doc) => void }> = ({ details, openDoc }) => (
   <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-3 min-[420px]:grid-cols-2">
       {details.items.map((it) => (
         <div key={it.label} className={it.wide ? "col-span-2" : ""}>
           <dt className="text-[0.6875rem] uppercase tracking-[0.12em] text-muted-foreground">{it.label}</dt>
@@ -100,7 +103,7 @@ const DetailsView: React.FC<{ details: Details; openDoc: (d: Doc) => void }> = (
   </div>
 );
 
-export const LegalDocumentPreview: React.FC = () => {
+export const LegalDocumentPreview: React.FC<{ dock: boolean }> = ({ dock }) => {
   const [panel, setPanel] = useState<Panel | null>(null);
 
   useEffect(() => {
@@ -115,13 +118,33 @@ export const LegalDocumentPreview: React.FC = () => {
     const el = ref.current;
     if (!el) return;
     const top = el.getBoundingClientRect().top;
-    if (top < 72 || top > window.innerHeight - 120) el.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [panel]);
+    // Only the docked panel sits in the page; the sliding one is always in view.
+    if (dock && (top < 72 || top > window.innerHeight - 120)) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [panel, dock]);
+
+  // Esc closes the sliding panel.
+  useEffect(() => {
+    if (!panel || dock) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [panel, dock]);
 
   if (!panel) return null;
   const isDoc = panel.kind === "doc";
   return (
-    <aside ref={ref} className="order-first flex h-[70vh] flex-col gap-3 rounded-2xl border border-border bg-card/90 p-4 shadow-sm backdrop-blur-lg lg:order-none lg:sticky lg:top-[4.5rem] lg:h-[calc(100vh-5.5rem)] lg:w-[40%] lg:shrink-0">
+    <>
+    {/* Not enough room to dock: dim the page behind the sliding panel; tap it to close. */}
+    {!dock && <button type="button" aria-label="Close panel" onClick={() => setPanel(null)} className="fixed inset-0 z-40 bg-black/30" />}
+    <aside
+      ref={ref}
+      className={dock
+        // Docked beside the page, under the fixed top bar; its width follows the space (38%, 320–560 px).
+        ? "sticky top-[4.5rem] flex h-[calc(100vh-5.5rem)] w-[clamp(320px,38%,560px)] shrink-0 flex-col gap-3 rounded-2xl border border-border bg-card/90 p-4 shadow-sm backdrop-blur-lg"
+        // Phones: a bottom sheet over the page.
+        : "fixed inset-x-0 bottom-0 z-50 flex h-[85dvh] flex-col gap-3 rounded-t-2xl border border-border bg-card p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl"}
+    >
+      {!dock && <div className="mx-auto -mt-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30" aria-hidden />}
       <div className="flex items-start gap-2">
         {isDoc && panel.back ? (
           <button type="button" onClick={() => setPanel(panel.back!)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Back to details" title="Back to details">
@@ -136,5 +159,6 @@ export const LegalDocumentPreview: React.FC = () => {
       </div>
       {isDoc ? <DocView doc={panel} /> : <DetailsView details={panel} openDoc={setPanel} />}
     </aside>
+    </>
   );
 };
