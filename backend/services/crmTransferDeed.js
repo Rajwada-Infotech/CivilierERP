@@ -33,14 +33,10 @@ const LIVE = ["Draft", "UnderReview", "LegalApproved", "WithParties", "PartiesAp
 const kycLabel = (who, pan) => `${who}'s KYC (${require("./crmResaleCase").isIndividualPan(pan) ? "PAN & Aadhaar" : "PAN & address proof"})`;
 
 /**
- * Whether staff may verify a paper they uploaded themselves is a setting in
- * Approval Setup ("crm-transfer-deed-papers", migration 571). Portal uploads
- * are the customer's, so any staff member may check them.
+ * Paper verification: work guard removed, staff member may verify papers.
  */
-async function assertMayVerifyOwn(doc, actorUserId) {
-  if (doc.UploadedByType === "Portal" || !doc.UploadedBy || Number(doc.UploadedBy) !== Number(actorUserId)) return;
-  if (await require("./approvalService").raiserMayApprove("crm-transfer-deed-papers")) return;
-  throw new DeedError("You uploaded this document, so someone else has to verify it (Approval Setup).", 403);
+async function assertMayVerifyOwn(_doc, _actorUserId) {
+  return;
 }
 
 /** The papers each deed needs, and whose they are. */

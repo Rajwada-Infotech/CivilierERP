@@ -13,6 +13,11 @@ const {
   isApproverFor,
 } = require("../services/approvalService");
 
+function isSuperAdminRole(role) {
+  const r = String(role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return r === "super_admin" || r === "superadmin" || r === "sa";
+}
+
 // ── Per-record visibility filter ────────────────────────────────────────────
 // Before this, GET / returned every Pending row in the system to anyone
 // holding "approval-inbox: view" — a Material Request waiting on its named
@@ -58,6 +63,7 @@ const {
 // Same rule as approvalService.userMatchesLevel: a level names the viewer's
 // role or the viewer. A level naming nobody admits nobody.
 function isNamedOnLevel(levelDef, role, viewerUserId) {
+  if (isSuperAdminRole(role)) return true;
   const roles = Array.isArray(levelDef?.roles) ? levelDef.roles.map((r) => String(r).toLowerCase()) : [];
   const ids = Array.isArray(levelDef?.userIds) ? levelDef.userIds.map(Number) : [];
   return (role !== "" && roles.includes(role)) || (viewerUserId != null && ids.includes(Number(viewerUserId)));
@@ -99,12 +105,13 @@ async function dprApprovalLevels(rungId) {
 // MRs had been approved past Level 1 — before this, Level-2-only approvers
 // correctly couldn't act on the other 8 yet, but also couldn't see them
 // coming, which read as "the inbox is missing records" (2026-09-22).
-// admin / super_admin still SEE every pending item (oversight), but may act
-// only where Approval Setup names them, like everyone else.
+// Super Admin has parallel approval rights for every approval across all modules.
+// admin / super_admin see every pending item (oversight), and canAct is true whenever they match or are Super Admin.
 async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
   const r = await whoMayAct(item, viewerRole, viewerUserId, workflowCache);
   const role = (viewerRole || "").toLowerCase();
-  if (!r.visible && (role === "admin" || role === "super_admin")) return { ...r, visible: true, canAct: false };
+  if (isSuperAdminRole(role)) return { ...r, visible: true, canAct: true };
+  if (!r.visible && role === "admin") return { ...r, visible: true, canAct: false };
   return r;
 }
 
@@ -117,7 +124,8 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
   // role or Approval Setup workflow — there's no meaningful way to "name" a
   // whichever-engineer-happens-to-be-on-this-row approver in Approval Setup.
   if (item.Module === "work-allocation-engineer") {
-    const visible = viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId);
+    const isSA = isSuperAdminRole(role);
+    const visible = isSA || (viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId));
     return { visible, canAct: visible };
   }
 
@@ -131,8 +139,11 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
   // "isNamedOnWorkflow" fallback below); actionable only for the level
   // that's actually next in line.
   if (item.Module === "civilworkdpr-approval") {
+    const isSA = isSuperAdminRole(role);
     const rungId = parseInt(item.RecordId, 10);
-    if (!Number.isFinite(rungId) || viewerUserId == null) return { visible: false, canAct: false };
+    if (!Number.isFinite(rungId)) return { visible: false, canAct: false };
+    if (isSA) return { visible: true, canAct: true };
+    if (viewerUserId == null) return { visible: false, canAct: false };
     try {
       const dpr = await dprApprovalLevels(rungId);
       if (!dpr) return { visible: false, canAct: false };

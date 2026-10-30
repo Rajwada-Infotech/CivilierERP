@@ -3,6 +3,10 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, isSaAdmin, applyLeadScope } = require("../services/saAccess");
+const { requireApprover } = require("../middleware/requireApprover");
+const { isApproverFor } = require("../services/approvalService");
+
+const APPROVE = requireApprover("sa-lead-transfers", "lead transfers");
 const { alertAssignedMany } = require("../services/saMessaging");
 
 const router = express.Router();
@@ -11,13 +15,13 @@ router.use(apiRateLimit);
 router.use(authMiddleware);
 
 // ── GET / ──────────────────────────────────────────────────────────────────
-// Admin: all requests.  TL: only requests they raised.
+// Admins and lead-transfer approvers (Approval Setup): all requests. TL: only requests they raised.
 router.get("/", requirePageRight("sa-lead-transfers", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
     let whereClause = "";
-    if (!isSaAdmin(req)) {
+    if (!isSaAdmin(req) && !(await isApproverFor("sa-lead-transfers", actorId(req), req.user?.role))) {
       request.input("ActorId", sql.Int, actorId(req));
       whereClause = "WHERE r.RequestedByUserId = @ActorId";
     }
@@ -158,10 +162,8 @@ router.post("/", requirePageRight("sa-lead-transfers", "create"), async (req, re
 });
 
 // ── POST /:id/approve ──────────────────────────────────────────────────────
-// Admin approves: reassigns all leads to the destination TL
-router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async (req, res) => {
-  if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admins can approve transfer requests" });
-
+// A lead-transfer approver (Approval Setup) approves: reassigns all leads to the destination TL
+router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), APPROVE, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { AdminNotes } = req.body;
@@ -247,9 +249,7 @@ router.post("/:id/approve", requirePageRight("sa-lead-transfers", "edit"), async
 });
 
 // ── POST /:id/reject ───────────────────────────────────────────────────────
-router.post("/:id/reject", requirePageRight("sa-lead-transfers", "edit"), async (req, res) => {
-  if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admins can reject transfer requests" });
-
+router.post("/:id/reject", requirePageRight("sa-lead-transfers", "edit"), APPROVE, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   const { AdminNotes } = req.body;

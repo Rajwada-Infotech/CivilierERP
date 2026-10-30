@@ -28,7 +28,23 @@ export type ApprovalTable =
   | "WorkDone"
   | "SaleOrders"
   | "VehicleInOut"
-  | "Contract";
+  | "Contract"
+  | "JournalVoucher"
+  | "InterCompanyTransfer"
+  | "FundTransfer"
+  | "DebitNote"
+  | "CrmApplication"
+  | "CrmBooking"
+  | "CrmAgreement"
+  | "CrmBrokerageMaster"
+  | "CrmCancellation"
+  | "CrmRefund"
+  | "CrmUnitResale"
+  | "CrmOwnershipChange"
+  | "CrmGstNote"
+  | "CrmTransferDeed"
+  | "CrmNoc"
+  | "CrmSalesDeed";
 
 interface Approver {
   email: string | null;

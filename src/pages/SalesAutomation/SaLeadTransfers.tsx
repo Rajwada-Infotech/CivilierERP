@@ -13,6 +13,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SaTabs } from "@/components/sa/SaTabs";
 import { LEAD_STAGES } from "@/components/sa/leadStages";
+import { useCanApprove } from "@/hooks/useCanApprove";
 
 const API = "/api/sa/lead-transfers";
 
@@ -34,7 +35,8 @@ const fmtDay = (d: unknown) =>
 const SaLeadTransfers: React.FC = () => {
   usePageRights("sa-lead-transfers");
   const { canDoAction } = useAuth();
-  const canApprove = canDoAction("sa-lead-transfers", "edit");
+  // Approval Setup decides who approves lead transfers (super admin always can) — the server says.
+  const canApprove = useCanApprove("sa-lead-transfers") && canDoAction("sa-lead-transfers", "edit");
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [loadedItems, setLoadedItems] = useState<Record<number, any[]>>({});

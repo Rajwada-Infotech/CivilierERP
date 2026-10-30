@@ -21,9 +21,6 @@ function parseJson(val, fallback = []) {
   }
 }
 
-// ── Raiser may approve their own request (migration 571) ─────────────────────
-// GET  /api/approval-workflows/raiser-rules           — every module that records its raiser
-// PUT  /api/approval-workflows/raiser-rules/:module   { raiserMayApprove: bool }
 // May the signed-in user approve/reject this record now? Approval Setup
 // decides (approvalService.canUserAct — the same check transition() makes);
 // the Approve / Reject buttons ask here instead of keeping role lists.
@@ -38,39 +35,6 @@ router.get("/can-act", authMiddleware, async (req, res) => {
   } catch (err) {
     console.error("[approval-workflows] can-act error:", err.message);
     res.status(500).json({ error: "Couldn't check approval rights" });
-  }
-});
-
-router.get("/raiser-rules", authMiddleware, async (_req, res) => {
-  try {
-    const { MAKER_COLUMNS, RAISER_RULE_EXTRA } = require("../services/approvalService");
-    const rows = (await getPool().request().query("SELECT Module, RaiserMayApprove, UpdatedBy, UpdatedAt FROM dbo.ApprovalRaiserRule")).recordset;
-    const byModule = new Map(rows.map((r) => [r.Module, r]));
-    res.json([...Object.keys(MAKER_COLUMNS), ...Object.keys(RAISER_RULE_EXTRA)].map((module) => {
-      const r = byModule.get(module);
-      return { module, label: RAISER_RULE_EXTRA[module] || null, raiserMayApprove: !!r?.RaiserMayApprove, updatedBy: r?.UpdatedBy || null, updatedAt: r?.UpdatedAt || null };
-    }));
-  } catch (err) {
-    console.error("[approval-workflows] GET /raiser-rules:", err.message);
-    res.status(500).json({ error: "Could not load the setting" });
-  }
-});
-
-router.put("/raiser-rules/:module", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { MAKER_COLUMNS, RAISER_RULE_EXTRA } = require("../services/approvalService");
-  const module = String(req.params.module || "");
-  if (!Object.prototype.hasOwnProperty.call(MAKER_COLUMNS, module) && !Object.prototype.hasOwnProperty.call(RAISER_RULE_EXTRA, module)) return res.status(404).json({ error: "That approval doesn't record who raised it" });
-  if (typeof req.body?.raiserMayApprove !== "boolean") return res.status(400).json({ error: "raiserMayApprove must be true or false" });
-  try {
-    await getPool().request().input("m", sql.NVarChar(100), module).input("v", sql.Bit, req.body.raiserMayApprove ? 1 : 0)
-      .input("by", sql.NVarChar(100), req.user?.email || req.user?.name || null)
-      .query(`MERGE dbo.ApprovalRaiserRule AS t USING (SELECT @m AS Module) AS s ON t.Module = s.Module
-              WHEN MATCHED THEN UPDATE SET RaiserMayApprove = @v, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-              WHEN NOT MATCHED THEN INSERT (Module, RaiserMayApprove, UpdatedBy) VALUES (@m, @v, @by);`);
-    res.json({ success: true, module, raiserMayApprove: req.body.raiserMayApprove });
-  } catch (err) {
-    console.error("[approval-workflows] PUT /raiser-rules:", err.message);
-    res.status(500).json({ error: "Could not save the setting" });
   }
 });
 
@@ -252,20 +216,73 @@ module.exports = router;
 // tableName matches what approvalService writes to ApprovalAuditLog
 // workflowModuleId matches what ApprovalWorkflows.modules JSON array contains
 const MODULE_TABLE_MAP = {
-  GoodsReceiptNotes: { workflowId: "GRN" },
-  PurchaseOrders: { workflowId: "PurchaseOrders" },
-  WorkOrderHeader: { workflowId: "WorkOrderHeader" },
-  ExpenseBooking: { workflowId: "Expenses" },
-  NewPayment: { workflowId: "NewPayment" },
-  MaterialIssues: { workflowId: "MaterialIssues" },
-  MaterialIssueReturn: { workflowId: "MaterialIssueReturn" },
-  MaterialRequests: { workflowId: "MaterialRequests" },
-  StockTransfers: { workflowId: "StockTransfer" },
-  BOQ: { workflowId: "BOQ" },
-  WorkDone: { workflowId: "WorkDone" },
-  SaleOrders: { workflowId: "SaleOrder" },
-  VehicleInOut: { workflowId: "VehicleInOut" },
-  Contract: { workflowId: "Contract" },
+  GoodsReceiptNotes: { workflowId: "GRN", tableName: "GoodsReceiptNotes" },
+  PurchaseOrders: { workflowId: "PurchaseOrders", tableName: "PurchaseOrders" },
+  WorkOrderHeader: { workflowId: "WorkOrderHeader", tableName: "WorkOrderHeader" },
+  ExpenseBooking: { workflowId: "Expenses", tableName: "ExpenseBooking" },
+  NewPayment: { workflowId: "NewPayment", tableName: "NewPayment" },
+  MaterialIssues: { workflowId: "MaterialIssues", tableName: "MaterialIssues" },
+  MaterialIssueReturn: { workflowId: "MaterialIssueReturn", tableName: "MaterialIssueReturn" },
+  MaterialRequests: { workflowId: "MaterialRequests", tableName: "MaterialRequests" },
+  StockTransfers: { workflowId: "StockTransfer", tableName: "StockTransfers" },
+  BOQ: { workflowId: "BOQ", tableName: "BOQ" },
+  WorkDone: { workflowId: "WorkDone", tableName: "WorkDone" },
+  SaleOrders: { workflowId: "SaleOrder", tableName: "SaleOrders" },
+  VehicleInOut: { workflowId: "VehicleInOut", tableName: "VehicleInOut" },
+  Contract: { workflowId: "Contract", tableName: "Contract" },
+  JournalVoucher: { workflowId: "JournalVoucher", tableName: "JournalVoucher" },
+  InterCompanyTransfer: { workflowId: "InterCompanyTransfer", tableName: "InterCompanyTransfer" },
+  FundTransfer: { workflowId: "FundTransfer", tableName: "FundTransfer" },
+  DebitNote: { workflowId: "debit-note", tableName: "DebitNote" },
+  CrmApplication: { workflowId: "crm-applications", tableName: "CrmApplication" },
+  CrmBooking: { workflowId: "crm-bookings", tableName: "CrmBooking" },
+  CrmAgreement: { workflowId: "crm-agreements", tableName: "CrmAgreement" },
+  CrmBrokerageMaster: { workflowId: "crm-brokerage", tableName: "CrmBrokerageMaster" },
+  CrmCancellation: { workflowId: "crm-cancellations", tableName: "CrmCancellation" },
+  CrmRefund: { workflowId: "crm-refunds", tableName: "CrmRefund" },
+  CrmUnitResale: { workflowId: "crm-resales", tableName: "CrmUnitResale" },
+  CrmOwnershipChange: { workflowId: "crm-ownership-changes", tableName: "CrmOwnershipChange" },
+  CrmGstNote: { workflowId: "crm-credit-notes", tableName: "CrmGstNote" },
+  CrmTransferDeed: { workflowId: "crm-transfer-deeds", tableName: "CrmTransferDeed" },
+  CrmNoc: { workflowId: "crm-noc", tableName: "CrmNoc" },
+  CrmSalesDeed: { workflowId: "crm-sales-deed-senior", tableName: "CrmSalesDeed" },
+
+  // Slugs as aliases
+  grn: { workflowId: "GRN", tableName: "GoodsReceiptNotes" },
+  "goods-receipt": { workflowId: "GRN", tableName: "GoodsReceiptNotes" },
+  "purchase-orders": { workflowId: "PurchaseOrders", tableName: "PurchaseOrders" },
+  "work-orders": { workflowId: "WorkOrderHeader", tableName: "WorkOrderHeader" },
+  "expense-booking": { workflowId: "Expenses", tableName: "ExpenseBooking" },
+  payments: { workflowId: "NewPayment", tableName: "NewPayment" },
+  "material-issues": { workflowId: "MaterialIssues", tableName: "MaterialIssues" },
+  "material-issue-return": { workflowId: "MaterialIssueReturn", tableName: "MaterialIssueReturn" },
+  "material-requests": { workflowId: "MaterialRequests", tableName: "MaterialRequests" },
+  "stock-transfers": { workflowId: "StockTransfer", tableName: "StockTransfers" },
+  boq: { workflowId: "BOQ", tableName: "BOQ" },
+  "work-done": { workflowId: "WorkDone", tableName: "WorkDone" },
+  "sale-orders": { workflowId: "SaleOrder", tableName: "SaleOrders" },
+  "vehicle-in-out": { workflowId: "VehicleInOut", tableName: "VehicleInOut" },
+  contracts: { workflowId: "Contract", tableName: "Contract" },
+  "journal-voucher": { workflowId: "JournalVoucher", tableName: "JournalVoucher" },
+  "inter-company-transfer": { workflowId: "InterCompanyTransfer", tableName: "InterCompanyTransfer" },
+  "fund-transfer": { workflowId: "FundTransfer", tableName: "FundTransfer" },
+  "debit-note": { workflowId: "debit-note", tableName: "DebitNote" },
+  "crm-applications": { workflowId: "crm-applications", tableName: "CrmApplication" },
+  "crm-bookings": { workflowId: "crm-bookings", tableName: "CrmBooking" },
+  "crm-agreements": { workflowId: "crm-agreements", tableName: "CrmAgreement" },
+  "crm-agreement-date": { workflowId: "crm-agreement-date", tableName: "CrmAgreement" },
+  "crm-brokerage": { workflowId: "crm-brokerage", tableName: "CrmBrokerageMaster" },
+  "crm-cancellations": { workflowId: "crm-cancellations", tableName: "CrmCancellation" },
+  "crm-refunds": { workflowId: "crm-refunds", tableName: "CrmRefund" },
+  "crm-resales": { workflowId: "crm-resales", tableName: "CrmUnitResale" },
+  "crm-ownership-changes": { workflowId: "crm-ownership-changes", tableName: "CrmOwnershipChange" },
+  "crm-credit-notes": { workflowId: "crm-credit-notes", tableName: "CrmGstNote" },
+  "crm-credit-note-cancel": { workflowId: "crm-credit-note-cancel", tableName: "CrmGstNote" },
+  "crm-transfer-deeds": { workflowId: "crm-transfer-deeds", tableName: "CrmTransferDeed" },
+  "crm-transfer-deed-date": { workflowId: "crm-transfer-deed-date", tableName: "CrmTransferDeed" },
+  "crm-noc": { workflowId: "crm-noc", tableName: "CrmNoc" },
+  "crm-sales-deed-director": { workflowId: "crm-sales-deed-director", tableName: "CrmSalesDeed" },
+  "crm-sales-deed-senior": { workflowId: "crm-sales-deed-senior", tableName: "CrmSalesDeed" },
 };
 
 // Builds one record's trail payload — shared by the single-record GET
@@ -286,6 +303,10 @@ const MODULE_TABLE_MAP = {
 const POST_APPROVAL_STATUSES = {
   PurchaseOrders: ["Received"],
   MaterialRequests: ["Partially Fulfilled", "Completed"],
+  WorkOrderHeader: ["In Progress", "Completed"],
+  CrmBooking: ["Confirmed"],
+  CrmAgreement: ["Executed", "Registered"],
+  CrmApplication: ["Converted"],
 };
 function isApprovedOutcome(module, status) {
   const s = String(status ?? "");
@@ -296,18 +317,20 @@ async function buildApprovalTrail(pool, module, recordId) {
   const entry = MODULE_TABLE_MAP[module];
   if (!entry) return { error: `Unknown module table: ${module}` };
 
-    // A CRM Refund's payout voucher is a NewPayment row routed through its
-    // own single-level "CrmRefundPayment" workflow (see approvalService.js),
-    // not the multi-module "NewPayment" bundle every other Payment shares —
-    // this endpoint only receives the table name, not which workflow
-    // actually governed the approve/reject click, so it has to look the
-    // row up itself to show the chain that's actually in effect.
-    let workflowId = entry.workflowId;
-    if (module === "NewPayment") {
-      const srcCheck = await pool.request().input("id", sql.Int, recordId)
-        .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
-      if (srcCheck.recordset[0]?.SourceCrmRefundId) workflowId = "CrmRefundPayment";
-    }
+  const tableName = entry.tableName || module;
+
+  // A CRM Refund's payout voucher is a NewPayment row routed through its
+  // own single-level "CrmRefundPayment" workflow (see approvalService.js),
+  // not the multi-module "NewPayment" bundle every other Payment shares —
+  // this endpoint only receives the table name, not which workflow
+  // actually governed the approve/reject click, so it has to look the
+  // row up itself to show the chain that's actually in effect.
+  let workflowId = entry.workflowId;
+  if (tableName === "NewPayment") {
+    const srcCheck = await pool.request().input("id", sql.Int, recordId)
+      .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+    if (srcCheck.recordset[0]?.SourceCrmRefundId) workflowId = "CrmRefundPayment";
+  }
 
     // 1. Fetch workflow config (levels + type)
     const wfResult = await pool
@@ -331,7 +354,7 @@ async function buildApprovalTrail(pool, module, recordId) {
     // 2. Fetch full audit trail (all rows, Level > 0 only — Level 0 is submission marker)
     const auditResult = await pool
       .request()
-      .input("TableName", sql.NVarChar(100), module)
+      .input("TableName", sql.NVarChar(100), tableName)
       .input("RecordId", sql.Int, recordId).query(`
         SELECT Level, Role, ApproverEmail, ActionStatus, Note, ActionAt
         FROM dbo.ApprovalAuditLog
@@ -347,7 +370,7 @@ async function buildApprovalTrail(pool, module, recordId) {
     // Level 0 fallback only still matters for that older historical data.
     const level0Result = await pool
       .request()
-      .input("TableName", sql.NVarChar(100), module)
+      .input("TableName", sql.NVarChar(100), tableName)
       .input("RecordId", sql.Int, recordId).query(`
         SELECT Level, Role, ApproverEmail, ActionStatus, Note, ActionAt
         FROM dbo.ApprovalAuditLog
@@ -494,7 +517,7 @@ async function buildApprovalTrail(pool, module, recordId) {
     // Only in-progress (Pending) records are still evaluated against the
     // current workflow shape.
     const docEntry = Object.values(DOC_MODULE_MAP).find(
-      (m) => m.table.replace("dbo.", "") === module,
+      (m) => m.table.replace("dbo.", "") === tableName,
     );
     let actualStatus = null;
     if (docEntry) {
@@ -509,7 +532,7 @@ async function buildApprovalTrail(pool, module, recordId) {
         // the step-derived computation below rather than erroring the badge.
       }
     }
-    const approvedOutcome = isApprovedOutcome(module, actualStatus);
+    const approvedOutcome = isApprovedOutcome(tableName, actualStatus);
     if (approvedOutcome) {
       for (const s of steps) {
         if (s.status !== "Approved") {
