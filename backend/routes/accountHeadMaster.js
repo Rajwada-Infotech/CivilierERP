@@ -11,12 +11,11 @@ router.use(cleanNames(["LHeadName", "LHeadCode", "DisplayName"]));
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const allowRoles = require("../middleware/role");
 const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const bcrypt = require("bcrypt");
+const { requireApprover } = require("../middleware/requireApprover");
 
-const adminOnly = allowRoles("admin", "super_admin");
 
 // Brokers are account heads too (LHeadType 'BR'), kept from Broker Master. Its users were refused every save here,
 // since only Account Head's rights counted. A broker row — the stored one for an id, else the one being created —
@@ -845,8 +844,8 @@ router.put("/:id/submit", requirePageRight("account-head", "edit"), async (req, 
   }
 });
 
-// ─── PUT /:id/approve — admin approves ────────────────────────────────────────
-router.put("/:id/approve", adminOnly, async (req, res) => {
+// ─── PUT /:id/approve — an Account Head approver (Approval Setup) approves ────
+router.put("/:id/approve", requireApprover("account-heads", "account heads"), async (req, res) => {
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;
@@ -885,8 +884,8 @@ router.put("/:id/approve", adminOnly, async (req, res) => {
   }
 });
 
-// ─── PUT /:id/reject — admin rejects ──────────────────────────────────────────
-router.put("/:id/reject", adminOnly, async (req, res) => {
+// ─── PUT /:id/reject — an Account Head approver (Approval Setup) rejects ──────
+router.put("/:id/reject", requireApprover("account-heads", "account heads"), async (req, res) => {
   try {
     const userName = requireUserName(req, res);
     if (!userName) return;

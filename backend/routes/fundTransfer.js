@@ -7,7 +7,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
-const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus, getWorkflow } = require("../services/approvalService");
+const { transition, guardEdit, guardEditAnyStage, restartApprovalCycle, getRecordStatus, getWorkflow, isSuperAdmin, userMatchesLevel } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postFundTransferApproval, hasCompleteFundTransferPosting, reversePostingBySource } = require("../services/generalLedger");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
@@ -21,14 +21,14 @@ function requireUser(req, res) {
   return email;
 }
 
+// Retrying an approved transfer's posting: anyone named on any level of the Fund Transfer
+// workflow in Approval Setup (role or person), or a super admin — the engine's rule.
 async function authorizeApprovedTransferRetry(req) {
-  const role = String(req.user?.role || "").toLowerCase();
-  if (role === "super_admin") return;
+  const role = req.user?.role;
+  if (isSuperAdmin(role)) return;
   const userId = req.user?.userId ?? req.user?.id;
   const workflow = await getWorkflow("fund-transfer");
-  const namedApprover = userId != null && workflow?.LevelDefs?.some((level) =>
-    Array.isArray(level.userIds) && level.userIds.map(Number).includes(Number(userId)),
-  );
+  const namedApprover = !!workflow?.LevelDefs?.some((level) => userMatchesLevel(level, role, userId));
   if (!namedApprover) {
     const err = new Error("Only a Fund Transfer approver can retry its accounting posting.");
     err.status = 403;

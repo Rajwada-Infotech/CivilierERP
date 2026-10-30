@@ -7,6 +7,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
 const { findOrCreateTag } = require("./dprTagMaster");
+const { requireApprover } = require("../middleware/requireApprover");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DB Schema (from sp_help):
@@ -285,7 +286,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
 });
 
 // ─── PATCH (Approve) ──────────────────────────────────────────────────────────
-router.patch("/:id/approve", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.patch("/:id/approve", requireApprover("activity-master", "activities"), async (req, res) => {
   try {
     const pool = getPool();
     const now = new Date();
