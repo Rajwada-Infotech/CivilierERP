@@ -40,7 +40,11 @@ const CHECKLIST_ITEMS = [
   { key: "ApplicantKyc", label: "Applicant & co-applicant details match KYC (name, mobile, email, PAN, address)" },
   { key: "ProjectUnitRate", label: "Project, Unit and Rate/SqFt are correct and the unit is genuinely available" },
   { key: "PaymentPlanAmounts", label: "Payment Plan and Token/Booking Amount match what was quoted to the customer" },
-  { key: "ParkingExtraCharges", label: "Parking (type, quantity, rate) and extra charges are correct, or correctly none" },
+  // onlyWhen: an item with nothing to verify is not on the checklist at all —
+  // shown (and required) only while this SQL finds data for the application.
+  { key: "ParkingExtraCharges", label: "Parking (type, quantity, rate) and extra charges are correct",
+    onlyWhen: `EXISTS (SELECT 1 FROM dbo.CrmParkingAllotment WHERE ApplicationId = @aid AND IsActive = 1)
+            OR EXISTS (SELECT 1 FROM dbo.CrmExtraCharge WHERE ApplicationId = @aid AND IsActive = 1)` },
   { key: "BankDepositMode", label: "Deposit bank, payment mode and instrument reference (cheque/txn) are correct" },
   { key: "BrokerDetails", label: "Broker / Channel Partner and brokerage rate/split are correctly recorded (if applicable)" },
   { key: "SourceAssignment", label: "Source and Assigned To are correctly set" },
@@ -55,7 +59,7 @@ const CHECKLIST_ITEMS = [
 const PLOT_SALE_LABELS = {
   ProjectUnitRate: "Project, Plot(s) and Rate/SqFt are correct and the plots are genuinely available",
   PaymentPlanAmounts: "Booking Amount and balance match what was quoted to the customer (no payment plan for land)",
-  ParkingExtraCharges: "Extra charges are correct, or correctly none (no parking with land)",
+  ParkingExtraCharges: "Extra charges are correct (no parking with land)",
 };
 
 // There is no longer a separate Level-2 checklist — the two-level
@@ -72,8 +76,20 @@ const { sql } = require("../db");
  * Makes sure every CHECKLIST_ITEMS key has a row for this application/level,
  * inserting only what's missing, then returns the full current row set.
  */
+// The items that apply to this application: every item without onlyWhen, and
+// each onlyWhen item whose data exists.
+async function applicableItems(pool, applicationId, level) {
+  const all = itemsForLevel(level);
+  const conditional = all.filter((it) => it.onlyWhen);
+  if (!conditional.length) return all;
+  const r = await pool.request().input("aid", sql.Int, applicationId).query(
+    `SELECT ${conditional.map((it) => `CASE WHEN ${it.onlyWhen} THEN 1 ELSE 0 END AS [${it.key}]`).join(", ")}`);
+  const row = r.recordset[0] || {};
+  return all.filter((it) => !it.onlyWhen || row[it.key] === 1);
+}
+
 async function ensureChecklistRows(pool, applicationId, level = 1) {
-  const items = itemsForLevel(level);
+  const items = await applicableItems(pool, applicationId, level);
   const existing = await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("lvl", sql.Int, level)
@@ -103,7 +119,8 @@ async function ensureChecklistRows(pool, applicationId, level = 1) {
                        THEN 1 ELSE 0 END AS BIT) AS IsPlotSale
       FROM dbo.CrmApplicationVerificationChecklist c
       WHERE c.ApplicationId = @aid AND c.Level = @lvl ORDER BY c.Id`);
-  return result.recordset.map(withSaleLabel);
+  const keys = new Set(items.map((it) => it.key));
+  return result.recordset.filter((r) => keys.has(r.ItemKey)).map(withSaleLabel);
 }
 
 // The wording the reader sees for a checklist row, by kind of sale.

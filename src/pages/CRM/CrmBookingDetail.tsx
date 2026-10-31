@@ -357,6 +357,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Parking & Extra Charges",
     staleTime: 15_000,
   });
+  // The Parking & Extra Charges tick box exists only while there is parking or
+  // an extra charge to verify, so adding/removing one refreshes the checklist.
+  const parkingExtrasCount = (parking as any[]).length + (extras as any[]).length;
+  useEffect(() => { if (tab === "Parking & Extra Charges") refetchChecklist(); }, [parkingExtrasCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Verification checklist — only the Parking & ExtraCharges sections are
   // shown on this tab; the full checklist lives on the Welcome Call page.
   const { data: parkingChecklist, refetch: refetchParkingChecklist } = useQuery({
