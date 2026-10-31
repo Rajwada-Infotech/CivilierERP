@@ -120,6 +120,11 @@ router.get("/", authenticateToken, async (req, res) => {
              co.name AS CompanyName, pr.name AS ProjectName,
              jv.Status, jv.CreatedBy, jv.CreatedAt,
              (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS TotalAmount,
+             -- Account heads on the voucher's lines, so the list can be searched by name.
+             (SELECT STRING_AGG(ISNULL(ahm.DisplayName, ahm.LHeadName), ', ')
+                FROM dbo.JournalVoucherLines l
+                JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = l.LHeadId
+               WHERE l.JVID = jv.JVID) AS AccountNames,
              CASE WHEN EXISTS (
                SELECT 1 FROM dbo.GeneralLedgerEntry gle
                WHERE gle.SourceType = 'JournalVoucher' AND gle.SourceId = jv.JVID AND gle.IsReversed = 0
