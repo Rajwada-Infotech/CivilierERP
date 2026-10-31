@@ -25,7 +25,6 @@ import { useGstRates, computeUnitParkingGst } from "@/lib/crmGst";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
-import { BodyPortal } from "@/components/ui/body-portal";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, parseMilestones, inputCls, labelCls } from "./applications/config";
@@ -2652,15 +2651,12 @@ const CrmApplication: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
-          when Cancel is opened from inside the view dialog (same fix pattern
-          as CoApplicant: two Radix Dialogs open at once freeze outer buttons). */}
-      {cancellingApp && (
-        <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-          onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}>
-          <div className="bg-background border border-border w-full max-w-md p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold font-heading">Cancel Application?</h3>
+      {/* A real dialog layered over the view dialog (elevated): a body-level
+          overlay sat outside the open view dialog, which blocks typing and
+          clicks there. */}
+      <Dialog open={!!cancellingApp} onOpenChange={(o) => { if (!o) { setCancellingApp(null); setCancelRemarks(""); } }}>
+        <DialogContent hideCloseButton elevated className="max-w-md rounded-none space-y-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="text-base font-semibold font-heading">Cancel Application?</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 <span className="font-heading tabular-nums text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
@@ -2696,9 +2692,8 @@ const CrmApplication: React.FC = () => {
                 {cancelling ? "Cancelling..." : "Cancel Application"}
               </button>
             </div>
-          </div>
-        </div></BodyPortal>
-      )}
+        </DialogContent>
+      </Dialog>
       {pdfDialogApp && (
         <ApplicationFormPdfDialog
           applicationId={pdfDialogApp.id}

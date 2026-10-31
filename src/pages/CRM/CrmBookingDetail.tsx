@@ -18,7 +18,6 @@ import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { BodyPortal } from "@/components/ui/body-portal";
 import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./bookings/DetailParts";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
@@ -1205,26 +1204,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {/* ── Booking Lifecycle Stepper ── */}
             <BookingLifecycleBar bookingId={booking.Id} />
 
-            {rejectOpen && (
-              <BodyPortal><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
-                <div className="bg-background border border-border p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</h3>
-                  <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)}
-                    placeholder="Required remarks"
-                    className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
-                      className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
-                      Cancel
-                    </button>
-                    <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
-                      className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
-                      {stageActioning === "reject" ? "Sending..." : "Send Back"}
-                    </button>
-                  </div>
-                </div>
-              </div></BodyPortal>
-            )}
 
             {/* 2-step required flow (Unit & Value, Payment Plan — both are
                 Data Review checklist items) plus a 3rd, INFORMATIONAL-ONLY
@@ -3014,6 +2993,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       </div>,
       document.body,
     )}
+    {/* Send back: a real dialog on top of the booking dialog (a body-level
+        overlay sat outside it, where the booking dialog blocks typing and clicks). */}
+    <Dialog open={rejectOpen} onOpenChange={(o) => { if (!o && !stageActioning) setRejectOpen(false); }}>
+      <DialogContent hideCloseButton elevated className="max-w-md rounded-none" style={{ border: RULE }}>
+        <DialogHeader>
+          <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
+        </DialogHeader>
+        <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
+          placeholder="What needs to be corrected? (required)"
+          className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
+            className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
+            Cancel
+          </button>
+          <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
+            className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
+            {stageActioning === "reject" ? "Sending..." : "Send Back"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <Dialog open={!!reasonDialog} onOpenChange={(o) => { if (!o) { setReasonDialog(null); setReasonText(""); } }}>
       <DialogContent hideCloseButton className="max-w-md rounded-none" style={{ border: RULE }}>
         <DialogHeader>
