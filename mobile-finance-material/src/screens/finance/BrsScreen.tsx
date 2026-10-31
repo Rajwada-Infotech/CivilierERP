@@ -56,14 +56,16 @@ function StatTile({ label, value, sub, icon: Icon, accent }: {
   );
 }
 
-function PassbookCheck({ checked, loading, onPress }: { checked: boolean; loading: boolean; onPress: () => void }) {
+// blocked: the backend says this row can't be cleared (un-clear stays possible).
+function PassbookCheck({ checked, loading, onPress, blocked }: { checked: boolean; loading: boolean; onPress: () => void; blocked?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={loading}
+      accessibilityState={{ disabled: !!blocked && !checked }}
       style={{
         width: 22, height: 22, borderRadius: 5, borderWidth: 2, alignItems: "center", justifyContent: "center",
-        borderColor: checked ? "#10b981" : colors.border, backgroundColor: checked ? "#10b981" : "transparent", opacity: loading ? 0.5 : 1,
+        borderColor: checked ? "#10b981" : colors.border, backgroundColor: checked ? "#10b981" : "transparent", opacity: loading ? 0.5 : blocked && !checked ? 0.3 : 1,
       }}
     >
       {loading ? <ActivityIndicator size="small" color={checked ? "#fff" : colors.mutedForeground} /> : checked ? (
@@ -89,7 +91,7 @@ function BrsCard({ entry, toggling, onToggle, onBounce, onReissue }: {
     >
       <View className="flex-row items-start gap-3">
         <View style={{ paddingTop: 2 }}>
-          <PassbookCheck checked={cleared && !bounced} loading={toggling} onPress={onToggle} />
+          <PassbookCheck checked={cleared && !bounced} loading={toggling} onPress={onToggle} blocked={entry.Clearable === false} />
         </View>
         <View className="flex-1 min-w-0">
           <View className="flex-row items-center gap-1.5 flex-wrap mb-0.5">
@@ -127,6 +129,9 @@ function BrsCard({ entry, toggling, onToggle, onBounce, onReissue }: {
             {formatINR(entry.Amount)}
           </Text>
           <ClearBadge cleared={cleared} bounced={bounced} />
+          {entry.Clearable === false && !cleared && (
+            <Text style={{ color: colors.mutedForeground, fontSize: 9.5, textAlign: "right" }}>Awaiting approval</Text>
+          )}
           {cleared && !!entry.ClearingDate && (
             <Text style={{ color: "#10b981", fontSize: 9.5, textAlign: "right" }}>{fmt(entry.ClearingDate)}</Text>
           )}
@@ -164,7 +169,7 @@ function BrsCard({ entry, toggling, onToggle, onBounce, onReissue }: {
             <CornerDownRight size={10} color="#d97706" />
             <Text style={{ color: "#d97706", fontSize: 10, fontFamily: fonts.body.semibold }}>{entry.OriginalDocNo}</Text>
           </View>
-        ) : entry.ChequeNo && !cleared ? (
+        ) : entry.ChequeNo && !cleared && entry.Clearable !== false ? (
           <Pressable onPress={onBounce} className="self-start flex-row items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#dc262660" }}>
             <Ban size={10} color="#dc2626" />
             <Text style={{ color: "#dc2626", fontSize: 10.5, fontFamily: fonts.body.medium }}>Mark Bounced</Text>
@@ -232,6 +237,10 @@ export default function BrsScreen() {
 
   const handleToggle = async (entry: BrsEntry) => {
     if (isBounced(entry)) return;
+    if (!isCleared(entry) && entry.Clearable === false) {
+      Alert.alert("Can't clear yet", entry.ClearBlockReason || "Approve this document before clearing");
+      return;
+    }
     const key = `${entry.SourceType}-${entry.SourceID}`;
     setTogglingKey(key);
     try {
