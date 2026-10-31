@@ -15,7 +15,8 @@
 
 const express = require("express");
 const { getPool, sql } = require("../../db");
-const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
+const { requirePageRight } = require("../../middleware/requirePageRight");
+const { canAct, ownWork } = require("./approvalAuthority");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 
@@ -36,9 +37,10 @@ const dateOrNull = (v) => {
   const s = String(v).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) ? { value: s } : { error: "Document date is not valid" };
 };
+// Document reviews are done by a Verifier (Setup → Approval Control).
 const approver = async (req, res) => {
-  if (await hasAnyPageAction(req, PAGE, ["approve"])) return true;
-  res.status(403).json({ error: "Only a reviewer (approve right on Land Property) can do this" });
+  if (await canAct(req, "Verifier", PAGE)) return true;
+  res.status(403).json({ error: "Only a verifier (Setup → Approval Control) can do this" });
   return false;
 };
 
@@ -221,6 +223,10 @@ router.post("/version/:versionId/review", requirePageRight(PAGE, "view"), async 
   if (!(await approver(req, res))) return;
   try {
     const pool = getPool();
+    // Maker-checker: whoever uploaded this version does not verify it.
+    const up = (await pool.request().input("Id", sql.Int, versionId).query("SELECT UploadedBy FROM dbo.LegalLandDocumentVersion WHERE VersionId = @Id")).recordset[0];
+    const own = status !== "Pending" && up ? ownWork(req, up.UploadedBy, "this document") : null;
+    if (own) return res.status(403).json({ error: own.replace("entered", "uploaded") });
     const r = await pool.request().input("Id", sql.Int, versionId).input("Status", sql.NVarChar(30), status)
       .input("Remarks", sql.NVarChar(1000), remarks).input("UserId", sql.Int, req.user?.userId || null)
       .query(`

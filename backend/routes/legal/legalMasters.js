@@ -23,6 +23,7 @@ const multer = require("multer");
 const { verifyFileMatchesDeclaredType } = require("../../services/fileSignature");
 const { MASTERS, EXTERNAL_REFS } = require("./masterConfig");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
+const { canAct, ownWork, isAdmin } = require("./approvalAuthority");
 
 const router = express.Router();
 router.use(apiRateLimit);
@@ -80,6 +81,11 @@ const masterOf = (req, res) => {
 const withRight = (action) => (req, res, next) => {
   const cfg = masterOf(req, res);
   if (!cfg) return;
+  // The approval setup (Approval Control, Approval Workflow, Reminder & SLA) is changed only by an
+  // administrator, whatever rights a user has been given on the page.
+  if (cfg.adminOnly && action !== "view" && !isAdmin(req)) {
+    return res.status(403).json({ error: `Only an administrator can change ${cfg.title}` });
+  }
   return requirePageRight(cfg.pageKey, action)(req, res, next);
 };
 
@@ -221,10 +227,11 @@ const derivedSql = (cfg) => (cfg.derived || []).map((d) => {
 
 // ── Review (verification) fields ──────────────────────────────────────────────────────────────────
 // `review: { field, by, at, free }` on a master: setting `field` to anything outside `free` (default
-// ["Pending"]) — Verified, Rejected, Approved… — needs the approve right on its page and stamps who and when.
+// ["Pending"]) — Verified, Rejected, Approved… — needs a Verifier (Setup → Approval Control) and stamps who and when.
+// Maker-checker: the user who entered the row cannot verify it; another user must.
 // A reviewed row whose other data is then edited by someone without that right goes back to free[0], so a
 // change is never left carrying an old approval.
-const isReviewer = (req, cfg) => hasAnyPageAction(req, cfg.pageKey, ["approve"]);
+const isReviewer = (req, cfg) => canAct(req, "Verifier", cfg.pageKey);
 
 async function reviewCols(req, cfg, values, before) {
   const rv = cfg.review;
@@ -233,9 +240,11 @@ async function reviewCols(req, cfg, values, before) {
   const next = values[rv.field];
   const prev = before ? before[rv.field] : free[0];
   if (next === prev) return { cols: [] };
-  if (!free.includes(next) && !(await isReviewer(req, cfg))) {
+  if (!free.includes(next)) {
     const label = cfg.fields.find((f) => f.name === rv.field).label;
-    return { error: `Only a reviewer (approve right) can set ${label} to ${next}` };
+    if (!(await isReviewer(req, cfg))) return { error: `Only a verifier (Setup → Approval Control) can set ${label} to ${next}` };
+    const own = before ? ownWork(req, before.CreatedBy) : ownWork(req, req.user?.userId ?? req.user?.id, "this record");
+    if (own) return { error: before ? own : `Save this record as ${free[0]} — another user must set ${label} to ${next}` };
   }
   const stamp = free.includes(next) ? "NULL" : null;
   return {
@@ -269,7 +278,7 @@ function sendDbError(res, cfg, err, where) {
 // ── Routes ────────────────────────────────────────────────────────────────────────────────────────
 router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
-    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete,
+    key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
     extras: (m.extras || []).map(({ name, label }) => ({ name, label })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto })),

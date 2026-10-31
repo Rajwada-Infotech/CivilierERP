@@ -3,6 +3,7 @@ import { FileText, Upload, X } from "lucide-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { useAuth } from "@/contexts/AuthContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { MasterPage, type DataChangeEvent, type RecordWithId, type FieldDef, type ColumnDef } from "@/components/MasterPage";
@@ -230,6 +231,8 @@ interface TableProps {
 
 export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName }: TableProps) {
   const rights = usePageRights(entry.pageKey);
+  const { currentUser } = useAuth();
+  const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
   const queryClient = useQueryClient();
 
   const { data: meta } = useQuery({ queryKey: ["legal-meta"], queryFn: getLegalMeta, staleTime: Infinity });
@@ -338,13 +341,21 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
 
   if (error) return <div className="p-6 text-destructive">Could not load {entry.label}: {(error as Error).message}</div>;
   if (!master || isLoading) return <div className="p-6 text-muted-foreground">Loading {entry.label}…</div>;
+  // The approval setup is changed only by an administrator; everyone else sees it read-only.
+  const locked = !!master.adminOnly && !isAdminTier;
   return (
+    <>
+    {locked && (
+      <p className="mb-3 border border-border px-3 py-2 text-xs text-muted-foreground">
+        Only an administrator can change {master.title}. You can view it.
+      </p>
+    )}
     <MasterPage
       title={master.title}
-      canCreate={rights.canCreate && !noAdd}
-      collapsibleAddForm={noAdd}
-      canEdit={rights.canEdit}
-      canDelete={rights.canDelete && !master.noDelete}
+      canCreate={rights.canCreate && !noAdd && !locked}
+      collapsibleAddForm={noAdd || !!parentId}
+      canEdit={rights.canEdit && !locked}
+      canDelete={rights.canDelete && !master.noDelete && !locked}
       fields={formFields}
       columns={columns}
       columnRenderers={columnRenderers}
@@ -361,6 +372,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       onRowClick={showDetails}
       rowClassName={rowClassName ? (row) => { const raw = rawById.get(row._id); return raw ? rowClassName(raw) : undefined; } : undefined}
     />
+    </>
   );
 }
 
@@ -371,6 +383,8 @@ export default function LegalMasterPage({ entry }: { entry: LegalMasterEntry }) 
     <>
       <Breadcrumbs items={["Dashboard", "Legal", entry.area === "land" ? "Land Management" : "Setup", entry.label]} />
       <LegalShell title={entry.label} subtitle={master?.desc ?? entry.desc} icon={entry.icon}>
+        {/* Approval routes & SLA (the "approval-workflow" master) are kept in the database for Registration Task
+            Type, but not shown until SLA and escalation are actually used. */}
         <LegalMasterTable entry={entry} />
       </LegalShell>
     </>

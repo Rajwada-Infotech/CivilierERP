@@ -113,7 +113,8 @@ export const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
   loan:        ["loan-dashboard", "loan-sanction"],
   "hr-payroll": ["hr-payroll-dashboard"],
   // Every page of the module, so a user granted only one master still sees (and can reach) it.
-  legal:       ["legal-dashboard", ...LEGAL_PAGE_KEYS],
+  legal:       ["legal-dashboard", ...LEGAL_PAGE_KEYS, "legal-land-reports", "legal-registration-search",
+                "legal-deed-registrations", "legal-approvals", "legal-pending-queue"],
   records:     ["records"],
   crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
 };

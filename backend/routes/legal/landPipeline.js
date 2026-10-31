@@ -23,6 +23,7 @@
 const express = require("express");
 const { getPool, sql } = require("../../db");
 const { requirePageRight, hasAnyPageAction } = require("../../middleware/requirePageRight");
+const { canAct } = require("./approvalAuthority");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 const { writeAudit, nextCodeSql, codePrefix } = require("./legalAudit");
 const { documentGate } = require("./landDocuments");
@@ -875,7 +876,7 @@ router.put("/:id/ownership/change/:date", requirePageRight(LAND_PAGE, "edit"), a
     const starting = recs.filter((r) => String(r.ValidFrom.toISOString().slice(0, 10)) === date);
     const givers = recs.filter((r) => r.ValidTo && String(r.ValidTo.toISOString().slice(0, 10)) === new Date(new Date(date).getTime() - 86400000).toISOString().slice(0, 10));
     const verified = evs.some((e) => e.VerificationStatus === "Verified") || starting.some((r) => r.VerificationStatus === "Verified");
-    if (verified && !(await hasAnyPageAction(req, LAND_PAGE, ["approve"]))) return refuse(409, "This change is verified — only a reviewer can edit it");
+    if (verified && !(await canAct(req, "Verifier", LAND_PAGE))) return refuse(409, "This change is verified — only a verifier can edit it");
     if (newDate !== date) {
       const giverStart = givers.map((r) => r.ValidFrom.toISOString().slice(0, 10)).sort().pop();
       if (giverStart && newDate <= giverStart) return refuse(409, `The date must be after ${giverStart}, when the previous owner's ownership started`);

@@ -51,8 +51,8 @@ export default function LegalDashboard() {
           {error && <div className={`${card} p-4 text-sm text-destructive`}>Could not load the Legal summary: {(error as Error).message}</div>}
 
           {/* ── Hero ── */}
-          <div className="relative overflow-hidden rounded-2xl border p-5 sm:p-7" style={{ background: `${ACCENT}0d`, borderColor: `${ACCENT}33` }}>
-            <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full blur-3xl" style={{ background: `${ACCENT}1f` }} />
+          <div className="relative overflow-hidden rounded-2xl border p-5 sm:p-7" style={{ background: `color-mix(in srgb, ${ACCENT} 5%, transparent)`, borderColor: `color-mix(in srgb, ${ACCENT} 20%, transparent)` }}>
+            <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full blur-3xl" style={{ background: `color-mix(in srgb, ${ACCENT} 12%, transparent)` }} />
             <div className="relative flex flex-wrap items-end justify-between gap-5">
               <div className="min-w-0">
                 <p className="text-sm text-muted-foreground">{greeting} 👋</p>
@@ -238,7 +238,7 @@ export default function LegalDashboard() {
                         onClick={() => navigate(legalMasterPath(it.key))}
                         className="group flex items-center gap-3 rounded-xl border border-border/70 bg-background/40 p-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-md"
                       >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: `${ACCENT}1a`, color: ACCENT }}>
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: `color-mix(in srgb, ${ACCENT} 10%, transparent)`, color: ACCENT }}>
                           <it.icon size={17} />
                         </span>
                         <span className="min-w-0 flex-1">

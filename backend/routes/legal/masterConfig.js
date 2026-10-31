@@ -1297,21 +1297,34 @@ const MASTERS = {
   },
 
   // ── Workflow ────────────────────────────────────────────────────────────────────────────────────
-  "approval-workflow": {
-    title: "Approval Workflow", group: "Workflow", pageKey: "legal-approval-workflow-master", table: "LegalApprovalWorkflow", pk: "WorkflowId",
-    desc: "The two-level approval route: who reviews at L1 and L2, their SLAs and escalation.",
-    label: "WorkflowName", orderBy: "WorkflowName",
-    unique: [["WorkflowName"], "A workflow with this name already exists"],
+  // Who verifies and who approves at L1 / L2 — the super admin's control panel (see approvalAuthority.js).
+  "approval-authority": {
+    title: "Approval Control", group: "Workflow", pageKey: "legal-approval-authority-master", table: "LegalApprovalAuthority", pk: "AuthorityId",
+    desc: "Which users verify records and documents, and which users approve deeds at L1 and at L2. Only an administrator can change it.",
+    label: "Stage + ' - ' + (SELECT name FROM dbo.users WHERE id = r.ApproverId)", orderBy: "Stage, ApproverId", adminOnly: true,
+    unique: [["Stage", "ApproverId"], "This user already has this approval role"],
     fields: [
-      { name: "WorkflowName", label: "Workflow name", type: "text", required: true, max: 150 },
-      { name: "L1RoleId", label: "L1 reviewer role", type: "ref", ref: "role", required: true },
+      { name: "Stage", label: "Approval role", type: "select", required: true, options: ["Verifier", "L1 Approver", "L2 Approver"] },
+      { name: "ApproverId", label: "User", type: "ref", ref: "user", required: true },
+      { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
+      ACTIVE,
+    ],
+  },
+  // Shown on the Approval Control page: a route's SLA and escalation. Who approves is set per user in
+  // Approval Control, and maker-checker is always on, so the old role / separation fields are not asked for.
+  "approval-workflow": {
+    adminOnly: true,
+    title: "Approval Route & SLA", group: "Workflow", pageKey: "legal-approval-authority-master", table: "LegalApprovalWorkflow", pk: "WorkflowId",
+    desc: "Each approval route used by a registration task: days allowed at L1 and L2, and who it escalates to when late.",
+    label: "WorkflowName", orderBy: "WorkflowName",
+    unique: [["WorkflowName"], "A route with this name already exists"],
+    fields: [
+      { name: "WorkflowName", label: "Route name", type: "text", required: true, max: 150 },
       { name: "L1SlaDays", label: "L1 SLA (days)", type: "int", required: true, min: 1, default: 2 },
-      { name: "L2RoleId", label: "L2 approver role", type: "ref", ref: "role", required: true },
       { name: "L2SlaDays", label: "L2 SLA (days)", type: "int", required: true, min: 1, default: 2 },
       { name: "EscalationRoleId", label: "Escalate to role", type: "ref", ref: "role" },
       { name: "EffectiveFrom", label: "Effective from", type: "date", required: true },
       { name: "EffectiveTo", label: "Effective to", type: "date", after: "EffectiveFrom" },
-      { name: "SeparationOfDuties", label: "Creator / uploader cannot approve", type: "bit", default: true },
       { name: "AllowDelegation", label: "Approvers may delegate", type: "bit", default: false },
       ACTIVE,
     ],
@@ -1331,6 +1344,7 @@ const MASTERS = {
     ],
   },
   "reminder-sla": {
+    adminOnly: true,
     title: "Reminder & SLA", group: "Workflow", pageKey: "legal-reminder-sla-master", table: "LegalReminderSla", pk: "ReminderId",
     desc: "How often a pending status is followed up and when it escalates, and to whom.",
     label: "AppliesTo", orderBy: "AppliesTo",

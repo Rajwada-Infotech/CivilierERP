@@ -3,6 +3,7 @@
 const express = require("express");
 const { getPool, sql } = require("../../db");
 const { requirePageRight } = require("../../middleware/requirePageRight");
+const { canAct, ownWork, isSuperAdmin, userOf } = require("./approvalAuthority");
 const apiRateLimit = require("../../middleware/apiRateLimit");
 
 const router = express.Router();
@@ -827,8 +828,32 @@ router.post("/deeds/:id/submit-l1", requirePageRight("legal-approvals", "edit"),
   }
 });
 
+// Deed approvals: only users named for the level in Setup → Approval Control (or, until anyone is named, the
+// approve right on Pending Approvals). Whoever created the deed never approves it, and L2 is never the L1 reviewer.
+const deedGate = (stage) => async (req, res, next) => {
+  try {
+    if (!(await canAct(req, stage, "legal-approvals"))) {
+      return res.status(403).json({ error: `Only an ${stage} (Setup → Approval Control) can do this` });
+    }
+    const pool = getPool();
+    if (await tableExists(pool, "LegalDeedDossier")) {
+      const d = (await pool.request().input("Id", sql.Int, Number(req.params.id))
+        .query("SELECT CreatedBy, L1ReviewerId FROM dbo.LegalDeedDossier WHERE DossierId = @Id")).recordset[0];
+      const own = d ? ownWork(req, d.CreatedBy, "this deed") : null;
+      if (own) return res.status(403).json({ error: own });
+      if (d && stage === "L2 Approver" && !isSuperAdmin(req) && Number(d.L1ReviewerId) === Number(userOf(req))) {
+        return res.status(403).json({ error: "You approved this deed at L1 — another user must approve it at L2" });
+      }
+    }
+    return next();
+  } catch (err) {
+    console.error("[legalOperations] approval gate:", err.message);
+    return res.status(500).json({ error: "Permission check error" });
+  }
+};
+
 // POST /api/legal/deeds/:id/l1-action (Approve / Return)
-router.post("/deeds/:id/l1-action", requirePageRight("legal-approvals", "approve"), async (req, res) => {
+router.post("/deeds/:id/l1-action", requirePageRight("legal-approvals", "view"), deedGate("L1 Approver"), async (req, res) => {
   const { id } = req.params;
   const { action, remarks } = req.body;
 
@@ -889,7 +914,7 @@ router.post("/deeds/:id/l1-action", requirePageRight("legal-approvals", "approve
 });
 
 // POST /api/legal/deeds/:id/l2-action (Approve / Return / Reject)
-router.post("/deeds/:id/l2-action", requirePageRight("legal-approvals", "approve"), async (req, res) => {
+router.post("/deeds/:id/l2-action", requirePageRight("legal-approvals", "view"), deedGate("L2 Approver"), async (req, res) => {
   const { id } = req.params;
   const { action, remarks } = req.body;
 

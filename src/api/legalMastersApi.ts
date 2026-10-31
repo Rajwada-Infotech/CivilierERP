@@ -39,6 +39,8 @@ export interface LegalMasterMeta {
   parent?: string;
   /** Never physically deleted — marked inactive instead. */
   noDelete?: boolean;
+  /** Approval setup: only an administrator can change it; everyone else sees it read-only. */
+  adminOnly?: boolean;
   /** Read-only computed columns shown in the table and details (e.g. "Used by land"). */
   extras?: { name: string; label: string }[];
   fields: LegalFieldMeta[];

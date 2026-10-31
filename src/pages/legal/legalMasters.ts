@@ -1,8 +1,8 @@
 import {
   Map1, Building, Shield, Home2, Layer, Global, UserTick, UserMinus, Crown1, People, Eye, Judge, Note1, Grid5, DocumentText, Ruler,
-  Building4, Link21, Book1, TaskSquare, DocumentCopy, ClipboardTick, Hierarchy, InfoCircle, Timer1, MessageQuestion,
+  Building4, Link21, Book1, TaskSquare, DocumentCopy, ClipboardTick, InfoCircle, Timer1, MessageQuestion,
   Location, Routing, Category, Profile, ArrowSwapHorizontal, Personalcard, Courthouse, Bank, Status, MoneySend, Receipt1,
-  Wallet, ReceiptText, Copy, TrendUp,
+  Wallet, ReceiptText, Copy, TrendUp, ShieldTick,
 } from "iconsax-react";
 
 // The Legal masters and land registers, in menu order. Keys and page keys match backend/routes/legal/masterConfig.js;
@@ -61,7 +61,6 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("txn-type", "Financial Transaction Type", "Legal & Financial", MoneySend, "Advance, payment, receipt, refund"),
   S("expense-type", "Expense Type", "Legal & Financial", Receipt1, "Advocate fee, commission, survey fee"),
   S("payment-mode", "Payment Mode", "Legal & Financial", Wallet, "Cash, bank transfer, cheque, UPI"),
-  S("approval-workflow", "Approval Workflow (L1 / L2)", "Legal & Financial", Hierarchy, "Reviewer roles, SLAs & escalation"),
   // ── Setup: Deed & Registration ──
   S("registration-office", "Deed Registration Office", "Deed & Registration", Building4, "ADSR / DSR / ARA offices"),
   S("deed-type", "Deed Type", "Deed & Registration", Book1, "Sale, gift, partition, POA…"),
@@ -74,6 +73,7 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   // ── Setup: Workflow ──
   S("status-reason", "Status & Reason", "Workflow", InfoCircle, "Statuses, return & missing reasons"),
   S("reminder-sla", "Reminder & SLA", "Workflow", Timer1, "Follow-up & escalation rules"),
+  S("approval-authority", "Approval Control", "Workflow", ShieldTick, "Who verifies and who approves at L1 / L2 — admin only"),
   // ── Setup: Parties ──
   S("buyer", "Buyer", "Parties", UserTick, "PAN, Aadhaar & land documents"),
   S("seller", "Seller", "Parties", UserMinus, "PAN, Aadhaar & title documents"),

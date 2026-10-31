@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { DocumentUpload } from "iconsax-react";
-import { Plus, ExternalLink, ChevronRight, AlertCircle, FileText } from "lucide-react";
+import { Plus, X, ExternalLink, ChevronRight, AlertCircle, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
@@ -10,7 +10,6 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { getLegalDeeds, createLegalDeed, type LegalDeedSummary } from "@/api/legalOperationsApi";
 import { getLegalLookup } from "@/api/legalMastersApi";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -97,7 +96,7 @@ export default function LegalDeedListPage() {
         subtitle="Manage land purchase deeds, document checklists, and two-level approval lifecycle."
         icon={DocumentUpload}
       >
-        <div className="space-y-6">
+        <div className="flex flex-col gap-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-heading font-semibold text-foreground">Registered & In-Progress Deeds</h2>
@@ -106,13 +105,13 @@ export default function LegalDeedListPage() {
               </p>
             </div>
             {rights.canCreate && (
-              <Button onClick={() => setOpenCreateModal(true)} className="gap-2">
-                <Plus size={16} /> New Deed Registration
+              <Button onClick={() => setOpenCreateModal((v) => !v)} className="gap-2 bg-foreground text-card hover:bg-foreground/85">
+                {openCreateModal ? <><X size={16} /> Close</> : <><Plus size={16} /> New Deed Registration</>}
               </Button>
             )}
           </div>
 
-          <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
+          <div className="order-2 rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
             {isLoading ? (
               <div className="p-8 text-center text-sm text-muted-foreground">Loading deeds…</div>
             ) : deeds.length === 0 ? (
@@ -204,14 +203,11 @@ export default function LegalDeedListPage() {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Modal: New Deed File */}
-        <Dialog open={openCreateModal} onOpenChange={setOpenCreateModal}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Open New Deed Registration Dossier</DialogTitle>
-            </DialogHeader>
+        {/* New deed file — opens in the page above the list, closes on create or cancel */}
+        {openCreateModal && (
+          <div className="order-1 border border-border bg-card p-4 sm:p-5">
+            <h2 className="text-base font-heading font-semibold text-foreground">Open New Deed Registration Dossier</h2>
             <form onSubmit={handleCreateSubmit} className="space-y-4 py-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -440,17 +436,18 @@ export default function LegalDeedListPage() {
                 />
               </div>
 
-              <DialogFooter>
+              <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setOpenCreateModal(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createMutation.isPending} className="bg-primary text-primary-foreground font-semibold">
+                <Button type="submit" disabled={createMutation.isPending} className="bg-foreground text-card hover:bg-foreground/85 font-semibold">
                   {createMutation.isPending ? "Creating…" : "Create Deed Dossier"}
                 </Button>
-              </DialogFooter>
+              </div>
             </form>
-          </DialogContent>
-        </Dialog>
+          </div>
+        )}
+        </div>
       </LegalShell>
     </>
   );
