@@ -7,7 +7,8 @@
 
 const { sql } = require("../db");
 
-const VALID_MODES = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
+// "Bank Charges": charges the bank debited itself — a bank account, no cheque or reference.
+const VALID_MODES = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card", "Bank Charges"];
 const CHEQUE_MODES = ["Cheque", "Post-Dated Cheque"];
 
 const isChequeMode = (mode) => CHEQUE_MODES.includes(mode);
@@ -22,6 +23,7 @@ function validateSettlementMode(b) {
     if (!parseInt(b.ChequeLotId, 10) || !b.ChequeNo) return "Select a cheque lot and cheque number for this mode.";
     if (!b.ChequeDate) return "Cheque date is required for this mode.";
   }
+  if (mode === "Bank Charges" && !parseInt(b.BankId, 10)) return "Select the bank account that charged it.";
   return null;
 }
 
