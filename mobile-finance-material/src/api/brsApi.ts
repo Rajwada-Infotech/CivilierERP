@@ -35,6 +35,9 @@ export interface BrsEntry {
   TxnId: string | null;
   ChequeNo: string | null;
   PayStatus: string;
+  // The backend's decision: only an Approved document can be cleared or bounced.
+  Clearable?: boolean;
+  ClearBlockReason?: string;
   IsMatched: boolean | number;
   IsBounced: boolean | number;
   BounceDate: string | null;
