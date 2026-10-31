@@ -129,7 +129,10 @@ const bookingDownstreamSql = `
     (SELECT COUNT(*) FROM dbo.CrmQueryPayment WHERE BookingId = @bid) AS QueryPayments,
     (SELECT COUNT(*) FROM dbo.CrmRegistry WHERE BookingId = @bid) AS RegistryRecords,
     (SELECT COUNT(*) FROM dbo.CrmInvoice WHERE BookingId = @bid AND Status <> 'Void') AS Invoices,
-    (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected') AS MoneyReceipts,
+    -- A money receipt still Pending (no Finance payment made from it) does not
+    -- block: deleting the booking cancels it (softDeleteBooking).
+    (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status <> 'Rejected'
+       AND NOT (Status = 'Pending' AND ReceivedPaymentId IS NULL)) AS MoneyReceipts,
     (SELECT COUNT(*) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS OnAccountPayments,
     (SELECT COUNT(*) FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid) AS PaymentReceipts,
     (SELECT COUNT(*) FROM dbo.ReceivedPayment rp
@@ -1651,6 +1654,16 @@ async function softDeleteBooking(pool, id, actor) {
     // Void any pending brokerage tranches — orphaned Pending tranches would
     // inflate the brokerage liability reports and confuse clawback tracking
     // if the application is later re-booked with fresh brokerage.
+      // A money receipt still waiting for approval goes with the booking:
+      // closed as Rejected (the terminal state every money query already
+      // skips), with the reason in its remarks. Approved money never reaches
+      // here — it blocks the delete above.
+      await tx.request().input("bid", sql.Int, id).query(`
+        UPDATE dbo.CrmMoneyReceipt
+        SET Status = 'Rejected', UpdatedAt = SYSDATETIME(),
+            Remarks = LEFT(ISNULL(Remarks + ' | ', '') + N'Cancelled — booking deleted before approval', 500)
+        WHERE BookingId = @bid AND Status = 'Pending' AND ReceivedPaymentId IS NULL
+      `);
       await tx.request().input("bid", sql.Int, id).query(`
       UPDATE dbo.CrmBrokerageMaster
       SET Status = 'Voided', UpdatedAt = SYSDATETIME(),
