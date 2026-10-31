@@ -81,7 +81,7 @@ const StartPurchase: React.FC<StepProps> = ({ landId, onSaved }) => {
             <label className="text-xs text-muted-foreground">Total land value (₹) *<input type="number" className={`${inputCls} mt-1`} value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} /></label>
             <label className="text-xs text-muted-foreground">Advance (₹)<input type="number" className={`${inputCls} mt-1`} value={f.advance} onChange={(e) => setF({ ...f, advance: e.target.value })} /></label>
           </div>
-          <button className="mt-3 inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
+          <button className="mt-3 inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
             disabled={busy || !f.buyer.trim() || !(Number(f.value) > 0)}
             onClick={async () => {
               setBusy(true);

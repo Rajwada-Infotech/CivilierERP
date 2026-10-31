@@ -208,7 +208,7 @@ export default function LandPropertyDetailPage() {
 
               {tab === "audit" ? <AuditTrail id={id} /> : <StepContent step={step} landId={id} mouzaId={land.MouzaId} onSaved={refresh} navigate={navigate} enquiryNo={land.EnquiryNo} milestones={data.milestones} />}
 
-              <div className="flex justify-between">
+              <div className="flex flex-wrap justify-between gap-2">
                 <button className={btn} disabled={idx <= 0} onClick={() => setSelected(data.steps[idx - 1].code)}><ChevronLeft size={13} /> Back</button>
                 <button className={btn} disabled={idx >= data.steps.length - 1} onClick={() => setSelected(data.steps[idx + 1].code)}>Next <ChevronRight size={13} /></button>
               </div>
@@ -244,7 +244,7 @@ const StepActions: React.FC<{
           <>
             {step.status !== "In Progress" && <button className={btn} disabled={busy} onClick={() => move("In Progress")}>Start</button>}
             {step.status !== "Pending Verification" && <button className={btn} disabled={busy} onClick={() => move("Pending Verification")}>Submit for verification</button>}
-            <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }} disabled={busy || step.missing.length > 0} onClick={() => move("Completed")}>
+            <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }} disabled={busy || step.missing.length > 0} onClick={() => move("Completed")}>
               Mark completed
             </button>
             {canApprove && step.status === "Pending Verification" && <button className={btn} disabled={busy || !remarks.trim()} onClick={() => move("Correction Required")}>Correction required</button>}

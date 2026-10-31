@@ -224,7 +224,7 @@ const ChangeForm: React.FC<StepProps & { current: LegalRow[]; onDone: () => void
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
+        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
           disabled={busy || !date || !balanced || (!first && (!typeId || !givers.length)) || to.some((x) => !x.name.trim())}
           onClick={save}>
           {first ? "Save first owner" : "Save change"}
@@ -296,7 +296,7 @@ const EditChange: React.FC<{ landId: number; date: string; evs: LegalRow[]; reco
       </div>
       <p className="mt-2 text-[0.6875rem] text-muted-foreground">Saving sends this change back for verification. To change shares or who gave the land, delete the change and record it again.</p>
       <div className="mt-3 flex gap-2">
-        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
+        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
           disabled={busy || !d || owners.some((o) => !o.name.trim())} onClick={save}>Save changes</button>
         <button className={btn} onClick={onClose}>Cancel</button>
       </div>
@@ -352,7 +352,7 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
         )}
         {rights.canEdit && !adding && (
           <div className="mt-4 flex flex-wrap gap-2">
-            <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: LEGAL_GRADIENT }} onClick={() => setAdding(true)}>
+            <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-card" style={{ background: LEGAL_GRADIENT }} onClick={() => setAdding(true)}>
               <Plus size={13} /> {current.length ? "Record ownership change" : "Add first owner"}
             </button>
           </div>

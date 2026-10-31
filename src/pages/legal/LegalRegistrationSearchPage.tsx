@@ -358,7 +358,7 @@ export default function LegalRegistrationSearchPage() {
           >
             {/* STEP 1: Main Search & Open Portal Panel */}
             <div className="rounded-2xl border border-border/80 bg-card p-5 sm:p-6 shadow-sm space-y-5">
-              <div className="border-b border-border/60 pb-3 flex items-center justify-between">
+              <div className="border-b border-border/60 pb-3 flex items-center flex-wrap justify-between gap-2">
                 <div>
                   <span className="text-[0.6875rem] font-heading uppercase text-primary font-bold tracking-wider">
                     Step 1 — Search Planning & Workspace
@@ -454,7 +454,7 @@ export default function LegalRegistrationSearchPage() {
 
                 {/* Optional Search Target Identifiers with Distinct RS & LR Fields */}
                 <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center flex-wrap justify-between gap-2">
                     <span className="text-xs font-semibold text-foreground">
                       Search Parameters (West Bengal Land Identifiers)
                     </span>
@@ -601,7 +601,7 @@ export default function LegalRegistrationSearchPage() {
 
                 {/* Candidate Matches Section */}
                 <div className="rounded-xl border border-border/70 bg-muted/20 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center flex-wrap justify-between gap-2">
                     <div>
                       <h4 className="text-xs font-semibold text-foreground">
                         Candidate Deed Matches ({candidates.length})
@@ -843,7 +843,7 @@ export default function LegalRegistrationSearchPage() {
             {/* STEP 3: If Deed is Found -> Immediate Deed Fill & Upload Form */}
             {showDeedUploadForm && activeSearch && (
               <div className="rounded-2xl border-2 border-emerald-500/40 bg-card p-5 sm:p-6 shadow-md space-y-5 animate-in fade-in duration-200">
-                <div className="border-b border-border/60 pb-3 flex items-center justify-between">
+                <div className="border-b border-border/60 pb-3 flex items-center flex-wrap justify-between gap-2">
                   <div>
                     <span className="text-[0.6875rem] font-heading uppercase text-emerald-600 font-bold tracking-wider">
                       Step 3 — Deed Found: Fill & Upload Deed Details
@@ -1073,7 +1073,7 @@ export default function LegalRegistrationSearchPage() {
 
             {/* Search History Records */}
             <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
-              <div className="p-4 border-b border-border/60 flex items-center justify-between">
+              <div className="p-4 border-b border-border/60 flex items-center flex-wrap justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-heading font-semibold text-foreground">Recent Portal Search History</h3>
                   <p className="text-[0.6875rem] text-muted-foreground">Log of employee government registration searches</p>

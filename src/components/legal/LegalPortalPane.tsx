@@ -95,7 +95,7 @@ export const LegalPortalPane: React.FC<LegalPortalPaneProps> = ({
       </div>
 
       {/* Helpful Guidance Banner */}
-      <div className="bg-amber-500/10 border-b border-amber-500/20 px-3.5 py-2 flex items-center justify-between text-[0.6875rem] text-amber-800 dark:text-amber-300">
+      <div className="bg-amber-500/10 border-b border-amber-500/20 px-3.5 py-2 flex items-center flex-wrap justify-between text-[0.6875rem] text-amber-800 dark:text-amber-300 gap-2">
         <div className="flex items-center gap-1.5">
           <AlertCircle size={13} className="shrink-0 text-amber-600" />
           <span>

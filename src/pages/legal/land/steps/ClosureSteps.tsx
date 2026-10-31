@@ -105,7 +105,7 @@ const TransferForm: React.FC<StepProps> = ({ landId, onSaved }) => {
         <button className={btn} onClick={() => setBuyers([...buyers, { name: "", guardian: "", share: "" }])}><Plus size={12} /> Add new owner</button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
+        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
           disabled={busy || !deedId || !date || !sellers.length || Math.abs(out - into) > 0.0001} onClick={save}>Record transfer</button>
         <span className={`text-xs ${Math.abs(out - into) > 0.0001 ? "text-amber-600" : "text-muted-foreground"}`}>Sold {out}% · bought {into}%{Math.abs(out - into) > 0.0001 ? " — must be equal" : ""}</span>
       </div>
@@ -191,7 +191,7 @@ const RegisterView: React.FC<StepProps> = ({ landId, onSaved }) => {
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className={eyebrow}>Current land register</p>
           {rights.canEdit && (
-            <button className="mb-3 inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }} disabled={busy}
+            <button className="mb-3 inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }} disabled={busy}
               onClick={async () => {
                 setBusy(true);
                 try { toast.success((await updateLandRegister(landId)).message); await queryClient.invalidateQueries({ queryKey: ["legal-land-register", landId] }); onSaved(); }

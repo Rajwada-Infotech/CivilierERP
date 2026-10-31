@@ -282,7 +282,7 @@ export default function LegalDeedListPage() {
 
               {/* Distinct Land Identifiers Box */}
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center flex-wrap justify-between gap-2">
                   <span className="text-xs font-semibold text-foreground">
                     West Bengal Land Parcel Identifiers
                   </span>

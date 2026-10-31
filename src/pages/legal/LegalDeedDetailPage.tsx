@@ -388,7 +388,7 @@ export default function LegalDeedDetailPage() {
 
             {/* Deed Metadata Grid with Distinct RS & LR Fields */}
             <div className="rounded-xl border border-border/80 bg-card p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-border/60 pb-2">
+              <div className="flex items-center flex-wrap justify-between border-b border-border/60 pb-2 gap-2">
                 <h3 className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
                   Property & Deed Identifiers
                 </h3>
@@ -452,7 +452,7 @@ export default function LegalDeedDetailPage() {
 
             {/* Checklist Documents Table */}
             <div className="rounded-xl border border-border/80 bg-card overflow-hidden">
-              <div className="p-4 border-b border-border/60 flex items-center justify-between">
+              <div className="p-4 border-b border-border/60 flex items-center flex-wrap justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-heading font-semibold text-foreground">Required Document Checklist</h3>
                   <p className="text-xs text-muted-foreground">Every document is individually reviewed, accepted, rejected, or waived.</p>

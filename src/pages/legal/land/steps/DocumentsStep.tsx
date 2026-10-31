@@ -120,7 +120,7 @@ const AddDocument: React.FC<{
         </div>
       </div>
       <div className="mt-4 flex gap-2">
-        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }} disabled={saving || up.busy || !f.docTypeId || !f.title.trim() || !file} onClick={save}>
+        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-card disabled:opacity-50" style={{ background: LEGAL_GRADIENT }} disabled={saving || up.busy || !f.docTypeId || !f.title.trim() || !file} onClick={save}>
           Save document
         </button>
         <button className={btn} onClick={onCancel}>Cancel</button>

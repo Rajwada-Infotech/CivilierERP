@@ -30,7 +30,7 @@ const Section: React.FC<{ title: string; step?: string; landId?: number; childre
   const navigate = useNavigate();
   return (
     <section className="break-inside-avoid border-t border-border pt-4 print:pt-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex items-center flex-wrap justify-between gap-2">
         <h3 className="text-xs font-heading font-semibold uppercase tracking-[0.16em]" style={{ color: LEGAL_ACCENT }}>{title}</h3>
         {step && landId ? (
           <button className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline print:hidden" onClick={() => navigate(`/legal/land/properties/${landId}?step=${step}`)}>
@@ -86,7 +86,7 @@ export default function LandDetailsPage() {
         action={
           <div className="flex gap-2 print:hidden">
             <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={() => navigate(`/legal/land/properties/${id}`)}><ArrowLeft size={13} /><span className="hidden sm:inline">Pipeline</span></button>
-            <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: LEGAL_ACCENT }} disabled={!data} onClick={print}><Download size={13} /> Download PDF</button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-card" style={{ background: LEGAL_ACCENT }} disabled={!data} onClick={print}><Download size={13} /> Download PDF</button>
           </div>
         }
       >

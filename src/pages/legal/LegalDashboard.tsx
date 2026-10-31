@@ -72,7 +72,7 @@ export default function LegalDashboard() {
                 </button>
                 <button
                   onClick={() => navigate("/legal/deeds")}
-                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-heading font-semibold text-white shadow-md transition-transform hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-heading font-semibold text-card shadow-md transition-transform hover:-translate-y-0.5"
                   style={{ background: LEGAL_GRADIENT }}
                 >
                   Deed Dossiers <ArrowRight size={14} />
@@ -105,10 +105,10 @@ export default function LegalDashboard() {
                   ["Completed", land.completed, TickCircle, "/legal/land/properties"],
                 ] as const).map(([label, value, Icon, path]) => (
                   <button key={label} onClick={() => navigate(path)} className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3 text-left transition-transform hover:-translate-y-0.5">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white" style={{ background: LEGAL_GRADIENT }}><Icon size={16} /></span>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-card" style={{ background: LEGAL_GRADIENT }}><Icon size={16} /></span>
                     <span className="min-w-0">
                       <span className="block text-xl font-heading font-bold tabular-nums leading-none text-foreground">{value}</span>
-                      <span className="mt-1 block text-[0.6875rem] text-muted-foreground truncate">{label}</span>
+                      <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground line-clamp-2 sm:truncate">{label}</span>
                     </span>
                   </button>
                 ))}
@@ -147,7 +147,7 @@ export default function LegalDashboard() {
                         <li key={it.k}>
                           <button disabled={!it.land} onClick={() => it.land && navigate(`/legal/land/properties/${it.land}`)}
                             className="flex w-full items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left text-sm hover:bg-muted/40 disabled:hover:bg-transparent">
-                            <span className="min-w-0 truncate text-foreground">{it.main}</span>
+                            <span className="min-w-0 break-words text-foreground sm:truncate">{it.main}</span>
                             <span className="shrink-0 text-xs text-muted-foreground">{it.side}</span>
                           </button>
                         </li>
@@ -169,12 +169,12 @@ export default function LegalDashboard() {
               ["Parties", active("buyer") + active("seller") + active("owner") + active("customer"), Profile2User, "seller"],
             ] as const).map(([label, value, Icon, key]) => (
               <button key={label} onClick={() => navigate(legalMasterPath(key))} className={`${card} p-4 flex items-center gap-3 text-left transition-transform hover:-translate-y-0.5`}>
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: LEGAL_GRADIENT }}>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-card shadow-sm" style={{ background: LEGAL_GRADIENT }}>
                   <Icon size={18} />
                 </span>
                 <span className="min-w-0">
                   <span className="block text-2xl font-heading font-bold tabular-nums leading-none text-foreground">{dash(value)}</span>
-                  <span className="mt-1 block text-[0.6875rem] text-muted-foreground truncate">{label}</span>
+                  <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground line-clamp-2 sm:truncate">{label}</span>
                 </span>
               </button>
             ))}

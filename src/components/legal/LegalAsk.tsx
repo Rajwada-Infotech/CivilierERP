@@ -67,7 +67,7 @@ export const LegalAskHost: React.FC = () => {
         <DialogFooter className="gap-2">
           <button type="button" onClick={() => close(null)} className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted">Cancel</button>
           <button type="button" disabled={!ok} onClick={submit}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${ask?.tone === "danger" ? "bg-rose-600 hover:bg-rose-700" : ""}`}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50 ${ask?.tone === "danger" ? "bg-rose-600 hover:bg-rose-700 text-white" : "text-card"}`}
             style={ask?.tone === "danger" ? undefined : { background: LEGAL_GRADIENT }}>
             {ask?.confirmText ?? "OK"}
           </button>
