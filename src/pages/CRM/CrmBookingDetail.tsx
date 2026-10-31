@@ -783,6 +783,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
   // nothing to verify, submit or approve, and nothing is overdue on it.
   const closed = isBookingClosed(booking?.Status);
+  // The Welcome Call's own parking / extra-charge checks belong to the Welcome
+  // Call, after Data Review — never shown beside the Data Review tick box.
+  const welcomeCallChecks = currentStage !== "Review";
   // Who may act at this stage is decided on the server from Approval Setup
   // (the booking workflow's levels: roles and named people).
   const canActOnStage = booking?.Status === CrmStatus.PENDING && !!stageState?.CanActOnStage;
@@ -1012,8 +1015,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // (checkBookingApprovalReadiness / submitForApproval) actually reads.
   const renderChecklistItem = (itemKey: string) => {
     const it = checklistItems.find((c: any) => c.ItemKey === itemKey);
-    if (!it) return null;
-    const interactive = currentStage === "Review" && !closed;
+    // One verify box per tab at a time: Data Review boxes only while the
+    // booking is in Data Review; after that the tab shows the Welcome Call
+    // checks instead (see welcomeCallChecks).
+    if (!it || currentStage !== "Review" || closed) return null;
+    const interactive = true;
 
     return (
       <div className=" border border-border/70 px-3 py-2 bg-muted/10">
@@ -2312,7 +2318,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   )}
                   {(parking as any[]).length > 0 && (
-                    <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    welcomeCallChecks && (
+                      <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    )
                   )}
                 </div>
                 )}
@@ -2415,7 +2423,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </>
                   )}
                   {(extras as any[]).length > 0 && (
-                    <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    welcomeCallChecks && (
+                      <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    )
                   )}
                 </div>
                 {renderChecklistItem("ParkingExtraCharges")}
