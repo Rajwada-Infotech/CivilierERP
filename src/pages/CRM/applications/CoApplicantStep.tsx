@@ -56,6 +56,29 @@ export const CoApplicantStep: React.FC<{
   // the applicant's (e.g. re-opening a previously saved entry).
   const [sameAsApplicant, setSameAsApplicant] = useState(false);
 
+  // A co-applicant being typed but not yet saved is kept in this browser and
+  // reopened next time (cleared by Save or Cancel).
+  const draftKey = `crm-coapp-draft:${applicationId}`;
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      setDraft({ ...emptyCoApplicant(), ...d.draft });
+      setEditingId(d.editingId);
+      setSameAsApplicant(!!d.sameAsApplicant);
+      toast.info("Unsaved co-applicant entry restored");
+    } catch { /* storage unavailable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  useEffect(() => {
+    if (editingId === null) return;
+    const t = setTimeout(() => {
+      try { localStorage.setItem(draftKey, JSON.stringify({ editingId, draft, sameAsApplicant })); } catch { /* storage unavailable */ }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [draftKey, editingId, draft, sameAsApplicant]);
+
   const startAdd = () => { setDraft(emptyCoApplicant()); setEditingId("new"); setSameAsApplicant(false); };
   const startEdit = (co: any) => {
     setDraft({
@@ -76,7 +99,7 @@ export const CoApplicantStep: React.FC<{
       (co.Pincode || "").trim() === (applicantPincode || "").trim()
     );
   };
-  const cancelEdit = () => { setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
+  const cancelEdit = () => { try { localStorage.removeItem(draftKey); } catch { /* storage unavailable */ } setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
   // An existing customer can be picked as a co-applicant: their details are
   // filled in and they are linked, never duplicated (the server also refuses
   // the main applicant or someone already on this application).
