@@ -112,7 +112,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
     check("booking created", ok(r) && !!run.bookingId, r);
     if (!run.bookingId) throw new Error("stop: no booking");
     const bid = run.bookingId;
-    for (const key of ["ApplicantKyc", "ProjectUnitRate", "PaymentPlanAmounts", "BankDepositMode", "BrokerDetails", "SourceAssignment", "Documents"]) {
+    for (const key of require("../services/crmApplicationChecklist").CHECKLIST_ITEMS.map((i) => i.key)) {
       await call("PUT", `/api/crm/bookings/${bid}/checklist/${key}/check`, { remarks: TAG });
     }
     r = await call("PUT", `/api/crm/bookings/${bid}/ready-for-approval`, {});

@@ -40,6 +40,7 @@ const CHECKLIST_ITEMS = [
   { key: "ApplicantKyc", label: "Applicant & co-applicant details match KYC (name, mobile, email, PAN, address)" },
   { key: "ProjectUnitRate", label: "Project, Unit and Rate/SqFt are correct and the unit is genuinely available" },
   { key: "PaymentPlanAmounts", label: "Payment Plan and Token/Booking Amount match what was quoted to the customer" },
+  { key: "ParkingExtraCharges", label: "Parking (type, quantity, rate) and extra charges are correct, or correctly none" },
   { key: "BankDepositMode", label: "Deposit bank, payment mode and instrument reference (cheque/txn) are correct" },
   { key: "BrokerDetails", label: "Broker / Channel Partner and brokerage rate/split are correctly recorded (if applicable)" },
   { key: "SourceAssignment", label: "Source and Assigned To are correctly set" },
@@ -54,6 +55,7 @@ const CHECKLIST_ITEMS = [
 const PLOT_SALE_LABELS = {
   ProjectUnitRate: "Project, Plot(s) and Rate/SqFt are correct and the plots are genuinely available",
   PaymentPlanAmounts: "Booking Amount and balance match what was quoted to the customer (no payment plan for land)",
+  ParkingExtraCharges: "Extra charges are correct, or correctly none (no parking with land)",
 };
 
 // There is no longer a separate Level-2 checklist — the two-level

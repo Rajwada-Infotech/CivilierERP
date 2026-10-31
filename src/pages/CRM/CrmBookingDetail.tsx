@@ -2413,6 +2413,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
                   )}
                 </div>
+                {renderChecklistItem("ParkingExtraCharges")}
               </div>
             )}
 
