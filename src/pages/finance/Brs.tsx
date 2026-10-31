@@ -136,15 +136,18 @@ function PayStatusBadge({ status }: { status: string | null }) {
 }
 
 // The tick against the passbook: an inked square once it is cleared.
-function PassbookCheck({ checked, loading, onChange }: { checked: boolean; loading: boolean; onChange: () => void }) {
+// blockedReason: set when the backend says this row can't be cleared. Un-clear
+// of an already cleared row stays possible, so mistakes can be fixed.
+function PassbookCheck({ checked, loading, onChange, blockedReason }: { checked: boolean; loading: boolean; onChange: () => void; blockedReason?: string }) {
+  const blocked = !!blockedReason && !checked;
   return (
     <button
       onClick={onChange}
-      disabled={loading}
+      disabled={loading || blocked}
       aria-pressed={checked}
-      title={checked ? "Cleared — click to revert to Unclear" : "Mark as Clear"}
+      title={blocked ? blockedReason : checked ? "Cleared — click to revert to Unclear" : "Mark as Clear"}
       className={`relative flex items-center justify-center w-5 h-5 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 ${
-        loading ? "opacity-40 cursor-wait" : "cursor-pointer"
+        loading ? "opacity-40 cursor-wait" : blocked ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
       } ${checked ? "bg-foreground text-card" : "bg-transparent hover:bg-primary/10"}`}
       style={{ border: "1.5px solid hsl(var(--foreground))" }}
     >
@@ -179,7 +182,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   });
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         {/* Header */}
@@ -307,7 +310,8 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
   const [bankClearingDate, setBankClearingDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    // At the dialogs' layer (z-60), under pop-overs (z-70): at z-9999 the date picker's calendar opened behind the modal.
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         <div className="flex items-start gap-3">
@@ -534,6 +538,8 @@ export default function Brs() {
   // that used to make this permanent was removed; see PUT .../unclear).
   const toggle = useCallback(async (entry: BrsEntry) => {
     if (isBounced(entry) || isCancelled(entry)) return; // can't toggle a bounced or cancelled-cheque entry
+    // The backend refuses it anyway; say why instead of opening the date form.
+    if (!isCleared(entry) && entry.Clearable === false) { toast.error(entry.ClearBlockReason || "Approve this document before clearing"); return; }
     if (isCleared(entry)) {
       if (!window.confirm("Revert this entry to Unclear? This clears the bank clearing date and cleared-by record.")) return;
       const key = `${entry.SourceType}-${entry.SourceID}`;
@@ -563,7 +569,7 @@ export default function Brs() {
       await fetchData();
     } catch (err) {
       console.error("BRS clear error", err);
-      toast.error("Failed to update status");
+      toast.error((err as any)?.response?.data?.error || "Failed to update status");
     } finally {
       setClearSaving(false);
     }
@@ -580,7 +586,7 @@ export default function Brs() {
       await fetchData();
     } catch (err) {
       console.error("BRS bounce error", err);
-      toast.error("Failed to record bounce");
+      toast.error((err as any)?.response?.data?.error || "Failed to record bounce");
     } finally {
       setBounceSaving(false);
     }
@@ -938,6 +944,7 @@ export default function Brs() {
                           checked={cleared && !bounced && !cancelled}
                           loading={toggling}
                           onChange={() => !bounced && !cancelled && toggle(entry)}
+                          blockedReason={entry.Clearable === false ? entry.ClearBlockReason : undefined}
                         />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -1021,7 +1028,7 @@ export default function Brs() {
                           <CornerDownRight size={10} className="shrink-0" />
                           <span className="font-heading tabular-nums">{entry.OriginalDocNo}</span>
                         </span>
-                      ) : entry.ChequeNo && !cleared ? (
+                      ) : entry.ChequeNo && !cleared && entry.Clearable !== false ? (
                         <button
                           onClick={() => setBounceEntry(entry)}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[0.6875rem] font-medium rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors"
@@ -1098,6 +1105,7 @@ export default function Brs() {
                           checked={cleared && !bounced && !cancelled}
                           loading={toggling}
                           onChange={() => !bounced && !cancelled && toggle(entry)}
+                          blockedReason={entry.Clearable === false ? entry.ClearBlockReason : undefined}
                         />
                       </td>
                       <td className="px-3 py-4 align-middle">
@@ -1135,6 +1143,11 @@ export default function Brs() {
                       </td>
                       <td className="px-3 py-4 align-middle">
                         <PayStatusBadge status={entry.PayStatus} />
+                        {entry.Clearable === false && !cleared && (
+                          <span className="mt-1 block text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground" title={entry.ClearBlockReason}>
+                            Awaiting approval
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-4 align-middle">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -1198,7 +1211,7 @@ export default function Brs() {
                             <CornerDownRight size={11} className="shrink-0" />
                             <span className="truncate">{entry.OriginalDocNo}</span>
                           </span>
-                        ) : entry.ChequeNo && !cleared ? (
+                        ) : entry.ChequeNo && !cleared && entry.Clearable !== false ? (
                           <button
                             onClick={() => setBounceEntry(entry)}
                             title="Mark this cheque as bounced / dishonoured"
