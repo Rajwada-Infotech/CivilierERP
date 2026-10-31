@@ -40,6 +40,21 @@ const EMPTY_BANK = {
 const TABS = ["Booking", "Parking & Extra Charges", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
 
+// Where each Data Review checklist item is verified — the tab holding the data
+// it checks. Drives the tick boxes on each tab, the tab marks, and "what's left".
+const CHECKLIST_TAB: Record<string, Tab> = {
+  ProjectUnitRate: "Booking",
+  BrokerDetails: "Booking",
+  SourceAssignment: "Booking",
+  ParkingExtraCharges: "Parking & Extra Charges",
+  PaymentPlanAmounts: "Payment Plan",
+  ApplicantKyc: "Bank Details",
+  Documents: "Attachments",
+  BankDepositMode: "Payment & Invoice",
+};
+// Plain words for a checklist item's state.
+const CHECK_STATE_LABEL: Record<string, string> = { Pending: "To verify", Checked: "Verified", NeedsRecheck: "Flagged — fix needed" };
+
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
@@ -357,6 +372,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Parking & Extra Charges",
     staleTime: 15_000,
   });
+  // The Parking & Extra Charges tick box exists only while there is parking or
+  // an extra charge to verify, so adding/removing one refreshes the checklist.
+  const parkingExtrasCount = (parking as any[]).length + (extras as any[]).length;
+  useEffect(() => { if (tab === "Parking & Extra Charges") refetchChecklist(); }, [parkingExtrasCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Verification checklist — only the Parking & ExtraCharges sections are
   // shown on this tab; the full checklist lives on the Welcome Call page.
   const { data: parkingChecklist, refetch: refetchParkingChecklist } = useQuery({
@@ -749,19 +769,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // columns — they ARE the Data Review checklist's own ProjectUnitRate /
   // PaymentPlanAmounts items being Checked. One source of truth for both
   // the top progress strip below and the booking-approval gate.
-  const unitConfirmed = checklistItems.find((it: any) => it.ItemKey === "ProjectUnitRate")?.CheckStatus === "Checked";
-  const planConfirmed = checklistItems.find((it: any) => it.ItemKey === "PaymentPlanAmounts")?.CheckStatus === "Checked";
   const mandatoryReady = checklistAllChecked;
+  // Per tab: how many Data Review items it holds, how many are verified/flagged.
+  const tabChecks = (t: Tab) => {
+    const items = checklistItems.filter((it: any) => CHECKLIST_TAB[it.ItemKey] === t);
+    return {
+      total: items.length,
+      checked: items.filter((it: any) => it.CheckStatus === "Checked").length,
+      flagged: items.filter((it: any) => it.CheckStatus === "NeedsRecheck").length,
+    };
+  };
+  const tabName = (t: Tab) => isPlotSale && t === "Parking & Extra Charges" ? "Extra Charges" : isPlotSale && t === "Payment Plan" ? "Payment Schedule" : t;
+  const checkedCount = checklistItems.filter((it: any) => it.CheckStatus === "Checked").length;
+  // Tabs still holding unverified items, in tab order; flagged ones first.
+  const tabsLeft = TABS.filter((t) => { const c = tabChecks(t); return c.total > c.checked; })
+    .sort((a, b) => (tabChecks(b).flagged > 0 ? 1 : 0) - (tabChecks(a).flagged > 0 ? 1 : 0));
   // Which specific gating step to point staff at, in the order they must be
   // completed — replaces the old generic "complete the checklist" message
   // with the actual step name and where to go do it, since the gates live
   // on 3 different tabs (Booking, Payment Plan, Payment & Invoice).
-  const pendingStepMessage = !unitConfirmed
-    ? { tab: "Booking" as Tab, text: "Step 1 (Unit & Value) is pending — check \"Project, Unit and Rate/SqFt are correct\" on the Booking tab." }
-    : !planConfirmed
-    ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — check the Payment Plan item on the Payment Plan tab." }
-    : !checklistAllChecked
-    ? { tab: "Booking" as Tab, text: "The Data Review checklist still has unchecked items." }
+  const itemsLeft = checklistItems.length - checkedCount;
+  const pendingStepMessage = itemsLeft > 0 && tabsLeft.length
+    ? { tab: tabsLeft[0], text: `${itemsLeft} item${itemsLeft === 1 ? "" : "s"} left to verify — ${tabsLeft.map(tabName).join(", ")}. Go to ${tabName(tabsLeft[0])} →` }
     : null;
 
   const goStep = (dir: 1 | -1) => {
@@ -778,6 +807,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
   // nothing to verify, submit or approve, and nothing is overdue on it.
   const closed = isBookingClosed(booking?.Status);
+  // The Welcome Call's own parking / extra-charge checks belong to the Welcome
+  // Call, after Data Review — never shown beside the Data Review tick box.
+  const welcomeCallChecks = currentStage !== "Review";
   // Who may act at this stage is decided on the server from Approval Setup
   // (the booking workflow's levels: roles and named people).
   const canActOnStage = booking?.Status === CrmStatus.PENDING && !!stageState?.CanActOnStage;
@@ -1005,13 +1037,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // (columns + routes) is gone; this checkbox is now the single, real
   // action for both what it visibly checks and what the readiness gate
   // (checkBookingApprovalReadiness / submitForApproval) actually reads.
+  const renderTabChecklist = (t: Tab) => {
+    const keys = Object.keys(CHECKLIST_TAB).filter((k) => CHECKLIST_TAB[k] === t);
+    const rows = keys.map(renderChecklistItem).filter(Boolean);
+    return rows.length ? <div className="space-y-2">{rows}</div> : null;
+  };
   const renderChecklistItem = (itemKey: string) => {
     const it = checklistItems.find((c: any) => c.ItemKey === itemKey);
-    if (!it) return null;
-    const interactive = currentStage === "Review" && !closed;
+    // One verify box per tab at a time: Data Review boxes only while the
+    // booking is in Data Review; after that the tab shows the Welcome Call
+    // checks instead (see welcomeCallChecks).
+    if (!it || currentStage !== "Review" || closed) return null;
+    const interactive = true;
 
     return (
-      <div className=" border border-border/70 px-3 py-2 bg-muted/10">
+      <div key={it.ItemKey} className={`border px-3 py-2.5 ${
+        it.CheckStatus === "Checked" ? "border-foreground/30 bg-card"
+        : it.CheckStatus === "NeedsRecheck" ? "border-destructive/50 bg-destructive/5" : "border-primary/40 bg-primary/5"
+      }`}>
+        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5 flex items-center gap-1">
+          <ClipboardCheck size={11} /> Data Review — {canVerify ? "tick when correct, flag if something is wrong" : "a data verifier ticks this"}
+        </p>
         <div className="flex items-start gap-2">
           <button
             type="button"
@@ -1026,13 +1072,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           </button>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium">{it.ItemLabel}</span>
+              <button type="button" disabled={!canVerify || checklistBusyKey === it.ItemKey}
+                onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
+                className="text-xs font-medium text-left enabled:cursor-pointer disabled:cursor-default">{it.ItemLabel}</button>
               <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium shrink-0 ${
                 it.CheckStatus === "Checked" ? "text-foreground bg-card border-foreground/30"
                 : it.CheckStatus === "NeedsRecheck" ? "text-destructive bg-destructive/5 border-destructive/40"
                 : "text-muted-foreground bg-muted/50 border-border"
               }`}>
-                {it.CheckStatus}
+                {CHECK_STATE_LABEL[it.CheckStatus] || it.CheckStatus}
               </span>
             </div>
             {it.Remarks && (
@@ -1199,28 +1247,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 : "text-muted-foreground bg-muted/40";
               return (
                 <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {[
-                    { label: isPlotSale ? "1. Plots & Value" : "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
-                    { label: isPlotSale ? "2. Payment Schedule" : "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
-                  ].map((s, i) => (
-                    <React.Fragment key={s.label}>
-                      <button onClick={() => setTab(s.t)}
-                        className={`flex items-center gap-1 px-2 py-1 font-medium shrink-0 ${
-                          s.done ? "text-foreground bg-card" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
-                        }`}>
-                        {s.done && <Check size={11} />} {s.label}
-                      </button>
-                      <ArrowRight size={11} className="text-muted-foreground shrink-0" />
-                    </React.Fragment>
-                  ))}
                   <button onClick={() => setTab("Payment & Invoice")}
                     title="Not required to book — informational only"
                     className={`flex items-center gap-1 px-2 py-1 font-medium shrink-0 ${mrChipClass}`}>
-                    {latestReceipt?.Status === CrmStatus.APPROVED && <Check size={11} />} 3. Money Receipt: {mrStatus}
+                    {latestReceipt?.Status === CrmStatus.APPROVED && <Check size={11} />} Money Receipt: {mrStatus}
                   </button>
-                  <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
-                    {mandatoryReady ? "Both required steps complete — ready to submit" : "Complete both required steps to submit"}
-                  </span>
+                  <span className="shrink-0 whitespace-nowrap text-muted-foreground">(for information — not needed to send for approval)</span>
                 </div>
               );
             })()}
@@ -1231,11 +1263,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 renderChecklistItem calls below), not dumped here as one
                 block. */}
             {currentStage === "Review" && !closed && checklistItems.length > 0 && (
-              <div className="flex items-center justify-between border border-border px-3 py-2 text-xs">
-                <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-foreground" /> Data Review Checklist</span>
-                <span className="text-muted-foreground">
-                  {checklistItems.filter((it: any) => it.CheckStatus === "Checked").length}/{checklistItems.length} verified — tick each item on its own tab below
-                </span>
+              <div className="border border-border px-3 py-2.5 text-xs space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-foreground" /> Data Review — {checkedCount} of {checklistItems.length} verified</span>
+                  {pendingStepMessage ? (
+                    <button onClick={() => setTab(pendingStepMessage.tab)} className="text-primary hover:underline text-left">{pendingStepMessage.text}</button>
+                  ) : (
+                    <span className="font-medium flex items-center gap-1"><Check size={12} /> All verified — ready for Verify &amp; Send for Approval</span>
+                  )}
+                </div>
+                <div className="h-1 bg-muted overflow-hidden" role="progressbar" aria-valuenow={checkedCount} aria-valuemax={checklistItems.length}>
+                  <div className="h-full bg-foreground transition-all" style={{ width: `${checklistItems.length ? (checkedCount / checklistItems.length) * 100 : 0}%` }} />
+                </div>
               </div>
             )}
 
@@ -1249,7 +1288,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   className={`px-3.5 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors whitespace-nowrap ${
                     tab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/10"
                   }`} style={{ borderRight: RULE_SOFT }}>
-                  {isPlotSale && t === "Parking & Extra Charges" ? "Extra Charges" : isPlotSale && t === "Payment Plan" ? "Payment Schedule" : t}
+                  <span className="flex items-center gap-1.5">
+                    {tabName(t)}
+                    {currentStage === "Review" && !closed && (() => {
+                      const c = tabChecks(t);
+                      if (!c.total) return null;
+                      if (c.flagged) return <span title={`${c.flagged} flagged`} className="px-1 text-destructive border border-destructive/50 bg-destructive/10">!</span>;
+                      if (c.checked === c.total) return <span title="All verified"><Check size={11} /></span>;
+                      return <span title={`${c.total - c.checked} to verify`} className="px-1 border border-current/40 tabular-nums">{c.total - c.checked}</span>;
+                    })()}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1476,9 +1524,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     a single action. See renderChecklistItem's own comment
                     for why there's no longer a separate Confirm button
                     here. */}
-                {renderChecklistItem("ProjectUnitRate")}
-                {renderChecklistItem("BrokerDetails")}
-                {renderChecklistItem("SourceAssignment")}
+                {renderTabChecklist("Booking")}
               </div>
             )}
 
@@ -1731,7 +1777,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     checklist item, a single action. See
                     renderChecklistItem's own comment for why there's no
                     longer a separate Confirm button here. */}
-                {renderChecklistItem("PaymentPlanAmounts")}
+                {renderTabChecklist("Payment Plan")}
               </div>
             )}
 
@@ -1997,7 +2043,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {renderChecklistItem("BankDepositMode")}
+                {renderTabChecklist("Payment & Invoice")}
               </div>
             )}
 
@@ -2307,7 +2353,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   )}
                   {(parking as any[]).length > 0 && (
-                    <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    welcomeCallChecks && (
+                      <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    )
                   )}
                 </div>
                 )}
@@ -2410,9 +2458,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </>
                   )}
                   {(extras as any[]).length > 0 && (
-                    <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    welcomeCallChecks && (
+                      <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    )
                   )}
                 </div>
+                {renderTabChecklist("Parking & Extra Charges")}
               </div>
             )}
 
@@ -2481,7 +2532,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </>
                 )}
 
-                {renderChecklistItem("ApplicantKyc")}
+                {renderTabChecklist("Bank Details")}
               </div>
             )}
 
@@ -2682,7 +2733,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {renderChecklistItem("Documents")}
+                {renderTabChecklist("Attachments")}
               </div>
             )}
 

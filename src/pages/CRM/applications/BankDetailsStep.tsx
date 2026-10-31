@@ -1,5 +1,5 @@
 // Wizard step: Bank / KYC.
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -28,6 +28,14 @@ const KYC_PREFILL_KEYS = ["PanNo", "AccountHolderName", "AadhaarNo", "Occupation
 // actually required. Empty now; format validation (IFSC/PAN/Aadhaar shape)
 // below still applies whenever a value IS provided.
 const BANK_STEP_REQUIRED_FIELDS: [keyof typeof EMPTY_BANK, string][] = [];
+
+// The one format check for this form — used by Next and by autosave.
+const bankFormatError = (b: any): string | null => {
+  if (b.IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(b.IfscCode.toUpperCase())) return "Invalid IFSC format (e.g. HDFC0001234)";
+  if (b.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(b.PanNo.toUpperCase())) return "Invalid PAN format (e.g. ABCDE1234F)";
+  if (b.AadhaarNo && !/^\d{12}$/.test(b.AadhaarNo)) return "Aadhaar must be exactly 12 digits";
+  return null;
+};
 
 export const BankDetailsStep: React.FC<{
   applicationId: number;
@@ -80,15 +88,8 @@ export const BankDetailsStep: React.FC<{
       toast.error(msg);
       throw new Error(msg);
     }
-    if ((bank as any).IfscCode && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test((bank as any).IfscCode.toUpperCase())) {
-      const msg = "Invalid IFSC format (e.g. HDFC0001234)"; toast.error(msg); throw new Error(msg);
-    }
-    if ((bank as any).PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test((bank as any).PanNo.toUpperCase())) {
-      const msg = "Invalid PAN format (e.g. ABCDE1234F)"; toast.error(msg); throw new Error(msg);
-    }
-    if ((bank as any).AadhaarNo && !/^\d{12}$/.test((bank as any).AadhaarNo)) {
-      const msg = "Aadhaar must be exactly 12 digits"; toast.error(msg); throw new Error(msg);
-    }
+    const formatError = bankFormatError(bank);
+    if (formatError) { toast.error(formatError); throw new Error(formatError); }
     setBankSaving(true);
     try {
       const res = await fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
@@ -110,6 +111,23 @@ export const BankDetailsStep: React.FC<{
     onRegisterSave?.(() => saveBank(true));
     return () => onRegisterSave?.(null);
   }, [onRegisterSave, saveBank]);
+
+  // Autosave: a second after typing stops, what is typed is saved to the
+  // application — Next pressed or not. Skipped quietly while a PAN / IFSC /
+  // Aadhaar is still half-typed; Next still checks and reports those.
+  const typed = useRef(false);
+  useEffect(() => {
+    if (!bankLoaded) return;
+    if (!typed.current) { typed.current = true; return; }
+    if (bankFormatError(bank)) return;
+    const t = setTimeout(() => {
+      fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bank),
+      }).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [bank, bankLoaded, applicationId]);
+  useEffect(() => { typed.current = false; }, [applicationId]);
 
   return (
     <div className="space-y-4">

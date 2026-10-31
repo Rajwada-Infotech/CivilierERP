@@ -167,9 +167,9 @@ async function requireActiveStage(pool, bookingId, stage) {
   return row;
 }
 
-// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Two gates:
-// all 7 data-review checklist items (KYC, Project/Unit/Rate, Payment Plan,
-// Bank/Deposit, Broker, Source, Documents) must be Checked, and the checklist must be complete. ProjectUnitRate and
+// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Every
+// data-review checklist item (CHECKLIST_ITEMS in crmApplicationChecklist.js)
+// must be Checked. ProjectUnitRate and
 // PaymentPlanAmounts being Checked already IS "Unit/Rate/Value confirmed"
 // and "Payment Plan confirmed" — the old separate
 // UnitReviewConfirmed/PlanReviewConfirmed columns asserted the exact same

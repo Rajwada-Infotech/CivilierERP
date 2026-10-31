@@ -232,7 +232,7 @@ const money = (x) => Math.round(Number(x || 0) * 100) / 100;
     check("data review checklist speaks of plots", clItems.some((i) => i.ItemKey === "ProjectUnitRate" && /Plot/.test(i.ItemLabel)) && clItems.some((i) => i.ItemKey === "PaymentPlanAmounts" && /no payment plan/i.test(i.ItemLabel)), clItems.map((i) => i.ItemLabel));
 
     console.log("\n[4] Data review checklist -> ready for approval -> approvals");
-    for (const key of ["ApplicantKyc", "ProjectUnitRate", "PaymentPlanAmounts", "BankDepositMode", "BrokerDetails", "SourceAssignment", "Documents"]) {
+    for (const key of require("../services/crmApplicationChecklist").CHECKLIST_ITEMS.map((i) => i.key)) {
       r = await call("PUT", `/api/crm/bookings/${bid}/checklist/${key}/check`, { remarks: TAG });
       if (!ok(r)) check(`checklist ${key}`, false, r);
     }
