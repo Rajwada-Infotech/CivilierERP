@@ -166,7 +166,7 @@ export default function LegalDashboard() {
               ["RS plots", active("rs-plot"), Grid5, "rs-plot"],
               ["LR RoR records", active("lr-ror"), DocumentText, "lr-ror"],
               ["Registration offices", active("registration-office"), Building4, "registration-office"],
-              ["Parties", active("party"), Profile2User, "party"],
+              ["Parties", active("buyer") + active("seller") + active("owner") + active("customer"), Profile2User, "seller"],
             ] as const).map(([label, value, Icon, key]) => (
               <button key={label} onClick={() => navigate(legalMasterPath(key))} className={`${card} p-4 flex items-center gap-3 text-left transition-transform hover:-translate-y-0.5`}>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ background: LEGAL_GRADIENT }}>

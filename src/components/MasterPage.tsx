@@ -205,6 +205,8 @@ interface MasterPageProps {
   rowActions?: (row: RecordWithId, data: RecordWithId[]) => React.ReactNode;
   /** Clicking a row (outside its buttons, links and inputs) calls this, e.g. to show the row's details. */
   onRowClick?: (row: RecordWithId) => void;
+  /** Extra classes for a row, e.g. a tint by status. */
+  rowClassName?: (row: RecordWithId) => string | undefined;
   /** Permission flags — when omitted everything is visible (default-open) */
   canCreate?: boolean;
   canEdit?: boolean;
@@ -285,6 +287,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onPrint,
   rowActions,
   onRowClick,
+  rowClassName,
   canCreate = true,
   canEdit = true,
   canDelete = true,
@@ -1164,7 +1167,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     return (
                     <tr
                       key={row._id}
-                      className={`${sheet ? "" : `hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}${onRowClick ? " cursor-pointer" : ""}`}
+                      className={`${sheet ? "" : `hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}${onRowClick ? " cursor-pointer" : ""}${rowClassName ? ` ${rowClassName(row) ?? ""}` : ""}`}
                       onClick={onRowClick ? (e) => { if (!(e.target as HTMLElement).closest("button, a, input, select, textarea, label")) onRowClick(row); } : undefined}
                       style={sheet && editingId === row._id ? { boxShadow: "inset 3px 0 0 hsl(var(--primary))" } : undefined}
                     >

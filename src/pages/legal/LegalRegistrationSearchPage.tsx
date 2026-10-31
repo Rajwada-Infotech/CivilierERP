@@ -104,7 +104,7 @@ export default function LegalRegistrationSearchPage() {
   const { data: deedTypes = [] } = useQuery({ queryKey: ["legal-lookup", "deed-type"], queryFn: () => getLegalLookup("deed-type") });
   const { data: projects = [] } = useQuery({ queryKey: ["legal-lookup", "project"], queryFn: () => getLegalLookup("project") });
   const { data: areaUnits = [] } = useQuery({ queryKey: ["legal-lookup", "area-unit"], queryFn: () => getLegalLookup("area-unit") });
-  const { data: parties = [] } = useQuery({ queryKey: ["legal-lookup", "party"], queryFn: () => getLegalLookup("party") });
+  const { data: parties = [] } = useQuery({ queryKey: ["legal-lookup", "person"], queryFn: () => getLegalLookup("person") });
 
   const { data: searches = [], isLoading } = useQuery({
     queryKey: ["legal-searches"],

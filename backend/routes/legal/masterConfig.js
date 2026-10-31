@@ -24,6 +24,8 @@
 //   `review: { field, by, at, free }` — setting `field` outside `free` (default ["Pending"]) needs the approve
 //   right and stamps who / when; `requiredWhen: { field, values }` makes a field required for those values;
 //   `afterWrite(pool, req, row, before)` runs after a successful add / update (a clearance putting the land on hold).
+//   `where` narrows a master with SQL ({t} = the row's table or alias), e.g. lands already acquired;
+//   `extras: [{ name, label, sql }]` adds read-only computed columns to the list (alias t is the row);
 //   `check(pool, values, id)` returns a message to refuse an add / update on a business rule (id null on add).
 // A `label` is evaluated with the master's table aliased as r.
 // Decimal fields take `min`, `maxValue` and `signed` (GPS coordinates).
@@ -134,6 +136,8 @@ const MASTERS = {
     desc: "Revisional Survey Record of Rights (Khatian): the account number of a landholder's records.",
     label: "'Khatian ' + KhatianNo + ISNULL(' - ' + HolderName, '')", orderBy: "MouzaId, KhatianNo",
     unique: [["MouzaId", "KhatianNo"], "This RS Khatian number already exists in this Mouza"],
+    // Read-only: the land properties whose RS / LR records use this entry.
+    extras: [{ name: "UsedByLands", label: "Used by land", sql: "(SELECT STRING_AGG(l.LandCode, ', ') FROM (SELECT DISTINCT x.LandId FROM dbo.LegalLandRsRecord x WHERE x.RsKhatianId = t.RsKhatianId AND x.IsActive = 1) u JOIN dbo.LegalLand l ON l.LandId = u.LandId)" }],
     fields: [
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
       { name: "KhatianNo", label: "RS Khatian number", type: "text", required: true, max: 30 },
@@ -150,6 +154,8 @@ const MASTERS = {
     desc: "Revisional Survey plot (Dag) numbers, with their Khatian, land class, area and project.",
     label: "'RS Dag ' + PlotNo", orderBy: "MouzaId, PlotNo",
     unique: [["MouzaId", "PlotNo"], "This RS plot number already exists in this Mouza"],
+    // Read-only: the land properties whose RS / LR records use this entry.
+    extras: [{ name: "UsedByLands", label: "Used by land", sql: "(SELECT STRING_AGG(l.LandCode, ', ') FROM (SELECT DISTINCT x.LandId FROM dbo.LegalLandRsRecord x WHERE x.RsPlotId = t.RsPlotId AND x.IsActive = 1) u JOIN dbo.LegalLand l ON l.LandId = u.LandId)" }],
     fields: [
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
       { name: "PlotNo", label: "RS plot (Dag) number", type: "text", required: true, max: 30 },
@@ -168,6 +174,8 @@ const MASTERS = {
     desc: "Land Reforms Record of Rights (Parcha): the official record of the holder and the parcel.",
     label: "'LR Khatian ' + LrKhatianNo + ' / Dag ' + LrPlotNo", orderBy: "MouzaId, LrKhatianNo, LrPlotNo",
     unique: [["MouzaId", "LrKhatianNo", "LrPlotNo"], "This LR Khatian and plot are already recorded in this Mouza"],
+    // Read-only: the land properties whose RS / LR records use this entry.
+    extras: [{ name: "UsedByLands", label: "Used by land", sql: "(SELECT STRING_AGG(l.LandCode, ', ') FROM (SELECT DISTINCT x.LandId FROM dbo.LegalLandLrRecord x WHERE x.LrRorId = t.LrRorId AND x.IsActive = 1) u JOIN dbo.LegalLand l ON l.LandId = u.LandId)" }],
     fields: [
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
       { name: "LrKhatianNo", label: "LR Khatian number", type: "text", required: true, max: 30 },
@@ -302,6 +310,9 @@ const MASTERS = {
     fields: [
       { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
+      // Optional links to the registers: picking one fills the numbers, holder and area below.
+      { name: "RsKhatianId", label: "Pick RS Khatian from register (optional)", type: "ref", ref: "rs-khatian", filterBy: "MouzaId", fill: { RsKhatianNo: "KhatianNo", RecordedHolder: "HolderName", Share: "Share" } },
+      { name: "RsPlotId", label: "Pick RS plot from register (optional)", type: "ref", ref: "rs-plot", filterBy: "MouzaId", fill: { RsDagNo: "PlotNo", Area: "Area", AreaUnitId: "AreaUnitId", RsKhatianId: "RsKhatianId" } },
       { name: "RsKhatianNo", label: "RS Khatian number", type: "text", required: true, max: 30 },
       { name: "RsDagNo", label: "RS Dag number", type: "text", required: true, max: 30 },
       { name: "RecordedHolder", label: "Recorded holder", type: "text", max: 200 },
@@ -326,6 +337,7 @@ const MASTERS = {
     fields: [
       { name: "LandId", label: "Land property", type: "ref", ref: "land", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true },
+      { name: "LrRorId", label: "Pick LR RoR from register (optional)", type: "ref", ref: "lr-ror", filterBy: "MouzaId", fill: { LrKhatianNo: "LrKhatianNo", LrDagNo: "LrPlotNo", RecordedHolder: "HolderName", GuardianName: "GuardianName", Area: "Area", AreaUnitId: "AreaUnitId", Share: "Share", RorDate: "RorDate" } },
       { name: "LrKhatianNo", label: "LR Khatian number", type: "text", required: true, max: 30 },
       { name: "LrDagNo", label: "LR Dag number", type: "text", required: true, max: 30 },
       // Optional: an LR plot need not carry the RS number, and the two numbers are never assumed equal.
@@ -1376,24 +1388,42 @@ const MASTERS = {
       ACTIVE,
     ],
   },
-  party: {
-    title: "Party", group: "Parties", pageKey: "legal-party-master", table: "LegalParty", pk: "PartyId",
-    desc: "Buyers, sellers, POA holders and witnesses, linked to deeds with a role.",
-    label: "LegalName", orderBy: "LegalName",
-    fields: [
-      { name: "PartyType", label: "Party type", type: "select", required: true, options: ["Individual", "Company", "LLP", "Partnership Firm", "Trust", "HUF", "Society", "Government", "Other"], default: "Individual" },
-      { name: "LegalName", label: "Name as on records", type: "text", required: true, max: 200 },
-      { name: "GuardianName", label: "Father / husband name", type: "text", max: 200 },
-      { name: "Pan", label: "PAN", type: "text", max: 10, upper: true, pattern: "^[A-Z]{5}[0-9]{4}[A-Z]$", patternMsg: "PAN must look like ABCDE1234F" },
-      { name: "Phone", label: "Phone", type: "text", max: 30 },
-      { name: "Email", label: "Email", type: "text", max: 150, pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", patternMsg: "Enter a valid email" },
-      { name: "Address", label: "Address", type: "textarea", max: 500 },
-      { name: "VerificationStatus", label: "Verification", type: "select", required: true, options: ["Unverified", "Verified", "Rejected"], default: "Unverified" },
-      { name: "PrivacyClass", label: "Privacy", type: "select", required: true, options: ["Normal", "Sensitive"], default: "Normal" },
-      ACTIVE,
-    ],
-  },
 };
+
+// Buying and selling are two views of LegalLandTransaction, kept apart by TxnType:
+//   land-purchase — the company acquiring the land (pipeline step 8); sellers are the land's current owners;
+//   land-sale     — the company selling an acquired land later (the land's Sales section).
+// "land-transaction" stays as the picker over both (payments, agreements, deeds and settlements point at it).
+{
+  const txn = MASTERS["land-transaction"];
+  const base = txn.fields.filter((f) => f.name !== "TxnType");
+  MASTERS["land-purchase"] = {
+    ...txn, title: "Purchase", scope: { column: "TxnType", value: "Purchase" }, check: undefined,
+    desc: "The company acquiring this land. Sellers are the land's current owners; the whole land (all owners' shares) can be bought in one purchase.",
+    fields: base.map((f) => (f.name === "BuyerName" ? { ...f, label: "Buyer (company)" } : f.name === "SellerNames" ? { ...f, label: "Seller(s) — the current owners" } : f)),
+  };
+  MASTERS["land-sale"] = {
+    ...txn, title: "Sale", scope: { column: "TxnType", value: "Sale" },
+    desc: "The company selling this land (or part of it) after acquiring it. The same area cannot be sold twice.",
+    // Only an acquired land can be sold, and never more than its unsold area.
+    check: async (pool, values, id) => {
+      const acquired = (await pool.request().input("Land", values.LandId).query(`
+        SELECT TOP 1 1 AS ok FROM dbo.LegalWorkflowStepState WHERE LandId = @Land AND StepCode = N'OWNERSHIP_TRANSFER' AND Status = N'Completed'`)).recordset[0];
+      if (!acquired) return "This land is not acquired yet — complete the purchase up to the ownership transfer (step 23) first";
+      return txn.check(pool, { ...values, TxnType: "Sale" }, id);
+    },
+    fields: base.map((f) => (f.name === "SellerNames" ? { ...f, label: "Seller (the company)" } : f)),
+  };
+  txn.lookupOnly = true;
+
+  // Only land the company has acquired (ownership transferred, step 23) can be sold.
+  MASTERS["acquired-land"] = {
+    ...MASTERS.land, title: "Land the company has acquired (ownership transferred, step 23)", lookupOnly: true,
+    where: "EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = {t}LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed')",
+  };
+  MASTERS["land-sale"].fields = MASTERS["land-sale"].fields.map((f) =>
+    (f.name === "LandId" ? { ...f, ref: "acquired-land", label: "Acquired land property" } : f));
+}
 
 // Pickers backed by core ERP tables rather than a Legal master.
 const EXTERNAL_REFS = {

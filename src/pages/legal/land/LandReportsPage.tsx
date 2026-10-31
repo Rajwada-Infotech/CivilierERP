@@ -2,12 +2,14 @@ import { useMemo, useRef, useState } from "react";
 import { useElementWidth } from "@/components/legal/useElementWidth";
 import { useQuery } from "@tanstack/react-query";
 import { DocumentText } from "iconsax-react";
-import { Download } from "lucide-react";
+import { Download, Printer } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv } from "@/lib/export";
-import { getLandReport, getLandReports } from "@/api/legalLandApi";
+import { getLandReport, getLandReports, getLandStats } from "@/api/legalLandApi";
+import { getLegalLookup } from "@/api/legalMastersApi";
+import { usePageRights as useRights } from "@/hooks/usePageRights";
 
 // Land Management reports (pipeline step 30): pick a report on the left, read and export it on the right.
 
@@ -23,19 +25,46 @@ export default function LandReportsPage() {
   const { data: list } = useQuery({ queryKey: ["legal-land-reports"], queryFn: getLandReports, staleTime: Infinity });
   const [key, setKey] = useState("land-register");
   const [q, setQ] = useState("");
+  const [landCode, setLandCode] = useState("");
+  const landRights = useRights("legal-land-master");
+  const { data: stats } = useQuery({ queryKey: ["legal-land-stats"], queryFn: getLandStats, enabled: landRights.canView, staleTime: 60 * 1000 });
+  const { data: lands } = useQuery({ queryKey: ["legal-lookup", "land"], queryFn: () => getLegalLookup("land"), staleTime: 60 * 1000 });
   const layoutRef = useRef<HTMLDivElement>(null);
   const wide = useElementWidth(layoutRef) >= 820;
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-land-report", key], queryFn: () => getLandReport(key) });
   const groups = useMemo(() => [...new Set((list ?? []).map((r) => r.group))], [list]);
+  const hasLandCol = !!data?.columns.includes("Land ID");
   const rows = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return !t ? data?.rows ?? [] : (data?.rows ?? []).filter((r) => Object.values(r).some((v) => cell(v).toLowerCase().includes(t)));
-  }, [data, q]);
+    return (data?.rows ?? [])
+      .filter((r) => !landCode || !hasLandCol || String(r["Land ID"]) === landCode)
+      .filter((r) => !t || Object.values(r).some((v) => cell(v).toLowerCase().includes(t)));
+  }, [data, q, landCode, hasLandCol]);
+  const print = () => {
+    document.body.classList.add("legal-printing");
+    const done = () => { document.body.classList.remove("legal-printing"); window.removeEventListener("afterprint", done); };
+    window.addEventListener("afterprint", done);
+    window.print();
+  };
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Reports"]} />
       <LegalShell title="Land Reports" subtitle="Registers and status reports across every land property" icon={DocumentText}>
+        {stats && (
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+            {([
+              ["Land properties", stats.totalLands], ["Active enquiries", stats.activeEnquiries], ["In progress", stats.inProgress],
+              ["Pending verification", stats.pendingVerification], ["On hold", stats.onHold], ["Pending registration", stats.pendingRegistration],
+              ["Mutation pending", stats.mutationPending], ["Completed", stats.completed],
+            ] as const).map(([l, v]) => (
+              <div key={l} className={`${card} p-3`}>
+                <div className="text-xl font-heading font-bold tabular-nums text-foreground">{v ?? 0}</div>
+                <div className="mt-0.5 truncate text-[0.6875rem] text-muted-foreground">{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <div ref={layoutRef} className={`grid gap-4 ${wide ? "grid-cols-[240px_minmax(0,1fr)]" : "grid-cols-1"}`}>
           <div className={`${card} p-3 ${wide ? "hidden" : ""}`}>
             <label className="text-[0.6875rem] uppercase tracking-[0.14em] text-muted-foreground" htmlFor="legal-report-picker">Report</label>
@@ -60,18 +89,29 @@ export default function LandReportsPage() {
               </div>
             ))}
           </nav>
-          <div className={`${card} min-w-0 p-4 sm:p-5`}>
+          <div className={`${card} legal-print min-w-0 p-4 sm:p-5`}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-base font-heading font-semibold text-foreground">{data?.title ?? "…"}</h3>
                 <p className="text-xs text-muted-foreground">{rows.length} row(s)</p>
               </div>
-              <div className="flex w-full gap-2 sm:w-auto">
+              <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                {hasLandCol && (
+                  <select className="min-w-0 rounded-lg border border-border bg-muted px-2.5 py-1.5 text-sm sm:w-52" value={landCode} onChange={(e) => setLandCode(e.target.value)} title="Filter by land">
+                    <option value="">All lands</option>
+                    {(lands ?? []).map((l) => <option key={l.value} value={l.label.split(" - ")[0]}>{l.label}</option>)}
+                  </select>
+                )}
                 <input className="min-w-0 flex-1 rounded-lg border border-border bg-muted px-2.5 py-1.5 text-sm sm:w-56 sm:flex-none" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
                 {rights.canExport && data && (
                   <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
                     onClick={() => exportToCsv(rows.map((r) => Object.fromEntries(data.columns.map((c) => [c, cell(r[c])]))), data.columns.map((c) => ({ header: c, accessor: c })), `legal-${key}`)}>
                     <Download size={13} /> CSV
+                  </button>
+                )}
+                {data && (
+                  <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={print}>
+                    <Printer size={13} /> PDF
                   </button>
                 )}
               </div>

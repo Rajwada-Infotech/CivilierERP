@@ -1,4 +1,4 @@
-import { Judge, SearchStatus, DocumentUpload, ClipboardTick, Clock, MessageQuestion, Global, Note1, Grid5, DocumentText, Chart } from "iconsax-react";
+import { Judge, SearchStatus, DocumentUpload, ClipboardTick, Clock, MessageQuestion, Global, Note1, DocumentText, Chart, MoneySend } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // In accordance with ERP conventions:
@@ -10,10 +10,11 @@ export const legalNavItems: NavItem[] = [
   // ── Land Management ──────────────────────────────────────────────────────
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
   { label: "Land Properties", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
+  { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "Land Reports", icon: Chart, path: "/legal/land/reports", pageKey: "legal-land-reports" },
-  { label: "RS Khatian Register", icon: Note1, path: "/legal/setup/rs-khatian", pageKey: "legal-rs-khatian-master" },
-  { label: "RS Plot Register", icon: Grid5, path: "/legal/setup/rs-plot", pageKey: "legal-rs-plot-master" },
-  { label: "LR RoR Register", icon: DocumentText, path: "/legal/setup/lr-ror", pageKey: "legal-lr-ror-master" },
+  // Registers of every land's RS / LR records (each row has its Land ID; entered on the land's step 4).
+  { label: "RS Record Register", icon: Note1, path: "/legal/land/rs-register", pageKey: "legal-land-master" },
+  { label: "LR RoR Register", icon: DocumentText, path: "/legal/land/lr-register", pageKey: "legal-land-master" },
 
   // ── Operations & Workflow ──────────────────────────────────────────────────
   { label: "Registration Search", icon: SearchStatus, path: "/legal/search", pageKey: "legal-registration-search" },

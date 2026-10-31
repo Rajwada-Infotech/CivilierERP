@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Global } from "iconsax-react";
-import { AlertTriangle, ChevronLeft, ChevronRight, Lock, Pause, Play, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Coins, FileText, Lock, Pause, Play, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell, LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 import { LandPipelineSidebar, StatusBadge } from "@/components/legal/land/LandPipelineSidebar";
+import { askLegal } from "@/components/legal/LegalAsk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { cancelLand, getLandAudit, getLandPipeline, holdLand, moveLandStep, resumeLand, type LandPipeline, type PipelineStep, type StepStatus } from "@/api/legalLandApi";
 import { LegalMasterTable } from "../LegalMasterPage";
@@ -43,10 +44,13 @@ export default function LandPropertyDetailPage() {
   const [holdOpen, setHoldOpen] = useState(false);
   const [hold, setHold] = useState({ category: "", reason: "", expectedReviewDate: "" });
 
-  // Open on the first unfinished step.
+  // Open on the step named in ?step= (links from the full details page), else the first unfinished step.
+  const [search] = useSearchParams();
   useEffect(() => {
-    if (data && !selected) setSelected((data.steps.find((s) => s.live && !["Completed", "Skipped"].includes(s.status)) ?? data.steps[0]).code);
-  }, [data, selected]);
+    if (!data || selected) return;
+    const asked = search.get("step");
+    setSelected((data.steps.find((s) => s.code === asked) ?? data.steps.find((s) => s.live && !["Completed", "Skipped"].includes(s.status)) ?? data.steps[0]).code);
+  }, [data, selected, search]);
 
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ["legal-land", id] }),
@@ -88,16 +92,23 @@ export default function LandPropertyDetailPage() {
         title={`${land.LandCode} · ${land.LandName}`}
         subtitle={[land.MouzaName && `${land.MouzaName} (J.L. ${land.JLNo ?? "-"})`, land.DistrictName, land.Area != null && `${Number(land.Area)} ${land.UnitName ?? ""}`].filter(Boolean).join(" · ")}
         icon={Global}
-        action={rights.canApprove && !land.IsCancelled ? (
+        action={(
           <div className="flex flex-wrap justify-end gap-1.5 sm:gap-2">
+          <button className={btn} title="Everything on this land, with PDF" onClick={() => navigate(`/legal/land/properties/${id}/details`)}><FileText size={13} /><span className="hidden sm:inline">Full details & PDF</span></button>
+          {/* Selling opens once the land is acquired (ownership transferred, step 23). */}
+          <button className={btn} disabled={data?.steps.find((s) => s.code === "OWNERSHIP_TRANSFER")?.status !== "Completed"}
+            title={data?.steps.find((s) => s.code === "OWNERSHIP_TRANSFER")?.status === "Completed" ? "Sales of this land" : "Available once the land is acquired (step 23 completed)"}
+            onClick={() => navigate(`/legal/land/properties/${id}/sales`)}><Coins size={13} /><span className="hidden sm:inline">Sales</span></button>
+          {rights.canApprove && !land.IsCancelled && (<>
           {!data.milestones.transactionClosed && (
-            <button className={btn} disabled={busy} title="Cancel transaction" onClick={() => { const r = window.prompt("Why is this land's transaction cancelled? Every record is kept."); if (r?.trim()) act(() => cancelLand(id, r.trim())); }}><X size={13} /><span className="hidden sm:inline">Cancel</span></button>
+            <button className={btn} disabled={busy} title="Cancel transaction" onClick={async () => { const r = await askLegal({ title: "Cancel this land's transaction?", message: "The pipeline is frozen and every record is kept, read-only.", input: { label: "Cancellation reason", required: true, minLength: 5 }, confirmText: "Cancel transaction", tone: "danger" }); if (r) act(() => cancelLand(id, r)); }}><X size={13} /><span className="hidden sm:inline">Cancel</span></button>
           )}
           {land.IsOnHold
-            ? <button className={btn} disabled={busy} title="Resume" onClick={() => { const r = window.prompt("Why is this land resumed?"); if (r?.trim()) act(() => resumeLand(id, r.trim())); }}><Play size={13} /><span className="hidden sm:inline">Resume</span></button>
+            ? <button className={btn} disabled={busy} title="Resume" onClick={async () => { const r = await askLegal({ title: "Resume this land?", input: { label: "Why is it resumed?", required: true }, confirmText: "Resume" }); if (r) act(() => resumeLand(id, r)); }}><Play size={13} /><span className="hidden sm:inline">Resume</span></button>
             : <button className={btn} disabled={busy} title="Put on hold" onClick={() => setHoldOpen((v) => !v)}><Pause size={13} /><span className="hidden sm:inline">Put on hold</span></button>}
+          </>)}
           </div>
-        ) : undefined}
+        )}
       >
         <div className="space-y-4">
           {/* ── Header strip ── */}
@@ -238,7 +249,7 @@ const StepActions: React.FC<{
             </button>
             {canApprove && step.status === "Pending Verification" && <button className={btn} disabled={busy || !remarks.trim()} onClick={() => move("Correction Required")}>Correction required</button>}
             {canApprove && step.skippable && (
-              <button className={btn} disabled={busy} onClick={() => { const r = window.prompt("Reason for skipping this step"); if (r?.trim()) move("Skipped", { skipReason: r.trim() }); }}>Skip…</button>
+              <button className={btn} disabled={busy} onClick={async () => { const r = await askLegal({ title: `Skip "${step.name}"?`, message: "Skipping is recorded with your name and the reason.", input: { label: "Reason for skipping", required: true, minLength: 5 }, confirmText: "Skip step" }); if (r) move("Skipped", { skipReason: r }); }}>Skip…</button>
             )}
           </>
         )}

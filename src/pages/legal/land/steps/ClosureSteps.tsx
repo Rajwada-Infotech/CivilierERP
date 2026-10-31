@@ -30,8 +30,18 @@ const TransferForm: React.FC<StepProps> = ({ landId, onSaved }) => {
   const approved = (deeds.data ?? []).filter((d) => d.IsActive && d.ApprovalStatus === "Approved");
   const [deedId, setDeedId] = useState("");
   const [date, setDate] = useState("");
+  const purchases = useQuery({ queryKey: ["legal-master", "land-purchase", landId], queryFn: () => getLegalRows("land-purchase", landId) });
   const [sell, setSell] = useState<Record<string, string>>({});
   const [buyers, setBuyers] = useState([{ name: "", guardian: "", share: "" }]);
+  // Pre-fill from the purchase: every current owner gives their whole share to the purchase's buyer.
+  const [prefilled, setPrefilled] = useState(false);
+  React.useEffect(() => {
+    if (prefilled || !current.length || !purchases.data) return;
+    const p = purchases.data.find((x) => x.IsActive && x.TxnStatus !== "Cancelled");
+    setSell(Object.fromEntries(current.map((o) => [String(o.RecordId), String(Number(o.SharePct))])));
+    if (p) setBuyers([{ name: String(p.BuyerName ?? ""), guardian: "", share: String(current.reduce((a, o) => a + Number(o.SharePct), 0)) }]);
+    setPrefilled(true);
+  }, [prefilled, current, purchases.data]);
   const [busy, setBusy] = useState(false);
   if (!rights.canEdit) return null;
   if (!approved.length) return <div className={`${stepCard} p-5 text-sm text-muted-foreground`}>The transfer is recorded from an <b>approved registered deed</b> (step 22). None yet.</div>;

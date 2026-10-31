@@ -3,6 +3,7 @@ import { Judge } from "iconsax-react";
 import { GlassShell } from "@/components/dashboard/GlassShell";
 import { LegalDocumentPreview, PANEL_DOCK_MIN_WIDTH } from "./LegalDocumentPreview";
 import { useElementWidth } from "./useElementWidth";
+import { LegalAskHost } from "./LegalAsk";
 
 // Single source of truth for the Legal module's accent — change this one value (and its twins in
 // moduleDefs.tsx / AppSidebar.tsx / index.css) to re-theme the whole module.
@@ -33,6 +34,7 @@ export const LegalShell: React.FC<LegalShellProps> = ({ title, subtitle, icon = 
         <div className="min-w-0 flex-1">{children}</div>
         <LegalDocumentPreview dock={dock} />
       </div>
+      <LegalAskHost />
     </GlassShell>
   );
 };

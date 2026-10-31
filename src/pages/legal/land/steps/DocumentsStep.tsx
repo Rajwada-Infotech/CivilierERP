@@ -9,6 +9,7 @@ import {
   type LandDocument, type RequiredDocument, type ReviewStatus,
 } from "@/api/legalDocumentsApi";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
+import { askLegal } from "@/components/legal/LegalAsk";
 import { LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 
 // Pipeline step 6 — Document Collection & Upload. Required documents come from the land's checklist;
@@ -145,10 +146,14 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
     setBusy(true);
     try { toast.success((await fn()).message); await refresh(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save"); } finally { setBusy(false); }
   };
-  const review = (d: LandDocument, status: ReviewStatus) => {
+  const review = async (d: LandDocument, status: ReviewStatus) => {
     let remarks: string | undefined;
     if (status !== "Verified") {
-      remarks = window.prompt(status === "Rejected" ? "Why is this version rejected?" : "What needs to be re-attached?")?.trim();
+      remarks = (await askLegal({
+        title: status === "Rejected" ? `Reject ${d.DocumentCode} v${d.CurrentVersionNo}?` : `Ask for a new copy of ${d.DocumentCode}?`,
+        input: { label: status === "Rejected" ? "Why is this version rejected?" : "What needs to be re-attached?", required: true },
+        confirmText: status === "Rejected" ? "Reject" : "Ask re-attach", tone: status === "Rejected" ? "danger" : "default",
+      })) ?? undefined;
       if (!remarks) return;
     }
     act(() => reviewDocumentVersion(d.VersionId, status, remarks));
@@ -156,7 +161,9 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
   const reattach = async (d: LandDocument) => {
     const r = await up.pick();
     if (!r) return;
-    const remarks = window.prompt("Note for this new version (optional)")?.trim() || undefined;
+    const note = await askLegal({ title: `New version of ${d.DocumentCode}`, message: r.fileName, input: { label: "Note for this version (optional)" }, confirmText: "Upload as new version" });
+    if (note === null) return;
+    const remarks = note || undefined;
     act(() => addDocumentVersion(d.DocumentId, r.id, remarks));
   };
 
@@ -191,7 +198,7 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
                     <td className="py-2 text-right whitespace-nowrap">
                       {i.state === "Missing" && rights.canEdit && <button className={btn} onClick={() => setAdding(i)}><Upload size={12} /> Upload</button>}
                       {i.state === "Missing" && i.allowNA && rights.canApprove && (
-                        <button className={`${btn} ml-1.5`} disabled={busy} onClick={() => { const r = window.prompt(`Why does ${i.docTypeName} not apply to this land?`)?.trim(); if (r) act(() => markDocumentNA(landId, i.docTypeId, r)); }}>Not applicable</button>
+                        <button className={`${btn} ml-1.5`} disabled={busy} onClick={async () => { const r = await askLegal({ title: `Mark ${i.docTypeName} not applicable?`, input: { label: "Why does it not apply to this land?", required: true, minLength: 5 }, confirmText: "Mark not applicable" }); if (r) act(() => markDocumentNA(landId, i.docTypeId, r)); }}>Not applicable</button>
                       )}
                       {i.state === "Not Applicable" && rights.canApprove && <button className={btn} disabled={busy} onClick={() => act(() => undoDocumentNA(landId, i.docTypeId))}>Make required</button>}
                     </td>

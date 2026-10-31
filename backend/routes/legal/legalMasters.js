@@ -57,7 +57,10 @@ const upload = multer({
 
 // ── Scoped masters (several masters sharing one table) ───────────────────────────────────────────
 // The scope value comes from the config, never from the request.
-const scopeSql = (cfg, alias) => (cfg.scope ? ` AND ${alias ? `${alias}.` : ""}${cfg.scope.column} = N'${cfg.scope.value}'` : "");
+// `where` (also from the config) narrows a master further; {t} stands for the row's table / alias.
+const scopeSql = (cfg, alias) =>
+  (cfg.scope ? ` AND ${alias ? `${alias}.` : ""}${cfg.scope.column} = N'${cfg.scope.value}'` : "")
+  + (cfg.where ? ` AND (${cfg.where.replace(/\{t\}/g, alias ? `${alias}.` : `${cfg.table}.`)})` : "");
 
 // ── Aadhaar ───────────────────────────────────────────────────────────────────────────────────────
 // Verhoeff check digit — the last digit of every genuine Aadhaar number.
@@ -187,6 +190,7 @@ async function validate(pool, cfg, body) {
     if (!found.recordset.length) {
       if (field.filterBy) return { error: `The ${field.label} chosen does not belong to the selected ${cfg.fields.find((f) => f.name === field.filterBy).label}` };
       const target = MASTERS[field.ref];
+      if (target?.where) return { error: `${field.label}: only ${target.title.toLowerCase()} can be chosen here` };
       return { error: target?.scope ? `Choose ${field.label} from the ${target.title} master` : `The ${field.label} chosen no longer exists` };
     }
   }
@@ -266,6 +270,7 @@ function sendDbError(res, cfg, err, where) {
 router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete,
+    extras: (m.extras || []).map(({ name, label }) => ({ name, label })),
     fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto }) =>
       ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto })),
   })));
@@ -388,7 +393,7 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
   try {
     const labels = cfg.fields.filter((f) => f.type === "ref" || f.type === "file").map((f) => `, ${refLabelSql(f, "t")} AS ${f.name}__label`).join("");
     const result = await getPool().request().input("Parent", sql.Int, parentId).query(`
-      SELECT t.*${labels},
+      SELECT t.*${labels}${(cfg.extras || []).map((x) => `, ${x.sql} AS ${x.name}`).join("")},
              (SELECT name FROM dbo.users WHERE id = t.CreatedBy) AS CreatedByName,
              (SELECT name FROM dbo.users WHERE id = t.UpdatedBy) AS UpdatedByName
       FROM dbo.${cfg.table} t WHERE 1 = 1${scopeSql(cfg, "t")}${parentId !== null ? ` AND t.${cfg.parent} = @Parent` : ""} ORDER BY ${cfg.orderBy.split(",").map((s) => `t.${s.trim()}`).join(", ")}`);

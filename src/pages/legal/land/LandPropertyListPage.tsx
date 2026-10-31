@@ -19,9 +19,10 @@ export default function LandPropertyListPage() {
           entry={entry}
           requestEditId={params.get("edit")}
           rowActions={(raw) => (
-            <button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
-              Open
-            </button>
+            <span className="inline-flex gap-1.5">
+              <button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">Open</button>
+              <button onClick={() => navigate(`/legal/land/properties/${raw.LandId}/details`)} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted" title="Everything on this land, with PDF">Details</button>
+            </span>
           )}
         />
       </LegalShell>

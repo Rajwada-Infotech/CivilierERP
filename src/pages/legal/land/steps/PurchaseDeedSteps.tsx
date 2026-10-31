@@ -1,6 +1,11 @@
-import React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getLandFinance } from "@/api/legalLandApi";
+import React, { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Users } from "lucide-react";
+import { usePageRights } from "@/hooks/usePageRights";
+import { getLegalLookup, getLegalRows } from "@/api/legalMastersApi";
+import { addOwnersToApprovals, getLandFinance, startPurchaseFromOwners } from "@/api/legalLandApi";
+import { LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 import { StepTabs, stepCard } from "./StepTabs";
 
 // Phase 4 (steps 8, 11–14: purchase / sale, valuation, agreement, approvals, payments) and Phase 5 (steps 15–22:
@@ -47,10 +52,81 @@ export const FinancialSummary: React.FC<{ landId: number }> = ({ landId }) => {
   );
 };
 
+const inputCls = "w-full rounded-lg border border-border bg-muted px-2.5 py-1.5 text-sm";
+const btnCls = "inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50";
+
+/** Step 8: the purchase starts from what the land already holds — its current owners and its area. */
+const StartPurchase: React.FC<StepProps> = ({ landId, onSaved }) => {
+  const rights = usePageRights("legal-land-master");
+  const queryClient = useQueryClient();
+  const purchases = useQuery({ queryKey: ["legal-master", "land-purchase", landId], queryFn: () => getLegalRows("land-purchase", landId) });
+  const owners = useQuery({ queryKey: ["legal-master", "ownership-record", landId], queryFn: () => getLegalRows("ownership-record", landId) });
+  const buyers = useQuery({ queryKey: ["legal-lookup", "buyer"], queryFn: () => getLegalLookup("buyer") });
+  const [f, setF] = useState({ buyer: "", value: "", advance: "" });
+  const [busy, setBusy] = useState(false);
+  const current = (owners.data ?? []).filter((r) => r.IsActive && !r.ValidTo);
+  if (!rights.canCreate || (purchases.data ?? []).some((p) => p.IsActive && p.TxnStatus !== "Cancelled")) return null;
+  const buyerOpt = (buyers.data ?? []).find((b) => b.label.split(" (")[0] === f.buyer);
+  return (
+    <div className={`${stepCard} p-4 sm:p-5`}>
+      <p className="mb-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground">Start the purchase from the current owners</p>
+      {!current.length ? <p className="text-sm text-amber-600">Record the land's current owners first (step 5).</p> : (
+        <>
+          <p className="text-sm text-muted-foreground">Sellers: {current.map((o) => `${String(o.OwnerName)} (${Number(o.SharePct)}%)`).join(", ")} — the whole land is bought from all of them.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="text-xs text-muted-foreground">Buyer (company) *
+              <input className={`${inputCls} mt-1`} list="legal-buyers" value={f.buyer} onChange={(e) => setF({ ...f, buyer: e.target.value })} placeholder="Type or pick from the Buyer master" />
+              <datalist id="legal-buyers">{(buyers.data ?? []).map((b) => <option key={b.value} value={b.label.split(" (")[0]} />)}</datalist>
+            </label>
+            <label className="text-xs text-muted-foreground">Total land value (₹) *<input type="number" className={`${inputCls} mt-1`} value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} /></label>
+            <label className="text-xs text-muted-foreground">Advance (₹)<input type="number" className={`${inputCls} mt-1`} value={f.advance} onChange={(e) => setF({ ...f, advance: e.target.value })} /></label>
+          </div>
+          <button className="mt-3 inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
+            disabled={busy || !f.buyer.trim() || !(Number(f.value) > 0)}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                toast.success((await startPurchaseFromOwners(landId, { buyerName: f.buyer.trim(), buyerId: buyerOpt?.value, totalValue: Number(f.value), advanceAmount: Number(f.advance) || undefined })).message);
+                await queryClient.invalidateQueries({ queryKey: ["legal-master"] });
+                onSaved();
+              } catch (e) { toast.error(e instanceof Error ? e.message : "Could not start the purchase"); } finally { setBusy(false); }
+            }}>Start purchase</button>
+        </>
+      )}
+    </div>
+  );
+};
+
+/** Step 13: put every current owner and the buyer on the agreement in one click. */
+const OwnersToApprovals: React.FC<StepProps> = ({ landId, onSaved }) => {
+  const rights = usePageRights("legal-land-master");
+  const queryClient = useQueryClient();
+  const agreements = useQuery({ queryKey: ["legal-master", "agreement", landId], queryFn: () => getLegalRows("agreement", landId) });
+  const [agr, setAgr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const list = (agreements.data ?? []).filter((a) => a.IsActive);
+  if (!rights.canCreate || !list.length) return null;
+  return (
+    <div className={`${stepCard} flex flex-wrap items-end gap-3 p-4 text-sm`}>
+      <label className="min-w-[14rem] flex-1 text-xs text-muted-foreground">Agreement
+        <select className={`${inputCls} mt-1`} value={agr} onChange={(e) => setAgr(e.target.value)}>
+          <option value="">Select…</option>
+          {list.map((a) => <option key={String(a.AgreementId)} value={String(a.AgreementId)}>{String(a.AgreementNo)} · {String(a.AgreementStatus)}</option>)}
+        </select>
+      </label>
+      <button className={btnCls} disabled={busy || !agr} onClick={async () => {
+        setBusy(true);
+        try { toast.success((await addOwnersToApprovals(landId, Number(agr))).message); await queryClient.invalidateQueries({ queryKey: ["legal-master", "party-approval"] }); onSaved(); }
+        catch (e) { toast.error(e instanceof Error ? e.message : "Could not add the parties"); } finally { setBusy(false); }
+      }}><Users size={13} /> Add all current owners and the buyer</button>
+    </div>
+  );
+};
+
 export const PurchaseSaleStep: React.FC<StepProps> = (p) => (
   <StepTabs {...p} tabs={[
-    { key: "txn", label: "Purchase / sale", tables: [{ key: "land-transaction", label: "Purchases & Sales" }],
-      note: "A sale may not exceed the land's unsold area — the same area cannot be sold twice. Cancelled sales do not count." },
+    { key: "txn", label: "Purchase", content: <StartPurchase {...p} />, tables: [{ key: "land-purchase", label: "Purchase" }],
+      note: "This pipeline is the company acquiring the land. Selling it later is in the land's Sales section." },
   ]} />
 );
 export const ValuationStep: React.FC<StepProps> = (p) => (
@@ -67,7 +143,7 @@ export const AgreementStep: React.FC<StepProps> = (p) => (
 );
 export const PartyApprovalStep: React.FC<StepProps> = (p) => (
   <StepTabs {...p} tabs={[
-    { key: "ap", label: "Buyer & seller approval", tables: [{ key: "party-approval", label: "Party Approvals" }],
+    { key: "ap", label: "Buyer & seller approval", content: <OwnersToApprovals {...p} />, tables: [{ key: "party-approval", label: "Party Approvals" }],
       note: "List every buyer, seller and co-owner separately. All must be Approved (or Not Applicable) on the signed agreement." },
   ]} />
 );

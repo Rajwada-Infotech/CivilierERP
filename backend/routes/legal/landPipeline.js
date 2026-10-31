@@ -181,10 +181,10 @@ async function gates(conn, land) {
 
   // Phase 4 (steps 8, 11–14) and Phase 5 (steps 15–22).
   const [txns, vals, agreements, approvals, pays, deeds, drafts, dchecks, duties, regPays, appts, attempts, regDeeds] = (await conn.request().input("Id", sql.Int, land.LandId).query(`
-    SELECT TransactionId, TransactionNo, TotalValue, AdvanceAmount, TxnStatus FROM dbo.LegalLandTransaction WHERE LandId = @Id AND IsActive = 1 AND TxnStatus <> N'Cancelled';
+    SELECT TransactionId, TransactionNo, TotalValue, AdvanceAmount, TxnStatus FROM dbo.LegalLandTransaction WHERE LandId = @Id AND IsActive = 1 AND TxnStatus <> N'Cancelled' AND TxnType = N'Purchase';
     SELECT VerificationStatus FROM dbo.LegalValuation WHERE LandId = @Id AND IsActive = 1;
     SELECT AgreementId, AgreementNo, AgreementStatus, AdvanceAmount FROM dbo.LegalAgreement WHERE LandId = @Id AND IsActive = 1;
-    SELECT AgreementId, PartyRole, ConsentStatus FROM dbo.LegalPartyApproval WHERE LandId = @Id AND IsActive = 1;
+    SELECT AgreementId, PartyRole, ConsentStatus, PartyName FROM dbo.LegalPartyApproval WHERE LandId = @Id AND IsActive = 1;
     SELECT TransactionId, Amount, VerificationStatus FROM dbo.LegalPayment WHERE LandId = @Id AND IsActive = 1;
     SELECT DeedId, DeedCode, RegistrationStatus FROM dbo.LegalLandDeed WHERE LandId = @Id AND IsActive = 1;
     SELECT DraftId, DeedId, VersionNo, ReviewStatus FROM dbo.LegalDeedDraft WHERE LandId = @Id AND IsActive = 1;
@@ -201,9 +201,15 @@ async function gates(conn, land) {
   if (!signed.length) need.AGREEMENT.push(agreements.length ? "The agreement is not signed by both sides yet" : "Record the agreement");
   if (signed.length) {
     const ap = approvals.filter((a) => signed.some((g) => g.AgreementId === a.AgreementId));
-    if (!ap.some((a) => a.PartyRole === "Buyer") || !ap.some((a) => a.PartyRole === "Seller")) need.PARTY_APPROVAL.push("List every buyer and seller on the signed agreement");
+    if (!ap.some((a) => a.PartyRole === "Buyer") || !ap.some((a) => ["Seller", "Co-owner"].includes(a.PartyRole))) need.PARTY_APPROVAL.push("List every buyer and seller on the signed agreement");
     const open = ap.filter((a) => !["Approved", "Not Applicable"].includes(a.ConsentStatus));
     if (open.length) need.PARTY_APPROVAL.push(`${open.length} party approval(s) still pending or rejected`);
+    // Buying the whole land needs every current owner's consent, however many share the same Dag.
+    const owners = (await conn.request().input("Id", sql.Int, land.LandId).query(
+      "SELECT OwnerName FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND ValidTo IS NULL")).recordset;
+    const norm = (x) => String(x || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const missingOwners = owners.filter((o) => !ap.some((a) => norm(a.PartyName) === norm(o.OwnerName)));
+    if (missingOwners.length) need.PARTY_APPROVAL.push(`Not listed on the agreement: ${missingOwners.map((o) => o.OwnerName).join(", ")} (current owner${missingOwners.length > 1 ? "s" : ""})`);
   } else need.PARTY_APPROVAL.push("Waiting for a signed agreement");
   const verifiedPaid = pays.filter((x) => x.VerificationStatus === "Verified").reduce((a, x) => a + Number(x.Amount), 0);
   const advance = Number(signed[0]?.AdvanceAmount ?? txns[0]?.AdvanceAmount ?? 0);
@@ -720,7 +726,7 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
 
   for (const n of c.to) {
     let eventId = null;
-    if (!c.first || c.doc.fileId || c.doc.documentNo) {
+    {  // every owner, the first one too, gets a chain entry so it can be shown, edited and verified
       const ev = await tx.request()
         .input("Land", sql.Int, landId).input("Type", sql.Int, c.transferTypeId || (await tx.request().query("SELECT TOP 1 LookupId AS id FROM dbo.LegalLookupValue WHERE Category = N'transfer-type' AND Name = N'Sale'")).recordset[0]?.id)
         .input("Date", sql.Date, c.date).input("Prev", sql.NVarChar(200), fromNames).input("PrevG", sql.NVarChar(200), fromGuardian)
@@ -839,6 +845,84 @@ router.post("/:id/ownership/undo", requirePageRight(LAND_PAGE, "edit"), async (r
     try { await tx.rollback(); } catch { /* already rolled back */ }
     console.error("[legal-land] ownership undo:", err.message);
     res.status(500).json({ error: "Could not undo. Please try again." });
+  }
+});
+
+// Step 5: edit one change of ownership (identified by its date). Date, document and the new owners' names /
+// father's names / relationships can change; shares cannot (delete and record the change again for that).
+// A new date moves the previous owners' end date and the new owners' start date with it, and must stay after
+// the givers' start and not after any later change. The edited change goes back to Pending for verification;
+// a verified change can only be edited by a reviewer.
+router.put("/:id/ownership/change/:date", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const date = String(req.params.date || "").slice(0, 10);
+  const b = req.body || {};
+  const newDate = b.date ? String(b.date).slice(0, 10) : date;
+  if (!id || !dateOk(date) || !dateOk(newDate)) return res.status(400).json({ error: "Invalid change or date" });
+  const owners = Array.isArray(b.owners) ? b.owners.map((o) => ({ eventId: idParam(o.eventId), name: text(o.name, 200), guardian: text(o.guardian, 200), rel: idParam(o.relationshipTypeId) })) : [];
+  if (owners.some((o) => !o.eventId || !o.name)) return res.status(400).json({ error: "Every new owner needs a name" });
+  const tx = new sql.Transaction(getPool());
+  try {
+    await tx.begin();
+    const refuse = async (s, msg) => { await tx.rollback(); return res.status(s).json({ error: msg }); };
+    const evs = (await tx.request().input("Land", sql.Int, id).input("D", sql.Date, date).query(`
+      SELECT EventId, VerificationStatus, RegisteredDeedId FROM dbo.LegalOwnershipEvent WITH (UPDLOCK) WHERE LandId = @Land AND IsActive = 1 AND EventDate = @D`)).recordset;
+    if (!evs.length) return refuse(404, "Change not found");
+    if (evs.some((e) => e.RegisteredDeedId)) return refuse(409, "This change came from the registered deed (step 23); edit the deed instead");
+    const recs = (await tx.request().input("Land", sql.Int, id).input("D", sql.Date, date).query(`
+      SELECT RecordId, ValidFrom, ValidTo, VerificationStatus, EventId FROM dbo.LegalOwnershipRecord WITH (UPDLOCK)
+      WHERE LandId = @Land AND IsActive = 1 AND (ValidFrom = @D OR ValidTo = DATEADD(day, -1, @D))`)).recordset;
+    const starting = recs.filter((r) => String(r.ValidFrom.toISOString().slice(0, 10)) === date);
+    const givers = recs.filter((r) => r.ValidTo && String(r.ValidTo.toISOString().slice(0, 10)) === new Date(new Date(date).getTime() - 86400000).toISOString().slice(0, 10));
+    const verified = evs.some((e) => e.VerificationStatus === "Verified") || starting.some((r) => r.VerificationStatus === "Verified");
+    if (verified && !(await hasAnyPageAction(req, LAND_PAGE, ["approve"]))) return refuse(409, "This change is verified — only a reviewer can edit it");
+    if (newDate !== date) {
+      const giverStart = givers.map((r) => r.ValidFrom.toISOString().slice(0, 10)).sort().pop();
+      if (giverStart && newDate <= giverStart) return refuse(409, `The date must be after ${giverStart}, when the previous owner's ownership started`);
+      const laterEnd = starting.filter((r) => r.ValidTo).map((r) => r.ValidTo.toISOString().slice(0, 10)).sort()[0];
+      if (laterEnd && newDate > laterEnd) return refuse(409, `The date cannot be after ${laterEnd}, when the next change ends these owners' ownership`);
+      const clash = (await tx.request().input("Land", sql.Int, id).input("N", sql.Date, newDate).input("D", sql.Date, date)
+        .query("SELECT TOP 1 1 AS x FROM dbo.LegalOwnershipEvent WHERE LandId = @Land AND IsActive = 1 AND EventDate = @N AND EventDate <> @D")).recordset[0];
+      if (clash) return refuse(409, "Another change is already recorded on that date");
+    }
+    const userId = req.user?.userId || null;
+    const r0 = tx.request().input("Land", sql.Int, id).input("D", sql.Date, date).input("N", sql.Date, newDate).input("UserId", sql.Int, userId)
+      .input("DocType", sql.Int, idParam(b.docTypeId)).input("DocNo", sql.NVarChar(100), text(b.documentNo, 100)).input("DeedNo", sql.NVarChar(60), text(b.deedNo, 60))
+      .input("File", sql.Int, idParam(b.fileId)).input("Value", sql.Decimal(18, 2), Number.isFinite(Number(b.transferValue)) && b.transferValue !== "" && b.transferValue != null ? Number(b.transferValue) : null)
+      .input("Remarks", sql.NVarChar(1000), text(b.remarks, 1000));
+    await r0.query(`
+      UPDATE dbo.LegalOwnershipEvent SET EventDate = @N, DocTypeId = @DocType, DocumentNo = @DocNo, DeedNo = @DeedNo, DocFileId = @File, TransferValue = @Value, Remarks = @Remarks,
+             VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+      WHERE LandId = @Land AND IsActive = 1 AND EventDate = @D;
+      UPDATE dbo.LegalOwnershipRecord SET ValidTo = DATEADD(day, -1, @N), UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+      WHERE LandId = @Land AND IsActive = 1 AND ValidTo = DATEADD(day, -1, @D);
+      UPDATE dbo.LegalOwnershipRecord SET ValidFrom = @N, TransferDocFileId = ISNULL(@File, TransferDocFileId),
+             VerificationStatus = N'Pending', VerifiedBy = NULL, VerifiedAt = NULL, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+      WHERE LandId = @Land AND IsActive = 1 AND ValidFrom = @D;
+      UPDATE dbo.LegalPartition SET PartitionDate = @N WHERE LandId = @Land AND IsActive = 1 AND PartitionDate = @D;`);
+    for (const o of owners) {
+      await tx.request().input("Ev", sql.Int, o.eventId).input("Land", sql.Int, id).input("Name", sql.NVarChar(200), o.name).input("G", sql.NVarChar(200), o.guardian)
+        .input("Rel", sql.Int, o.rel).query(`
+          -- The heir row is found by the owner's old name, so it is renamed first.
+          UPDATE dbo.LegalInheritanceHeir SET HeirName = @Name, HeirGuardian = @G, RelationshipTypeId = @Rel
+          WHERE LandId = @Land AND IsActive = 1 AND HeirName = (SELECT TOP 1 NewOwnerName FROM dbo.LegalOwnershipEvent WHERE EventId = @Ev);
+          UPDATE dbo.LegalOwnershipEvent SET NewOwnerName = @Name, NewOwnerGuardian = @G WHERE EventId = @Ev AND LandId = @Land;
+          UPDATE dbo.LegalOwnershipRecord SET OwnerName = @Name, OwnerGuardian = @G, RelationshipTypeId = @Rel WHERE EventId = @Ev AND LandId = @Land AND IsActive = 1;`);
+    }
+    // Later changes name these owners as "From": keep those names in step.
+    await tx.request().input("Land", sql.Int, id).input("N", sql.Date, newDate).query(`
+      UPDATE later SET PreviousOwnerName = LEFT((SELECT STRING_AGG(r.OwnerName, ', ') FROM dbo.LegalOwnershipRecord r
+                                                 WHERE r.LandId = @Land AND r.IsActive = 1 AND r.ValidTo = DATEADD(day, -1, later.EventDate)), 200)
+      FROM dbo.LegalOwnershipEvent later
+      WHERE later.LandId = @Land AND later.IsActive = 1 AND later.EventDate > @N
+        AND EXISTS (SELECT 1 FROM dbo.LegalOwnershipRecord r WHERE r.LandId = @Land AND r.IsActive = 1 AND r.ValidFrom = @N AND r.ValidTo = DATEADD(day, -1, later.EventDate));`);
+    await writeAudit(tx, req, { action: "Ownership change edited", entityType: "Land Property", entityId: id, landId: id, oldValue: { date }, newValue: { date: newDate, owners: owners.map((o) => o.name), document: text(b.documentNo, 100) } });
+    await tx.commit();
+    res.json({ message: `Change ${newDate !== date ? `moved to ${newDate} and ` : ""}updated — sent back for verification` });
+  } catch (err) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    console.error("[legal-land] ownership edit:", err.message);
+    res.status(500).json({ error: "Could not update the change. Please try again." });
   }
 });
 
@@ -994,6 +1078,164 @@ router.post("/:id/cancel", requirePageRight(LAND_PAGE, "edit"), async (req, res)
   }
 });
 
+// An enquiry's status from its row: Reject / Hold (reason required) or back to Under Review. The reason is
+// added to the enquiry's notes with the date; a converted enquiry cannot change.
+// ── Acquisition helpers ──────────────────────────────────────────────────────────────────────────
+/** The land's current owners with their shares (step 5), for purchase and approvals. */
+const currentOwners = async (conn, landId) => (await conn.request().input("Land", sql.Int, landId).query(`
+  SELECT OwnerName, OwnerGuardian, PersonId, CAST(SharePct AS FLOAT) AS SharePct FROM dbo.LegalOwnershipRecord
+  WHERE LandId = @Land AND IsActive = 1 AND ValidTo IS NULL ORDER BY SharePct DESC, RecordId`)).recordset;
+
+// Step 8: start the purchase from what the land already holds — sellers = every current owner with their share,
+// area = the land's area. One purchase covers the whole land however many owners share the Dag.
+router.post("/:id/purchase/from-owners", requirePageRight(LAND_PAGE, "create"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const buyer = text(req.body?.buyerName, 200);
+  const value = Number(req.body?.totalValue);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (!buyer) return res.status(400).json({ error: "Enter the buyer (company)" });
+  if (!(value > 0)) return res.status(400).json({ error: "Enter the total land value" });
+  try {
+    const pool = getPool();
+    const owners = await currentOwners(pool, id);
+    if (!owners.length) return res.status(409).json({ error: "Record the land's current owners first (step 5)" });
+    const land = (await pool.request().input("Id", sql.Int, id).query("SELECT Area, AreaUnitId FROM dbo.LegalLand WHERE LandId = @Id")).recordset[0];
+    if (!land?.Area || !land.AreaUnitId) return res.status(409).json({ error: "Enter the land's total area and unit first (step 2)" });
+    const exists = (await pool.request().input("Id", sql.Int, id).query("SELECT TOP 1 TransactionNo FROM dbo.LegalLandTransaction WHERE LandId = @Id AND IsActive = 1 AND TxnType = N'Purchase' AND TxnStatus <> N'Cancelled'")).recordset[0];
+    if (exists) return res.status(409).json({ error: `A purchase (${exists.TransactionNo}) is already recorded for this land` });
+    const sellers = owners.map((o) => `${o.OwnerName} (${Number(o.SharePct.toFixed(4))}%)`).join(", ").slice(0, 500);
+    const r = await pool.request()
+      .input("Prefix", sql.NVarChar(20), codePrefix("TXN")).input("Land", sql.Int, id).input("Buyer", sql.NVarChar(200), buyer)
+      .input("BuyerId", sql.Int, idParam(req.body?.buyerId)).input("Sellers", sql.NVarChar(500), sellers)
+      .input("Area", sql.Decimal(18, 6), land.Area).input("Unit", sql.Int, land.AreaUnitId).input("Value", sql.Decimal(18, 2), value)
+      .input("Rate", sql.Decimal(18, 2), Number(land.Area) ? value / Number(land.Area) : null)
+      .input("Advance", sql.Decimal(18, 2), Number(req.body?.advanceAmount) > 0 ? Number(req.body.advanceAmount) : null)
+      .input("UserId", sql.Int, req.user?.userId || null)
+      .query(`
+        INSERT INTO dbo.LegalLandTransaction (TransactionNo, LandId, TxnType, BuyerName, BuyerId, SellerNames, TxnArea, AreaUnitId, RatePerUnit, TotalValue, AdvanceAmount, TxnStatus, CreatedBy)
+        OUTPUT INSERTED.TransactionNo AS no
+        SELECT ${nextCodeSql("LegalLandTransaction", "TransactionNo", "@Prefix")}, @Land, N'Purchase', @Buyer, @BuyerId, @Sellers, @Area, @Unit, @Rate, @Value, @Advance, N'Draft', @UserId`);
+    await writeAudit(pool, req, { action: "Purchase started", entityType: "Land Property", entityId: id, landId: id, newValue: { no: r.recordset[0].no, buyer, sellers, value } });
+    res.status(201).json({ message: `Purchase ${r.recordset[0].no}: ${buyer} buys the whole land from ${owners.length} owner(s)` });
+  } catch (err) {
+    console.error("[legal-land] purchase from owners:", err.message);
+    res.status(500).json({ error: "Could not start the purchase" });
+  }
+});
+
+// Step 13: list every current owner (Seller, with share) and the buyer on an agreement, once each.
+router.post("/:id/approvals/from-owners", requirePageRight(LAND_PAGE, "create"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const agreementId = idParam(req.body?.agreementId);
+  if (!id || !agreementId) return res.status(400).json({ error: "Choose the agreement" });
+  try {
+    const pool = getPool();
+    const agr = (await pool.request().input("A", sql.Int, agreementId).input("Land", sql.Int, id).query(`
+      SELECT a.AgreementId, t.BuyerName, t.BuyerId FROM dbo.LegalAgreement a JOIN dbo.LegalLandTransaction t ON t.TransactionId = a.TransactionId
+      WHERE a.AgreementId = @A AND a.LandId = @Land AND a.IsActive = 1`)).recordset[0];
+    if (!agr) return res.status(404).json({ error: "Agreement not found on this land" });
+    const owners = await currentOwners(pool, id);
+    const rows = [...owners.map((o) => ({ name: o.OwnerName, person: o.PersonId, role: owners.length > 1 ? "Co-owner" : "Seller", share: o.SharePct })),
+      { name: agr.BuyerName, person: agr.BuyerId, role: "Buyer", share: null }];
+    let added = 0;
+    for (const x of rows) {
+      const r = await pool.request().input("Land", sql.Int, id).input("A", sql.Int, agreementId).input("Name", sql.NVarChar(200), x.name)
+        .input("Person", sql.Int, x.person).input("Role", sql.NVarChar(30), x.role).input("Share", sql.Decimal(7, 4), x.share).input("UserId", sql.Int, req.user?.userId || null)
+        .query(`
+          IF NOT EXISTS (SELECT 1 FROM dbo.LegalPartyApproval WHERE AgreementId = @A AND PartyName = @Name AND IsActive = 1)
+            INSERT INTO dbo.LegalPartyApproval (LandId, AgreementId, PartyName, PersonId, PartyRole, OwnershipSharePct, ConsentStatus, IdVerification, CreatedBy)
+            OUTPUT INSERTED.ApprovalId VALUES (@Land, @A, @Name, @Person, @Role, @Share, N'Pending', N'Pending', @UserId);`);
+      added += r.recordset?.length ? 1 : 0;
+    }
+    res.json({ message: added ? `${added} part${added > 1 ? "ies" : "y"} added — record each one's consent` : "Every owner and the buyer are already listed" });
+  } catch (err) {
+    console.error("[legal-land] approvals from owners:", err.message);
+    res.status(500).json({ error: "Could not add the parties" });
+  }
+});
+
+// Everything recorded on one land, section by section — for the full-details page and its PDF.
+router.get("/:id/dossier", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const r = await getPool().request().input("Id", sql.Int, id).query(`
+      SELECT l.LandCode, l.LandName, l.LocationAddress, l.Area, u.UnitName, lt.LandTypeName, l.LandStatus, l.WorkflowStatus, l.IsOnHold, l.IsCancelled,
+             d.DistrictName, sd.SubDivisionName, b.BlockName, v.VillageName, ps.StationName, mu.BodyName AS Municipality, m.MouzaName, m.JLNo,
+             l.NorthBoundary, l.SouthBoundary, l.EastBoundary, l.WestBoundary, l.GpsLatitude, l.GpsLongitude, e.EnquiryNo, l.CreatedAt
+        FROM dbo.LegalLand l
+        LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId LEFT JOIN dbo.LegalLandType lt ON lt.LandTypeId = l.LandTypeId
+        LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId LEFT JOIN dbo.LegalSubDivision sd ON sd.SubDivisionId = l.SubDivisionId
+        LEFT JOIN dbo.LegalBlock b ON b.BlockId = l.BlockId LEFT JOIN dbo.LegalVillage v ON v.VillageId = l.VillageId
+        LEFT JOIN dbo.LegalPoliceStation ps ON ps.PoliceStationId = l.PoliceStationId LEFT JOIN dbo.LegalMunicipality mu ON mu.MunicipalityId = l.MunicipalityId
+        LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalLandEnquiry e ON e.EnquiryId = l.EnquiryId
+        WHERE l.LandId = @Id;
+      SELECT OwnerName, OwnerGuardian, CAST(SharePct AS FLOAT) AS SharePct, ValidFrom, ValidTo, VerificationStatus FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 ORDER BY ValidFrom, RecordId;
+      SELECT e.EventDate, t.Name AS TransferType, e.PreviousOwnerName, e.NewOwnerName, CAST(e.TransferSharePct AS FLOAT) AS SharePct, ISNULL(e.DocumentNo, e.DeedNo) AS DocumentNo, e.DocFileId, f.FileName AS DocFileName, e.VerificationStatus
+        FROM dbo.LegalOwnershipEvent e LEFT JOIN dbo.LegalMasterFile f ON f.FileId = e.DocFileId LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = e.TransferTypeId WHERE e.LandId = @Id AND e.IsActive = 1 ORDER BY e.EventDate, e.EventId;
+      SELECT 'RS' AS Kind, RsKhatianNo AS Khatian, RsDagNo AS Dag, RecordedHolder, CAST(Area AS FLOAT) AS Area, Share, VerificationStatus, DocFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = DocFileId) AS DocFileName FROM dbo.LegalLandRsRecord WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT 'LR', LrKhatianNo, LrDagNo, RecordedHolder, CAST(Area AS FLOAT), Share, VerificationStatus, DocFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = DocFileId) FROM dbo.LegalLandLrRecord WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT 'LR (after mutation)', NewLrKhatianNo, NewLrDagNo, RecordedHolder, CAST(UpdatedArea AS FLOAT), CAST(CAST(NewSharePct AS DECIMAL(7,2)) AS NVARCHAR(20)) + '%', VerificationStatus, RorFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = RorFileId) FROM dbo.LegalMutationRecord WHERE LandId = @Id AND IsActive = 1;
+      SELECT d.DocumentCode, d.Title, t.DocTypeName, d.DocumentNo, d.CurrentVersionNo, v.ReviewStatus, v.FileId AS DocFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = v.FileId) AS DocFileName FROM dbo.LegalLandDocument d
+        JOIN dbo.LegalDocumentType t ON t.DocTypeId = d.DocTypeId JOIN dbo.LegalLandDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNo = d.CurrentVersionNo
+        WHERE d.LandId = @Id AND d.IsActive = 1 ORDER BY d.DocumentCode;
+      SELECT 'Court case' AS Kind, CaseNumber + ' — ' + CourtName AS Detail, (SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = LegalStatusId) AS Status FROM dbo.LegalCase WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT 'Mortgage', LenderName, MortgageStatus FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT 'Search: ' + CheckType, ISNULL(SearchSource, ''), Result FROM dbo.LegalVerificationCheck WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT 'Legal opinion', OpinionNo + ' — ' + FinalOpinion, OpinionStatus FROM dbo.LegalOpinion WHERE LandId = @Id AND IsActive = 1
+      UNION ALL SELECT 'Legal clearance', ClearanceNo, Decision FROM dbo.LegalClearance WHERE LandId = @Id AND IsActive = 1;
+      SELECT t.TransactionNo, t.TxnType, t.BuyerName, t.SellerNames, CAST(t.TxnArea AS FLOAT) AS Area, au.UnitName, t.TotalValue, t.TxnStatus,
+             ISNULL((SELECT SUM(Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0) AS Paid
+        FROM dbo.LegalLandTransaction t LEFT JOIN dbo.LegalAreaUnit au ON au.AreaUnitId = t.AreaUnitId WHERE t.LandId = @Id AND t.IsActive = 1 ORDER BY t.TransactionId;
+      SELECT d.DeedCode, dt.DeedTypeName, d.ConsiderationAmount, o.OfficeName, d.RegistrationStatus, d.RegisteredDeedNo,
+             (SELECT TOP 1 RegistrationDate FROM dbo.LegalRegisteredDeed r WHERE r.DeedId = d.DeedId AND r.IsActive = 1) AS RegistrationDate
+        FROM dbo.LegalLandDeed d LEFT JOIN dbo.LegalDeedType dt ON dt.DeedTypeId = d.DeedTypeId LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = d.RegistrationOfficeId
+        WHERE d.LandId = @Id AND d.IsActive = 1;
+      SELECT ApplicationNo, OfficeName, ApplicationStatus, OrderNo, OrderDate FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1;
+      SELECT s.StepNo, s.StepCode, s.StepName, ISNULL(st.Status, N'Not Started') AS Status, st.UpdatedAt,
+             (SELECT name FROM dbo.users WHERE id = st.UpdatedBy) AS UpdatedByName
+        FROM dbo.LegalWorkflowStep s LEFT JOIN dbo.LegalWorkflowStepState st ON st.StepCode = s.StepCode AND st.LandId = @Id
+        WHERE s.IsActive = 1 ORDER BY s.StepNo;`);
+    const [land, owners, chain, records, documents, legal, transactions, deeds, mutations, steps] = r.recordsets;
+    if (!land[0]) return res.status(404).json({ error: "Land property not found" });
+    res.json({ land: land[0], owners, chain, records, documents, legal, transactions, deeds, mutations, steps });
+  } catch (err) {
+    console.error("[legal-land] dossier:", err.message);
+    res.status(500).json({ error: "Could not load the land details" });
+  }
+});
+
+router.post("/enquiries/:id/status", requirePageRight(ENQUIRY_PAGE, "edit"), async (req, res) => {
+  const id = idParam(req.params.id);
+  const status = req.body?.status;
+  const reason = text(req.body?.reason, 500);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (!["Rejected", "On Hold", "Under Review"].includes(status)) return res.status(400).json({ error: "Status must be Rejected, On Hold or Under Review" });
+  if (status !== "Under Review" && !reason) return res.status(400).json({ error: "Give the reason" });
+  try {
+    const pool = getPool();
+    const r = await pool.request().input("Id", sql.Int, id).input("Status", sql.NVarChar(40), status).input("UserId", sql.Int, req.user?.userId || null)
+      .input("Note", sql.NVarChar(600), `[${new Date().toISOString().slice(0, 10)}] ${status}${reason ? `: ${reason}` : ""}`)
+      .query(`
+        UPDATE dbo.LegalLandEnquiry
+        SET EnquiryStatus = @Status,
+            InitialNotes = LEFT(ISNULL(InitialNotes + CHAR(10), N'') + @Note, 2000),
+            UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+        OUTPUT DELETED.EnquiryStatus AS prev, INSERTED.EnquiryNo AS no
+        WHERE EnquiryId = @Id AND EnquiryStatus <> N'Converted to Land Record'`);
+    if (!r.recordset.length) return res.status(409).json({ error: "This enquiry is already converted, or does not exist" });
+    await writeAudit(pool, req, { action: "Enquiry status changed", entityType: "Land Enquiry", entityId: id, oldValue: { status: r.recordset[0].prev }, newValue: { status }, remarks: reason });
+    res.json({ message: `${r.recordset[0].no}: ${status}` });
+  } catch (err) {
+    console.error("[legal-land] enquiry status:", err.message);
+    res.status(500).json({ error: "Could not change the status" });
+  }
+});
+
 router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), requirePageRight(ENQUIRY_PAGE, "edit"), async (req, res) => {
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -1006,7 +1248,7 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
     const refuse = async (status, msg) => { await tx.rollback(); return res.status(status).json({ error: msg }); };
     if (!e) return refuse(404, "Enquiry not found");
     if (e.LandId || e.EnquiryStatus === "Converted to Land Record") return refuse(409, "This enquiry is already converted");
-    if (e.EnquiryStatus === "Rejected") return refuse(409, "A rejected enquiry cannot be converted. Change its status first.");
+    if (e.EnquiryStatus === "Rejected" || e.EnquiryStatus === "On Hold") return refuse(409, `This enquiry is ${e.EnquiryStatus.toLowerCase()}; resume it before converting.`);
 
     const ins = await tx.request()
       .input("Prefix", sql.NVarChar(20), codePrefix("LND"))

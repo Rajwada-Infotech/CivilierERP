@@ -299,8 +299,8 @@ router.get("/deeds", requirePageRight("legal-deed-registrations", "view"), async
                owner.name AS AssignedExecutiveName,
                l1.name AS L1ReviewerName,
                l2.name AS L2ApproverName,
-               (SELECT TOP 1 pt.LegalName FROM dbo.LegalDossierParty dp JOIN dbo.LegalParty pt ON pt.PartyId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Seller%') AS SellerName,
-               (SELECT TOP 1 pt.LegalName FROM dbo.LegalDossierParty dp JOIN dbo.LegalParty pt ON pt.PartyId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Buyer%') AS BuyerName,
+               (SELECT TOP 1 pt.FullName FROM dbo.LegalDossierParty dp JOIN dbo.LegalPerson pt ON pt.PersonId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Seller%') AS SellerName,
+               (SELECT TOP 1 pt.FullName FROM dbo.LegalDossierParty dp JOIN dbo.LegalPerson pt ON pt.PersonId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Buyer%') AS BuyerName,
                (SELECT COUNT(*) FROM dbo.LegalDossierDocument doc WHERE doc.DossierId = d.DossierId AND doc.IsActive = 1) AS TotalDocs,
                (SELECT COUNT(*) FROM dbo.LegalDossierDocument doc WHERE doc.DossierId = d.DossierId AND doc.IsActive = 1 AND doc.DocumentStatus = 'Accepted') AS AcceptedDocs,
                (SELECT COUNT(*) FROM dbo.LegalDossierDocument doc WHERE doc.DossierId = d.DossierId AND doc.IsActive = 1 AND doc.RequirementType = 'Required' AND doc.DocumentStatus NOT IN ('Accepted', 'Waived')) AS PendingMandatoryDocs
@@ -334,8 +334,8 @@ router.get("/deeds", requirePageRight("legal-deed-registrations", "view"), async
              rk.KhatianNo AS RsKhatian,
              NULL AS LrKhatian,
              u.UnitName AS AreaUnitName,
-             sp.LegalName AS SellerName,
-             bp.LegalName AS BuyerName,
+             sp.FullName AS SellerName,
+             bp.FullName AS BuyerName,
              ae.name AS AssignedExecutiveName,
              l1.name AS L1ReviewerName,
              l2.name AS L2ApproverName,
@@ -351,8 +351,8 @@ router.get("/deeds", requirePageRight("legal-deed-registrations", "view"), async
       LEFT JOIN dbo.LegalRsPlot rp ON rp.RsPlotId = d.RsPlotId
       LEFT JOIN dbo.LegalRsKhatian rk ON rk.RsKhatianId = d.RsKhatianId
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = d.AreaUnitId
-      LEFT JOIN dbo.LegalParty sp ON sp.PartyId = d.SellerPartyId
-      LEFT JOIN dbo.LegalParty bp ON bp.PartyId = d.BuyerPartyId
+      LEFT JOIN dbo.LegalPerson sp ON sp.PersonId = d.SellerPartyId
+      LEFT JOIN dbo.LegalPerson bp ON bp.PersonId = d.BuyerPartyId
       LEFT JOIN dbo.users ae ON ae.id = d.AssignedExecutiveId
       LEFT JOIN dbo.users l1 ON l1.id = d.L1ReviewerId
       LEFT JOIN dbo.users l2 ON l2.id = d.L2ApproverId
@@ -411,8 +411,8 @@ router.get("/deeds/:id", requirePageRight("legal-deed-registrations", "view"), a
                owner.name AS AssignedExecutiveName,
                l1.name AS L1ReviewerName,
                l2.name AS L2ApproverName,
-               (SELECT TOP 1 pt.LegalName FROM dbo.LegalDossierParty dp JOIN dbo.LegalParty pt ON pt.PartyId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Seller%') AS SellerName,
-               (SELECT TOP 1 pt.LegalName FROM dbo.LegalDossierParty dp JOIN dbo.LegalParty pt ON pt.PartyId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Buyer%') AS BuyerName
+               (SELECT TOP 1 pt.FullName FROM dbo.LegalDossierParty dp JOIN dbo.LegalPerson pt ON pt.PersonId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Seller%') AS SellerName,
+               (SELECT TOP 1 pt.FullName FROM dbo.LegalDossierParty dp JOIN dbo.LegalPerson pt ON pt.PersonId = dp.PartyId WHERE dp.DossierId = d.DossierId AND dp.PartyRole LIKE '%Buyer%') AS BuyerName
         FROM dbo.LegalDeedDossier d
         JOIN dbo.LegalDeedType dt ON dt.DeedTypeId = d.DeedTypeId
         JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = d.RegistrationOfficeId
@@ -461,13 +461,13 @@ router.get("/deeds/:id", requirePageRight("legal-deed-registrations", "view"), a
         SELECT ev.EventId AS LogId,
                ev.EntityId AS DeedRecordId,
                'Workflow' AS Stage,
-               ev.ActionTaken AS Action,
-               ev.EventType AS NewStatus,
-               ev.Remarks AS Comments,
+               ev.Action AS Action,
+               ev.NewState AS NewStatus,
+               ev.Comments AS Comments,
                u.name AS ActionByName,
-               ev.PerformedAt AS ActionAt
+               ev.Timestamp AS ActionAt
         FROM dbo.LegalAuditEvent ev
-        LEFT JOIN dbo.users u ON u.id = ev.PerformedBy
+        LEFT JOIN dbo.users u ON u.id = ev.ActorId
         WHERE ev.EntityName = 'LegalDeedDossier' AND ev.EntityId = @Id
         ORDER BY ev.EventId DESC
       `);
@@ -494,8 +494,8 @@ router.get("/deeds/:id", requirePageRight("legal-deed-registrations", "view"), a
              rk.KhatianNo AS RsKhatian,
              NULL AS LrKhatian,
              u.UnitName AS AreaUnitName,
-             sp.LegalName AS SellerName,
-             bp.LegalName AS BuyerName,
+             sp.FullName AS SellerName,
+             bp.FullName AS BuyerName,
              ae.name AS AssignedExecutiveName,
              l1.name AS L1ReviewerName,
              l2.name AS L2ApproverName
@@ -508,8 +508,8 @@ router.get("/deeds/:id", requirePageRight("legal-deed-registrations", "view"), a
       LEFT JOIN dbo.LegalRsPlot rp ON rp.RsPlotId = d.RsPlotId
       LEFT JOIN dbo.LegalRsKhatian rk ON rk.RsKhatianId = d.RsKhatianId
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = d.AreaUnitId
-      LEFT JOIN dbo.LegalParty sp ON sp.PartyId = d.SellerPartyId
-      LEFT JOIN dbo.LegalParty bp ON bp.PartyId = d.BuyerPartyId
+      LEFT JOIN dbo.LegalPerson sp ON sp.PersonId = d.SellerPartyId
+      LEFT JOIN dbo.LegalPerson bp ON bp.PersonId = d.BuyerPartyId
       LEFT JOIN dbo.users ae ON ae.id = d.AssignedExecutiveId
       LEFT JOIN dbo.users l1 ON l1.id = d.L1ReviewerId
       LEFT JOIN dbo.users l2 ON l2.id = d.L2ApproverId

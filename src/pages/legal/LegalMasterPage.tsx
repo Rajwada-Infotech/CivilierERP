@@ -224,9 +224,11 @@ interface TableProps {
   requestEditId?: string | null;
   /** Hide the "Add" form: rows are created elsewhere (e.g. the ownership chain) and only edited / verified here. */
   noAdd?: boolean;
+  /** Extra classes for a row from its raw values (e.g. a tint by status). */
+  rowClassName?: (raw: LegalRow) => string | undefined;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const queryClient = useQueryClient();
 
@@ -266,7 +268,11 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fields, lookups, parentField, JSON.stringify(defaults)],
   );
-  const data = useMemo(() => (rows ?? []).map((r) => mapRow(r, master?.pk ?? "", fields)), [rows, master, fields]);
+  const extras = useMemo(() => master?.extras ?? [], [master]);
+  const data = useMemo(
+    () => (rows ?? []).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.map((x) => [`${x.name}__display`, r[x.name] ?? ""])) })),
+    [rows, master, fields, extras],
+  );
   const rawById = useMemo(() => new Map((rows ?? []).map((r) => [String(r[master?.pk ?? ""]), r])), [rows, master]);
 
   // Every field as a column (the table scrolls sideways): documents as a preview chip, long notes cut to one
@@ -274,9 +280,10 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   const columns: ColumnDef[] = useMemo(() => {
     const shown = fields.filter((f) => !isStatus(f));
     const cols: ColumnDef[] = shown.map((f, i) => ({ key: displayKey(f), label: f.label, hideOnMobile: i >= 2 }));
+    for (const x of extras) cols.push({ key: `${x.name}__display`, label: x.label, hideOnMobile: true });
     if (fields.some(isStatus)) cols.push({ key: "status", label: "Status" });
     return cols;
-  }, [fields]);
+  }, [fields, extras]);
   const columnRenderers = useMemo(
     () => Object.fromEntries([
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
@@ -306,6 +313,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         wide: f.type === "textarea" || f.type === "url",
         url: f.type === "url",
       })),
+      ...extras.map((x) => ({ label: x.label, value: String(row[`${x.name}__display`] || "—") })),
       { label: "Created by", value: String(row.createdBy ?? "") },
       { label: "Last updated by", value: String(row.updatedBy ?? "") },
     ]);
@@ -346,10 +354,12 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       gridCols={fields.length > 8 ? 3 : 2}
       fluid
       exportConfig={{ title: entry.label, filename: `legal-${entry.key}`, columns: exportColumns }}
-      requestEditId={requestEditId}
-      requestEditKey={requestEditId}
+      // Ask for the edit only once that row is loaded, or the form falls back to "Add".
+      requestEditId={requestEditId && rawById.has(requestEditId) ? requestEditId : null}
+      requestEditKey={requestEditId && rawById.has(requestEditId) ? requestEditId : null}
       rowActions={rowActions ? (row) => { const raw = rawById.get(row._id); return raw ? rowActions(raw) : null; } : undefined}
       onRowClick={showDetails}
+      rowClassName={rowClassName ? (row) => { const raw = rawById.get(row._id); return raw ? rowClassName(raw) : undefined; } : undefined}
     />
   );
 }

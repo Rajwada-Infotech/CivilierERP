@@ -49,7 +49,7 @@ export default function LegalDeedListPage() {
   const { data: projects = [] } = useQuery({ queryKey: ["legal-lookup", "project"], queryFn: () => getLegalLookup("project") });
   const { data: mouzas = [] } = useQuery({ queryKey: ["legal-lookup", "mouza"], queryFn: () => getLegalLookup("mouza") });
   const { data: areaUnits = [] } = useQuery({ queryKey: ["legal-lookup", "area-unit"], queryFn: () => getLegalLookup("area-unit") });
-  const { data: parties = [] } = useQuery({ queryKey: ["legal-lookup", "party"], queryFn: () => getLegalLookup("party") });
+  const { data: parties = [] } = useQuery({ queryKey: ["legal-lookup", "person"], queryFn: () => getLegalLookup("person") });
   const { data: users = [] } = useQuery({ queryKey: ["legal-lookup", "user"], queryFn: () => getLegalLookup("user") });
 
   const createMutation = useMutation({

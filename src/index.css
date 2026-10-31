@@ -2633,3 +2633,17 @@ select[aria-hidden="true"] {
 [data-theme="bw"] .app-sidebar [class*="hover:bg-"]:hover {
     background-color: rgba(255, 255, 255, 0.08) !important;
 }
+
+/* Legal — land enquiry rows tinted by status (LandEnquiryPage). Plain classes so they always ship. */
+.legal-enq-review    { background-color: rgba(14,165,233,.07);  box-shadow: inset 3px 0 0 #0ea5e9; }
+.legal-enq-interest  { background-color: rgba(16,185,129,.08);  box-shadow: inset 3px 0 0 #10b981; }
+.legal-enq-hold      { background-color: rgba(245,158,11,.10);  box-shadow: inset 3px 0 0 #f59e0b; }
+.legal-enq-rejected  { background-color: rgba(244,63,94,.08);   box-shadow: inset 3px 0 0 #f43f5e; color: hsl(var(--muted-foreground)); }
+.legal-enq-converted { background-color: rgba(124,74,46,.07);   box-shadow: inset 3px 0 0 #7c4a2e; }
+
+/* Legal — "Download PDF" on a land's full details prints only that sheet. */
+@media print {
+  body.legal-printing * { visibility: hidden; }
+  body.legal-printing .legal-print, body.legal-printing .legal-print * { visibility: visible; }
+  body.legal-printing .legal-print { position: absolute; inset: 0 auto auto 0; width: 100%; background: #fff; color: #111; }
+}

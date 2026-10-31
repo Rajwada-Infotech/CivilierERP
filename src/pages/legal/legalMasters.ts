@@ -1,6 +1,6 @@
 import {
   Map1, Building, Shield, Home2, Layer, Global, UserTick, UserMinus, Crown1, People, Eye, Judge, Note1, Grid5, DocumentText, Ruler,
-  Building4, Link21, Book1, TaskSquare, DocumentCopy, ClipboardTick, Hierarchy, InfoCircle, Timer1, Profile2User, MessageQuestion,
+  Building4, Link21, Book1, TaskSquare, DocumentCopy, ClipboardTick, Hierarchy, InfoCircle, Timer1, MessageQuestion,
   Location, Routing, Category, Profile, ArrowSwapHorizontal, Personalcard, Courthouse, Bank, Status, MoneySend, Receipt1,
   Wallet, ReceiptText, Copy, TrendUp,
 } from "iconsax-react";
@@ -81,7 +81,6 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("customer", "Customer", "Parties", People, "Customers with identity & documents"),
   S("witness", "Witness", "Parties", Eye, "Deed witnesses & ID proof"),
   S("advocate", "Advocate", "Parties", Judge, "Enrolment, practice & chamber"),
-  S("party", "Party (Deed)", "Parties", Profile2User, "Deed parties: buyers, sellers, POA holders"),
 ];
 
 export const LEGAL_MASTER_GROUPS = ["Locations", "Land records", "Ownership", "Legal & Financial", "Deed & Registration", "Workflow", "Parties"] as const;

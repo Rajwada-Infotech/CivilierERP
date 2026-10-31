@@ -112,9 +112,22 @@ export interface OwnershipChange {
   remarks?: string;
 }
 export const recordOwnershipChange = async (id: number, body: OwnershipChange) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/ownership/change`, post(body)));
+export const updateOwnershipChange = async (id: number, date: string, body: {
+  date: string; docTypeId?: number; documentNo?: string; deedNo?: string; fileId?: number; transferValue?: number; remarks?: string;
+  owners: { eventId: number; name: string; guardian?: string; relationshipTypeId?: number }[];
+}) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/ownership/change/${date}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
 export const undoOwnershipChange = async (id: number) => handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/ownership/undo`, post({})));
+
+export const startPurchaseFromOwners = async (id: number, body: { buyerName: string; buyerId?: number; totalValue: number; advanceAmount?: number }) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/purchase/from-owners`, post(body)));
+export const addOwnersToApprovals = async (id: number, agreementId: number) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/approvals/from-owners`, post({ agreementId })));
+export type LandDossier = Record<"owners" | "chain" | "records" | "documents" | "legal" | "transactions" | "deeds" | "mutations" | "steps", Record<string, unknown>[]> & { land: Record<string, unknown> };
+export const getLandDossier = async (id: number) => handle<LandDossier>(await fetchWithAuth(`${BASE}/${id}/dossier`));
 
 export const initDueDiligence = async (id: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/due-diligence/init`, post({})));
+export const setEnquiryStatus = async (id: number, status: "Rejected" | "On Hold" | "Under Review", reason?: string) =>
+  handle<{ message: string }>(await fetchWithAuth(`${BASE}/enquiries/${id}/status`, post({ status, reason })));
 export const convertEnquiry = async (id: number, landName?: string) =>
   handle<{ landId: number; landCode: string; message: string }>(await fetchWithAuth(`${BASE}/enquiries/${id}/convert`, post({ landName })));

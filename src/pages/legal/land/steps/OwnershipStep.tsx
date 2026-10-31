@@ -1,11 +1,12 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowRight, Circle, Plus, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { ArrowRight, Circle, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getLegalLookup, getLegalRows, uploadLegalFile, type LegalRow } from "@/api/legalMastersApi";
-import { recordOwnershipChange, undoOwnershipChange, type OwnershipChange } from "@/api/legalLandApi";
+import { recordOwnershipChange, undoOwnershipChange, updateOwnershipChange, type OwnershipChange } from "@/api/legalLandApi";
 import { LegalFileLink } from "@/components/legal/LegalDocumentPreview";
+import { askLegal } from "@/components/legal/LegalAsk";
 import { LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 import { StepTabs, stepCard } from "./StepTabs";
 
@@ -234,6 +235,75 @@ const ChangeForm: React.FC<StepProps & { current: LegalRow[]; onDone: () => void
   );
 };
 
+/** Edits one change: date, document and the new owners' names (shares stay; delete and re-record for those). */
+const EditChange: React.FC<{ landId: number; date: string; evs: LegalRow[]; records: LegalRow[]; onClose: () => void; onSaved: () => void }> = ({ landId, date, evs, records, onClose, onSaved }) => {
+  const rels = useQuery({ queryKey: ["legal-lookup", "relationship-type"], queryFn: () => getLegalLookup("relationship-type") });
+  const docTypes = useQuery({ queryKey: ["legal-lookup", "document-type"], queryFn: () => getLegalLookup("document-type") });
+  const e0 = evs[0];
+  const [d, setD] = useState(date);
+  const [doc, setDoc] = useState({ docTypeId: e0.DocTypeId ? String(e0.DocTypeId) : "", documentNo: String(e0.DocumentNo ?? ""), deedNo: String(e0.DeedNo ?? ""), value: e0.TransferValue != null ? String(e0.TransferValue) : "", remarks: String(e0.Remarks ?? "") });
+  const [file, setFile] = useState<{ id: number; name: string } | null>(e0.DocFileId ? { id: Number(e0.DocFileId), name: String(e0.DocFileId__label ?? "Document") } : null);
+  const [owners, setOwners] = useState(evs.map((e) => ({
+    eventId: Number(e.EventId), name: String(e.NewOwnerName ?? ""), guardian: String(e.NewOwnerGuardian ?? ""),
+    rel: String(records.find((r) => r.EventId === e.EventId)?.RelationshipTypeId ?? ""),
+  })));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      toast.success((await updateOwnershipChange(landId, date, {
+        date: d, docTypeId: Number(doc.docTypeId) || undefined, documentNo: doc.documentNo || undefined, deedNo: doc.deedNo || undefined,
+        fileId: file?.id, transferValue: doc.value ? Number(doc.value) : undefined, remarks: doc.remarks || undefined,
+        owners: owners.map((o) => ({ eventId: o.eventId, name: o.name.trim(), guardian: o.guardian.trim() || undefined, relationshipTypeId: Number(o.rel) || undefined })),
+      })).message);
+      onClose();
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-2 rounded-xl border border-border bg-muted/20 p-3 sm:p-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <label className={label}>Date of change<input type="date" className={`${input} mt-1`} value={d} onChange={(e) => setD(e.target.value)} /></label>
+        <label className={label}>Document type
+          <select className={`${input} mt-1`} value={doc.docTypeId} onChange={(e) => setDoc({ ...doc, docTypeId: e.target.value })}>
+            <option value="">Select…</option>
+            {(docTypes.data ?? []).filter((t) => t.active !== false).map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        </label>
+        <label className={label}>Document number<input className={`${input} mt-1`} value={doc.documentNo} onChange={(e) => setDoc({ ...doc, documentNo: e.target.value })} /></label>
+        <label className={label}>Deed number<input className={`${input} mt-1`} value={doc.deedNo} onChange={(e) => setDoc({ ...doc, deedNo: e.target.value })} /></label>
+        <div className={label}>Document file<div className="mt-1"><FilePick value={file} onChange={setFile} placeholder="Upload PDF / image" /></div></div>
+        <label className={label}>Value (₹)<input type="number" className={`${input} mt-1`} value={doc.value} onChange={(e) => setDoc({ ...doc, value: e.target.value })} /></label>
+        <label className={`${label} sm:col-span-2`}>Remarks<input className={`${input} mt-1`} value={doc.remarks} onChange={(e) => setDoc({ ...doc, remarks: e.target.value })} /></label>
+      </div>
+      <p className="mt-3 text-xs font-medium text-foreground">New owner(s) — shares stay as recorded</p>
+      <div className="mt-2 space-y-2">
+        {owners.map((o, i) => (
+          <div key={o.eventId} className="grid gap-2 sm:grid-cols-[1.3fr_1.2fr_1fr_auto] sm:items-center">
+            <input className={input} placeholder="Name *" value={o.name} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+            <input className={input} placeholder="Father / husband" value={o.guardian} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, guardian: e.target.value } : x)))} />
+            <select className={input} value={o.rel} onChange={(e) => setOwners(owners.map((x, j) => (j === i ? { ...x, rel: e.target.value } : x)))}>
+              <option value="">Not related</option>
+              {(rels.data ?? []).filter((t) => t.active !== false).map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <span className="text-xs text-muted-foreground">{pct(evs[i]?.TransferSharePct)}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[0.6875rem] text-muted-foreground">Saving sends this change back for verification. To change shares or who gave the land, delete the change and record it again.</p>
+      <div className="mt-3 flex gap-2">
+        <button className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50" style={{ background: LEGAL_GRADIENT }}
+          disabled={busy || !d || owners.some((o) => !o.name.trim())} onClick={save}>Save changes</button>
+        <button className={btn} onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  );
+};
+
 /** Current owners, the chain from the first owner to today, and the one form to extend it. */
 const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
   const rights = usePageRights("legal-land-master");
@@ -241,6 +311,7 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
   const records = useQuery({ queryKey: ["legal-master", "ownership-record", landId], queryFn: () => getLegalRows("ownership-record", landId) });
   const events = useQuery({ queryKey: ["legal-master", "ownership-event", landId], queryFn: () => getLegalRows("ownership-event", landId) });
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const current = useMemo(() => (records.data ?? []).filter((r) => r.IsActive && !r.ValidTo), [records.data]);
   const total = current.reduce((s, r) => s + Number(r.SharePct ?? 0), 0);
@@ -284,13 +355,6 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
             <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: LEGAL_GRADIENT }} onClick={() => setAdding(true)}>
               <Plus size={13} /> {current.length ? "Record ownership change" : "Add first owner"}
             </button>
-            {changes.length > 0 && (
-              <button className={btn} disabled={busy} onClick={async () => {
-                if (!window.confirm("Undo the latest ownership change? Its new owners are removed and the previous owners become current again.")) return;
-                setBusy(true);
-                try { toast.success((await undoOwnershipChange(landId)).message); await refresh(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not undo"); } finally { setBusy(false); }
-              }}><RotateCcw size={13} /> Undo latest change</button>
-            )}
           </div>
         )}
       </div>
@@ -302,13 +366,29 @@ const Chain: React.FC<StepProps> = ({ landId, onSaved }) => {
         <p className={eyebrow}>Ownership chain — earliest to today</p>
         {!changes.length ? <p className="text-sm text-muted-foreground">Nothing recorded yet.</p> : (
           <ol className="relative ml-2 border-l border-border">
-            {changes.map(([d, evs]) => (
+            {changes.map(([d, evs], idx) => (
               <li key={d} className="mb-5 ml-5 last:mb-0">
                 <span className="absolute -left-[7px] mt-1 rounded-full bg-card"><Circle size={13} className="fill-[#7c4a2e] text-[#7c4a2e]" /></span>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-semibold text-foreground">{fmt(d)}</span>
                   <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs">{String(evs[0].TransferTypeId__label ?? "")}</span>
+                  {rights.canEdit && !evs.some((e) => e.RegisteredDeedId) && (
+                    <span className="ml-auto flex gap-1.5">
+                      <button className={btn} onClick={() => setEditing(editing === d ? null : d)}><Pencil size={12} /> Edit</button>
+                      {/* Only the latest change can be deleted, so the chain never breaks in the middle. */}
+                      {idx === changes.length - 1 && (
+                        <button className={`${btn} text-rose-600`} disabled={busy} onClick={async () => {
+                          if (!(await askLegal({ title: `Delete the change of ${fmt(d)}?`, message: "Its new owners are removed and the previous owners become current again.", confirmText: "Delete change", tone: "danger" }))) return;
+                          setBusy(true);
+                          try { toast.success((await undoOwnershipChange(landId)).message); await refresh(); } catch (e) { toast.error(e instanceof Error ? e.message : "Could not delete"); } finally { setBusy(false); }
+                        }}><Trash2 size={12} /> Delete</button>
+                      )}
+                    </span>
+                  )}
                 </div>
+                {editing === d && (
+                  <EditChange landId={landId} date={d} evs={evs} records={records.data ?? []} onClose={() => setEditing(null)} onSaved={refresh} />
+                )}
                 <div className="mt-1.5 grid gap-2 text-sm sm:grid-cols-[1fr_auto_1fr] sm:items-start">
                   <div className="rounded-lg border border-border bg-muted/30 px-3 py-2">
                     <div className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">From</div>
