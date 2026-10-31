@@ -1019,14 +1019,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             : sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3")}
           style={sheet ? { borderTop: RULE } : undefined}
         >
-          <p className={fluid ? "min-w-[10rem] flex-1 text-[0.6875rem] text-muted-foreground" : "text-[0.6875rem] text-muted-foreground hidden sm:block"}>
+          <p className={fluid ? "w-full text-[0.6875rem] text-muted-foreground sm:w-auto sm:min-w-[10rem] sm:flex-1" : "text-[0.6875rem] text-muted-foreground hidden sm:block"}>
             {canSave
               ? sheet ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-emerald-500 font-medium">Ready to save</span>
               : fields.some((f) => f.required)
                 ? "Fill in the required fields to save"
                 : ""}
           </p>
-          <div className={fluid ? "ml-auto flex flex-wrap items-center justify-end gap-2" : "flex items-center gap-2 sm:ml-auto"}>
+          <div className={fluid ? "flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto" : "flex items-center gap-2 sm:ml-auto"}>
             <button
               onClick={handleReset}
               disabled={!isDirty && editingId === null}
@@ -1074,7 +1074,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               </p>
             </div>
             )}
-            <div className={fluid ? "flex min-w-[15rem] flex-1 items-center justify-end gap-2" : "flex items-center gap-2 w-full sm:w-auto"}>
+            <div className={fluid ? "flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:min-w-[15rem] sm:flex-1" : "flex items-center gap-2 w-full sm:w-auto"}>
               {exportConfig && canExport && (
                 <ExportMenu
                   data={sorted as Record<string, unknown>[]}
@@ -1085,7 +1085,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   disabled={filtered.length === 0}
                 />
               )}
-              <div className={fluid ? "relative min-w-0 flex-1 max-w-[14rem]" : "relative flex-1 sm:flex-none"}>
+              <div className={fluid ? "relative min-w-0 flex-1 sm:max-w-[14rem]" : "relative flex-1 sm:flex-none"}>
                 <Search
                   size={13}
                   className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
