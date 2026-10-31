@@ -435,7 +435,8 @@ const CrmApplication: React.FC = () => {
   // On a Converted application the booking is live and has real financial
   // history; the backend rejects deletes in that state, so don't offer the
   // button either (misleading to show a destructive action that will always fail).
-  const canDeleteApplication = (app: any) => !!app && isAdmin && app.Stage !== "Converted";
+  // Until its booking is fully approved; a not-yet-approved booking is deleted with it.
+  const canDeleteApplication = (app: any) => !!app && isAdmin && !(app.Stage === "Converted" && app.BookingStatus === CrmStatus.APPROVED);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -1059,7 +1060,7 @@ const CrmApplication: React.FC = () => {
     }
   };
   const handleDeleteApplication = async (a: any) => {
-    requestConfirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`, async () => {
+    requestConfirm(`Delete application ${a.ApplicationNo}? Its booking, if not yet fully approved, is deleted with it.`, async () => {
       try {
         const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
         const data = await res.json().catch(() => ({}));

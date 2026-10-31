@@ -1505,11 +1505,13 @@ router.delete("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res
 // cancellation flow: once a booking has entered approval or downstream
 // execution, staff must use Cancellation Request so refunds, parking, legal
 // records, and audit steps are handled explicitly.
-router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
-  const id = parseId(req.params.id);
-  if (id === null) return res.status(400).json({ error: "Invalid id" });
-  try {
-    const pool = getPool();
+// Soft-deletes a booking (IsActive = 0, nothing erased) and releases what it
+// held. Allowed until the booking is fully approved and while no money or legal
+// record hangs off it. Shared by DELETE /:id here and the application delete
+// (routes/crmApplications.js), which removes a not-yet-approved booking first.
+// Throws an Error with .status on refusal.
+const isBookingFullyApproved = (b) => b.Status === CrmStatus.APPROVED || !!b.DirectorApprovedAt || !!b.ConfirmedAt;
+async function softDeleteBooking(pool, id, actor) {
     const rowRes = await pool.request().input("id", sql.Int, id).query(`
       SELECT Id, BookingNo, ApplicationId, UnitId, Status, IsActive, WorkflowStage,
              ReadyForApprovalAt, MarketingHeadApprovedAt, DirectorApprovedAt, ConfirmedAt
@@ -1517,17 +1519,16 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       WHERE Id = @id AND IsActive = 1
     `);
     const booking = rowRes.recordset[0];
-    if (!booking) return res.status(404).json({ error: "Booking not found" });
+    if (!booking) throw Object.assign(new Error("Booking not found"), { status: 404 });
 
     const isCancelled = booking.Status === "Cancelled";
     const progressedReasons = [];
 
     if (!isCancelled) {
       // For active bookings, redirect to the cancellation workflow if already progressed.
-      if (booking.Status === CrmStatus.APPROVED) progressedReasons.push("booking is fully approved");
-      if (booking.WorkflowStage && booking.WorkflowStage !== "Review") progressedReasons.push(`workflow is at ${booking.WorkflowStage}`);
-      if (booking.ReadyForApprovalAt) progressedReasons.push("booking has been submitted for approval");
-      if (booking.MarketingHeadApprovedAt || booking.DirectorApprovedAt || booking.ConfirmedAt) progressedReasons.push("approval stamps already exist");
+      // Deletable at any point before FULL approval (Data Review, Marketing Head,
+      // Director pending); once fully approved it goes through Cancellation.
+      if (isBookingFullyApproved(booking)) progressedReasons.push("booking is fully approved");
     }
 
     // Cancelled bookings: only legal/financial records are permanent — operational
@@ -1556,20 +1557,17 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       if (Number(count) > 0) progressedReasons.push(label);
     }
     if (progressedReasons.length) {
-      return res.status(400).json({
-        error: isCancelled
+      throw Object.assign(new Error(isCancelled
           ? `Cannot remove booking ${booking.BookingNo} — it has legal or financial records (${progressedReasons.join(", ")}) that form a permanent audit trail and cannot be deleted.`
-          : `Cannot delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}. Use Cancellation Request instead.`,
-      });
+          : `Cannot delete booking ${booking.BookingNo} because it has progressed: ${progressedReasons.join(", ")}. Use Cancellation Request instead.`), { status: 400 });
     }
 
     // Same rule as cancellation: the land under a booked villa can't be let go.
     const villaOnLand = await require("../services/villaLand").villaBookedOnLandOf(pool, id);
     if (villaOnLand) {
-      return res.status(409).json({ error: `Villa booking ${villaOnLand} stands on this plot — cancel the villa booking first.` });
+      throw Object.assign(new Error(`Villa booking ${villaOnLand} stands on this plot — cancel the villa booking first.`), { status: 409 });
     }
 
-    const actor = actorId(req);
     const tx = pool.transaction();
     await tx.begin();
     let releasedHoldTypes = [];
@@ -1712,7 +1710,15 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       if (releasedHoldTypes.length) { try { getIo().emit("matrix:update", {}); } catch {} }
     }
 
-    res.json({ success: true, message: `Booking ${booking.BookingNo} deleted` });
+  return { BookingNo: booking.BookingNo };
+}
+
+router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const { BookingNo } = await softDeleteBooking(getPool(), id, actorId(req));
+    res.json({ success: true, message: `Booking ${BookingNo} deleted` });
   } catch (e) {
     console.error("[crm-bookings] DELETE error:", e.message);
     if (e.status) return res.status(e.status).json({ error: e.message });
@@ -3092,3 +3098,5 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
 });
 
 module.exports = router;
+module.exports.softDeleteBooking = softDeleteBooking;
+module.exports.isBookingFullyApproved = isBookingFullyApproved;
