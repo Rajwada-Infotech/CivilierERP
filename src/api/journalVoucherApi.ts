@@ -46,6 +46,8 @@ export interface JournalVoucherSummary {
   CreatedByName?: string | null;
   CreatedAt: string;
   TotalAmount: number | null;
+  /** Account heads on the voucher's lines, comma-separated (list only). */
+  AccountNames?: string | null;
   PostedToGL?: boolean;
   /** Payment mode + settlement detail (all null on a plain journal). */
   Mode?: string | null;

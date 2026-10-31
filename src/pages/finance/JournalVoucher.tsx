@@ -97,6 +97,11 @@ export default function JournalVoucher() {
   const [loading, setLoading] = useState(true);
   const [ledgerOptions, setLedgerOptions] = useState<JournalVoucherLedgerOption[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const filtersOn = !!(search.trim() || statusFilter || dateFrom || dateTo);
+  const clearFilters = () => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); };
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -408,16 +413,22 @@ export default function JournalVoucher() {
   ], []);
 
   // Filtered list
+  // Search matches number, narration, status, company, project, account heads
+  // and amount; status and the date range narrow it further.
   const filtered = useMemo(() => {
-    if (!search.trim()) return vouchers;
-    const q = search.toLowerCase();
-    return vouchers.filter(
-      (v) =>
-        (v.JVNo || "").toLowerCase().includes(q) ||
-        (v.Narration || "").toLowerCase().includes(q) ||
-        (v.Status || "").toLowerCase().includes(q),
-    );
-  }, [vouchers, search]);
+    const q = search.trim().toLowerCase();
+    const qDigits = q.replace(/[,\s₹]/g, "");
+    return vouchers.filter((v) => {
+      if (statusFilter && v.Status !== statusFilter) return false;
+      const d = (v.JVDate || "").slice(0, 10);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      if (!q) return true;
+      return [v.JVNo, v.Narration, v.Status, v.CompanyName, v.ProjectName, v.AccountNames, v.CreatedByName]
+        .some((x) => (x || "").toLowerCase().includes(q))
+        || (!!qDigits && /^\d+(\.\d+)?$/.test(qDigits) && String(v.TotalAmount ?? "").includes(qDigits));
+    });
+  }, [vouchers, search, statusFilter, dateFrom, dateTo]);
 
   return (
     <>
@@ -480,12 +491,37 @@ export default function JournalVoucher() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by JV number, narration, or status…"
+            placeholder="Search by JV number, account / company / project name, narration or amount…"
             className="w-full pl-8 pr-8 py-2.5 border border-foreground/40 bg-card text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-foreground transition-colors"
           />
           {search && (
             <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
               <X size={12} />
+            </button>
+          )}
+        </div>
+
+        {/* ── Filters ── */}
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status</span>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-9 px-2 border border-foreground/40 bg-card text-sm focus:outline-none focus:border-foreground">
+              <option value="">All</option>
+              {["Draft", "Pending", "Approved", "Rejected"].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">From</span>
+            <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">To</span>
+            <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </label>
+          {filtersOn && (
+            <button onClick={clearFilters} className="h-9 px-3 text-xs border border-border text-muted-foreground hover:text-foreground">
+              Clear filters
             </button>
           )}
         </div>
@@ -505,12 +541,12 @@ export default function JournalVoucher() {
                 <div className="flex flex-col items-center gap-3 text-muted-foreground">
                   <Scale size={36} className="opacity-20" />
                   <p className="text-sm font-medium">
-                    {search ? "No vouchers match your search" : "No journal vouchers yet"}
+                    {filtersOn ? "No vouchers match these filters" : "No journal vouchers yet"}
                   </p>
-                  {search && (
-                    <button onClick={() => setSearch("")} className="text-xs text-primary hover:underline">Clear search</button>
+                  {filtersOn && (
+                    <button onClick={clearFilters} className="text-xs text-primary hover:underline">Clear filters</button>
                   )}
-                  {!search && rights.canCreate && (
+                  {!filtersOn && rights.canCreate && (
                     <button
                       onClick={() => setDialogOpen(true)}
                       className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
@@ -611,11 +647,11 @@ export default function JournalVoucher() {
                   <td colSpan={9} className="py-20 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <Scale size={36} className="opacity-20" />
-                      <p className="text-sm font-medium">{search ? "No vouchers match your search" : "No journal vouchers yet"}</p>
-                      {search && (
-                        <button onClick={() => setSearch("")} className="text-xs text-foreground underline">Clear search</button>
+                      <p className="text-sm font-medium">{filtersOn ? "No vouchers match these filters" : "No journal vouchers yet"}</p>
+                      {filtersOn && (
+                        <button onClick={clearFilters} className="text-xs text-foreground underline">Clear filters</button>
                       )}
-                      {!search && rights.canCreate && (
+                      {!filtersOn && rights.canCreate && (
                         <button
                           onClick={() => setDialogOpen(true)}
                           className="flex items-center gap-1.5 mt-1 px-4 py-2 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
@@ -687,7 +723,7 @@ export default function JournalVoucher() {
             </tbody>
           </table>
 
-          {!loading && filtered.length > 0 && search && (
+          {!loading && filtered.length > 0 && filtersOn && (
             <div className="px-3 py-2.5" style={{ borderTop: "1px solid hsl(var(--foreground))" }}>
               <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                 Showing {filtered.length} of {vouchers.length} vouchers
