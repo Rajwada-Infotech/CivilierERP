@@ -10,6 +10,7 @@ const { bumpCacheVersion } = require("../redis");
 const { getPool } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { hasPosting, reversePostingBySource } = require("../services/generalLedger");
+const { BRS_SOURCES, isApprovedStatus, findUnapproved, unapprovedResponse, NOT_CLEARABLE_REASON } = require("../utils/brsClearGuard");
 
 // Maps a BRS-level sourceType to the GeneralLedgerEntry.SourceType(s) that
 // carry its actual money-movement leg(s), in authority order — the first
@@ -50,15 +51,8 @@ router.use(checkPermissionForMethod("Finance", "BRS"));
 
 // Every SourceType the unified BRS view (GET /) can produce — the /clear,
 // /unclear, /bounce actions below all validate against this same list.
-const RECONCILABLE_SOURCE_TYPES = [
-  "PAYMENT",
-  "RECEIVED",
-  "CRM_RECEIVED",
-  "FUND_TRANSFER_OUT",
-  "FUND_TRANSFER_IN",
-  "LOAN_DISBURSED",
-  "LOAN_RECEIVED",
-];
+// One list, from utils/brsClearGuard.js.
+const RECONCILABLE_SOURCE_TYPES = Object.keys(BRS_SOURCES);
 
 // Bust cache on startup so the unmatched-payments filter fix above takes
 // effect immediately instead of waiting out the 60s TTL on stale entries.
@@ -677,7 +671,11 @@ router.get("/", cache("brs", 60), async (req, res) => {
     const dataResult = await dataReq.query(dataSql);
 
     res.json({
-      data: dataResult.recordset,
+      // Clearable: the backend's decision (utils/brsClearGuard.js) — web and
+      // mobile only reflect it.
+      data: dataResult.recordset.map((r) => isApprovedStatus(r.PayStatus)
+        ? { ...r, Clearable: true }
+        : { ...r, Clearable: false, ClearBlockReason: NOT_CLEARABLE_REASON }),
       total,
       page,
       limit,
@@ -716,11 +714,22 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
   try {
     const pool = getPool();
 
+    // Only an Approved document may be cleared — re-read and locked inside the
+    // same transaction as the write, so it cannot change mid-clear.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+    const blocked = await findUnapproved(tx, [{ SourceType: sourceType, SourceID: parseInt(sourceId) }]);
+    if (blocked.length) {
+      await tx.rollback();
+      return res.status(400).json(unapprovedResponse(blocked));
+    }
+
     // Upsert into BankReconciliation — BankClearingDate/ClearedBy/ClearedAt
     // describe the CURRENT clear state and get overwritten on every
     // clear/unclear cycle (unclear nulls them back out below), same
     // convention BounceDate/BounceReason already use.
-    await pool
+    await tx
       .request()
       .input("SourceType", sql.NVarChar(20), sourceType)
       .input("SourceID", sql.Int, parseInt(sourceId))
@@ -740,6 +749,11 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
           VALUES
             (@SourceType, @SourceID, 1, @BankClearingDate, @ClearedBy, GETDATE(), GETDATE(), GETDATE())
       `);
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already ended */ }
+      throw txErr;
+    }
 
     await bumpCacheVersion("brs");
     // The payment/received-payment list's DisplayStatus (Cheque Issued ->
@@ -815,7 +829,16 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
 
   try {
     const pool = getPool();
-    await pool
+    // Same rule as clear: only an Approved document can be bounced.
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+    const blocked = await findUnapproved(tx, [{ SourceType: sourceType, SourceID: parseInt(sourceId) }]);
+    if (blocked.length) {
+      await tx.rollback();
+      return res.status(400).json(unapprovedResponse(blocked));
+    }
+    await tx
       .request()
       .input("SourceType",    sql.NVarChar(20),  sourceType)
       .input("SourceID",      sql.Int,            parseInt(sourceId))
@@ -841,6 +864,11 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
           VALUES
             (@SourceType, @SourceID, 0, 1, @BounceDate, @BounceReason, @BounceRemarks, GETDATE())
       `);
+    await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already ended */ }
+      throw txErr;
+    }
 
     // A bounced instrument never actually moved money — reverse its GL
     // posting now, before the response, so a caller sees the true outcome
@@ -901,10 +929,23 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
 router.put("/:id/match", async (req, res) => {
   try {
     const pool = getPool();
-    await pool
-      .request()
-      .input("id", sql.Int, req.params.id)
-      .query("UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID = @id");
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const row = (await tx.request().input("id", sql.Int, req.params.id)
+        .query("SELECT SourceType, SourceID FROM BankReconciliation WITH (UPDLOCK, HOLDLOCK) WHERE BRSID = @id")).recordset[0];
+      const blocked = row ? await findUnapproved(tx, [row]) : [];
+      if (blocked.length) {
+        await tx.rollback();
+        return res.status(400).json(unapprovedResponse(blocked));
+      }
+      await tx.request().input("id", sql.Int, req.params.id)
+        .query("UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch { /* already ended */ }
+      throw txErr;
+    }
     await bumpCacheVersion("brs");
     res.json({ message: "Marked as matched" });
   } catch (err) {
