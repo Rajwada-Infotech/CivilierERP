@@ -114,16 +114,16 @@ const CrmBooking: React.FC = () => {
 
   const canDeleteBooking = (b: any) =>
     isAdmin
+    // Until fully approved (the server has the final word, incl. money checks).
     && b.Status !== CrmStatus.APPROVED
-    && b.WorkflowStage === "Review"
-    && !b.ReadyForApprovalAt
+    && b.WorkflowStage !== "Confirmed"
     && !b.AgreementId
     && Number(b.TotalCleared || 0) <= 0
     && Number(b.MRReceivedTotal || 0) <= 0
     && Number(b.ApprovedOnAccount || 0) <= 0;
 
   const handleDeleteBooking = async (b: any) => {
-    if (!(await ask.confirm(`Delete booking ${b.BookingNo}? Only allowed before approval or any progress; the application returns to the pre-booking list.`, { okLabel: "Delete", danger: true }))) return;
+    if (!(await ask.confirm(`Delete booking ${b.BookingNo}? Allowed until the booking is fully approved; the application returns to the pre-booking list.`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`${API}/${b.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
