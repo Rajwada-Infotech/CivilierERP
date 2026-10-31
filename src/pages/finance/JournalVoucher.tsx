@@ -530,7 +530,7 @@ export default function JournalVoucher() {
                       <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtDate(v.JVDate)}</span>
                     </div>
                     <span className="font-heading tabular-nums text-sm font-semibold text-foreground tabular-nums shrink-0">
-                      {formatINR(v.TotalAmount || 0)}
+                      {formatINR(v.TotalAmount || 0, { decimals: 2 })}
                     </span>
                   </div>
                   {/* Row 2: company / project */}
@@ -650,7 +650,7 @@ export default function JournalVoucher() {
                     <td className="px-3 py-3 text-[0.8125rem] text-foreground/85 max-w-xs">
                       <p className="line-clamp-2">{v.Narration || <span className="text-muted-foreground">—</span>}</p>
                     </td>
-                    <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">{formatINR(v.TotalAmount || 0)}</td>
+                    <td className="px-3 py-3 text-right whitespace-nowrap font-heading text-[0.8125rem] font-semibold tabular-nums text-foreground">{formatINR(v.TotalAmount || 0, { decimals: 2 })}</td>
                     <td className="px-3 py-3"><SheetMark text={v.Status || "—"} tone={statusTone(v.Status || "")} /></td>
                     <td className="px-3 py-3">
                       <SheetMark
@@ -830,8 +830,8 @@ export default function JournalVoucher() {
                           <Plus size={11} /> Add line
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.debit)}</td>
-                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.credit)}</td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.debit, { decimals: 2 })}</td>
+                      <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-foreground">{formatINR(totals.credit, { decimals: 2 })}</td>
                       <td />
                     </tr>
                   </tfoot>
@@ -854,9 +854,9 @@ export default function JournalVoucher() {
                 ? <AlertCircle size={13} className="shrink-0" />
                 : <Scale size={13} className="shrink-0" />}
               {totals.balanced
-                ? `Balanced — ${formatINR(totals.debit)} each side`
+                ? `Balanced — ${formatINR(totals.debit, { decimals: 2 })} each side`
                 : totals.debit > 0 || totals.credit > 0
-                ? `Difference: ${formatINR(Math.abs(totals.debit - totals.credit))}`
+                ? `Difference: ${formatINR(Math.abs(totals.debit - totals.credit), { decimals: 2 })}`
                 : "Enter amounts on each line"}
             </div>
 
@@ -982,10 +982,10 @@ export default function JournalVoucher() {
                           </div>
                         </div>
                         <span className="text-xs text-right font-heading tabular-nums text-foreground">
-                          {l.DebitAmount ? formatINR(l.DebitAmount) : ""}
+                          {l.DebitAmount ? formatINR(l.DebitAmount, { decimals: 2 }) : ""}
                         </span>
                         <span className="text-xs text-right font-heading tabular-nums text-destructive">
-                          {l.CreditAmount ? formatINR(l.CreditAmount) : ""}
+                          {l.CreditAmount ? formatINR(l.CreditAmount, { decimals: 2 }) : ""}
                         </span>
                       </div>
                     );
@@ -993,10 +993,10 @@ export default function JournalVoucher() {
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
                     <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                     <span className="text-right text-foreground font-heading tabular-nums">
-                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0))}
+                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.DebitAmount) || 0), 0), { decimals: 2 })}
                     </span>
                     <span className="text-right text-destructive font-heading tabular-nums">
-                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0))}
+                      {formatINR(viewingJV.lines.reduce((s, l) => s + (Number(l.CreditAmount) || 0), 0), { decimals: 2 })}
                     </span>
                   </div>
                 </div>

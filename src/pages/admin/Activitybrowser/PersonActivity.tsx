@@ -1,6 +1,6 @@
 // By User, right side: one person's figures and their activity, day by day.
 import React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Download } from "lucide-react";
 import type { SessionEvent, UserActivitySummary, UserActivityType } from "@/api/userActivityApi";
 import { describeActivity } from "./describeActivity";
 import { ChangeDetails } from "./ChangeDetails";
@@ -11,6 +11,40 @@ const IST = "Asia/Kolkata";
 const timeIst = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: IST });
 const dayLabelIst = (key: string) =>
   new Date(`${key}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: IST });
+
+/** Build and trigger a CSV download of all loaded activity rows, grouped by date. */
+function exportActivityCsv(
+  days: { key: string; items: SessionEvent[] }[],
+  userName: string
+) {
+  const headers = ["Date", "Time (IST)", "Kind", "Action", "Subject", "Where", "Record", "IP"];
+  const rows: string[][] = [];
+  for (const g of days) {
+    const dateLabel = dayLabelIst(g.key);
+    for (const e of g.items) {
+      const d = describeActivity(e);
+      rows.push([
+        dateLabel,
+        timeIst(e.timestamp),
+        d.kind,
+        d.verb,
+        d.subject || "",
+        d.where || "",
+        d.record || "",
+        e.ipAddress && e.ipAddress !== "unknown" ? e.ipAddress : "",
+      ]);
+    }
+  }
+  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const csv = [headers.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `activity-${userName.replace(/\s+/g, "-")}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
 
 export const TYPES: { key: UserActivityType; label: string }[] = [
   { key: "changes", label: "Changes" },
