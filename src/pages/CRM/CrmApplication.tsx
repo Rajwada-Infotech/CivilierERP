@@ -10,7 +10,10 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle } from "lucide-react";
+import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1151,35 +1154,41 @@ const CrmApplication: React.FC = () => {
           {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
         </span>
       ) },
-    { id: "actions", header: "", size: 240, enableSorting: false,
-      cell: (i) => (
-        <div className="flex items-center gap-3 flex-wrap">
-          <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
-            className="flex items-center gap-1 text-xs text-primary hover:underline">
-            <Building2 size={12} /> View Booking <ChevronRight size={12} />
-          </button>
-          {i.row.original.Stage === "Converted" && (
-            <button onClick={() => setPdfDialogApp({ id: i.row.original.Id, no: i.row.original.ApplicationNo })}
-              title="Preview / download Application Form PDF"
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-              <FileText size={12} /> Form
-            </button>
-          )}
-          {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId
-            && i.row.original.BookingStatus !== CrmStatus.CANCELLED
-            && i.row.original.DeedStatus !== "Registered" && (
-            <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
-              className="flex items-center gap-1 text-xs text-destructive hover:underline">
-              <Ban size={12} /> Request Cancellation
-            </button>
-          )}
-          {i.row.original.DeedStatus === "Registered" && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
-              <Ban size={12} /> Deed Registered
-            </span>
-          )}
-        </div>
-      ) },
+    { id: "actions", header: "", size: 80, enableSorting: false,
+      cell: (i) => {
+        const r = i.row.original;
+        const canRequestCxl = (canEditApplications || canRequestBookingCancellation) && r.BookingId
+          && r.BookingStatus !== CrmStatus.CANCELLED && r.DeedStatus !== "Registered";
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                <MoreHorizontal size={15} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 rounded-none">
+              <DropdownMenuItem onClick={() => openApplication(r.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate(`/crm/bookings?applicationId=${r.Id}`)} className="gap-2"><Building2 size={14} /> View booking</DropdownMenuItem>
+              {r.Stage === "Converted" && (
+                <DropdownMenuItem onClick={() => setPdfDialogApp({ id: r.Id, no: r.ApplicationNo })} className="gap-2"><FileText size={14} /> Application form (PDF)</DropdownMenuItem>
+              )}
+              {canRequestCxl && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${r.BookingId}`)} className="gap-2 text-destructive focus:text-destructive">
+                    <Ban size={14} /> Request cancellation
+                  </DropdownMenuItem>
+                </>
+              )}
+              {r.DeedStatus === "Registered" && (
+                <DropdownMenuItem disabled className="gap-2" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+                  <Ban size={14} /> Deed registered — no cancellation
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      } },
   ];
 
   const inProcessColumns: ColumnDef<any, unknown>[] = [
@@ -1266,118 +1275,81 @@ const CrmApplication: React.FC = () => {
       cell: (i) => {
         const a = i.row.original;
         const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
+        // Only an unfinished application keeps a button on the row (Resume);
+        // everything else lives in the ⋯ menu.
+        const resumeOnRow = canResume && isResumable(a);
+        const editLabel = a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit";
+        const canCreateBooking = activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted"
+          && !a.UnitUnavailableForBooking && a.PreferredUnitId != null;
+        const hasMenu = (canResume && !resumeOnRow) || canCreateBooking || a.Stage === "Converted"
+          || canCancelApplication(a) || canDeleteApplication(a);
         return (
           <div className="flex flex-col gap-1.5 py-0.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {activeStage === "InProcess" ? (
-                <>
-                  {canResume && (
-                    <button
-                      onClick={() => loadApplicationIntoWizard(a.Id)}
-                      disabled={loadingApplication}
-                      className={`${KEY_INK} h-7 px-2`}
-                    >
-                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : isResumable(a) ? "Resume" : a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit"}
-                    </button>
-                  )}
-                  {/* There is no Application-level Approve/Reject anymore —
-                      this renders nothing for a normal Pending application
-                      (submitOnly hides Approve/Reject even if status were
-                      Pending, and Approved/Cancelled/Expired render nothing
-                      either way). It only still shows a "Submit" button for
-                      the legacy case of an application some old data has
-                      sitting at Rejected — a real resubmit back to Pending,
-                      see crmApplications.js PUT /:id/submit. */}
-                  <ApprovalActions
-                    status={a.Status}
-                    recordId={a.Id}
-                    endpoint={API}
-                    submitOnly
-                    onSuccess={(_action, data) => {
-                      qc.invalidateQueries({ queryKey: ["crm-apps"] });
-                      if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
-                    }}
-                  />
-                  {/* Create Booking — only when the application has been properly
-                      submitted (Status=Pending) AND a unit was picked. Draft
-                      applications haven't been submitted yet so the wizard may
-                      not be complete. Stage=Converted means a booking already
-                      exists — retry path is not needed. */}
-                  {a.Status === CrmStatus.PENDING && a.Stage !== "Converted" && (
-                    a.UnitUnavailableForBooking ? (
-                      <span
-                        className="flex items-center gap-1 text-[0.6875rem] text-destructive"
-                        title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
-                      >
-                        <XCircle size={12} /> Unit unavailable
-                      </span>
-                    ) : a.PreferredUnitId == null ? (
-                      <span
-                        className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
-                        title="No unit was selected in the application — edit the application and pick a unit first."
-                      >
-                        <AlertTriangle size={12} /> No unit selected
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => handleCreateBooking(a)}
-                        disabled={creatingBookingId === a.Id}
-                        className={`${KEY_INK} h-7 px-2`}
-                      >
-                        <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
-                      </button>
-                    )
-                  )}
-                  {canCancelApplication(a) && (
-                    <button
-                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Ban size={12} /> Cancel
-                    </button>
-                  )}
-                  {canDeleteApplication(a) && (
-                    <button
-                      onClick={() => handleDeleteApplication(a)}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  {canCancelApplication(a) && (
-                    <button
-                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Ban size={12} /> Cancel
-                    </button>
-                  )}
-                  {canDeleteApplication(a) && (
-                    <button
-                      onClick={() => handleDeleteApplication(a)}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  )}
-                </>
-              )}
-              {/* Application Form PDF — only after Level 1 verification (Stage=Converted,
-                  i.e. the Application is Approved and a live Booking exists).
-                  Backend enforces the same gate; this hides the button before that point. */}
-              {a.Stage === "Converted" && (
-                <button
-                  onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })}
-                  title="Preview / download Application Form PDF"
-                  className={`${KEY_LINE} h-7 px-2`}
-                >
-                  <FileText size={12} /> Form
+            <div className="flex items-center gap-1.5">
+              {resumeOnRow && (
+                <button onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
+                  <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
                 </button>
               )}
+              {/* Legacy only: a Rejected application from old data gets its resubmit. */}
+              {activeStage === "InProcess" && (
+                <ApprovalActions
+                  status={a.Status}
+                  recordId={a.Id}
+                  endpoint={API}
+                  submitOnly
+                  onSuccess={(_action, data) => {
+                    qc.invalidateQueries({ queryKey: ["crm-apps"] });
+                    if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
+                  }}
+                />
+              )}
+              {hasMenu && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                      <MoreHorizontal size={15} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52 rounded-none">
+                    <DropdownMenuItem onClick={() => openApplication(a.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
+                    {canResume && !resumeOnRow && (
+                      <DropdownMenuItem onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className="gap-2">
+                        <PlayCircle size={14} /> {editLabel}
+                      </DropdownMenuItem>
+                    )}
+                    {canCreateBooking && (
+                      <DropdownMenuItem onClick={() => handleCreateBooking(a)} disabled={creatingBookingId === a.Id} className="gap-2">
+                        <Building2 size={14} /> {creatingBookingId === a.Id ? "Creating..." : "Create booking"}
+                      </DropdownMenuItem>
+                    )}
+                    {/* Application Form PDF — only once a live booking exists (backend enforces the same gate). */}
+                    {a.Stage === "Converted" && (
+                      <DropdownMenuItem onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })} className="gap-2">
+                        <FileText size={14} /> Application form (PDF)
+                      </DropdownMenuItem>
+                    )}
+                    {(canCancelApplication(a) || canDeleteApplication(a)) && <DropdownMenuSeparator />}
+                    {canCancelApplication(a) && (
+                      <DropdownMenuItem onClick={() => { setCancellingApp(a); setCancelRemarks(""); }} className="gap-2 text-destructive focus:text-destructive">
+                        <Ban size={14} /> Cancel application
+                      </DropdownMenuItem>
+                    )}
+                    {canDeleteApplication(a) && (
+                      <DropdownMenuItem onClick={() => handleDeleteApplication(a)} className="gap-2 text-destructive focus:text-destructive">
+                        <Trash2 size={14} /> Delete
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted" && a.UnitUnavailableForBooking && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-destructive"
+                title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created.">
+                <XCircle size={10} /> Unit unavailable — re-pick a unit
+              </span>
+            )}
             {/* Status hint lives on its own line as a plain caption, never
                 inline with the buttons — that inline mixing (a link, a
                 sentence, another link, all wrapping unpredictably in a
