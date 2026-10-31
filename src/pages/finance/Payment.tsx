@@ -1979,6 +1979,11 @@ const Payment: React.FC = () => {
       return false;
     }
 
+    if (form.mode === "Bank Charges" && !form.bankId) {
+      toast.error("Select the bank account that charged it.");
+      return false;
+    }
+
     if (isDigitalMode) {
       if (!form.bankId) {
         toast.error("Please select a bank account.");
