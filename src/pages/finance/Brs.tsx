@@ -179,7 +179,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   });
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         {/* Header */}
@@ -307,7 +307,8 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
   const [bankClearingDate, setBankClearingDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    // At the dialogs' layer (z-60), under pop-overs (z-70): at z-9999 the date picker's calendar opened behind the modal.
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         <div className="flex items-start gap-3">
