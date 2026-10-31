@@ -380,13 +380,9 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 
   await generateMoneyReceiptPdf(pool, receiptId);
 
-  // No demand-raise here on purpose. This milestone's own status doesn't
-  // flip to Paid until Finance separately approves the linked
-  // ReceivedPayment (receivedPayment.js PUT /:id/approve ->
-  // applyCrmMilestonePaymentApproval), and THAT already calls
-  // handleMilestoneBecamePaid, which correctly raises the true next
-  // milestone's demand (MilestoneNo > this one). Raising it here too would
-  // just re-target this same still-unpaid milestone.
+  // No demand-raise here on purpose: a payment never raises a demand. Demands
+  // are raised when a milestone falls due (services/crmDemandScheduler.js);
+  // money received before that stays On Account.
 
   return { success: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo };
 }
