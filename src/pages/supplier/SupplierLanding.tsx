@@ -246,7 +246,7 @@ function MarkSuppliedDialog({ order, onClose, onConfirm, submitting }: {
 }) {
   const [challan, setChallan] = useState("");
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
         className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -304,7 +304,7 @@ function OrderDetailDialog({ orderId, onClose }: { orderId: number; onClose: () 
   const grnOrder = grnOrders.find((o) => o.purchaseOrderId === orderId);
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+    <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15 }}
         className="w-full max-w-2xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>

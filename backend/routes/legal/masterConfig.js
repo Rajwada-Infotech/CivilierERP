@@ -227,6 +227,8 @@ const MASTERS = {
     label: "LandCode + ' - ' + LandName", orderBy: "LandCode",
     unique: [["LandCode"], "This Land ID already exists"],
     noDelete: true,
+    // Steps waiting for a verifier — also what the dashboard's "Pending verification" tile filters on.
+    extras: [{ name: "StepsAwaitingVerification", label: "Awaiting verification", sql: "(SELECT COUNT(*) FROM dbo.LegalWorkflowStepState s WHERE s.LandId = t.LandId AND s.Status = N'Pending Verification')" }],
     fields: [
       { name: "LandCode", label: "Land ID", type: "text", max: 30, auto: "LND" },
       { name: "LandName", label: "Land title / name", type: "text", required: true, max: 200 },
@@ -1380,7 +1382,7 @@ const MASTERS = {
   buyer: person("Buyer", "Buyer", "Buyers of land: identity, PAN / Aadhaar and their land record documents."),
   seller: person("Seller", "Seller", "Sellers of land: identity, PAN / Aadhaar and their title documents."),
   owner: person("Owner", "Owner", "Recorded owners of land parcels, picked on the Land master."),
-  customer: person("Customer", "Customer", "Customers a land deal is for, with their identity and documents."),
+  customer: person("Customer", "Legal Customer", "Customers a land deal is for, with their identity and documents. Separate from the Sales / CRM customers."),
   witness: person("Witness", "Witness", "Witnesses to deeds, with their identity proof.", { landDocs: false }),
   advocate: {
     title: "Advocate", group: "Parties", pageKey: "legal-advocate-master", table: "LegalAdvocate", pk: "AdvocateId",

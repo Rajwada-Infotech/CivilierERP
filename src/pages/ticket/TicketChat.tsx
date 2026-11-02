@@ -209,7 +209,7 @@ function AttachmentImage({ url, filename, isMine }: { url: string; filename: str
 
       {lightbox && (
         <BodyPortal><div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 backdrop-blur-md"
           onClick={() => setLightbox(false)}
         >
           <button

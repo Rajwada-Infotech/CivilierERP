@@ -877,8 +877,8 @@ const DebitNoteMaster: React.FC = () => {
           `position: fixed` a transformed containing block instead of the
           viewport. */}
       {viewingQDN && createPortal(
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && setViewingQDN(null)}>
-          <div className="sheet-frame bg-card w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && setViewingQDN(null)}>
+          <div className="sheet-frame bg-card w-full max-w-lg h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true">
             <div className="sticky top-0 bg-card z-10 flex items-start justify-between px-5 py-4" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
               <div>
                 <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Quality rejection debit note</p>

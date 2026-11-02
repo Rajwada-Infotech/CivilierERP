@@ -753,7 +753,7 @@ function SaleOrderHistory() {
       {/*  VIEW / PRINT MODAL                                                */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       {viewingOrder && createPortal(
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+        <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
           <style>{`
             @media print {
               body * { visibility: hidden; }
@@ -774,7 +774,7 @@ function SaleOrderHistory() {
               .so-print-modal .sticky { position: static !important; }
             }
           `}</style>
-          <div className="so-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+          <div className="so-print-modal bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-3xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh] overflow-y-auto">
             {/* Modal header */}
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
               <div>

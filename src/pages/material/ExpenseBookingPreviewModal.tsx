@@ -524,7 +524,7 @@ export function ExpenseBookingPreviewModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 expense-preview-modal">
+    <div className="fixed inset-0 z-[100] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 expense-preview-modal">
       {/* carries its own copy of the frame styles, so it looks the same wherever it is opened from */}
       <style>{SHEET_FRAME_CSS}</style>
       <style>{`
@@ -536,7 +536,7 @@ export function ExpenseBookingPreviewModal({
           .expense-preview-inner { outline: none !important; background-image: none !important; }
         }
       `}</style>
-      <div className="sheet-frame expense-preview-inner w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }}>
+      <div className="sheet-frame expense-preview-inner w-full max-w-5xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }}>
 
         {/* ── Sticky header ── */}
         <div className="sticky top-0 bg-card z-10 expense-preview-print-hide" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>

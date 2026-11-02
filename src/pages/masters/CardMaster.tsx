@@ -1463,7 +1463,7 @@ const CardMaster: React.FC = () => {
 
           {/* Delete Confirm */}
           {deleteId && (
-            <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm">
               <div className="sheet-frame bg-card p-5 max-w-sm w-full mx-4" style={{ margin: "0 16px", border: "1.5px solid hsl(var(--destructive))" }}>
                 <p className="font-heading text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-destructive">Delete card</p>
                 <h3 className="font-heading text-lg font-bold tracking-tight text-foreground mt-1">Delete this card?</h3>
@@ -1524,7 +1524,7 @@ const CardMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => {
