@@ -29,7 +29,11 @@ import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
-import { formatINR } from "@/utils/formatCurrency";
+import { formatINR as formatINRWhole } from "@/utils/formatCurrency";
+
+// A payment is recorded to the paisa (₹29.50), so this page shows it that way everywhere — the list used to round it to
+// ₹30 while the posting view showed ₹29.50. Same fix as the Journal Voucher page.
+const formatINR = (value: unknown, options?: { decimals?: number }) => formatINRWhole(value, { decimals: 2, ...options });
 import { printStatusLabel } from "@/utils/printStatus";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
