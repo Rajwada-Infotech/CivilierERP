@@ -184,18 +184,6 @@ export async function fetchBrokerageRateTiers(): Promise<RateTier[]> {
   try { const r = await fetchWithAuth("/api/crm/brokerage-rate-tiers"); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-// Same shape CrmPaymentPlans.tsx already parses off the list endpoint's
-// MilestonesJson column — reused here so the brief plan-preview card below
-// can compute real ₹ figures instead of just repeating raw %s.
-export type MilestoneRow = { name: string; pct: number };
-export function parseMilestones(json: string | null | undefined): MilestoneRow[] {
-  if (!json) return [];
-  try {
-    const raw = JSON.parse(json);
-    return (raw as any[]).map((r) => ({ name: r.name, pct: Number(r.pct) || 0 }));
-  } catch { return []; }
-}
-
 export const inputCls = "w-full h-9 text-sm border border-foreground/40 focus:border-foreground bg-card px-2.5 text-foreground outline-none transition-colors disabled:bg-muted/30 disabled:border-foreground/20 disabled:cursor-not-allowed";
 export const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5";
 

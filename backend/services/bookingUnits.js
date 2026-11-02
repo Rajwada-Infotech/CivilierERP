@@ -25,6 +25,24 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 const num = (v) => (v == null || v === "" ? null : Number(v));
 
+// The SQL type of an agreed rate per sq ft on applications and bookings (and
+// their unit / plot lines): 4 decimals, so a rate worked out from a typed price
+// gives that price back (migration 589). Every write of such a rate uses this.
+const rateSqlType = () => require("../db").sql.Decimal(18, 4);
+
+/**
+ * THE unit price: area x rate, to the paisa. Every screen and route that turns
+ * an area and a rate into a price goes through this (and priceBooking, which
+ * uses the same rounding), so a quote, a booking and an edit can't disagree.
+ * Before this, the booking edit rounded to the rupee while booking creation
+ * kept the paise — 885 sqft x Rs 3,405.23 was Rs 30,13,629 on one screen and
+ * Rs 30,13,628.55 on the next.
+ */
+const unitPrice = (areaSqFt, ratePerSqFt) => {
+  const area = num(areaSqFt), rate = num(ratePerSqFt);
+  return area && rate ? round2(area * rate) : 0;
+};
+
 /**
  * Split `total` across `weights` proportionally, guaranteeing the parts sum to
  * `total` exactly at 2dp.
@@ -121,4 +139,4 @@ function allocateConsideration({ lines = [], totalConsideration = 0 } = {}) {
   }));
 }
 
-module.exports = { apportion, priceBooking, allocateConsideration, round2 };
+module.exports = { apportion, priceBooking, allocateConsideration, round2, unitPrice, rateSqlType };

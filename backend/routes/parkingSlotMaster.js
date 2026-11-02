@@ -157,30 +157,41 @@ router.put("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-aut
     }
 
     // A Booked or OnHold slot can never be edited — not just deactivated —
-    // same reasoning as unitMaster.js's PUT lock check.
-    const lockReason = await getParkingSlotLockReason(pool, parseInt(id));
-    if (lockReason) {
-      return res.status(409).json({
-        error: `Parking slot "${SlotNo}" ${lockReason} and cannot be edited. Cancel/release the booking or hold first.`,
-      });
-    }
+    // same reasoning as unitMaster.js's PUT lock check. Checked and written
+    // under the slot's lock (lockSlot).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await lockSlot(tx, parseInt(id));
+      const lockReason = await getParkingSlotLockReason(tx, parseInt(id));
+      if (lockReason) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: `Parking slot "${SlotNo}" ${lockReason} and cannot be edited. Cancel/release the booking or hold first.`,
+        });
+      }
 
-    await pool
-      .request()
-      .input("Id",        sql.Int, parseInt(id))
-      .input("ProjectId", sql.Int, parseInt(ProjectId))
-      .input("BlockId",   sql.Int, BlockId ? parseInt(BlockId) : null)
-      .input("SlotNo",    sql.NVarChar(50), SlotNo.trim())
-      .input("Type",      sql.NVarChar(50), ParkingType)
-      .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
-      .input("UpdatedBy", sql.Int, updatedBy)
-      .query(`
-        UPDATE dbo.ParkingSlot SET
-          ProjectId = @ProjectId, BlockId = @BlockId, SlotNo = @SlotNo,
-          ParkingType = @Type, IsActive = @IsActive,
-          UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-        WHERE Id = @Id
-      `);
+      await tx
+        .request()
+        .input("Id",        sql.Int, parseInt(id))
+        .input("ProjectId", sql.Int, parseInt(ProjectId))
+        .input("BlockId",   sql.Int, BlockId ? parseInt(BlockId) : null)
+        .input("SlotNo",    sql.NVarChar(50), SlotNo.trim())
+        .input("Type",      sql.NVarChar(50), ParkingType)
+        .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
+        .input("UpdatedBy", sql.Int, updatedBy)
+        .query(`
+          UPDATE dbo.ParkingSlot SET
+            ProjectId = @ProjectId, BlockId = @BlockId, SlotNo = @SlotNo,
+            ParkingType = @Type, IsActive = @IsActive,
+            UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+          WHERE Id = @Id
+        `);
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw e;
+    }
     await bumpCacheVersion("parking-slot-master");
     res.json({ message: "Parking slot updated successfully" });
   } catch (err) {
@@ -191,6 +202,18 @@ router.put("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-aut
     res.status(500).json({ error: err.message });
   }
 });
+
+// Locks one slot, and the allotment and hold rows that could claim it (range
+// locks: HOLDLOCK covers rows not there yet), until the transaction ends — so a
+// booking or hold can't land between "not booked or held" and the edit /
+// delete that check guards. Same rows crmParking.js's assertSlotAvailable locks.
+async function lockSlot(tx, id) {
+  await tx.request().input("Id", sql.Int, id).query(`
+    SELECT Id FROM dbo.ParkingSlot WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
+    SELECT Id FROM dbo.CrmParkingAllotment WITH (UPDLOCK, HOLDLOCK) WHERE ParkingSlotId = @Id;
+    SELECT Id FROM dbo.CrmInventoryHold WITH (UPDLOCK, HOLDLOCK) WHERE EntityType = 'Parking' AND EntityId = @Id;
+  `);
+}
 
 // DELETE — a real, permanent removal (not a soft IsActive=0 flag left
 // sitting in the grid forever). Two checks run first: getParkingSlotLockReason
@@ -209,21 +232,28 @@ router.delete("/:id", requireAnyPageRight(["followup-parking-slot-master", "crm-
     if (!existing.recordset.length) return res.status(404).json({ error: "Parking slot not found" });
     const { SlotNo } = existing.recordset[0];
 
-    const lockReason = await getParkingSlotLockReason(pool, id);
-    if (lockReason) {
-      return res.status(409).json({
-        error: `Parking slot "${SlotNo}" ${lockReason} and cannot be deleted. Cancel/release the booking or hold first.`,
-      });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await lockSlot(tx, id);
+      const lockReason = await getParkingSlotLockReason(tx, id);
+      if (lockReason) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: `Parking slot "${SlotNo}" ${lockReason} and cannot be deleted. Cancel/release the booking or hold first.`,
+        });
+      }
+      const hardBlockers = await getParkingSlotHardDeleteBlockers(tx, id);
+      if (hardBlockers) {
+        await tx.rollback();
+        return res.status(409).json({ error: `Parking slot "${SlotNo}" ${hardBlockers}.` });
+      }
+      await tx.request().input("Id", sql.Int, id).query("DELETE FROM dbo.ParkingSlot WHERE Id = @Id");
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      throw e;
     }
-
-    const hardBlockers = await getParkingSlotHardDeleteBlockers(pool, id);
-    if (hardBlockers) {
-      return res.status(409).json({
-        error: `Parking slot "${SlotNo}" ${hardBlockers}.`,
-      });
-    }
-
-    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.ParkingSlot WHERE Id = @Id");
     await bumpCacheVersion("parking-slot-master");
     res.json({ message: `Parking slot "${SlotNo}" deleted` });
   } catch (err) {

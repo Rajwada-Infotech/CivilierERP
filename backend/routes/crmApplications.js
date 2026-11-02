@@ -1,5 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
+const { unitPrice, rateSqlType } = require("../services/bookingUnits");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { SA_LEAD_BOOKED } = require("../constants/saStatuses");
 const router = express.Router();
@@ -322,6 +323,24 @@ router.get("/stage-counts", requirePageRight("crm-applications", "view"), async 
   } catch (e) {
     console.error("[crm-applications] GET /stage-counts error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /price-quote — the sale's price, GST and payment schedule before a
+// booking exists, from the same functions that price the booking itself
+// (services/crmPriceQuote.js). The application form shows this.
+router.post("/price-quote", requireAnyPageRight(["crm-applications", "crm-bookings"], "view"), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { refuseOutOfScope } = require("../services/projectScope");
+    if (await refuseOutOfScope(req, res, "unit", Array.isArray(b.unitIds) ? b.unitIds : [])) return;
+    if (await refuseOutOfScope(req, res, "plot", Array.isArray(b.plotIds) ? b.plotIds : [])) return;
+    const quote = await require("../services/crmPriceQuote").quoteSale(getPool(), b);
+    if (!quote) return res.status(400).json({ error: "Pick a unit or plot to price." });
+    res.json(quote);
+  } catch (e) {
+    console.error("[crm-applications] POST /price-quote error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 
@@ -655,7 +674,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("campid", sql.Int, campaignId ?? null)
       .input("adid",   sql.Int, adId ?? null)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", rateSqlType(), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId)
       .input("pptouched", sql.Bit,      pptouched)
@@ -819,7 +838,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         const unitIds0 = plotIds0.length ? [] : await getApplicationUnitIds(pool0, id, ap.PreferredUnitId);
         const ids0 = plotIds0.length ? plotIds0 : unitIds0;
         if (ids0.length) {
-          const rows0 = (await pool0.request().input("r", sql.Decimal(18, 2), Number(ap.RatePerSqFt) || 0).query(plotIds0.length
+          const rows0 = (await pool0.request().input("r", rateSqlType(), Number(ap.RatePerSqFt) || 0).query(plotIds0.length
             ? `SELECT PlotName AS Name, COALESCE(NULLIF(@r, 0), RatePerSqFt, 0) * ISNULL(AreaSqFt, 0) AS Price FROM dbo.PlotMaster WHERE Id IN (${ids0.join(",")})`
             : `SELECT UnitName AS Name, COALESCE(NULLIF(@r, 0), RatePerSqFt, 0) * ISNULL(AreaSqFt, 0) AS Price FROM dbo.UnitMaster WHERE Id IN (${ids0.join(",")})`)).recordset;
           const unpriced = rows0.filter((r) => !(Number(r.Price) > 0)).map((r) => r.Name);
@@ -913,7 +932,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           }
           await tx.request()
             .input("bid", sql.Int, booking.id)
-            .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
+            .input("RatePerSqFt", rateSqlType(), a.RatePerSqFt)
             .input("PaymentPlanId", sql.Int, a.PaymentPlanId)
             .input("BookingDate", sql.Date, a.DateOfApply)
             .input("TokenType", sql.NVarChar(50), a.TokenType)
@@ -948,13 +967,18 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           // across while TotalValue stayed at the old figure.
           const newRate = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
           if (newRate != null && Number(before?.RatePerSqFt) !== newRate && Number(before?.AreaSqFt) > 0) {
-            const newTotal = Math.round(Number(before.AreaSqFt) * newRate * 100) / 100;
+            const newTotal = unitPrice(before.AreaSqFt, newRate);
             await tx.request().input("bid", sql.Int, booking.id).input("tot", sql.Decimal(18, 2), newTotal).query(`
               UPDATE dbo.CrmBooking
               SET TotalValue = @tot, GrandTotal = @tot + ISNULL(ParkingTotal, 0) + ISNULL(ExtraChargesTotal, 0), UpdatedAt = SYSDATETIME()
               WHERE Id = @bid`);
             await reallocateBookingLines(tx, booking.id, newTotal);
             await recalculateBookingGst(tx, booking.id);
+            // The unpaid steps follow the new price. Before, they only did when
+            // a Booking Amount also came with the resubmit, so a rate-only
+            // change left a schedule that no longer added up to the price.
+            // A plan change rebuilds the schedule below anyway.
+            if (!paymentPlanChanged) await recalculateRemainingMilestones(tx, booking.id);
           }
 
           // A plot sale's schedule is re-derived from the (possibly new)

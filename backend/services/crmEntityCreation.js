@@ -415,7 +415,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("campid", sql.Int, campaignId)
       .input("adid",   sql.Int, adId)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", rateSqlType(), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId != null ? effectivePaymentPlanId : null)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
@@ -603,6 +603,24 @@ async function rebuildLandSchedule(poolOrTx, bookingId, actorUserId = null) {
     WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
   await generateMilestonesForBooking(poolOrTx, bookingId, Number(bk.TotalValue), null, bk.BookingDate, actorUserId, Number(bk.BookingAmount || 0));
   return { rebuilt: true };
+}
+
+/**
+ * The schedule a payment plan gives at a Grand Total: Milestone 1 is the plan's
+ * fixed Booking Amount, the other steps share what's left by their %. It is
+ * exactly what booking creation stores (generateMilestonesForBooking, then
+ * recalculateRemainingMilestones, which split with the same apportion) — the
+ * application form shows this so its preview and the real schedule agree.
+ * A plot sale's schedule is landSaleSchedule's instead.
+ */
+function planSchedule(grandTotal, bookingAmount, items) {
+  const { apportion, round2 } = require("./bookingUnits");
+  const list = (items && items.length ? items : DEFAULT_MILESTONES).slice().sort((x, y) => x.no - y.no);
+  const booking = Math.max(0, round2(Number(bookingAmount || 0)));
+  const rest = list.filter((m) => m.no !== 1);
+  const shares = apportion(Math.max(0, round2(Number(grandTotal || 0) - booking)), rest.map((m) => Number(m.pct)));
+  let i = 0;
+  return list.map((m) => ({ no: m.no, name: m.name, pct: m.no === 1 ? null : Number(m.pct), amount: m.no === 1 ? booking : shares[i++] }));
 }
 
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
@@ -815,7 +833,7 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 // ApplicationId -> BookingId backfill every other Application-stage capture
 // (bank/KYC, documents, parking) already gets a few lines below.
 
-const { priceBooking, allocateConsideration } = require("./bookingUnits");
+const { priceBooking, allocateConsideration, rateSqlType } = require("./bookingUnits");
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
@@ -1051,7 +1069,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .input("builtUpArea",     sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
       .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
       .input("openTerraceArea", sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
-      .input("rate",  sql.Decimal(18,2), rate)
+      .input("rate",  rateSqlType(), rate)
       .input("tot",   sql.Decimal(18,2), total)
       .input("bamt",  sql.Decimal(18,2), bookingAmount)
       .input("ttype", sql.NVarChar(20),  tokenType)
@@ -1119,7 +1137,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
         .input("bid", sql.Int, bookingId)
         .input("uid", sql.Int, line.unitId)
         .input("area", sql.Decimal(18,2), line.areaSqFt)
-        .input("rate", sql.Decimal(18,2), line.ratePerSqFt)
+        .input("rate", rateSqlType(), line.ratePerSqFt)
         .input("premium", sql.Decimal(18,2), line.premiumAmount)
         .input("alloc", sql.Decimal(18,2), line.allocatedValue)
         .input("cb", sql.Int, actorUserId)
@@ -1290,6 +1308,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
+  generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

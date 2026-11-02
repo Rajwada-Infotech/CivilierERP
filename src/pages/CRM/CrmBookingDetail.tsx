@@ -2453,10 +2453,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
-                      {/* Live GST preview — 18% is fixed from the HSN Master
-                          "Extra Charges" row; there's no rate to pick anymore. */}
+                      {/* GST preview at the rate the server gives this booking. */}
                       {extraForm.Amount && Number(extraForm.Amount) > 0 && (
-                        <ExtraWorkGstPreview amount={Number(extraForm.Amount)} />
+                        <ExtraWorkGstPreview amount={Number(extraForm.Amount)} bookingId={bookingId} />
                       )}
                     </>
                   )}

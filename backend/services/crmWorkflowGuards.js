@@ -1017,20 +1017,14 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
   const evenShare = knownSum > 0 ? knownSum / open.length : 100 / open.length;
   const resolvedWeights = weights.map((w) => w != null ? w : evenShare);
   const openPercentSum = resolvedWeights.reduce((s, w) => s + w, 0);
-  const weight = (r, idx) => (openPercentSum > 0 ? resolvedWeights[idx] / openPercentSum : 1 / open.length);
+  // Shared split (bookingUnits.apportion): each open step's share by weight,
+  // the last absorbing the rounding so the schedule sums exactly to Grand
+  // Total — the same split the application form previews (planSchedule).
+  const amounts = require("./bookingUnits").apportion(remainingTarget, openPercentSum > 0 ? resolvedWeights : open.map(() => 1));
 
-  let allocated = 0;
   for (let i = 0; i < open.length; i++) {
     const r = open[i];
-    const isLast = i === open.length - 1;
-    // The last open milestone absorbs whatever's left after rounding the
-    // others, so the schedule always sums exactly to GrandTotal instead of
-    // drifting a paisa or two off from independently-rounded shares.
-    const amount = isLast
-      ? Math.round((remainingTarget - allocated) * 100) / 100
-      : Math.round(remainingTarget * weight(r, i) * 100) / 100;
-    allocated += amount;
-    const finalAmount = Math.max(0, amount);
+    const finalAmount = Math.max(0, amounts[i]);
     const percent = remainingTarget > 0 ? Math.round((finalAmount / remainingTarget) * 10000) / 100 : 0;
 
     await poolOrTx.request()
