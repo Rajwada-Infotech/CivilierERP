@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { CheckCircle2, Circle, Lock } from "lucide-react";
+import { CheckCircle2, Circle, Lock, ArrowRight } from "lucide-react";
 
 type StepStatus = "done" | "active" | "locked";
 
@@ -13,15 +13,21 @@ interface Step {
   date: string | null;
   link: string | null;
   blockedBy: string | null;
+  /** Where the step sits inside its own approval chain (Booking only). */
+  stage?: string | null;
+  /** What has to be done now, when this is the open step. */
+  todo?: string | null;
 }
 
-async function fetchLifecycle(bookingId: number): Promise<{ steps: Step[] } | null> {
+async function fetchLifecycle(bookingId: number): Promise<{ steps: Step[]; current: string | null } | null> {
   const r = await fetchWithAuth(`/api/crm/bookings/${bookingId}/lifecycle`);
   return r.ok ? r.json() : null;
 }
 
 interface BookingLifecycleBarProps {
   bookingId: number;
+  /** The booking's approval stage — a change refetches the bar. */
+  stage?: string | null;
 }
 
 // Compact chip stepper — replaces the old fixed-90px-column horizontal
@@ -29,11 +35,11 @@ interface BookingLifecycleBarProps {
 // (flex-wrap) so nothing ever needs to scroll, and each chip is a single
 // inline row (icon + label) instead of a tall icon-over-label-over-date
 // stack, so the whole thing takes a fraction of the vertical space.
-export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookingId }) => {
+export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookingId, stage }) => {
   const navigate = useNavigate();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["crm-booking-lifecycle", bookingId],
+    queryKey: ["crm-booking-lifecycle", bookingId, stage],
     queryFn: () => fetchLifecycle(bookingId),
     staleTime: 60_000,
     enabled: bookingId != null,
@@ -52,14 +58,16 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
 
   const doneCount = data.steps.filter((s) => s.status === "done").length;
   const pct = Math.round((doneCount / data.steps.length) * 100);
-  const nextLocked = data.steps.find((s) => s.status === "locked" && s.blockedBy);
+  const nowStep = data.steps.find((s) => s.key === data.current) ?? null;
+  const nowText = nowStep ? nowStep.todo || nowStep.blockedBy || `Continue on the ${nowStep.label} page` : null;
+  const nowIsHere = nowStep?.key === "booking";
 
   return (
     <div className="border border-border bg-card px-3 py-2.5">
       {/* header + inline progress bar share one row */}
       <div className="flex items-center gap-3 mb-2">
         <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
-          Lifecycle
+          Journey
         </span>
         <div className="h-1 flex-1 bg-muted overflow-hidden">
           <div
@@ -94,6 +102,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
                 {step.status === "active" && <Circle size={6} className="fill-primary text-foreground shrink-0 animate-pulse" />}
                 {step.status === "locked" && <Lock size={8} className="shrink-0" />}
                 {step.label}
+                {step.stage && <span className="font-normal text-muted-foreground">· {step.stage}</span>}
               </button>
               {!isLast && <span className="text-muted-foreground/20 text-[0.625rem] select-none mx-0.5">›</span>}
             </React.Fragment>
@@ -101,12 +110,25 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
         })}
       </div>
 
-      {/* single-line "what's next" hint, only when something is actually blocked */}
-      {nextLocked && (
-        <div className="mt-2 text-[0.625rem] text-muted-foreground truncate">
-          <span className="font-medium text-foreground">Next:</span> {nextLocked.label} — {nextLocked.blockedBy}
+      {/* The open step: what to do now, and the way to it. */}
+      {nowStep ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-2">
+          <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-primary shrink-0">Now</span>
+          <span className="text-[0.75rem] text-foreground min-w-0 flex-1">
+            <span className="font-semibold">{nowStep.label}</span> — {nowText}
+          </span>
+          {nowStep.link && !nowIsHere && (
+            <button
+              onClick={() => navigate(nowStep.link!)}
+              className="inline-flex items-center gap-1 border border-primary/40 bg-primary/10 px-2.5 py-1 text-[0.6875rem] font-semibold text-foreground hover:bg-primary/20 shrink-0"
+            >
+              Open {nowStep.label} <ArrowRight size={11} />
+            </button>
+          )}
         </div>
-      )}
+      ) : doneCount === data.steps.length ? (
+        <div className="mt-2 text-[0.6875rem] text-muted-foreground">Every step is complete.</div>
+      ) : null}
     </div>
   );
 };

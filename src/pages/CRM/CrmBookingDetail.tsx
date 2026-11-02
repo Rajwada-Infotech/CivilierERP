@@ -1202,7 +1202,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <PropertyCard bookingId={booking.Id} />
 
             {/* ── Booking Lifecycle Stepper ── */}
-            <BookingLifecycleBar bookingId={booking.Id} />
+            <BookingLifecycleBar bookingId={booking.Id} stage={`${currentStage}:${booking.Status}`} />
 
 
             {/* 2-step required flow (Unit & Value, Payment Plan — both are
