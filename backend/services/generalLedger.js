@@ -831,6 +831,12 @@ async function resolvePaymentSupplierHeadId(pool, payment) {
     supplierHeadId = payment.PPartyId;
   }
 
+  // A payment made straight to an expense with no party, invoice or contract behind it: the bank's own charges
+  // (payment mode "Bank Charges"). Dr Bank Charges (the seeded BNKCHG expense ledger) / Cr Bank, as bounce charges do.
+  if (!supplierHeadId && String(payment.PMode || "").trim().toLowerCase() === "bank charges") {
+    supplierHeadId = await getGLHeadIdByCode(pool, "BNKCHG", "Bank Charges").catch(() => null);
+  }
+
   return supplierHeadId;
 }
 
