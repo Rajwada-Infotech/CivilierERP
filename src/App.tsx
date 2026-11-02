@@ -13,6 +13,7 @@ import {
   Navigate,
   useLocation,
   useSearchParams,
+  useParams,
 } from "react-router-dom";
 
 // Static imports (needed synchronously for auth shell)
@@ -46,6 +47,7 @@ import { ActivityBrowserProvider } from "./contexts/ActivityBrowserContext";
 // Query Client
 import { queryClient } from "./lib/queryClient";
 import { useModuleUsageTracker } from "./hooks/useModuleUsageTracker";
+import { legalMasterByKey } from "./pages/legal/legalMasters";
 
 // ─── Page Skeleton (inline route-transition loader) ───────────────────────────
 function PageSkeleton() {
@@ -126,6 +128,20 @@ const ChequeCancellation = lazy(() => import("./pages/finance/ChequeCancellation
 const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = withCountUp(lazy(() => import("./pages/loan/LoanDashboard")));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
+const LegalDashboard = withCountUp(lazy(() => import("./pages/legal/LegalDashboard")));
+const LegalMasterPage = lazy(() => import("./pages/legal/LegalMasterPage"));
+const LegalRegistrationSearchPage = lazy(() => import("./pages/legal/LegalRegistrationSearchPage"));
+const LegalDeedListPage = lazy(() => import("./pages/legal/LegalDeedListPage"));
+const LegalDeedDetailPage = lazy(() => import("./pages/legal/LegalDeedDetailPage"));
+const LegalApprovalsInboxPage = lazy(() => import("./pages/legal/LegalApprovalsInboxPage"));
+const LegalPendingQueuePage = lazy(() => import("./pages/legal/LegalPendingQueuePage"));
+const LandEnquiryPage = lazy(() => import("./pages/legal/land/LandEnquiryPage"));
+const LandPropertyListPage = lazy(() => import("./pages/legal/land/LandPropertyListPage"));
+const LandPropertyDetailPage = lazy(() => import("./pages/legal/land/LandPropertyDetailPage"));
+const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"));
+const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
+const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
+const LandRecordRegisterPage = lazy(() => import("./pages/legal/land/LandRecordRegisterPage"));
 const MaintenanceDashboard = withCountUp(lazy(() => import("./pages/maintenance/MaintenanceDashboard")));
 const HrPayrollDashboard = withCountUp(lazy(() => import("./pages/hrpayroll/HrPayrollDashboard")));
 const EmployeeMaster = lazy(() => import("./pages/hrpayroll/EmployeeMaster"));
@@ -648,6 +664,19 @@ function PageGuard({
 }
 
 // ─── Protected Route ──────────────────────────────────────────────────────────
+// /legal/setup/:master — one route for every Legal Setup master, gated by that master's own page right.
+function LegalMasterRoute() {
+  const { master } = useParams();
+  const entry = legalMasterByKey(master);
+  if (!entry) return <Navigate to="/legal" replace />;
+  return (
+    <ProtectedRoute pageKey={entry.pageKey}>
+      {/* key: switching master resets the form instead of carrying the last one's state over */}
+      <LegalMasterPage key={entry.key} entry={entry} />
+    </ProtectedRoute>
+  );
+}
+
 function ProtectedRoute({
   children,
   pageKey,
@@ -978,6 +1007,66 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/legal"
+        element={
+          <ProtectedRoute pageKey="legal-dashboard">
+            <LegalDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/legal/search"
+        element={
+          <ProtectedRoute pageKey="legal-registration-search">
+            <LegalRegistrationSearchPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/legal/deeds"
+        element={
+          <ProtectedRoute pageKey="legal-deed-registrations">
+            <LegalDeedListPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/legal/deeds/:id"
+        element={
+          <ProtectedRoute pageKey="legal-deed-registrations">
+            <LegalDeedDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/legal/approvals"
+        element={
+          <ProtectedRoute pageKey="legal-approvals">
+            <LegalApprovalsInboxPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/legal/pending-queue"
+        element={
+          <ProtectedRoute pageKey="legal-pending-queue">
+            <LegalPendingQueuePage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Land Management: enquiries, the Land Property Master and each land's pipeline. */}
+      <Route path="/legal/land/enquiries" element={<ProtectedRoute pageKey="legal-land-enquiry"><LandEnquiryPage /></ProtectedRoute>} />
+      <Route path="/legal/land/properties" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyListPage /></ProtectedRoute>} />
+      <Route path="/legal/land/properties/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyDetailPage /></ProtectedRoute>} />
+      <Route path="/legal/land/reports" element={<ProtectedRoute pageKey="legal-land-reports"><LandReportsPage /></ProtectedRoute>} />
+      <Route path="/legal/land/properties/:id/details" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage /></ProtectedRoute>} />
+      <Route path="/legal/land/properties/:id/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
+      <Route path="/legal/land/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
+      <Route path="/legal/land/rs-register" element={<ProtectedRoute pageKey="legal-land-master"><LandRecordRegisterPage kind="rs" /></ProtectedRoute>} />
+      <Route path="/legal/land/lr-register" element={<ProtectedRoute pageKey="legal-land-master"><LandRecordRegisterPage kind="lr" /></ProtectedRoute>} />
+      {/* Every Legal Setup master; the route checks the master's own page right. */}
+      <Route path="/legal/setup/:master" element={<LegalMasterRoute />} />
       <Route
         path="/maintenance"
         element={

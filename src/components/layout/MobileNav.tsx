@@ -13,6 +13,7 @@ import {
   civilWorkDprSetupItems,
   salesAutomationSetupItems,
   crmSetupItems,
+  legalSetupItems,
   adminSetupItems,
 } from "./setupMenus";
 import { Grip } from "lucide-react";
@@ -59,6 +60,7 @@ import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
+import { legalNavItems } from "./sidebars/LegalSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -177,6 +179,8 @@ export const MobileNav: React.FC = () => {
       return { items: salesSetupItems, label: "Sales", available: true };
     if (activeModule === "hr-payroll")
       return { items: hrPayrollSetupItems, label: "HR and Payroll", available: true };
+    if (activeModule === "legal")
+      return { items: legalSetupItems, label: "Legal", available: true };
     if (activeModule === "sales-automation")
       return {
         items: salesAutomationSetupItems,
@@ -271,6 +275,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(crmNavItems as DesktopNavItem[]);
       case "loan":
         return adaptItems(loanNavItems as DesktopNavItem[]);
+      case "legal":
+        return adaptItems(legalNavItems as DesktopNavItem[]);
       default:
         return [];
     }
