@@ -207,8 +207,8 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
         </div>
       </div>
 
-      {/* Tabs (same pattern as the Sale Deed page) */}
-      <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+      {/* Tabs (same pattern as the Sale Deed page): wrap rather than hide the last ones off the edge. */}
+      <div className="flex flex-wrap items-stretch bg-card" style={{ border: RULE }}>
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${
             tab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`} style={{ borderRight: RULE_SOFT }}>
