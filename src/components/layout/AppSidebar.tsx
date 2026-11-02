@@ -45,7 +45,7 @@ import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
-import { crmNavItems, CRM_MY_WORK_PATH } from "./sidebars/CrmSidebar";
+import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
 import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
@@ -265,8 +265,6 @@ export const AppSidebar = () => {
   const pendingApprovalCount = usePolledCount("/api/approval-inbox/count", "approval-action");
   // Civil Work DPR's own per-assignment approvals (dependencyActivityAssignmentApi.ts).
   const civilWorkDprApprovalCount = usePolledCount("/api/dependency-activity-assignment/approvals/pending-count", "civilworkdpr-approval-action");
-  // CRM My Work — only while the CRM module is open.
-  const crmMyWorkCount = usePolledCount(activeModule === "crm" ? "/api/crm/my-work/count" : null, "approval-action");
 
   const { canAccessPage } = useAuth();
 
@@ -368,7 +366,7 @@ export const AppSidebar = () => {
         raw = salesAutomationNavItems;
         break;
       case "crm":
-        raw = crmNavItems.map((it) => (it.path === CRM_MY_WORK_PATH ? { ...it, badge: crmMyWorkCount || undefined } : it));
+        raw = crmNavItems;
         break;
       case "loan":
         raw = loanNavItems;

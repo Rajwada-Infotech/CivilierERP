@@ -5,7 +5,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-const { WELCOME_CALL_DUE_SQL, AGREEMENT_NEEDS_ACTION_SQL, DEMAND_BOOKING_LIVE_SQL, MILESTONE_OVERDUE_SQL } = require("../services/crmWorkQueues");
+const { WELCOME_CALL_DUE_SQL, AGREEMENT_NEEDS_ACTION_SQL, DEMAND_BOOKING_LIVE_SQL, MILESTONE_OVERDUE_SQL } = require("../services/crmAttentionConditions");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
