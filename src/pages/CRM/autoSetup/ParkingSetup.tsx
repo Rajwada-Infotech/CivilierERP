@@ -136,9 +136,11 @@ const ParkingSetup: React.FC = () => {
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<ParkingTemplateRow>) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).map((r, i) => (i === idx ? { ...r, ...patch } : r)) }));
-  // Another block's mix into this one's editor (not saved until Save).
-  const copyMixFrom = (blockId: number, fromId: number) =>
-    setParkingTemplates((m) => ({ ...m, [blockId]: (m[fromId] || []).map((r) => ({ ...r })) }));
+  // Another block's SAVED mix into this one's editor (its unsaved edits are not copied); applied on Save.
+  const copyMixFrom = (blockId: number, from: { Id: number; BlockName: string }) => {
+    setParkingTemplates((m) => ({ ...m, [blockId]: (savedMix[from.Id] || []).map((r) => ({ ...r })) }));
+    toast.info(`Block ${from.BlockName}'s mix copied — check it, then Save`);
+  };
 
   const handleSaveTemplate = async (blockId: number) => {
     const rows = parkingTemplates[blockId] || [];
@@ -305,7 +307,7 @@ const ParkingSetup: React.FC = () => {
                 const locked = !rights.canEdit || (generatedCount > 0 && editingTemplateFor !== b.Id);
                 const total = templateTotal(b.Id);
                 const pending = b.ParkingSlotsToCreate || 0;
-                const copySources = blocks.filter((o) => o.Id !== b.Id && (parkingTemplates[o.Id] || []).some((r) => r.ParkingType && parseInt(r.Count, 10)));
+                const copySources = blocks.filter((o) => o.Id !== b.Id && (savedMix[o.Id] || []).length > 0);
                 const openSlot = blockSlots.find((s) => s.Id === openSlotId) || null;
                 const openLock = openSlot ? lockOf(openSlot) : null;
                 return (
@@ -331,12 +333,19 @@ const ParkingSetup: React.FC = () => {
                     {/* ── The mix ── */}
                     <div className="px-3 py-2 overflow-x-auto thin-scroll">
                       {!locked && copySources.length > 0 && (
-                        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <label className="mb-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
                           <Copy size={12} /> Same as another block?
-                          {copySources.map((o) => (
-                            <button key={o.Id} onClick={() => copyMixFrom(b.Id, o.Id)} className={`${KEY_LINE} h-7 px-2`}>Copy Block {o.BlockName}</button>
-                          ))}
-                        </div>
+                          <select value="" aria-label="Copy the mix from another block"
+                            onChange={(e) => { const o = copySources.find((x) => String(x.Id) === e.target.value); if (o) copyMixFrom(b.Id, o); }}
+                            className={`${SMALL_INP} !w-48`}>
+                            <option value="">Copy mix from…</option>
+                            {copySources.map((o) => (
+                              <option key={o.Id} value={o.Id}>
+                                Block {o.BlockName} — {rowsTotal(savedMix[o.Id])} slots, {(savedMix[o.Id] || []).map((r) => r.ParkingType).join(", ")}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                       )}
                       <table className="w-full text-xs min-w-[420px]">
                         <thead>
