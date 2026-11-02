@@ -13,6 +13,7 @@ import { Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Tra
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
+import { BookingStatement } from "@/components/crm/BookingStatement";
 import { PropertyCard } from "@/components/crm/PropertyCard";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -1762,6 +1763,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
+                {/* Read-only: refreshed whenever a payment, receipt or on-account change lands. */}
+                <BookingStatement bookingId={booking.Id}
+                  refreshKey={`${milestoneList.map((m: any) => m.AmountPaid).join(",")}|${(moneyReceipts as any[]).map((r: any) => r.Status).join(",")}|${bookingOnAccountBalance}`} />
                 <div className=" border border-border p-4 space-y-2">
                   <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><CreditCard size={15} className="text-foreground" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
