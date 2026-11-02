@@ -16,6 +16,7 @@ import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 import { localDay } from "./salesDeed/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
 
@@ -98,7 +99,8 @@ const CrmLoanTracking: React.FC = () => {
   const [sp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
 
-  const [activeTab, setActiveTab] = useState<string>("All");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeTab, setActiveTab] = useUrlParam<string>("tab", "All", ["All", "NotApplied", "Applied", "Sanctioned", "Disbursed", "Rejected"]);
   const [editingRow, setEditingRow] = useState<any | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);

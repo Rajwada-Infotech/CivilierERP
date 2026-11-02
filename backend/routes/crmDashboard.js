@@ -5,6 +5,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { WELCOME_CALL_DUE_SQL, AGREEMENT_NEEDS_ACTION_SQL, DEMAND_BOOKING_LIVE_SQL, MILESTONE_OVERDUE_SQL } = require("../services/crmAttentionConditions");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -44,11 +45,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const alertWelcomeCallQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}' ${projBookingCond}
-        AND NOT EXISTS (
-          SELECT 1 FROM dbo.CrmWelcomeCall w
-          WHERE w.BookingId = b.Id AND w.Outcome = 'Welcomed'
-        )
+      WHERE ${WELCOME_CALL_DUE_SQL} ${projBookingCond}
     `);
 
     // 2. Overdue payment milestones (DueDate < today, Status = Pending, active booking)
@@ -56,8 +53,8 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
-        AND m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE)
+      WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}
+        AND ${MILESTONE_OVERDUE_SQL}
     `);
 
     // 3. Disputed possession notices (permanently blocks handover)
@@ -128,15 +125,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const alertAgreementsPendingQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}' ${projBookingCond}
-        AND (
-          NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement a WHERE a.BookingId = b.Id AND a.Status <> 'Cancelled')
-          OR EXISTS (
-            SELECT 1 FROM dbo.CrmAgreement a
-            WHERE a.BookingId = b.Id AND a.Status = '${CrmStatus.DRAFT}'
-              AND DATEDIFF(DAY, a.CreatedAt, SYSDATETIME()) > 5
-          )
-        )
+      WHERE ${AGREEMENT_NEEDS_ACTION_SQL} ${projBookingCond}
     `);
 
     // ── THIS WEEK — daily breakdown for the 7-day strip ──────────────────────
@@ -158,7 +147,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         ISNULL((SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
           JOIN dbo.CrmBooking b ON b.Id = m.BookingId
           WHERE m.Status = '${CrmStatus.PENDING}' AND CAST(m.DueDate AS DATE) = d.D
-            AND b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}), 0) AS MilestonesDue
+            AND ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}), 0) AS MilestonesDue
       FROM Days d
       ORDER BY d.D
     `);
@@ -169,7 +158,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     const unitsSoldThisMonthQ = addPid(pool.request()).query(`
       SELECT COUNT(*) AS Cnt, ISNULL(SUM(TotalValue), 0) AS TotalValue
       FROM dbo.CrmBooking b
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}
         AND CAST(b.BookingDate AS DATE) >= DATEFROMPARTS(YEAR(SYSDATETIME()), MONTH(SYSDATETIME()), 1)
     `);
 
@@ -198,7 +187,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND Status = '${CrmStatus.PENDING}' AND DueDate < CAST(SYSDATETIME() AS DATE)) AS OverdueCount
         FROM dbo.CrmBooking b
         LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-        WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+        WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}
       )
       SELECT ProjectName, SUM(TotalDue) AS TotalDue, SUM(TotalPaid) AS TotalPaid, SUM(OverdueCount) AS OverdueCount
       FROM BookingTotals
@@ -213,7 +202,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         COUNT(*) AS MilestoneCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}
         AND m.Status = '${CrmStatus.PENDING}'
         AND m.DueDate BETWEEN CAST(SYSDATETIME() AS DATE)
             AND DATEADD(DAY, 30, CAST(SYSDATETIME() AS DATE))
@@ -277,7 +266,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
         SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}
     `);
 
     const ticketsQ = addPid(pool.request()).query(`

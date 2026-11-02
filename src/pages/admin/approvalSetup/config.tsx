@@ -310,7 +310,7 @@ export const MODULE_OPTIONS = [
     id: "crm-money-receipts",
     label: "CRM Money Receipt",
     icon: "🧾",
-    desc: "Approving, bouncing or sweeping a customer's money receipt",
+    desc: "Bouncing a customer's money receipt before it goes to Finance (it goes when the Director approves the booking)",
   },
   {
     id: "crm-bank-details-edit",

@@ -1,7 +1,7 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
 const { returnLeadToPool } = require("../services/saHandoff");
-const { CrmStatus } = require("../constants/crmStatuses");
+const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -90,6 +90,8 @@ const {
   approveStageRequest,
   rejectStageRequest,
   stageLabel,
+  STAGE_REVIEW,
+  STAGE_CONFIRMED,
 } = require("../services/crmBookingStageService");
 // The merged Data Review checklist (formerly the Application's own Level-1
 // gate) — see the "Data Review checklist" comment block below for why this
@@ -2888,7 +2890,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     const [bkRes, wcRes, agRes, lmRes, ppRes, pnRes, hoRes, sdRes, orgNocRes, bankNocRes, qpRes, regRes, mutRes] = await Promise.all([
       // booking itself
       pool.request().input("id", sql.Int, id)
-        .query("SELECT Id, BookingNo, Status, BookingDate, ApplicationId FROM dbo.CrmBooking WHERE Id = @id"),
+        .query("SELECT Id, BookingNo, Status, BookingDate, ApplicationId, WorkflowStage FROM dbo.CrmBooking WHERE Id = @id"),
       // welcome call — any 'Welcomed' outcome
       pool.request().input("id", sql.Int, id)
         .query("SELECT TOP 1 CallDate, Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = @id AND Outcome = 'Welcomed' ORDER BY CallDate DESC"),
@@ -2988,6 +2990,14 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
 
     const d = (v) => v ? String(v).slice(0, 10) : null;
 
+    // The booking is done only once its approval chain is through (Data Review
+    // -> Marketing Head -> Director -> Confirmed); until then the stage it sits
+    // at is the step everyone is waiting on.
+    const bkStage = bk.WorkflowStage || STAGE_REVIEW;
+    const bkConfirmed = bk.Status === CrmStatus.APPROVED || bkStage === STAGE_CONFIRMED;
+    // A closed booking (cancelled, transferred...) has nothing open.
+    const closed = DEAD_BOOKING_STATUSES.includes(bk.Status);
+
     // Minimal high-level lifecycle — 9 stages.
     // Sub-step detail (Legal Milestones, Pre-Possession, Possession Notice,
     // Query Payment) lives on each step's own dedicated page; the bar here
@@ -3004,10 +3014,14 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
       {
         key: "booking",
         label: "Booking",
-        status: "done",
+        status: bkConfirmed ? "done" : "active",
         date: d(bk.BookingDate),
         link: `/crm/bookings?view=${id}`,
         blockedBy: null,
+        stage: bkConfirmed || closed ? null : stageLabel(bkStage),
+        todo: bkConfirmed || closed ? null
+          : bkStage === STAGE_REVIEW ? `${stageLabel(bkStage)}: verify every tab of this booking, then send it for approval`
+          : `Waiting for ${stageLabel(bkStage)}`,
       },
       {
         key: "welcome_call",
@@ -3016,6 +3030,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         date: wc ? d(wc.CallDate) : null,
         link: `/crm/welcome-calls?bookingId=${id}`,
         blockedBy: null,
+        todo: wc ? null : "Call the buyer and log the welcome call",
       },
       {
         // Covers the full Agreement phase: AFS registration, legal milestones,
@@ -3027,6 +3042,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         date: agRegistered ? d(ag.AgreementDate || ag.CreatedAt) : ag ? d(ag.CreatedAt) : null,
         link: `/crm/agreements?bookingId=${id}`,
         blockedBy: wc ? agWaitingOn : "Welcome Call must be completed first",
+        todo: agRegistered || !wc ? null : agWaitingOn || (ag ? `Agreement is ${ag.Status} — continue it on the Agreement page` : "Prepare the agreement"),
       },
       {
         key: "noc",
@@ -3041,6 +3057,8 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         date: activeNoc ? d(activeNoc.CreatedAt) : null,
         link: `/crm/noc?bookingId=${id}`,
         blockedBy: agRegistered ? null : "Agreement must be Registered first",
+        todo: !agRegistered || (activeNoc && activeNoc.Status === "Issued") || (!activeNoc && possessionDone) ? null
+          : activeNoc ? `NOC is ${activeNoc.Status}` : "Request the NOC",
       },
       {
         // Single "Handover" chip covers: Pre-Possession inspection → Possession
@@ -3072,6 +3090,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         date: sd ? d(sd.CreatedAt) : null,
         link: `/crm/sales-deed?bookingId=${id}`,
         blockedBy: hoDone ? null : "Handover must be Completed first",
+        todo: !hoDone || sdDone ? null : sd ? "Sale deed is waiting for approval" : "Draft the sale deed",
       },
       {
         // Single "Registry" chip covers: Query Payment → Registry appointment
@@ -3100,10 +3119,13 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         date: mut ? d(mut.CreatedAt) : null,
         link: `/crm/mutation?bookingId=${id}`,
         blockedBy: regDone ? null : "Registry must be Completed first",
+        todo: !regDone || mutDone ? null : mut ? `Mutation is ${mut.Status}` : "Apply for mutation",
       },
     ];
 
-    res.json({ BookingId: id, BookingNo: bk.BookingNo, steps });
+    // The step that needs attention now: the first one still open, in order.
+    const current = closed ? null : steps.find((s) => s.status === "active")?.key || null;
+    res.json({ BookingId: id, BookingNo: bk.BookingNo, steps, current, closed });
   } catch (e) {
     console.error("[crm-bookings] lifecycle error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });

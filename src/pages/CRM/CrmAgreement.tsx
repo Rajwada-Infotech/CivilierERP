@@ -26,7 +26,8 @@ import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { API, DOC_TYPES, agrStatusColor, isBookingCancelled, unverifiedMandatoryDocs, followupProgress, AGR_TABS, AgrTab, TAB_SLUGS, SLUG_FOR_TAB, agreementStepStates } from "./agreement/config";
-import { AgreementStepper, docStatusColor, AgreementTimeline } from "./agreement/Timeline";
+import { docStatusColor, AgreementTimeline } from "./agreement/Timeline";
+import { StepBar } from "@/components/crm/StepBar";
 import { EMPTY_AGR_FORM, fetchUsers, EMPTY_DOC_FORM, EMPTY_DOC_REQUEST_FORM, mimeIcon, fmtBytes } from "./agreement/forms";
 import { DocumentReviewCard } from "./agreement/DocumentReviewCard";
 import { PAGE_SIZE, AgreementListFilters, fetchAgreementsList, fetchAgreementDetail, fetchAgreementIdByBooking, fetchDateHistory, fetchRevisions, fetchBookings, fetchWelcomeCallsForBooking } from "./agreement/api";
@@ -661,7 +662,7 @@ const CrmAgreement: React.FC = () => {
             <>
               {detail.agreement?.Status !== CrmStatus.CANCELLED && (
                 <div className="bg-card p-4 space-y-3" style={{ border: RULE }}>
-                  <AgreementStepper steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
+                  <StepBar<AgrTab> steps={agreementStepStates(detail.agreement, detail.documents)} activeTab={agrTab} onStepClick={setAgrTab} />
                   {(() => {
                     const a = detail.agreement;
                     const pendingDocs = unverifiedMandatoryDocs(detail.documents);
@@ -872,7 +873,8 @@ const CrmAgreement: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+              {/* Wraps rather than hiding the last tabs off the edge of the panel. */}
+              <div className="flex flex-wrap items-stretch bg-card" style={{ border: RULE }}>
                 {AGR_TABS.filter(tabAllowed).map((t) => (
                   <button key={t} onClick={() => setAgrTab(t)}
                     className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${

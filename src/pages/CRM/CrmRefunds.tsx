@@ -19,6 +19,7 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/refunds";
 const BKG_API = "/api/crm/bookings";
 const PROJECT_BANK_API = "/api/crm/project-banks";
@@ -418,7 +419,8 @@ const CrmRefunds: React.FC = () => {
   // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => { setSearch(v); setPage(1); });
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [status, setStatus] = useState<string>("All");
+  // In the address, so a refresh or a shared link keeps it.
+  const [status, setStatus] = useUrlParam<string>("status", "All");
   const [page, setPage] = useState(1);
   const [showNew, setShowNew] = useState(false);
   const [financeDialog, setFinanceDialog] = useState<any | null>(null);

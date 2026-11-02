@@ -1,4 +1,4 @@
-// Auto Project Setup's parking tab. Its own component with its own project, fetches and state: parking is
+// Auto Project Setup's parking tab. Its own component with its own fetches and state (the project is shared via the address): parking is
 // block-scoped only (dbo.ParkingSlot has no floor), so it never needed floors or units first, and a slow request on
 // one tab can't affect the other.
 import React, { useEffect, useState } from "react";
@@ -10,6 +10,7 @@ import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
 import { ParkingNamingPanel } from "./NamingPanel";
 import { ProjectPicker } from "./ProjectPicker";
@@ -32,11 +33,13 @@ const ParkingSetup: React.FC = () => {
   const ask = useSheetAsk();
   const qc = useQueryClient();
   const rights = usePageRights("crm-auto-project-setup");
-  const [companyId, setCompanyId] = useState("");
-  const [projectId, setProjectId] = useState("");
+  // In the address, shared with the setup tab (see CrmProjectAutoSetup).
+  const [companyId, setCompanyId] = useUrlParam("company");
+  const [projectId, setProjectId] = useUrlParam("project");
   const [parkingTemplates, setParkingTemplates] = useState<Record<number, ParkingTemplateRow[]>>({});
   const [savingTemplateBlockId, setSavingTemplateBlockId] = useState<number | null>(null);
-  const [generating, setGenerating] = useState(false);
+  // null = idle; "all" = every block; a block id = that block only.
+  const [generating, setGenerating] = useState<number | "all" | null>(null);
   const [expandedBlockId, setExpandedBlockId] = useState<number | null>(null);
   const [blockSlots, setBlockSlots] = useState<Record<number, any[]>>({});
   const [loadingSlotsBlockId, setLoadingSlotsBlockId] = useState<number | null>(null);
@@ -117,35 +120,41 @@ const ParkingSetup: React.FC = () => {
     }
   };
 
-  // Project-wide and additive: slots for every block whose mix totals more than it has; existing slots untouched.
-  const handleGenerate = async () => {
-    setGenerating(true);
+  // Additive: creates exactly the slots each mix still lacks, type by type (the server counts them, so this
+  // matches the "+N to create" figure); existing slots are never touched. One block, or every block.
+  const handleGenerate = async (blockId?: number) => {
+    setGenerating(blockId ?? "all");
     try {
       const res = await fetchWithAuth(`${API}/generate-parking-slots`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ProjectId: parseInt(projectId) }),
+        body: JSON.stringify({ ProjectId: parseInt(projectId), ...(blockId ? { BlockIds: [blockId] } : {}) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to generate parking slots");
-      if (data.createdCount === 0) toast.info("No eligible blocks to generate — save a Parking template with at least one row first");
-      else toast.success(`${data.createdCount} parking slot(s) created — e.g. ${data.sample.slice(0, 3).join(", ")}`);
-      // The slot lists shown are stale now.
+      // After a save that added nothing (a charge, GST or a lowered count), stay quiet.
+      if (data.createdCount === 0) { if (!blockId) toast.info("Nothing to create — every block already has the slots its mix asks for"); }
+      else toast.success(`${plural(data.createdCount, "parking slot")} created — e.g. ${data.sample.slice(0, 3).join(", ")}`);
+      // The slot lists shown are stale now; reopen the block that was just filled so the new slots show.
       setBlockSlots({});
       setExpandedBlockId(null);
       refetchStatus();
       invalidateSyncedMasters();
+      if (blockId) {
+        const blk = blocks.find((x) => x.Id === blockId);
+        if (blk) void handleToggleExpand(blk, true);
+      }
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
-      setGenerating(false);
+      setGenerating(null);
     }
   };
 
-  const handleToggleExpand = async (b: any) => {
-    if (expandedBlockId === b.Id) { setExpandedBlockId(null); return; }
+  const handleToggleExpand = async (b: any, reload = false) => {
+    if (expandedBlockId === b.Id && !reload) { setExpandedBlockId(null); return; }
     setExpandedBlockId(b.Id);
-    if (blockSlots[b.Id]) return;
+    if (blockSlots[b.Id] && !reload) return;
     setLoadingSlotsBlockId(b.Id);
     try {
       const res = await fetchWithAuth(`${API}/blocks/${b.Id}/parking-slots`);
@@ -202,7 +211,8 @@ const ParkingSetup: React.FC = () => {
     }
   };
 
-  const toCreate = blocks.reduce((s, b) => s + Math.max(0, templateTotal(b.Id) - (b.ParkingSlotCount || 0)), 0);
+  // The server's count, per type (status.blocks[].ParkingSlotsToCreate) — the same figure create uses.
+  const toCreate = blocks.reduce((s, b) => s + (b.ParkingSlotsToCreate || 0), 0);
   const th = `!px-2 !py-2 text-left ${LBL}`;
 
   return (
@@ -235,8 +245,8 @@ const ParkingSetup: React.FC = () => {
         <Section title="Parking, block by block" done={blocks.some((b) => b.ParkingSlotCount > 0)}
           note="Each block's mix of parking types, with the charge and GST per slot. Saved mixes lock; Edit to change."
           right={rights.canCreate && toCreate > 0 && (
-            <button onClick={handleGenerate} disabled={generating} className={`${KEY_INK} h-8 px-3`}>
-              {generating ? "Creating…" : `Create ${plural(toCreate, "parking slot")}`}
+            <button onClick={() => handleGenerate()} disabled={generating !== null} className={`${KEY_INK} h-8 px-3`}>
+              {generating === "all" ? "Creating…" : `Create all ${plural(toCreate, "parking slot")}`}
             </button>
           )}>
           <ParkingNamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
@@ -247,7 +257,7 @@ const ParkingSetup: React.FC = () => {
               const generatedCount = b.ParkingSlotCount || 0;
               const locked = !rights.canEdit || (generatedCount > 0 && editingTemplateFor !== b.Id);
               const total = templateTotal(b.Id);
-              const pending = Math.max(0, total - generatedCount);
+              const pending = b.ParkingSlotsToCreate || 0;
               return (
                 <div key={b.Id} className={PANEL}>
                   <div className="px-3 py-2.5 flex flex-wrap items-center gap-2" style={{ borderBottom: RULE_SOFT }}>
@@ -257,6 +267,12 @@ const ParkingSetup: React.FC = () => {
                       : <SheetMark text="Not created yet" tone="draft" />}
                     {pending > 0 && generatedCount > 0 && <SheetMark text={`+${pending} to create`} tone="waiting" />}
                     <div className="ml-auto flex items-center gap-1.5">
+                      {/* On the block itself: the section-wide button sat off the right edge on a laptop. */}
+                      {rights.canCreate && pending > 0 && editingTemplateFor !== b.Id && (
+                        <button onClick={() => handleGenerate(b.Id)} disabled={generating !== null} className={`${KEY_INK} h-7 px-2.5`}>
+                          <Plus size={11} /> {generating === b.Id ? "Creating…" : `Create ${pending}`}
+                        </button>
+                      )}
                       {generatedCount > 0 && (
                         <button onClick={() => handleToggleExpand(b)} className={`${KEY_LINE} h-7 px-2.5`}>
                           {expandedBlockId === b.Id ? <ChevronDown size={11} /> : <ChevronRight size={11} />} Slots
@@ -329,12 +345,18 @@ const ParkingSetup: React.FC = () => {
                   {!locked && (
                     <div className="px-3 pb-3 space-y-2">
                       {generatedCount > 0 && (
-                        <p className="text-xs text-muted-foreground">Raising a count adds new slots when you create them. Lowering it doesn&apos;t remove slots already created — delete those under Slots.</p>
+                        <p className="text-xs text-muted-foreground">Saving creates the slots a raised count adds. Lowering a count doesn&apos;t remove slots already created — delete those under Slots.</p>
                       )}
                       <div className="flex justify-end gap-2">
                         {generatedCount > 0 && <button onClick={() => setEditingTemplateFor(null)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>}
-                        <button onClick={async () => { if (await handleSaveTemplate(b.Id)) setEditingTemplateFor(null); }} disabled={savingTemplateBlockId === b.Id} className={`${KEY_INK} h-8 px-3`}>
-                          {savingTemplateBlockId === b.Id ? "Saving…" : "Save mix"}
+                        {/* Saving a mix creates what it adds at once — a saved-but-not-created mix
+                            looked like parking that "didn't show". */}
+                        <button onClick={async () => {
+                          if (!(await handleSaveTemplate(b.Id))) return;
+                          setEditingTemplateFor(null);
+                          if (rights.canCreate) await handleGenerate(b.Id); else refetchStatus();
+                        }} disabled={savingTemplateBlockId === b.Id || generating !== null} className={`${KEY_INK} h-8 px-3`}>
+                          {savingTemplateBlockId === b.Id ? "Saving…" : generating === b.Id ? "Creating…" : rights.canCreate ? "Save & create slots" : "Save mix"}
                         </button>
                       </div>
                     </div>

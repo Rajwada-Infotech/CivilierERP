@@ -1,7 +1,7 @@
 const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { generateMoneyReceiptPdf, getMoneyReceiptByReceivedPaymentId } = require("./moneyReceiptPdf");
-const { STAGE_REVIEW, stageLabel } = require("./crmBookingStageService");
+const { STAGE_REVIEW, STAGE_CONFIRMED, stageLabel } = require("./crmBookingStageService");
 
 
 class MoneyReceiptError extends Error {
@@ -11,7 +11,11 @@ class MoneyReceiptError extends Error {
   }
 }
 
-// Who approves money receipts is set in Approval Setup ("crm-money-receipts").
+// The booking-amount money receipt has no approval of its own: it is handed
+// to Finance automatically when the Director approves the booking (see
+// crmBookingStageService), and Finance's approval of the Received Payment is
+// the one check on the money. Approval Setup's "crm-money-receipts" names only
+// who may bounce a receipt before that hand-off.
 function isMoneyReceiptApprover(role, userId) {
   return require("./approvalService").isApproverFor("crm-money-receipts", userId, role);
 }
@@ -279,9 +283,13 @@ async function bounceMoneyReceipt(pool, receiptId, reason, actorUserId) {
   return result.recordset[0];
 }
 
-// ── Approve (Booking Amount's Pending MR -> Finance Approval Inbox) ────────
-
-async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
+// ── Send to Finance (Booking Amount's Pending MR -> Finance Approval Inbox) ─
+//
+// Runs when the Director approves the booking, and again from the sweep for
+// any receipt that hand-off missed. The receipt stays Pending: its status
+// follows Finance's Received Payment from here (deriveStatus — Approved when
+// Finance approves, Bounced when Finance rejects).
+async function sendMoneyReceiptToFinance(pool, receiptId, actorUserId, actorEmail) {
   const tx = new sql.Transaction(pool);
   let mrRow;
   let rp;
@@ -302,16 +310,12 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
     `);
     mrRow = cur.recordset[0];
     if (!mrRow) throw new MoneyReceiptError("Money receipt not found", 404);
-    if (mrRow.Status !== "Pending") throw new MoneyReceiptError(`Cannot approve from status "${mrRow.Status}"`);
-    if (mrRow.ReceivedPaymentId) throw new MoneyReceiptError("Money receipt is already linked to Finance Received Payment");
-    // Gate: booking must have been submitted for approval (past Review) — it
-    // does NOT need to wait for Director/Level-2 sign-off. Finance records the
-    // payment as soon as first-level verification is done; the booking's own
-    // L1/L2 approval is a business-terms sign-off, independent of whether the
-    // money was received. A still-at-Review booking has not been verified at all
-    // and should not yet have a payable Money Receipt.
-    if (mrRow.WorkflowStage === STAGE_REVIEW) {
-      throw new MoneyReceiptError("Booking must be submitted for approval (Verify & Send for Approval) before the Money Receipt can be approved");
+    if (mrRow.Status !== "Pending") throw new MoneyReceiptError(`Cannot send a money receipt to Finance from status "${mrRow.Status}"`);
+    if (mrRow.ReceivedPaymentId) throw new MoneyReceiptError("Money receipt is already with Finance");
+    // Gate: the booking is fully approved. Until then it can still be deleted,
+    // which cancels this receipt — so Finance gets nothing it would have to undo.
+    if (mrRow.WorkflowStage !== STAGE_CONFIRMED) {
+      throw new MoneyReceiptError(`The money receipt goes to Finance when the Director approves the booking (it is at ${stageLabel(mrRow.WorkflowStage || STAGE_REVIEW)})`);
     }
 
     // Payment goes to On Account — NOT directly to a milestone.
@@ -360,10 +364,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       .input("by", sql.Int, actorUserId || null)
       .query(`
         UPDATE dbo.CrmMoneyReceipt SET
-          Status = 'Approved',
           ReceivedPaymentId = @rpid,
-          ApprovedBy = @by,
-          ApprovedAt = SYSDATETIME(),
           UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
@@ -402,7 +403,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 //
 // Idempotent by ReceivedPaymentId: the Booking Amount's first payment still
 // goes through the separate Pending-MR-first flow above (createMoneyReceipt
-// AfterDataReview -> approveMoneyReceipt), which already links its MR to
+// AfterDataReview -> sendMoneyReceiptToFinance), which already links its MR to
 // the ReceivedPayment it creates — for that one case this just refreshes
 // the PDF instead of creating a duplicate document for the same money.
 // Every other payment (a top-up on an already-partly-paid milestone, any
@@ -411,6 +412,10 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
 async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, actorUserId) {
   const existing = await getMoneyReceiptByReceivedPaymentId(pool, receivedPaymentId);
   if (existing) {
+    // The booking-amount receipt sent to Finance: Finance's approval is its approval.
+    await pool.request().input("id", sql.Int, existing.Id).input("by", sql.Int, actorUserId || null).query(`
+      UPDATE dbo.CrmMoneyReceipt SET Status = 'Approved', ApprovedBy = @by, ApprovedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
+      WHERE Id = @id AND Status = 'Pending'`);
     await generateMoneyReceiptPdf(pool, existing.Id);
     return { existing: true, id: existing.Id };
   }
@@ -478,7 +483,7 @@ async function retryConfirmedPendingMoneyReceipts(pool, actorEmail = "CRM system
   let failed = 0;
   for (const row of pending.recordset) {
     try {
-      await approveMoneyReceipt(pool, row.Id, null, actorEmail);
+      await sendMoneyReceiptToFinance(pool, row.Id, null, actorEmail);
       processed++;
     } catch (err) {
       failed++;
@@ -496,7 +501,7 @@ module.exports = {
   updateMoneyReceipt,
   resubmitMoneyReceipt,
   bounceMoneyReceipt,
-  approveMoneyReceipt,
+  sendMoneyReceiptToFinance,
   ensureMoneyReceiptForApprovedPayment,
   retryConfirmedPendingMoneyReceipts,
 };

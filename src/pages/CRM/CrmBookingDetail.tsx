@@ -9,21 +9,23 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
-import { Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
+import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
+import { BookingStatement } from "@/components/crm/BookingStatement";
 import { PropertyCard } from "@/components/crm/PropertyCard";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { BodyPortal } from "@/components/ui/body-portal";
 import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./bookings/DetailParts";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { useNavigate } from "react-router-dom";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const AMEND_API = "/api/crm/booking-amendments";
@@ -139,7 +141,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const canVerify = useCanApprove("crm-booking-verification") && canEdit;
   const navigate = useNavigate();
   const canRaiseDemand = canDoAction("crm-payments", "edit");
-  const [tab, setTab] = useState<Tab>("Booking");
+  // In the address (?bookingTab=, beside the page's ?view=), so a refresh or a shared link reopens the same tab;
+  // dropped again when the popup closes.
+  const [tab, setTab] = useUrlParam<Tab>("bookingTab", "Booking", TABS);
+  useEffect(() => () => setTab(""), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
@@ -824,6 +829,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+      // The menu's Approval Inbox badge re-counts at once.
+      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -851,6 +858,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+      // The menu's Approval Inbox badge re-counts at once.
+      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -1141,32 +1150,43 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   Deed Registered — cancellation not applicable
                 </span>
               )}
-              {/* Offered only to those who may raise a cancellation (the server checks the same right). */}
+              {/* Offered only to those who may raise a cancellation (the server checks the same right).
+                  Kept in a menu: a red button beside the title read as the page's main action. */}
               {booking && booking.Status !== 'Cancelled' && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
-                <button onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className={`${KEY_LINE} h-9 px-3 shrink-0 !text-destructive !border-destructive`}>
-                  <AlertTriangle size={13} /> Request cancellation
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`${KEY_LINE} h-9 w-9 shrink-0`} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56 rounded-none">
+                    <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
+                      <AlertTriangle size={14} /> Request cancellation
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
         </DialogHeader>
 
-        {isLoading || !booking ? (
+        {isLoading ? (
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
+        ) : !booking ? (
+          // fetchDetail returns null for a missing / deleted booking or one outside the user's projects.
+          <div className="py-16 text-center text-sm text-muted-foreground">This booking could not be found — it may have been deleted, or it belongs to a project you can't open.</div>
         ) : (
           <div className="min-w-0">
-            <div className="bg-card px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ border: RULE }}>
-              <div className="min-w-0">
-                <div className={LBL}>Current stage</div>
-                <div className={`text-sm font-semibold ${closed ? "text-destructive" : ""}`}>
-                  {closed ? `${booking.Status} — no further steps` : bookingWorkflowStageLabel[currentStage] || currentStage}
-                </div>
-                {booking.StageRemarks && (
-                  <div className="mt-1 px-2 py-1.5 text-xs text-foreground" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
-                    <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
-                  </div>
-                )}
+            {/* The current stage is on the Journey bar's "Now" line below; only
+                what needs reading first is called out here. */}
+            {closed && (
+              <div className="px-3 py-2 text-sm font-semibold text-destructive" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+                {booking.Status} — no further steps
               </div>
-            </div>
+            )}
+            {booking.StageRemarks && (
+              <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+                <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
+                <div><span className="font-semibold">Sent back for correction ({bookingWorkflowStageLabel[currentStage] || currentStage}): </span>{booking.StageRemarks}</div>
+              </div>
+            )}
 
             {booking.IsFrozen && (
               <div className="flex items-start gap-2 border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs">
@@ -1203,28 +1223,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <PropertyCard bookingId={booking.Id} />
 
             {/* ── Booking Lifecycle Stepper ── */}
-            <BookingLifecycleBar bookingId={booking.Id} />
+            <BookingLifecycleBar bookingId={booking.Id} stage={`${currentStage}:${booking.Status}`} />
 
-            {rejectOpen && (
-              <BodyPortal><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
-                <div className="bg-background border border-border p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</h3>
-                  <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)}
-                    placeholder="Required remarks"
-                    className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
-                      className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
-                      Cancel
-                    </button>
-                    <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
-                      className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
-                      {stageActioning === "reject" ? "Sending..." : "Send Back"}
-                    </button>
-                  </div>
-                </div>
-              </div></BodyPortal>
-            )}
 
             {/* 2-step required flow (Unit & Value, Payment Plan — both are
                 Data Review checklist items) plus a 3rd, INFORMATIONAL-ONLY
@@ -1783,6 +1783,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
+                {/* Read-only: refreshed whenever a payment, receipt or on-account change lands. */}
+                <BookingStatement bookingId={booking.Id}
+                  refreshKey={`${milestoneList.map((m: any) => m.AmountPaid).join(",")}|${(moneyReceipts as any[]).map((r: any) => r.Status).join(",")}|${bookingOnAccountBalance}`} />
                 <div className=" border border-border p-4 space-y-2">
                   <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><CreditCard size={15} className="text-foreground" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
@@ -3014,6 +3017,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       </div>,
       document.body,
     )}
+    {/* Send back: a real dialog on top of the booking dialog (a body-level
+        overlay sat outside it, where the booking dialog blocks typing and clicks). */}
+    <Dialog open={rejectOpen} onOpenChange={(o) => { if (!o && !stageActioning) setRejectOpen(false); }}>
+      <DialogContent hideCloseButton elevated className="max-w-md rounded-none" style={{ border: RULE }}>
+        <DialogHeader>
+          <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
+        </DialogHeader>
+        <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
+          placeholder="What needs to be corrected? (required)"
+          className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
+            className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
+            Cancel
+          </button>
+          <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
+            className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
+            {stageActioning === "reject" ? "Sending..." : "Send Back"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <Dialog open={!!reasonDialog} onOpenChange={(o) => { if (!o) { setReasonDialog(null); setReasonText(""); } }}>
       <DialogContent hideCloseButton className="max-w-md rounded-none" style={{ border: RULE }}>
         <DialogHeader>

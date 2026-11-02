@@ -25,7 +25,6 @@ import { useGstRates, computeUnitParkingGst } from "@/lib/crmGst";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
-import { BodyPortal } from "@/components/ui/body-portal";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, parseMilestones, inputCls, labelCls } from "./applications/config";
@@ -37,6 +36,7 @@ import { ParkingSelectionStep } from "./applications/ParkingSelectionStep";
 import { ExtraWorkSelectionStep } from "./applications/ExtraWorkSelectionStep";
 import { AttachmentsStep } from "./applications/AttachmentsStep";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -51,7 +51,8 @@ const CrmApplication: React.FC = () => {
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [activeStage, setActiveStage] = useState<Stage>("InProcess");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeStage, setActiveStage] = useUrlParam<Stage>("stage", "InProcess", STAGES);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
@@ -1110,7 +1111,7 @@ const CrmApplication: React.FC = () => {
     }
   };
   const convertedColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 120,
+    { accessorKey: "ApplicationNo", header: "Application", size: 120,
       cell: (i) => (
         <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
@@ -1120,24 +1121,26 @@ const CrmApplication: React.FC = () => {
        inProcessColumns above. Sizes across this set are generous (sum
        ~1420px) so table-layout:fixed fills a normal desktop card
        edge-to-edge instead of bunching columns on the left. */
-      accessorKey: "ApplicantName", header: "Applicant", size: 210,
+      accessorKey: "ApplicantName", header: "Applicant", size: 190,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="font-medium text-foreground break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
           </div>
         </div>
       ) },
-    { accessorKey: "BookingNo", header: "Booking", size: 190,
+    // Booked-on date sits under the booking so the row fits a laptop screen.
+    { accessorKey: "BookingNo", header: "Booking", size: 170,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-heading tabular-nums text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</div>
           <SheetMark text={i.row.original.BookingStatus || "—"} tone={i.row.original.BookingStatus ? appTone(i.row.original.BookingStatus) : "none"} />
         </div>
       ) },
-    { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
+    { id: "unitProject", header: "Unit / Project", size: 200, enableSorting: false,
       cell: (i) => (
         <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
@@ -1148,12 +1151,6 @@ const CrmApplication: React.FC = () => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
         return <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
       } },
-    { accessorKey: "BookingDate", header: "Booked On", size: 130,
-      cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
-          {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
-        </span>
-      ) },
     { id: "actions", header: "", size: 80, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
@@ -1192,11 +1189,14 @@ const CrmApplication: React.FC = () => {
   ];
 
   const inProcessColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 120,
+    // Columns are combined so status and actions fit a laptop screen without
+    // scrolling sideways; nothing shown before is dropped.
+    { accessorKey: "ApplicationNo", header: "Application", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">
-          {i.getValue() as string}
-        </span>
+        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
+          <div className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">{i.getValue() as string}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</div>
+        </div>
       ) },
     {/* Mobile folded into this cell (as a second line, same pattern used on
        CrmLeads/CrmCustomers) instead of its own column — one less dedicated
@@ -1205,40 +1205,38 @@ const CrmApplication: React.FC = () => {
        across this whole set are generous (sum ~1420px) so table-layout:fixed
        fills a normal desktop card edge-to-edge instead of leaving the
        columns bunched on the left with dead space after Date. */
-      accessorKey: "ApplicantName", header: "Applicant", size: 220,
+      accessorKey: "ApplicantName", header: "Applicant", size: 180,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="font-medium text-foreground break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
           </div>
         </div>
       ) },
-    { id: "interestedProject", header: "Interested Project", size: 220, enableSorting: false,
+    { id: "interestedProject", header: "Interested in", size: 170, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
         return (
-          <span onClick={() => openApplication(r.Id)} className="cursor-pointer">
-            {[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}
-          </span>
+          <div onClick={() => openApplication(r.Id)} className="cursor-pointer">
+            <div>{[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}</div>
+            {r.RatePerSqFt ? <div className="text-xs text-muted-foreground tabular-nums">₹{Number(r.RatePerSqFt).toLocaleString("en-IN")}/sqft</div> : null}
+          </div>
         );
       } },
-    { accessorKey: "Source", header: "Source", size: 170,
+    { accessorKey: "Source", header: "Source / assigned", size: 150,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
           <div>{i.row.original.Source || "—"}</div>
           <div className="text-muted-foreground">
             {[i.row.original.PlatformName, i.row.original.CampaignName, i.row.original.AdName].filter(Boolean).join(" › ") || i.row.original.ChannelPartnerName || ""}
           </div>
+          {i.row.original.AssigneeName && <div className="text-muted-foreground">To {i.row.original.AssigneeName}</div>}
         </div>
       ) },
-    { accessorKey: "RatePerSqFt", header: "Rate", size: 130,
-      cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 140,
-      cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "Status", header: "Status", size: 130,
+    { accessorKey: "Status", header: "Status", size: 190,
       cell: (i) => {
         const r = i.row.original;
         // When a live Booking exists (Stage='Converted'), the Application's
@@ -1251,8 +1249,9 @@ const CrmApplication: React.FC = () => {
         const displayStatus = r.Stage !== "Converted" ? r.Status
           : r.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In Approval";
         return (
-          <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5">
-            <SheetMark text={displayStatus} tone={appTone(displayStatus)} />
+          // The pinned Status column is nowrap; the notes under the mark wrap.
+          <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5 whitespace-normal">
+            <span className="whitespace-nowrap"><SheetMark text={displayStatus} tone={appTone(displayStatus)} /></span>
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
@@ -1262,16 +1261,46 @@ const CrmApplication: React.FC = () => {
                 {r.BookingNo} · {r.BookingStatus}
               </div>
             )}
+            {/* Where it stands and what is next, beside the status itself. */}
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.Stage !== "Converted" && r.UnitUnavailableForBooking && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-destructive"
+                title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created.">
+                <XCircle size={10} /> Unit unavailable — re-pick a unit
+              </span>
+            )}
+            {activeStage === "InProcess" && r.Status === CrmStatus.DRAFT && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
+                <Clock size={10} /> Not submitted yet — complete the wizard and submit
+              </span>
+            )}
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.PreferredUnitId == null && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
+                <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
+              </span>
+            )}
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.PreferredUnitId != null && r.Stage !== "Converted" && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+                <Clock size={10} /> Submitted — booking not yet created
+              </span>
+            )}
+            {activeStage === "InProcess" && r.Stage === "Converted" && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
+                <Clock size={10} /> Booking {r.BookingNo || ""} — {r.BookingStatus === CrmStatus.PENDING
+                  ? `pending ${bookingWorkflowStageLabel[r.BookingWorkflowStage] || "approval"}`
+                  : r.BookingStatus}
+              </span>
+            )}
+            {activeStage !== "InProcess" && !canCancelApplication(r) && (
+              <span className="text-[0.6875rem] text-muted-foreground">
+                {r.BookingNo && r.BookingStatus === CrmStatus.CANCELLED
+                  ? `Booking cancelled — application closed`
+                  : `${r.Status} — no further action`}
+              </span>
+            )}
           </div>
         );
       } },
-    { accessorKey: "CreatedAt", header: "Date", size: 110,
-      cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
-          {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
-        </span>
-      ) },
-    { id: "actions", header: "", size: 200, enableSorting: false,
+    { id: "actions", header: "", size: 110, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
         const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
@@ -1344,46 +1373,6 @@ const CrmApplication: React.FC = () => {
                 </DropdownMenu>
               )}
             </div>
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted" && a.UnitUnavailableForBooking && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-destructive"
-                title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created.">
-                <XCircle size={10} /> Unit unavailable — re-pick a unit
-              </span>
-            )}
-            {/* Status hint lives on its own line as a plain caption, never
-                inline with the buttons — that inline mixing (a link, a
-                sentence, another link, all wrapping unpredictably in a
-                210px cell) was what made this column look broken. */}
-            {/* Status hint — contextual caption below the action buttons */}
-            {activeStage === "InProcess" && a.Status === CrmStatus.DRAFT && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
-                <Clock size={10} /> Not submitted yet — complete the wizard and submit
-              </span>
-            )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId == null && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
-                <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
-              </span>
-            )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && a.Stage !== "Converted" && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-                <Clock size={10} /> Submitted — booking not yet created
-              </span>
-            )}
-            {activeStage === "InProcess" && a.Stage === "Converted" && (
-              <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-                <Clock size={10} /> Booking {a.BookingNo || ""} — {a.BookingStatus === CrmStatus.PENDING
-                  ? `pending ${bookingWorkflowStageLabel[a.BookingWorkflowStage] || "approval"}`
-                  : a.BookingStatus}
-              </span>
-            )}
-            {activeStage !== "InProcess" && !canCancelApplication(a) && (
-              <span className="text-[0.6875rem] text-muted-foreground">
-                {a.BookingNo && a.BookingStatus === CrmStatus.CANCELLED
-                  ? `Booking cancelled — application closed`
-                  : `${a.Status} — no further action`}
-              </span>
-            )}
           </div>
         );
       } },
@@ -2652,15 +2641,12 @@ const CrmApplication: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
-          when Cancel is opened from inside the view dialog (same fix pattern
-          as CoApplicant: two Radix Dialogs open at once freeze outer buttons). */}
-      {cancellingApp && (
-        <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-          onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}>
-          <div className="bg-background border border-border w-full max-w-md p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold font-heading">Cancel Application?</h3>
+      {/* A real dialog layered over the view dialog (elevated): a body-level
+          overlay sat outside the open view dialog, which blocks typing and
+          clicks there. */}
+      <Dialog open={!!cancellingApp} onOpenChange={(o) => { if (!o) { setCancellingApp(null); setCancelRemarks(""); } }}>
+        <DialogContent hideCloseButton elevated className="max-w-md rounded-none space-y-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="text-base font-semibold font-heading">Cancel Application?</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 <span className="font-heading tabular-nums text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
@@ -2696,9 +2682,8 @@ const CrmApplication: React.FC = () => {
                 {cancelling ? "Cancelling..." : "Cancel Application"}
               </button>
             </div>
-          </div>
-        </div></BodyPortal>
-      )}
+        </DialogContent>
+      </Dialog>
       {pdfDialogApp && (
         <ApplicationFormPdfDialog
           applicationId={pdfDialogApp.id}

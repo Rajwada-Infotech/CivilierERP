@@ -23,6 +23,7 @@ import { downloadFile, fetchFileBlob, fmtDate, localDay, roleKey } from "./sales
 import { DocRow, Panel } from "./salesDeed/parts";
 import { useCanApprove } from "@/hooks/useCanApprove";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/mutation";
 const STATUS_LABEL: Record<string, string> = { Applied: "Applied", QueryRaised: "Query raised", Approved: "Approved" };
 const mutTone = (s: string): "done" | "waiting" | "stopped" => s === "Approved" ? "done" : s === "QueryRaised" ? "stopped" : "waiting";
@@ -79,7 +80,8 @@ const CrmMutation: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const [detailId, setDetailId] = useState<number | null>(mutationIdParam && /^\d+$/.test(mutationIdParam) ? Number(mutationIdParam) : null);
-  const [activeTab, setActiveTab] = useState<DetailTab>("Overview");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeTab, setActiveTab] = useUrlParam<DetailTab>("tab", "Overview", ["Overview", "Documents", "History"]);
   const [deepLinkDone, setDeepLinkDone] = useState(false);
 
   const [queryOpen, setQueryOpen] = useState(false);

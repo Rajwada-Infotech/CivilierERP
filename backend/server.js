@@ -393,6 +393,7 @@ const ALL_ROUTES = [
   { path: "/api/crm/possession-notice",    file: "./routes/crmPossessionNotice"    },
   { path: "/api/crm/construction-updates", file: "./routes/crmConstructionUpdates" },
   { path: "/api/crm/dashboard",            file: "./routes/crmDashboard"           },
+  { path: "/api/crm/booking-statement",    file: "./routes/crmBookingStatement"    },
   { path: "/api/crm/reports",              file: "./routes/crmReports"             },
   { path: "/api/crm/customer-bank-details",file: "./routes/crmCustomerBankDetails" },
   { path: "/api/crm/brokerage",            file: "./routes/crmBrokerage"           },
