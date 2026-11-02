@@ -117,6 +117,7 @@ describe("while maintenance is on", () => {
     expect(res.body).toEqual({
       active: true,
       enforced: true,
+      variant: "maintenance",
       title: "Upgrade",
       message: "Back soon",
       startedAt: "2026-10-08T10:00:00.000Z",
@@ -124,6 +125,27 @@ describe("while maintenance is on", () => {
       endsAt: "2026-10-08T12:00:00.000Z",
       updatedBy: null,
     });
+  });
+});
+
+describe("the 404 page variant", () => {
+  test("a held caller is told which page to show", async () => {
+    mockRow = { IsActive: true, Variant: "unavailable", Title: null, Message: null, StartedAt: new Date(), StartsAt: null, EndsAt: null };
+    resetMaintenanceCache();
+    const res = await request(app).get("/api/things").set(bearer("admin"));
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ code: "MAINTENANCE", variant: "unavailable" });
+  });
+
+  test("a super admin gets through", async () => {
+    mockRow = { IsActive: true, Variant: "unavailable", StartedAt: new Date(), StartsAt: null, EndsAt: null };
+    resetMaintenanceCache();
+    expect((await request(app).get("/api/things").set(bearer("super_admin"))).status).toBe(200);
+  });
+
+  test("an unknown variant is refused", async () => {
+    const res = await request(app).put("/api/system-maintenance").set(bearer("super_admin")).send({ active: true, variant: "nope" });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -183,7 +205,7 @@ describe("before migration 548 (no table)", () => {
     mockRow = null;
     const res = await request(app).put("/api/system-maintenance").set(bearer("super_admin")).send({ active: true, endsAt: ends() });
     expect(res.status).toBe(503);
-    expect(res.body.error).toMatch(/migrations 548 and 549/);
+    expect(res.body.error).toMatch(/migrations 548, 549 and 615/);
   });
 });
 

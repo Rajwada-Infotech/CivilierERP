@@ -4,6 +4,8 @@ export interface MaintenanceState {
   active: boolean;
   /** False while it is only announced (people can still finish their work), true once everyone is held. */
   enforced: boolean;
+  /** "maintenance" = the countdown page; "unavailable" = a plain 404 page (cloud bill unpaid). */
+  variant?: "maintenance" | "unavailable";
   title: string | null;
   message: string | null;
   startedAt: string | null;
@@ -35,6 +37,7 @@ export async function getMaintenanceStatus(): Promise<MaintenanceState> {
 
 export async function setMaintenanceMode(input: {
   active: boolean;
+  variant?: "maintenance" | "unavailable";
   title?: string;
   message?: string;
   endsAt?: string | null;
