@@ -54,9 +54,10 @@ function decodeLogo(dataUrl) {
 }
 
 // Two independent status sources feed the same displayed value, deliberately:
-// mr.Status is the customer-facing approval state (Pending -> Approved via
-// approveMoneyReceipt when Account's Head signs off; Pending -> Bounced via
-// bounceMoneyReceipt if the instrument itself failed), while rpStatus is the
+// mr.Status is the customer-facing state (Pending -> Approved once Finance
+// approves the Received Payment it was sent to — ensureMoneyReceiptForApproved
+// Payment; Pending -> Bounced via bounceMoneyReceipt if the instrument itself
+// failed before the hand-off), while rpStatus is the
 // downstream Finance/ledger state on the linked ReceivedPayment row. Priority:
 //   mr.Status = 'Approved'  -> "Approved"   (customer-facing sign-off)
 //   mr.Status = 'Bounced'   -> "Bounced"    (instrument bounced pre-approval)

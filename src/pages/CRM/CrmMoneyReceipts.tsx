@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { FileText, Download, RotateCcw, X, Check, Ban, RefreshCw, ChevronRight } from "lucide-react";
+import { FileText, Download, RotateCcw, X, Ban, RefreshCw, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
@@ -19,8 +19,9 @@ import { useCanApprove } from "@/hooks/useCanApprove";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
 // One row per booking (its receipts on the loaded page, grouped here — BookingId is on every receipt), opened
-// to a dialog listing each receipt with its own actions. Approve / Bounce are Finance's: the server allows only
-// the approver roles, so the buttons follow the same rule.
+// to a dialog listing each receipt with its own actions. A receipt has no approval of its own: it goes to Finance
+// when the Director approves the booking, and Finance's approval is its approval. Bounce (before that hand-off)
+// is for whoever Approval Setup names for crm-money-receipts; the server checks the same.
 
 const API = "/api/crm/money-receipts";
 const PAGE_SIZE = 20;
@@ -154,12 +155,13 @@ function BounceDialog({ receipt, onClose, onConfirm, submitting }: {
 }
 
 // One receipt inside the booking dialog.
-function ReceiptDetailRow({ r, canEdit, canApprove, busy, onPreview, onResubmit, onApprove, onBounce }: {
-  r: ReceiptRow; canEdit: boolean; canApprove: boolean; busy: boolean;
-  onPreview: () => void; onResubmit: () => void; onApprove: () => void; onBounce: () => void;
+function ReceiptDetailRow({ r, canEdit, canBounce, busy, onPreview, onResubmit, onBounce }: {
+  r: ReceiptRow; canEdit: boolean; canBounce: boolean; busy: boolean;
+  onPreview: () => void; onResubmit: () => void; onBounce: () => void;
 }) {
   const showResubmit = canEdit && r.Status === "Bounced" && r.ReceivedPaymentId == null;
-  const showApproverActions = canApprove && r.Status === CrmStatus.PENDING;
+  const notYetSent = r.Status === CrmStatus.PENDING && r.ReceivedPaymentId == null;
+  const withFinance = r.Status === CrmStatus.PENDING && r.ReceivedPaymentId != null;
   return (
     <div className="px-4 py-3.5 space-y-2" style={{ borderBottom: RULE_SOFT, borderLeft: r.Status === "Bounced" ? "3px solid hsl(var(--destructive))" : undefined }}>
       <div className="flex items-center justify-between gap-2">
@@ -179,26 +181,25 @@ function ReceiptDetailRow({ r, canEdit, canApprove, busy, onPreview, onResubmit,
         </div>
       </div>
       {r.Status === "Bounced" && r.BouncedReason && <p className="text-[0.6875rem] text-destructive">Reason: {r.BouncedReason}</p>}
+      {notYetSent && <p className="text-[0.6875rem] text-muted-foreground">Goes to Finance automatically when the Director approves the booking.</p>}
+      {withFinance && <p className="text-[0.6875rem] text-muted-foreground">With Finance for approval{r.RPDocNo ? <> — <span className="font-heading tabular-nums text-foreground">{r.RPDocNo}</span></> : null}.</p>}
       {r.Status === CrmStatus.APPROVED && r.RPDocNo && (
         <p className="text-[0.6875rem] text-muted-foreground">Finance doc <span className="font-heading tabular-nums text-foreground">{r.RPDocNo}</span></p>
       )}
       <div className="flex items-center gap-2 flex-wrap pt-0.5">
         <button onClick={onPreview} className={`${KEY_LINE} h-8 px-3`}><FileText size={12} /> PDF</button>
         {showResubmit && <button onClick={onResubmit} disabled={busy} className={`${KEY_LINE} h-8 px-3`}><RotateCcw size={12} /> Resubmit</button>}
-        {showApproverActions && (
-          <>
-            <button onClick={onApprove} disabled={busy} className={`${KEY_INK} h-8 px-3`}><Check size={12} /> {busy ? "Approving…" : "Approve"}</button>
-            <button onClick={onBounce} disabled={busy} className={`${KEY_LINE} h-8 px-3 !text-destructive !border-destructive`}><Ban size={12} /> Bounce</button>
-          </>
+        {canBounce && notYetSent && (
+          <button onClick={onBounce} disabled={busy} className={`${KEY_LINE} h-8 px-3 !text-destructive !border-destructive`}><Ban size={12} /> Bounce</button>
         )}
       </div>
     </div>
   );
 }
 
-function BookingDetailDialog({ group, canEdit, canApprove, busyId, onClose, onPreview, onResubmit, onApprove, onBounce }: {
-  group: BookingGroup; canEdit: boolean; canApprove: boolean; busyId: number | null; onClose: () => void;
-  onPreview: (r: ReceiptRow) => void; onResubmit: (r: ReceiptRow) => void; onApprove: (r: ReceiptRow) => void; onBounce: (r: ReceiptRow) => void;
+function BookingDetailDialog({ group, canEdit, canBounce, busyId, onClose, onPreview, onResubmit, onBounce }: {
+  group: BookingGroup; canEdit: boolean; canBounce: boolean; busyId: number | null; onClose: () => void;
+  onPreview: (r: ReceiptRow) => void; onResubmit: (r: ReceiptRow) => void; onBounce: (r: ReceiptRow) => void;
 }) {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -216,8 +217,8 @@ function BookingDetailDialog({ group, canEdit, canApprove, busyId, onClose, onPr
         </div>
         <div className="max-h-[55vh] overflow-y-auto thin-scroll" style={{ border: RULE_SOFT, borderBottom: 0 }}>
           {group.receipts.map((r) => (
-            <ReceiptDetailRow key={r.Id} r={r} canEdit={canEdit} canApprove={canApprove} busy={busyId === r.Id}
-              onPreview={() => onPreview(r)} onResubmit={() => onResubmit(r)} onApprove={() => onApprove(r)} onBounce={() => onBounce(r)} />
+            <ReceiptDetailRow key={r.Id} r={r} canEdit={canEdit} canBounce={canBounce} busy={busyId === r.Id}
+              onPreview={() => onPreview(r)} onResubmit={() => onResubmit(r)} onBounce={() => onBounce(r)} />
           ))}
         </div>
       </DialogContent>
@@ -241,8 +242,9 @@ const CrmMoneyReceipts: React.FC = () => {
   const qc = useQueryClient();
   const { canEdit } = usePageRights("crm-money-receipts");
   // Approve / Bounce / Sweep: whoever Approval Setup names for crm-money-receipts.
+  // Bounce (before the hand-off to Finance): whoever Approval Setup names for crm-money-receipts.
   const isReceiptApprover = useCanApprove("crm-money-receipts");
-  const canApprove = canEdit && isReceiptApprover;
+  const canBounce = canEdit && isReceiptApprover;
 
   const patchFilters = useCallback((patch: Partial<ReceiptListFilters>) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); }, []);
   // Searches as you type (after a short pause); Enter still searches at once.
@@ -351,11 +353,11 @@ const CrmMoneyReceipts: React.FC = () => {
       <SheetShell
         eyebrow="CivilierERP · CRM · Finance"
         title="Money Receipts"
-        subtitle="The booking-amount receipt, issued once a booking's data review is done and it goes for approval; Finance approves or bounces it into its received payments."
+        subtitle="The booking-amount receipt, issued once a booking's data review is done. It goes to Finance when the Director approves the booking, and Finance approves or bounces it there."
         action={
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button onClick={() => refetch()} disabled={isFetching} className={`${KEY_LINE} h-9 w-9`} title="Refresh"><RefreshCw size={13} className={isFetching ? "animate-spin" : ""} /></button>
-            {canApprove && (
+            {canEdit && (
               <button onClick={sweepPendingMrs} disabled={sweeping} className={`${KEY_LINE} h-9 px-4`}
                 title="Send pending receipts of confirmed bookings to Finance">
                 {sweeping ? "Sweeping…" : "Sweep stuck receipts"}
@@ -471,12 +473,11 @@ const CrmMoneyReceipts: React.FC = () => {
           <BookingDetailDialog
             group={selectedBooking}
             canEdit={canEdit}
-            canApprove={canApprove}
+            canBounce={canBounce}
             busyId={busyId}
             onClose={() => setSelectedBookingId(null)}
             onPreview={setPreviewReceipt}
             onResubmit={(r) => void runAction(r, "resubmit", `${r.ReceiptNo} resubmitted for approval`)}
-            onApprove={(r) => void runAction(r, "approve", `${r.ReceiptNo} approved and sent to Finance`)}
             onBounce={setBounceReceipt}
           />
         )}

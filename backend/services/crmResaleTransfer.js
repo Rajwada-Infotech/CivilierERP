@@ -327,7 +327,7 @@ async function completeBuyBack(pool, resaleId, newPaymentId, actorUserId, actorE
         await require("./crmLedger").syncCrmOnAccountLedger(tx, u.Id, actorEmail, `Paid back in buy-back #${resaleId}`);
       }
       await syncApplicationOnBookingTerminal(tx, id, "Cancelled", "BookingBoughtBack", `Bought back by the developer (buy-back #${resaleId})`, actorUserId);
-      await tx.request().input("b", sql.Int, id).query("UPDATE dbo.CrmMoneyReceipt SET Status = 'Rejected', UpdatedAt = SYSDATETIME() WHERE BookingId = @b AND Status = 'Pending'");
+      await tx.request().input("b", sql.Int, id).query("UPDATE dbo.CrmMoneyReceipt SET Status = 'Rejected', UpdatedAt = SYSDATETIME() WHERE BookingId = @b AND Status = 'Pending' AND ReceivedPaymentId IS NULL");
       await tx.request().input("b", sql.Int, id).input("by", sql.Int, actorUserId).query(`
         UPDATE dbo.ReceivedPayment SET RPStatus = 'Rejected', RPRejectedBy = @by, RPRejectedAt = SYSDATETIME(),
           RPRejectionNote = 'Auto-rejected — property bought back', RPUpdatedBy = @by, RPUpdatedAt = SYSDATETIME()
