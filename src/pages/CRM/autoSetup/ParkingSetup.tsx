@@ -1,23 +1,32 @@
-// Auto Project Setup's parking tab. Its own component with its own fetches and state (the project is shared via the address): parking is
-// block-scoped only (dbo.ParkingSlot has no floor), so it never needed floors or units first, and a slow request on
-// one tab can't affect the other.
-import React, { useEffect, useState } from "react";
+// Auto Project Setup's parking tab. Its own component with its own fetches and state (the project is shared via the
+// address): parking is block-scoped only (dbo.ParkingSlot has no floor), so it never needed floors or units first, and
+// a slow request on one tab can't affect the other.
+//
+// The page reads top to bottom: the project's parking at a glance (planned, created, free / held / booked, value),
+// then each block — its mix of types with charge, GST and value, and a map of its real slots (the Parking Matrix's
+// tiles) where a click opens that slot to rename, retype or delete it.
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
+import { Copy, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
-import { SheetMark } from "@/components/sheet/Sheet";
+import { SheetMark, money } from "@/components/sheet/Sheet";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
+import { Legend, Tile, type TileStatus } from "../matrix/shared";
 import { ParkingNamingPanel } from "./NamingPanel";
 import { ProjectPicker } from "./ProjectPicker";
 import { API, INP, KEY_INK, KEY_LINE, LBL, NUM, Notice, PANEL, RULE, RULE_SOFT, Section, TEXT_LINK, fetchStatus, lockOf, plural } from "./config";
 
 type ParkingTemplateRow = { ParkingType: string; Count: string; Charge: string; GstRate: string };
 type SlotEdit = { SlotNo: string; ParkingType: string };
+type Slot = {
+  Id: number; ProjectId: number; BlockId: number; SlotNo: string; ParkingType: string | null; IsActive: boolean;
+  LockAllotmentId: number | null; LockBookingNo: string | null; LockHoldId: number | null;
+};
 
 async function fetchParkingTypes(): Promise<string[]> {
   try {
@@ -25,9 +34,22 @@ async function fetchParkingTypes(): Promise<string[]> {
     return r.ok ? r.json() : [];
   } catch { return []; }
 }
+async function fetchProjectSlots(projectId: string): Promise<Slot[]> {
+  const r = await fetchWithAuth(`${API}/projects/${projectId}/parking-slots`);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || "The parking slots didn't load");
+  return data.slots || [];
+}
 
 const SMALL_INP = `${INP} !h-8 !text-xs`;
-const inr = (v: string) => (v === "" || v == null ? "—" : `₹${Number(v).toLocaleString("en-IN")}`);
+const num = (v: string) => (v === "" || v == null ? 0 : Number(v) || 0);
+const inr = (v: number) => `₹${v.toLocaleString("en-IN")}`;
+const inrOrDash = (v: string) => (v === "" || v == null ? "—" : inr(Number(v)));
+// A slot's state on the map: allotted to a booking = booked; on hold = held; else free.
+const slotStatus = (s: Slot): TileStatus => (s.LockAllotmentId || s.LockBookingNo ? "Booked" : s.LockHoldId ? "OnHold" : "Available");
+// "TSTRSD/A/P07" reads as "P07" on a tile; the full name is its tooltip.
+const shortName = (slotNo: string) => slotNo.split("/").pop() || slotNo;
+const COUNT0: Record<TileStatus, number> = { Available: 0, OnHold: 0, Booked: 0, Blocked: 0 };
 
 const ParkingSetup: React.FC = () => {
   const ask = useSheetAsk();
@@ -37,17 +59,18 @@ const ParkingSetup: React.FC = () => {
   const [companyId, setCompanyId] = useUrlParam("company");
   const [projectId, setProjectId] = useUrlParam("project");
   const [parkingTemplates, setParkingTemplates] = useState<Record<number, ParkingTemplateRow[]>>({});
+  // Each block's mix as last saved (the editor rows can hold unsaved changes, or a blank starter row) — the
+  // project totals count only these.
+  const [savedMix, setSavedMix] = useState<Record<number, ParkingTemplateRow[]>>({});
   const [savingTemplateBlockId, setSavingTemplateBlockId] = useState<number | null>(null);
   // null = idle; "all" = every block; a block id = that block only.
   const [generating, setGenerating] = useState<number | "all" | null>(null);
-  const [expandedBlockId, setExpandedBlockId] = useState<number | null>(null);
-  const [blockSlots, setBlockSlots] = useState<Record<number, any[]>>({});
-  const [loadingSlotsBlockId, setLoadingSlotsBlockId] = useState<number | null>(null);
-  const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
-  const [editingSlot, setEditingSlot] = useState<SlotEdit | null>(null);
-  const [savingSlotId, setSavingSlotId] = useState<number | null>(null);
   // Which generated block's mix is open for editing (locked otherwise).
   const [editingTemplateFor, setEditingTemplateFor] = useState<number | null>(null);
+  // The slot opened on a block's map.
+  const [openSlotId, setOpenSlotId] = useState<number | null>(null);
+  const [editingSlot, setEditingSlot] = useState<SlotEdit | null>(null);
+  const [savingSlot, setSavingSlot] = useState(false);
 
   // Own query keys, apart from the setup tab's, so nothing here refetches that tab or the other way round.
   const { data: parkingTypes = [] } = useQuery<string[]>({ queryKey: ["parking-master-types"], queryFn: fetchParkingTypes, staleTime: 10 * 60_000 });
@@ -56,8 +79,16 @@ const ParkingSetup: React.FC = () => {
     queryFn: () => fetchStatus(projectId),
     enabled: !!projectId,
   });
+  const { data: slots = [], isError: slotsFailed, error: slotsError } = useQuery({
+    queryKey: ["crm-auto-project-setup-parking-slots", projectId],
+    queryFn: () => fetchProjectSlots(projectId),
+    enabled: !!projectId,
+  });
 
-  const refetchStatus = () => qc.invalidateQueries({ queryKey: ["crm-auto-project-setup-parking-status", projectId] });
+  const refetchAll = () => {
+    qc.invalidateQueries({ queryKey: ["crm-auto-project-setup-parking-status", projectId] });
+    qc.invalidateQueries({ queryKey: ["crm-auto-project-setup-parking-slots", projectId] });
+  };
   const invalidateSyncedMasters = () => {
     qc.invalidateQueries({ queryKey: ["parking-master"] });
     qc.invalidateQueries({ queryKey: ["parking-slot-master"] });
@@ -66,6 +97,11 @@ const ParkingSetup: React.FC = () => {
 
   const blocks: any[] = status?.blocks || [];
   const step1Done = blocks.length > 0;
+  const slotsByBlock = useMemo(() => {
+    const m: Record<number, Slot[]> = {};
+    slots.forEach((s) => { (m[s.BlockId] ||= []).push(s); });
+    return m;
+  }, [slots]);
 
   // Each block's parking mix, fetched the first time it's seen; one blank row when it has none.
   useEffect(() => {
@@ -84,18 +120,25 @@ const ParkingSetup: React.FC = () => {
             }))
           : [{ ParkingType: parkingTypes[0] ?? "", Count: "1", Charge: "", GstRate: "" }];
         setParkingTemplates((m) => ({ ...m, [b.Id]: rows }));
+        setSavedMix((m) => ({ ...m, [b.Id]: (data.items || []).length ? rows : [] }));
       } catch { /* leave unset — rows can still be added */ }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step1Done, blocks]);
 
-  const templateTotal = (blockId: number) => (parkingTemplates[blockId] || []).reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
+  const rowsTotal = (rows: ParkingTemplateRow[] = []) => rows.reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
+  const rowsValue = (rows: ParkingTemplateRow[] = []) => rows.reduce((s, r) => s + (parseInt(r.Count, 10) || 0) * num(r.Charge), 0);
+  const templateTotal = (blockId: number) => rowsTotal(parkingTemplates[blockId]);
+  const templateValue = (blockId: number) => rowsValue(parkingTemplates[blockId]);
   const addTemplateRow = (blockId: number) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: parkingTypes[0] ?? "", Count: "1", Charge: "", GstRate: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<ParkingTemplateRow>) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).map((r, i) => (i === idx ? { ...r, ...patch } : r)) }));
+  // Another block's mix into this one's editor (not saved until Save).
+  const copyMixFrom = (blockId: number, fromId: number) =>
+    setParkingTemplates((m) => ({ ...m, [blockId]: (m[fromId] || []).map((r) => ({ ...r })) }));
 
   const handleSaveTemplate = async (blockId: number) => {
     const rows = parkingTemplates[blockId] || [];
@@ -111,6 +154,7 @@ const ParkingSetup: React.FC = () => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to save parking template");
       toast.success(`Saved — ${data.total} slot(s)`);
+      setSavedMix((m) => ({ ...m, [blockId]: rows.map((r) => ({ ...r })) }));
       return true;
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -135,15 +179,8 @@ const ParkingSetup: React.FC = () => {
       // After a save that added nothing (a charge, GST or a lowered count), stay quiet.
       if (data.createdCount === 0) { if (!blockId) toast.info("Nothing to create — every block already has the slots its mix asks for"); }
       else toast.success(`${plural(data.createdCount, "parking slot")} created — e.g. ${data.sample.slice(0, 3).join(", ")}`);
-      // The slot lists shown are stale now; reopen the block that was just filled so the new slots show.
-      setBlockSlots({});
-      setExpandedBlockId(null);
-      refetchStatus();
+      refetchAll();
       invalidateSyncedMasters();
-      if (blockId) {
-        const blk = blocks.find((x) => x.Id === blockId);
-        if (blk) void handleToggleExpand(blk, true);
-      }
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -151,45 +188,27 @@ const ParkingSetup: React.FC = () => {
     }
   };
 
-  const handleToggleExpand = async (b: any, reload = false) => {
-    if (expandedBlockId === b.Id && !reload) { setExpandedBlockId(null); return; }
-    setExpandedBlockId(b.Id);
-    if (blockSlots[b.Id] && !reload) return;
-    setLoadingSlotsBlockId(b.Id);
-    try {
-      const res = await fetchWithAuth(`${API}/blocks/${b.Id}/parking-slots`);
-      const data = await res.json().catch(() => ({}));
-      // A failed load said nothing and showed "No slots left".
-      if (!res.ok) throw new Error(data.error || "The slots didn't load");
-      setBlockSlots((m) => ({ ...m, [b.Id]: data.slots || [] }));
-    } catch (e: any) {
-      toast.error(translateError(e.message));
-    } finally {
-      setLoadingSlotsBlockId(null);
-    }
-  };
-
   // Through Parking Slot Master's own endpoints — they enforce the booking / hold / allotment lock.
-  const handleDeleteSlot = async (blockId: number, slot: any) => {
+  const handleDeleteSlot = async (slot: Slot) => {
     if (!(await ask.confirm(`Delete parking slot "${slot.SlotNo}"?`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`/api/parking-slot-master/${slot.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to delete parking slot");
       toast.success(data.message || "Parking slot deleted");
-      setBlockSlots((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((s) => s.Id !== slot.Id) }));
-      refetchStatus();
+      setOpenSlotId(null);
+      refetchAll();
       invalidateSyncedMasters();
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
   };
 
-  const handleSaveSlot = async (blockId: number, slot: any) => {
+  const handleSaveSlot = async (slot: Slot) => {
     if (!editingSlot) return;
     const slotNo = editingSlot.SlotNo.trim();
     if (!slotNo) { toast.error("Slot number is required"); return; }
-    setSavingSlotId(slot.Id);
+    setSavingSlot(true);
     try {
       const res = await fetchWithAuth(`/api/parking-slot-master/${slot.Id}`, {
         method: "PUT",
@@ -199,20 +218,23 @@ const ParkingSetup: React.FC = () => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Failed to update parking slot");
       toast.success(data.message || "Parking slot updated");
-      setBlockSlots((m) => ({ ...m, [blockId]: (m[blockId] || []).map((s) => (s.Id === slot.Id ? { ...s, SlotNo: slotNo, ParkingType: editingSlot.ParkingType } : s)) }));
-      setEditingSlotId(null);
       setEditingSlot(null);
-      refetchStatus();
+      refetchAll();
       invalidateSyncedMasters();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
-      setSavingSlotId(null);
+      setSavingSlot(false);
     }
   };
 
+  // ── Project totals ──
+  const planned = blocks.reduce((s, b) => s + rowsTotal(savedMix[b.Id]), 0);
+  const created = slots.length;
   // The server's count, per type (status.blocks[].ParkingSlotsToCreate) — the same figure create uses.
   const toCreate = blocks.reduce((s, b) => s + (b.ParkingSlotsToCreate || 0), 0);
+  const value = blocks.reduce((s, b) => s + rowsValue(savedMix[b.Id]), 0);
+  const stateCounts = slots.reduce((c, s) => ({ ...c, [slotStatus(s)]: c[slotStatus(s)] + 1 }), { ...COUNT0 });
   const th = `!px-2 !py-2 text-left ${LBL}`;
 
   return (
@@ -228,6 +250,7 @@ const ParkingSetup: React.FC = () => {
       )}
       {projectId && statusLoading && <p className="text-sm text-muted-foreground">Loading the project…</p>}
       {projectId && statusFailed && <Notice tone="error">{(statusError as Error)?.message}</Notice>}
+      {projectId && slotsFailed && <Notice tone="error">{(slotsError as Error)?.message}</Notice>}
 
       {projectId && status && !step1Done && (
         <Notice>This project has no blocks yet. Create them on the Blocks tab first, then come back here to set up parking.</Notice>
@@ -242,177 +265,220 @@ const ParkingSetup: React.FC = () => {
       )}
 
       {projectId && status && step1Done && (
-        <Section title="Parking, block by block" done={blocks.some((b) => b.ParkingSlotCount > 0)}
-          note="Each block's mix of parking types, with the charge and GST per slot. Saved mixes lock; Edit to change."
-          right={rights.canCreate && toCreate > 0 && (
-            <button onClick={() => handleGenerate()} disabled={generating !== null} className={`${KEY_INK} h-8 px-3`}>
-              {generating === "all" ? "Creating…" : `Create all ${plural(toCreate, "parking slot")}`}
-            </button>
-          )}>
-          <ParkingNamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
+        <>
+          {/* ── The project's parking at a glance ── */}
+          <div className="bg-card" style={{ border: RULE }}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+              {[
+                { label: "Planned", value: planned.toLocaleString("en-IN"), note: `${plural(blocks.filter((b) => (savedMix[b.Id] || []).length).length, "block")} with a saved mix` },
+                { label: "Created", value: created.toLocaleString("en-IN"), note: toCreate > 0 ? `${toCreate} still to create` : "every mix is filled" , warn: toCreate > 0 },
+                { label: "Free", value: stateCounts.Available.toLocaleString("en-IN"), note: "can be sold" },
+                { label: "On hold", value: stateCounts.OnHold.toLocaleString("en-IN"), note: "held for a customer" },
+                { label: "Booked", value: stateCounts.Booked.toLocaleString("en-IN"), note: "allotted to a booking" },
+                { label: "List value", value: money(value), note: "slots × charge, before GST", title: inr(value) },
+              ].map((x) => (
+                <div key={x.label} className="px-4 py-3 min-w-0" style={{ borderRight: RULE_SOFT, borderBottom: RULE_SOFT }} title={(x as any).title}>
+                  <p className={LBL}>{x.label}</p>
+                  <p className={`mt-1.5 font-heading font-bold tabular-nums text-lg whitespace-nowrap ${x.warn ? "text-destructive" : "text-foreground"}`}>{x.value}</p>
+                  <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{x.note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {blocks.map((b) => {
-              const rows = parkingTemplates[b.Id] || [];
-              const generatedCount = b.ParkingSlotCount || 0;
-              const locked = !rights.canEdit || (generatedCount > 0 && editingTemplateFor !== b.Id);
-              const total = templateTotal(b.Id);
-              const pending = b.ParkingSlotsToCreate || 0;
-              return (
-                <div key={b.Id} className={PANEL}>
-                  <div className="px-3 py-2.5 flex flex-wrap items-center gap-2" style={{ borderBottom: RULE_SOFT }}>
-                    <span className="text-sm font-semibold">Block {b.BlockName}</span>
-                    {generatedCount > 0
-                      ? <SheetMark text={`${plural(generatedCount, "slot")} created`} tone="done" />
-                      : <SheetMark text="Not created yet" tone="draft" />}
-                    {pending > 0 && generatedCount > 0 && <SheetMark text={`+${pending} to create`} tone="waiting" />}
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {/* On the block itself: the section-wide button sat off the right edge on a laptop. */}
-                      {rights.canCreate && pending > 0 && editingTemplateFor !== b.Id && (
-                        <button onClick={() => handleGenerate(b.Id)} disabled={generating !== null} className={`${KEY_INK} h-7 px-2.5`}>
-                          <Plus size={11} /> {generating === b.Id ? "Creating…" : `Create ${pending}`}
-                        </button>
-                      )}
-                      {generatedCount > 0 && (
-                        <button onClick={() => handleToggleExpand(b)} className={`${KEY_LINE} h-7 px-2.5`}>
-                          {expandedBlockId === b.Id ? <ChevronDown size={11} /> : <ChevronRight size={11} />} Slots
-                        </button>
-                      )}
-                      {rights.canEdit && generatedCount > 0 && editingTemplateFor !== b.Id && (
-                        <button onClick={() => setEditingTemplateFor(b.Id)} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit</button>
-                      )}
-                    </div>
-                  </div>
+          <Section title="Parking, block by block" done={blocks.some((b) => b.ParkingSlotCount > 0)}
+            note="Each block's mix of types with its charge and GST, and a map of the slots made from it. Click a slot to rename, retype or delete it."
+            right={rights.canCreate && toCreate > 0 && (
+              <button onClick={() => handleGenerate()} disabled={generating !== null} className={`${KEY_INK} h-8 px-3`}>
+                {generating === "all" ? "Creating…" : `Create all ${plural(toCreate, "parking slot")}`}
+              </button>
+            )}>
+            <ParkingNamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
+            <Legend counts={stateCounts} />
 
-                  <div className="px-3 py-2 overflow-x-auto thin-scroll">
-                    <table className="w-full text-xs min-w-[380px]">
-                      <thead>
-                        <tr style={{ borderBottom: RULE }}>
-                          <th className={th}>Type</th>
-                          <th className={`${th} !text-right w-20`}>Slots</th>
-                          <th className={`${th} !text-right w-32`}>Charge</th>
-                          <th className={`${th} !text-right w-20`}>GST</th>
-                          {!locked && <th className="w-6" />}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((row, idx) => locked ? (
-                          <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
-                            <td className="!px-2 !py-2">{row.ParkingType}</td>
-                            <td className={`!px-2 !py-2 text-right ${NUM}`}>{row.Count}</td>
-                            <td className={`!px-2 !py-2 text-right ${NUM}`}>{inr(row.Charge)}</td>
-                            <td className={`!px-2 !py-2 text-right ${NUM}`}>{row.GstRate === "" ? "—" : `${row.GstRate}%`}</td>
-                          </tr>
-                        ) : (
-                          <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
-                            <td className="!px-1 !py-1.5">
-                              <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })} className={`${SMALL_INP} max-w-[180px]`}>
-                                {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                              </select>
-                            </td>
-                            <td className="!px-1 !py-1.5">
-                              <input type="number" min={1} max={500} value={row.Count} aria-label="Slots"
-                                onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })} className={`${SMALL_INP} ${NUM} text-right`} />
-                            </td>
-                            <td className="!px-1 !py-1.5">
-                              <input type="number" min={0} value={row.Charge} placeholder="₹ 0" aria-label="Charge"
-                                onChange={(e) => updateTemplateRow(b.Id, idx, { Charge: e.target.value })} className={`${SMALL_INP} ${NUM} text-right`} />
-                            </td>
-                            <td className="!px-1 !py-1.5">
-                              <input type="number" min={0} max={100} step={0.01} value={row.GstRate} placeholder="0 %" aria-label="GST %"
-                                onChange={(e) => updateTemplateRow(b.Id, idx, { GstRate: e.target.value })} className={`${SMALL_INP} ${NUM} text-right`} />
-                            </td>
-                            <td className="!px-1 !py-1.5 text-center">
-                              {rows.length > 1 && (
-                                <button onClick={() => removeTemplateRow(b.Id, idx)} aria-label="Remove type" className="text-muted-foreground hover:text-destructive"><X size={13} /></button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot>
-                        <tr>
-                          <td className="!px-2 !pt-2">
-                            {!locked && <button onClick={() => addTemplateRow(b.Id)} className={`${TEXT_LINK} inline-flex items-center gap-1`}><Plus size={11} /> Add a type</button>}
-                          </td>
-                          <td className={`!px-2 !pt-2 text-right font-semibold ${NUM}`}>{total}</td>
-                          <td colSpan={locked ? 2 : 3} />
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-
-                  {!locked && (
-                    <div className="px-3 pb-3 space-y-2">
-                      {generatedCount > 0 && (
-                        <p className="text-xs text-muted-foreground">Saving creates the slots a raised count adds. Lowering a count doesn&apos;t remove slots already created — delete those under Slots.</p>
-                      )}
-                      <div className="flex justify-end gap-2">
-                        {generatedCount > 0 && <button onClick={() => setEditingTemplateFor(null)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>}
-                        {/* Saving a mix creates what it adds at once — a saved-but-not-created mix
-                            looked like parking that "didn't show". */}
-                        <button onClick={async () => {
-                          if (!(await handleSaveTemplate(b.Id))) return;
-                          setEditingTemplateFor(null);
-                          if (rights.canCreate) await handleGenerate(b.Id); else refetchStatus();
-                        }} disabled={savingTemplateBlockId === b.Id || generating !== null} className={`${KEY_INK} h-8 px-3`}>
-                          {savingTemplateBlockId === b.Id ? "Saving…" : generating === b.Id ? "Creating…" : rights.canCreate ? "Save & create slots" : "Save mix"}
-                        </button>
+            {/* One block per row (two only on very wide screens): its mix table and slot map need the width. */}
+            <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+              {blocks.map((b) => {
+                const rows = parkingTemplates[b.Id] || [];
+                const blockSlots = slotsByBlock[b.Id] || [];
+                const generatedCount = b.ParkingSlotCount || 0;
+                const locked = !rights.canEdit || (generatedCount > 0 && editingTemplateFor !== b.Id);
+                const total = templateTotal(b.Id);
+                const pending = b.ParkingSlotsToCreate || 0;
+                const copySources = blocks.filter((o) => o.Id !== b.Id && (parkingTemplates[o.Id] || []).some((r) => r.ParkingType && parseInt(r.Count, 10)));
+                const openSlot = blockSlots.find((s) => s.Id === openSlotId) || null;
+                const openLock = openSlot ? lockOf(openSlot) : null;
+                return (
+                  <div key={b.Id} className={PANEL}>
+                    <div className="px-3 py-2.5 flex flex-wrap items-center gap-2" style={{ borderBottom: RULE_SOFT }}>
+                      <span className="text-sm font-semibold">Block {b.BlockName}</span>
+                      {generatedCount > 0
+                        ? <SheetMark text={`${plural(generatedCount, "slot")} created`} tone="done" />
+                        : <SheetMark text="Not created yet" tone="draft" />}
+                      {pending > 0 && generatedCount > 0 && <SheetMark text={`+${pending} to create`} tone="waiting" />}
+                      <div className="ml-auto flex items-center gap-1.5">
+                        {rights.canCreate && pending > 0 && editingTemplateFor !== b.Id && (
+                          <button onClick={() => handleGenerate(b.Id)} disabled={generating !== null} className={`${KEY_INK} h-7 px-2.5`}>
+                            <Plus size={11} /> {generating === b.Id ? "Creating…" : `Create ${pending}`}
+                          </button>
+                        )}
+                        {rights.canEdit && generatedCount > 0 && editingTemplateFor !== b.Id && (
+                          <button onClick={() => setEditingTemplateFor(b.Id)} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit mix</button>
+                        )}
                       </div>
                     </div>
-                  )}
 
-                  {expandedBlockId === b.Id && (
-                    <div className="px-3 pb-3 pt-2 space-y-1.5" style={{ borderTop: RULE_SOFT }}>
-                      {loadingSlotsBlockId === b.Id ? (
-                        <p className="text-xs text-muted-foreground">Loading slots…</p>
-                      ) : !blockSlots[b.Id] ? (
-                        <p className="text-xs text-destructive">The slots didn&apos;t load. Close and open them again.</p>
-                      ) : blockSlots[b.Id].length === 0 ? (
-                        <p className="text-xs text-muted-foreground">No slots left in this block.</p>
-                      ) : blockSlots[b.Id].map((s) => {
-                        const lock = lockOf(s);
-                        const isEditing = editingSlotId === s.Id && editingSlot;
-                        return (
-                          <div key={s.Id} className="flex flex-wrap items-center justify-between gap-2 text-xs py-1" style={{ borderBottom: RULE_SOFT }}>
-                            {isEditing ? (
-                              <span className="grid grid-cols-[minmax(140px,1fr)_110px] gap-1.5 flex-1">
-                                <input autoFocus value={editingSlot.SlotNo} onChange={(e) => setEditingSlot((x) => (x ? { ...x, SlotNo: e.target.value } : x))} className={`${SMALL_INP} ${NUM}`} />
-                                <select value={editingSlot.ParkingType} onChange={(e) => setEditingSlot((x) => (x ? { ...x, ParkingType: e.target.value } : x))} className={SMALL_INP}>
-                                  {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                                </select>
-                              </span>
+                    {/* ── The mix ── */}
+                    <div className="px-3 py-2 overflow-x-auto thin-scroll">
+                      {!locked && copySources.length > 0 && (
+                        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <Copy size={12} /> Same as another block?
+                          {copySources.map((o) => (
+                            <button key={o.Id} onClick={() => copyMixFrom(b.Id, o.Id)} className={`${KEY_LINE} h-7 px-2`}>Copy Block {o.BlockName}</button>
+                          ))}
+                        </div>
+                      )}
+                      <table className="w-full text-xs min-w-[420px]">
+                        <thead>
+                          <tr style={{ borderBottom: RULE }}>
+                            <th className={th}>Type</th>
+                            <th className={`${th} !text-right w-16`}>Slots</th>
+                            <th className={`${th} !text-right w-28`}>Charge / slot</th>
+                            <th className={`${th} !text-right w-16`}>GST</th>
+                            <th className={`${th} !text-right w-28`}>Value</th>
+                            {!locked && <th className="w-6" />}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row, idx) => {
+                            const rowValue = (parseInt(row.Count, 10) || 0) * num(row.Charge);
+                            return locked ? (
+                              <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
+                                <td className="!px-2 !py-2">{row.ParkingType}</td>
+                                <td className={`!px-2 !py-2 text-right ${NUM}`}>{row.Count}</td>
+                                <td className={`!px-2 !py-2 text-right ${NUM}`}>{inrOrDash(row.Charge)}</td>
+                                <td className={`!px-2 !py-2 text-right ${NUM}`}>{row.GstRate === "" ? "—" : `${row.GstRate}%`}</td>
+                                <td className={`!px-2 !py-2 text-right ${NUM}`}>{rowValue ? inr(rowValue) : "—"}</td>
+                              </tr>
                             ) : (
-                              <span><span className={`${NUM} font-medium`}>{s.SlotNo}</span>{s.ParkingType ? <span className="text-muted-foreground"> · {s.ParkingType}</span> : null}</span>
-                            )}
-                            <span className="flex items-center gap-3">
-                              {lock && <SheetMark text={lock.text} tone={lock.tone} />}
-                              {isEditing ? (
-                                <>
-                                  <button onClick={() => handleSaveSlot(b.Id, s)} disabled={savingSlotId === s.Id} className={TEXT_LINK}>{savingSlotId === s.Id ? "Saving…" : "Save"}</button>
-                                  <button onClick={() => { setEditingSlotId(null); setEditingSlot(null); }} className={`${TEXT_LINK} text-muted-foreground`}>Cancel</button>
-                                </>
-                              ) : (
-                                <>
-                                  {rights.canEdit && (
-                                    <button onClick={() => { setEditingSlotId(s.Id); setEditingSlot({ SlotNo: s.SlotNo || "", ParkingType: s.ParkingType || parkingTypes[0] || "" }); }}
-                                      disabled={!!lock} className={TEXT_LINK}>Edit</button>
+                              <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
+                                <td className="!px-1 !py-1.5">
+                                  <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })} className={`${SMALL_INP} max-w-[180px]`}>
+                                    {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  </select>
+                                </td>
+                                <td className="!px-1 !py-1.5">
+                                  <input type="number" min={1} max={500} value={row.Count} aria-label="Slots"
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })} className={`${SMALL_INP} ${NUM} text-right`} />
+                                </td>
+                                <td className="!px-1 !py-1.5">
+                                  <input type="number" min={0} value={row.Charge} placeholder="₹ 0" aria-label="Charge"
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { Charge: e.target.value })} className={`${SMALL_INP} ${NUM} text-right`} />
+                                </td>
+                                <td className="!px-1 !py-1.5">
+                                  <input type="number" min={0} max={100} step={0.01} value={row.GstRate} placeholder="0 %" aria-label="GST %"
+                                    onChange={(e) => updateTemplateRow(b.Id, idx, { GstRate: e.target.value })} className={`${SMALL_INP} ${NUM} text-right`} />
+                                </td>
+                                <td className={`!px-2 !py-1.5 text-right ${NUM} text-muted-foreground`}>{rowValue ? inr(rowValue) : "—"}</td>
+                                <td className="!px-1 !py-1.5 text-center">
+                                  {rows.length > 1 && (
+                                    <button onClick={() => removeTemplateRow(b.Id, idx)} aria-label="Remove type" className="text-muted-foreground hover:text-destructive"><X size={13} /></button>
                                   )}
-                                  {rights.canDelete && <button onClick={() => handleDeleteSlot(b.Id, s)} disabled={!!lock} className={`${TEXT_LINK} text-destructive`}>Delete</button>}
-                                </>
-                              )}
-                            </span>
-                          </div>
-                        );
-                      })}
-                      <Link to="/crm/setup/parking-slot-master" className={`${TEXT_LINK} inline-block text-muted-foreground`}>Edit details in Parking Slot Master</Link>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <td className="!px-2 !pt-2">
+                              {!locked && <button onClick={() => addTemplateRow(b.Id)} className={`${TEXT_LINK} inline-flex items-center gap-1`}><Plus size={11} /> Add a type</button>}
+                            </td>
+                            <td className={`!px-2 !pt-2 text-right font-semibold ${NUM}`}>{total}</td>
+                            <td colSpan={2} />
+                            <td className={`!px-2 !pt-2 text-right font-semibold ${NUM}`}>{templateValue(b.Id) ? inr(templateValue(b.Id)) : "—"}</td>
+                            {!locked && <td />}
+                          </tr>
+                        </tfoot>
+                      </table>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Section>
+
+                    {!locked && (
+                      <div className="px-3 pb-3 space-y-2">
+                        {generatedCount > 0 && (
+                          <p className="text-xs text-muted-foreground">Saving creates the slots a raised count adds. Lowering a count doesn&apos;t remove slots already created — delete those on the map below.</p>
+                        )}
+                        <div className="flex justify-end gap-2">
+                          {generatedCount > 0 && <button onClick={() => setEditingTemplateFor(null)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>}
+                          {/* Saving a mix creates what it adds at once — a saved-but-not-created mix
+                              looked like parking that "didn't show". */}
+                          <button onClick={async () => {
+                            if (!(await handleSaveTemplate(b.Id))) return;
+                            setEditingTemplateFor(null);
+                            if (rights.canCreate) await handleGenerate(b.Id); else refetchAll();
+                          }} disabled={savingTemplateBlockId === b.Id || generating !== null} className={`${KEY_INK} h-8 px-3`}>
+                            {savingTemplateBlockId === b.Id ? "Saving…" : generating === b.Id ? "Creating…" : rights.canCreate ? "Save & create slots" : "Save mix"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── The slots, as a map ── */}
+                    {blockSlots.length > 0 && (
+                      <div className="px-3 pb-3 pt-2.5 space-y-2" style={{ borderTop: RULE_SOFT }}>
+                        <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-10 gap-1.5">
+                          {blockSlots.map((s) => (
+                            <Tile key={s.Id} name={shortName(s.SlotNo)} status={slotStatus(s)} tag={null}
+                              line={s.ParkingType || "—"} title={`${s.SlotNo}${s.LockBookingNo ? ` — ${s.LockBookingNo}` : ""}`}
+                              onClick={() => { setOpenSlotId(openSlotId === s.Id ? null : s.Id); setEditingSlot(null); }} />
+                          ))}
+                        </div>
+
+                        {openSlot && (
+                          <div className="px-3 py-2.5 bg-card space-y-2" style={{ border: RULE }}>
+                            {editingSlot ? (
+                              <div className="flex flex-wrap items-end gap-2">
+                                <label className="space-y-1 flex-1 min-w-[160px]">
+                                  <span className={`block ${LBL}`}>Slot name</span>
+                                  <input autoFocus value={editingSlot.SlotNo} onChange={(e) => setEditingSlot((x) => (x ? { ...x, SlotNo: e.target.value } : x))} className={`${SMALL_INP} ${NUM}`} />
+                                </label>
+                                <label className="space-y-1 w-36">
+                                  <span className={`block ${LBL}`}>Type</span>
+                                  <select value={editingSlot.ParkingType} onChange={(e) => setEditingSlot((x) => (x ? { ...x, ParkingType: e.target.value } : x))} className={SMALL_INP}>
+                                    {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  </select>
+                                </label>
+                                <button onClick={() => handleSaveSlot(openSlot)} disabled={savingSlot} className={`${KEY_INK} h-8 px-3`}>{savingSlot ? "Saving…" : "Save"}</button>
+                                <button onClick={() => setEditingSlot(null)} className={`${KEY_LINE} h-8 px-3`}>Cancel</button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-sm"><span className={`${NUM} font-semibold`}>{openSlot.SlotNo}</span> <span className="text-muted-foreground">· {openSlot.ParkingType || "No type"}</span></span>
+                                {openLock ? <SheetMark text={openLock.text} tone={openLock.tone} /> : <SheetMark text="Free" tone="done" />}
+                                <span className="ml-auto flex items-center gap-1.5">
+                                  {rights.canEdit && (
+                                    <button onClick={() => setEditingSlot({ SlotNo: openSlot.SlotNo || "", ParkingType: openSlot.ParkingType || parkingTypes[0] || "" })}
+                                      disabled={!!openLock} title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit</button>
+                                  )}
+                                  {rights.canDelete && (
+                                    <button onClick={() => handleDeleteSlot(openSlot)} disabled={!!openLock}
+                                      title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5 !text-destructive !border-destructive`}><Trash2 size={11} /> Delete</button>
+                                  )}
+                                  <button onClick={() => setOpenSlotId(null)} aria-label="Close" className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground"><X size={13} /></button>
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <Link to="/crm/setup/parking-slot-master" className={`${TEXT_LINK} inline-block text-muted-foreground`}>All slot details in Parking Slot Master</Link>
+          </Section>
+        </>
       )}
     </div>
   );
