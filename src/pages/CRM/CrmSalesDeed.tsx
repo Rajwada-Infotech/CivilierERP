@@ -32,7 +32,8 @@ import {
   deedTone, roleKey, fmtDate, deedDocumentProgress, deedStepStates, downloadFile, fetchBookingContext, fetchDeedsList,
   fetchEligible, fetchFileBlob, fetchLegalExecutives,
 } from "./salesDeed/config";
-import { DeedDetailsSection, DeedStepper, DocRow, Panel, StepBox } from "./salesDeed/parts";
+import { DeedDetailsSection, DocRow, Panel, StepBox } from "./salesDeed/parts";
+import { StepBar } from "@/components/crm/StepBar";
 import { QueryPaymentTab, useDeedQueryPayment } from "./salesDeed/QueryPaymentTab";
 import { RegistryTab, useDeedRegistry } from "./salesDeed/RegistryTab";
 
@@ -454,7 +455,7 @@ const CrmSalesDeed: React.FC = () => {
             <>
               {detail.Status !== "Cancelled" && (
                 <div className="bg-card p-4 space-y-3" style={{ border: RULE }}>
-                  <DeedStepper steps={deedStepStates(detail, deedDetail?.documents, detailContext)} activeTab={activeTab} onStepClick={setActiveTab} />
+                  <StepBar<DeedTab> steps={deedStepStates(detail, deedDetail?.documents, detailContext)} activeTab={activeTab} onStepClick={setActiveTab} />
                   {(() => {
                     const d = detail;
                     const pendingDocs = deedDetail?.documents?.filter((doc: any) => doc.IsMandatory && doc.Status !== "Verified") || [];
@@ -556,7 +557,8 @@ const CrmSalesDeed: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+              {/* Wraps rather than hiding the last tabs off the edge of the panel. */}
+              <div className="flex flex-wrap items-stretch bg-card" style={{ border: RULE }}>
                 {DEED_TABS.map((t) => (
                   <button key={t} onClick={() => setActiveTab(t)}
                     className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${

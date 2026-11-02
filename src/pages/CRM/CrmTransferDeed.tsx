@@ -8,6 +8,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DateInput } from "@/components/ui/date-input";
 import { AlertCircle, ArrowRight, Check, CheckCircle2, ExternalLink, Eye, Loader2, ScrollText, Upload, UserCheck } from "lucide-react";
 import { SheetMark } from "@/components/sheet/Sheet";
+import { StepBar, type StepBarState } from "@/components/crm/StepBar";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 import { localDay } from "./salesDeed/config";
@@ -160,7 +161,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
     ...steps.slice(1).map((s: any) => ({ label: s.key === "legal" ? "Legal Head" : s.key === "parties" ? (st.parties.length > 1 ? "Parties Approve" : "Seller Approves") : s.key === "date" ? "Signing Date" : s.key === "duty" ? "Stamp Duty" : s.key === "executed" ? "Executed" : "Registered", done: s.ok, tab: STEP_TAB[s.key] })),
   ];
   let blocked = false;
-  const chips = stepper.map((s) => { const state = !blocked && s.done ? "done" : !blocked ? (blocked = true, "current") : "upcoming"; return { ...s, state }; });
+  const chips = stepper.map((s) => { const state: StepBarState = !blocked && s.done ? "done" : !blocked ? (blocked = true, "current") : "upcoming"; return { ...s, state }; });
 
   // ── Next-action banner ──
   const cur = steps.find((s: any) => s.state === "current");
@@ -175,20 +176,7 @@ export function TransferDeedDetail({ id, canEdit: canEditRight, initialTab }: { 
       <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && sendFile(e.target.files[0])} />
 
       <div className="bg-card p-3 space-y-3" style={{ border: RULE }}>
-        <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-          {chips.map((s, i) => (
-            <React.Fragment key={s.label}>
-              <button onClick={() => setTab(s.tab)} className={`flex items-center gap-1.5 shrink-0 px-2 py-1.5 hover:bg-primary/10 transition-colors ${tab === s.tab ? "bg-primary/10" : ""}`}>
-                <span className={`w-6 h-6 flex items-center justify-center text-[0.625rem] font-bold shrink-0 border ${
-                  s.state === "done" ? "bg-foreground text-card border-foreground" : s.state === "current" ? "bg-card text-foreground border-foreground border-2" : "bg-card text-muted-foreground border-foreground/25"}`}>
-                  {s.state === "done" ? <Check size={11} /> : <span className="font-heading tabular-nums">{i + 1}</span>}
-                </span>
-                <span className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap ${s.state === "upcoming" ? "text-muted-foreground/60" : "text-foreground"}`}>{s.label}</span>
-              </button>
-              {i < chips.length - 1 && <div className={`w-4 h-px mx-0.5 shrink-0 ${chips[i + 1].state !== "upcoming" ? "bg-foreground" : "bg-foreground/20"}`} />}
-            </React.Fragment>
-          ))}
-        </div>
+        <StepBar<Tab> steps={chips} activeTab={tab} onStepClick={setTab} />
         {banner && (
           <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-3 bg-card"
             style={{ border: RULE_SOFT, borderLeft: `3px solid ${banner.v === "error" ? "hsl(var(--destructive))" : banner.v === "success" ? "hsl(var(--foreground) / 0.3)" : "hsl(var(--foreground))"}` }}>

@@ -6,36 +6,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Check, ArrowRight, BarChart3 } from "lucide-react";
 import { AgrTab, StepState } from "./config";
 
-export function AgreementStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: AgrTab }[]; activeTab: AgrTab; onStepClick: (t: AgrTab) => void }) {
-  return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={`flex items-center gap-1.5 shrink-0 px-2 py-1.5 hover:bg-primary/10 transition-colors group ${activeTab === s.tab ? "bg-primary/10" : ""}`}>
-            <span className={`w-6 h-6 flex items-center justify-center text-[0.625rem] font-bold shrink-0 border ${
-              s.state === "done"
-                ? "bg-foreground text-card border-foreground"
-                : s.state === "current"
-                ? "bg-card text-foreground border-foreground border-2"
-                : "bg-card text-muted-foreground border-foreground/25"}`}>
-              {s.state === "done" ? <Check size={11} /> : <span className="font-heading tabular-nums">{i + 1}</span>}
-            </span>
-            <span className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap leading-tight ${
-              s.state === "done" ? "text-foreground"
-              : s.state === "current" ? "text-foreground"
-              : "text-muted-foreground/60"}`}>
-              {s.label}
-            </span>
-          </button>
-          {i < steps.length - 1 && (
-            <div className={`w-4 h-px mx-0.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-foreground" : "bg-foreground/20"}`} />
-          )}
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
 export const docStatusColor: Record<string, string> = {
   Pending:   "text-muted-foreground bg-card border-foreground/25 border-dashed",
   Requested: "text-foreground bg-card border-foreground/30",
