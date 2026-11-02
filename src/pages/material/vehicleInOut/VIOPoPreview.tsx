@@ -9,8 +9,8 @@ export function VIOPoPreview({ m }: { m: VIOState }) {
     <>
       {/* ── PO Preview pop-out (above view modal) ── */}
       {showPODetails && viewingRec && (
-        <BodyPortal><div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
-          <div className="bg-card border border-foreground/30 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/50 p-0 sm:p-4">
+          <div className="bg-card border border-foreground/30 w-full max-w-2xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-y-auto">
             {/* Header */}
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-foreground/30">
               <div>

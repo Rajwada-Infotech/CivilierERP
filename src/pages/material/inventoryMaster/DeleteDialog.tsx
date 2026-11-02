@@ -31,7 +31,7 @@ export function DeleteDialog({
   if (!godown) return null;
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+    <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
       <div className="sheet-frame bg-card w-full max-w-sm p-6 space-y-4" style={{ margin: 0 }} role="dialog" aria-modal="true">
         <div className="text-center space-y-1">
           <h2 className="text-sm font-heading font-bold text-foreground">

@@ -1386,7 +1386,7 @@ const BankMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRow && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRow(null)}

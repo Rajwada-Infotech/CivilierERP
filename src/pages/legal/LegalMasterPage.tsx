@@ -227,9 +227,11 @@ interface TableProps {
   noAdd?: boolean;
   /** Extra classes for a row from its raw values (e.g. a tint by status). */
   rowClassName?: (raw: LegalRow) => string | undefined;
+  /** Show only the rows this returns true for (a dashboard tile's filter). */
+  rowFilter?: (raw: LegalRow) => boolean;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
@@ -273,8 +275,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   );
   const extras = useMemo(() => master?.extras ?? [], [master]);
   const data = useMemo(
-    () => (rows ?? []).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.map((x) => [`${x.name}__display`, r[x.name] ?? ""])) })),
-    [rows, master, fields, extras],
+    () => (rows ?? []).filter((r) => !rowFilter || rowFilter(r)).map((r) => ({ ...mapRow(r, master?.pk ?? "", fields), ...Object.fromEntries(extras.map((x) => [`${x.name}__display`, r[x.name] ?? ""])) })),
+    [rows, master, fields, extras, rowFilter],
   );
   const rawById = useMemo(() => new Map((rows ?? []).map((r) => [String(r[master?.pk ?? ""]), r])), [rows, master]);
 
@@ -354,6 +356,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       title={master.title}
       canCreate={rights.canCreate && !noAdd && !locked}
       collapsibleAddForm={noAdd || !!parentId}
+      statusTabs
       canEdit={rights.canEdit && !locked}
       canDelete={rights.canDelete && !master.noDelete && !locked}
       fields={formFields}

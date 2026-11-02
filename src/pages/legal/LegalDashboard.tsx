@@ -24,6 +24,8 @@ const READINESS: { key: string; label: string; hint: string }[] = [
 const fmtDate = (d: string | null) =>
   d ? new Date(d.slice(0, 10)).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Never tested";
 
+const PARTY_KEYS = ["owner", "seller", "buyer", "customer", "witness"] as const;
+
 export default function LegalDashboard() {
   usePageRights("legal-dashboard");
   const navigate = useNavigate();
@@ -31,6 +33,7 @@ export default function LegalDashboard() {
   const landRights = usePageRights("legal-land-master");
   const { data: land } = useQuery({ queryKey: ["legal-land-stats"], queryFn: getLandStats, staleTime: 60 * 1000, enabled: landRights.canView });
 
+  // Counts are of active records, which is what each table shows first (its Active tab).
   const active = (key: string) => data?.masters[key]?.active ?? 0;
   const dash = (n: number) => (isLoading ? "—" : n);
   const readiness = useMemo(() => READINESS.map((r) => ({ ...r, done: (data?.masters[r.key]?.active ?? 0) > 0 })), [data]);
@@ -38,8 +41,6 @@ export default function LegalDashboard() {
   const firstGap = readiness.find((r) => !r.done);
   const plotsWithoutRor = (data?.mouzas ?? []).reduce((n, m) => n + m.PlotsWithoutRor, 0);
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shadow-sm";
   const eyebrow = "mb-3 text-[0.6875rem] font-heading uppercase tracking-[0.18em] text-muted-foreground";
 
@@ -51,11 +52,10 @@ export default function LegalDashboard() {
           {error && <div className={`${card} p-4 text-sm text-destructive`}>Could not load the Legal summary: {(error as Error).message}</div>}
 
           {/* ── Hero ── */}
-          <div className="relative overflow-hidden rounded-2xl border p-5 sm:p-7" style={{ background: `color-mix(in srgb, ${ACCENT} 5%, transparent)`, borderColor: `color-mix(in srgb, ${ACCENT} 20%, transparent)` }}>
-            <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full blur-3xl" style={{ background: `color-mix(in srgb, ${ACCENT} 12%, transparent)` }} />
-            <div className="relative flex flex-wrap items-end justify-between gap-5">
+          <div className="border border-border p-4 sm:p-6">
+            <div className="flex flex-wrap items-end justify-between gap-5">
               <div className="min-w-0">
-                <p className="text-sm text-muted-foreground">{greeting} 👋</p>
+                <p className="label">Setup readiness</p>
                 <h2 className="mt-1 text-2xl sm:text-3xl font-heading font-bold leading-tight text-foreground">
                   Setup {isLoading ? "—" : `${ready} of ${readiness.length}`} ready
                 </h2>
@@ -66,21 +66,21 @@ export default function LegalDashboard() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate("/legal/search")}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-primary/30 bg-card px-3.5 py-2.5 text-xs font-heading font-semibold text-foreground shadow-sm transition-transform hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-1.5 border border-foreground bg-card px-3.5 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10"
                 >
                   Registration Search
                 </button>
                 <button
                   onClick={() => navigate("/legal/deeds")}
-                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-heading font-semibold text-card shadow-md transition-transform hover:-translate-y-0.5"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-card hover:opacity-85"
                   style={{ background: LEGAL_GRADIENT }}
                 >
                   Deed Dossiers <ArrowRight size={14} />
                 </button>
               </div>
             </div>
-            <div className="relative mt-5 h-2 rounded-full bg-muted overflow-hidden">
-              <div className="h-full rounded-full transition-all" style={{ width: `${(ready / readiness.length) * 100}%`, background: LEGAL_GRADIENT }} />
+            <div className="mt-5 h-1.5 bg-muted overflow-hidden">
+              <div className="h-full transition-all" style={{ width: `${(ready / readiness.length) * 100}%`, background: LEGAL_GRADIENT }} />
             </div>
           </div>
 
@@ -97,12 +97,12 @@ export default function LegalDashboard() {
                 {([
                   ["Land properties", land.totalLands, Global, "/legal/land/properties"],
                   ["Active enquiries", land.activeEnquiries, MessageQuestion, "/legal/land/enquiries"],
-                  ["In progress", land.inProgress, Timer1, "/legal/land/properties"],
-                  ["Pending verification", land.pendingVerification, ShieldTick, "/legal/land/properties"],
-                  ["On hold", land.onHold, PauseCircle, "/legal/land/properties"],
+                  ["In progress", land.inProgress, Timer1, "/legal/land/properties?filter=in-progress"],
+                  ["Pending verification", land.pendingVerification, ShieldTick, "/legal/land/properties?filter=pending-verification"],
+                  ["On hold", land.onHold, PauseCircle, "/legal/land/properties?filter=on-hold"],
                   ["Pending registration", land.pendingRegistration, DocumentText, "/legal/land/reports"],
                   ["Mutation pending", land.mutationPending, Map1, "/legal/land/reports"],
-                  ["Completed", land.completed, TickCircle, "/legal/land/properties"],
+                  ["Completed", land.completed, TickCircle, "/legal/land/properties?filter=completed"],
                 ] as const).map(([label, value, Icon, path]) => (
                   <button key={label} onClick={() => navigate(path)} className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3 text-left transition-transform hover:-translate-y-0.5">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-card" style={{ background: LEGAL_GRADIENT }}><Icon size={16} /></span>
@@ -166,7 +166,8 @@ export default function LegalDashboard() {
               ["RS plots", active("rs-plot"), Grid5, "rs-plot"],
               ["LR RoR records", active("lr-ror"), DocumentText, "lr-ror"],
               ["Registration offices", active("registration-office"), Building4, "registration-office"],
-              ["Parties", active("buyer") + active("seller") + active("owner") + active("customer"), Profile2User, "seller"],
+              // All party types together; the tile opens the first type that has anyone in it.
+              ["Parties", PARTY_KEYS.reduce((n, k) => n + active(k), 0), Profile2User, PARTY_KEYS.find((k) => active(k) > 0) ?? "owner"],
             ] as const).map(([label, value, Icon, key]) => (
               <button key={label} onClick={() => navigate(legalMasterPath(key))} className={`${card} p-4 flex items-center gap-3 text-left transition-transform hover:-translate-y-0.5`}>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-card shadow-sm" style={{ background: LEGAL_GRADIENT }}>

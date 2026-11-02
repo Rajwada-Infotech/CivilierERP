@@ -93,12 +93,12 @@ export const MaterialBreakdownModal: React.FC<{
       </button>
 
       {open && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center">
           <div
             className="absolute inset-0 bg-black/50"
             onClick={() => setOpen(false)}
           />
-          <div className="relative z-10 w-full sm:w-[640px] sm:max-w-[calc(100vw-2rem)] bg-card border border-foreground/30 flex flex-col max-h-[88vh]">
+          <div className="relative z-10 w-full sm:w-[640px] sm:max-w-[calc(100vw-2rem)] bg-card border border-foreground/30 flex flex-col h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[88vh]">
             <div className="flex justify-center pt-2.5 pb-0 sm:hidden shrink-0">
               <div className="w-9 h-1 bg-muted-foreground/20" />
             </div>

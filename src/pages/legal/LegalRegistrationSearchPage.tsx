@@ -775,12 +775,12 @@ export default function LegalRegistrationSearchPage() {
                         onChange={(e) => setSearchOutcome(e.target.value)}
                         required
                       >
-                        <option value="Deed Found">✅ Yes — Deed Found / Available</option>
-                        <option value="Multiple Matches">📋 Multiple Candidate Matches</option>
-                        <option value="Completed - Clean">✅ Completed — Clean (No Encumbrance)</option>
-                        <option value="Encumbrance Found">⚠️ Encumbrance Found (Mortgage / Lien)</option>
-                        <option value="Defect Found">❌ Defect in Title Chain</option>
-                        <option value="Record Not Found">❌ Deed / Record Not Found</option>
+                        <option value="Deed Found">Yes — Deed Found / Available</option>
+                        <option value="Multiple Matches">Multiple Candidate Matches</option>
+                        <option value="Completed - Clean">Completed — Clean (No Encumbrance)</option>
+                        <option value="Encumbrance Found">Encumbrance Found (Mortgage / Lien)</option>
+                        <option value="Defect Found">Defect in Title Chain</option>
+                        <option value="Record Not Found">Deed / Record Not Found</option>
                         <option value="Pending">⏳ Still Pending at Sub-Registrar</option>
                       </select>
                     </div>

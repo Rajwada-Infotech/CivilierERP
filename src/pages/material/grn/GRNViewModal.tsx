@@ -29,8 +29,8 @@ export function GRNViewModal({ m }: { m: GRNState }) {
           );
           const subtotalInclGST = subtotal + gstTotal;
           return (
-            <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4 bw-modal-topmost">
-              <div className="bg-card border border-foreground/30 w-full max-w-4xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
+            <BodyPortal><div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 p-0 sm:p-4 bw-modal-topmost">
+              <div className="bg-card border border-foreground/30 w-full max-w-4xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
                 {/* Modal header */}
                 <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-foreground/30">
                   <div>

@@ -1383,6 +1383,18 @@
 .crm-dialog[class*="dlg-sticky"] :is([data-dlg-head], [data-dlg-foot]) {
   background: hsl(var(--card));
 }
+/* Phones: a dialog takes the whole screen less a small margin, whatever height cap the page gave it, so its
+   content is never cut short; wide content (tables, item grids) scrolls sideways inside it instead of being
+   clipped. The bottom bar steps aside while a dialog is open (MobileNav). */
+@media (max-width: 639px) {
+  .dlg-sticky {
+    width: calc(100% - 1rem) !important;
+    max-width: calc(100% - 1rem) !important;
+    max-height: calc(100dvh - 1rem) !important;
+  }
+  .dlg-sticky table { min-width: max-content; }
+  .dlg-sticky :has(> table) { overflow-x: auto; }
+}
 /* The × lives in a zero-height sticky strip at the top of the scroll box. */
 .dlg-close-anchor {
   position: sticky;

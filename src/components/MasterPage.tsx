@@ -207,6 +207,9 @@ interface MasterPageProps {
   onRowClick?: (row: RecordWithId) => void;
   /** Extra classes for a row, e.g. a tint by status. */
   rowClassName?: (row: RecordWithId) => string | undefined;
+  /** Rows with an Active / Inactive `status` get Active · Inactive · All tabs above the table, showing Active
+   *  first, so inactive records never sit among the live ones unnoticed. */
+  statusTabs?: boolean;
   /** Permission flags — when omitted everything is visible (default-open) */
   canCreate?: boolean;
   canEdit?: boolean;
@@ -297,6 +300,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   isRowLocked,
   isDeleteLocked,
   collapsibleAddForm = false,
+  statusTabs = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -348,6 +352,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const currentSection = tabbed ? (sectionGroups.find((g) => g.key === activeSection) ?? sectionGroups[0]) : null;
   const currentSectionIdx = currentSection ? sectionGroups.indexOf(currentSection) : -1;
   const [search, setSearch] = useState("");
+  const [statusView, setStatusView] = useState<"active" | "inactive" | "all">("active");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -633,7 +638,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const canSave = fields.every((f) => !f.required || isFieldFilled(f, form[f.name]));
 
+  const hasStatus = statusTabs && data.some((row) => typeof row.status === "boolean");
+  const statusCount = {
+    active: data.filter((row) => row.status === true).length,
+    inactive: data.filter((row) => row.status === false).length,
+    all: data.length,
+  };
   const filtered = data.filter((row) => {
+    if (hasStatus && statusView !== "all" && row.status !== (statusView === "active")) return false;
     if (!search) return true;
     return Object.values(row).some((v) =>
       String(v).toLowerCase().includes(search.toLowerCase()),
@@ -1060,10 +1072,27 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             style={sheet ? { borderBottom: RULE } : undefined}
           >
             {sheet ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <p className="flex items-baseline gap-2.5">
                 <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title} records</span>
                 <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
               </p>
+              {hasStatus && (
+                <div className="inline-flex border border-foreground" role="tablist" aria-label="Show records">
+                  {(["active", "inactive", "all"] as const).map((v, i) => (
+                    <button
+                      key={v}
+                      role="tab"
+                      aria-selected={statusView === v}
+                      onClick={() => setStatusView(v)}
+                      className={`${i ? "border-l border-foreground " : ""}px-2.5 py-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${statusView === v ? "bg-foreground text-card" : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"}`}
+                    >
+                      {v === "active" ? "Active" : v === "inactive" ? "Inactive" : "All"} <span className="tabular-nums">{statusCount[v]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              </div>
             ) : (
             <div className={fluid ? "min-w-[9rem]" : undefined}>
               <h3 className="font-heading font-semibold text-foreground text-sm">
@@ -1145,7 +1174,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     >
                       {search
                         ? "No records match your search."
-                        : "No records yet. Add one above."}
+                        : hasStatus && data.length > 0
+                          ? `No ${statusView} records. ${statusView === "active" ? "Inactive" : "Active"} ones are under "${statusView === "active" ? "Inactive" : "Active"}".`
+                          : "No records yet. Add one above."}
                     </td>
                   </tr>
                 ) : (
