@@ -8,7 +8,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { SheetMark, money } from "@/components/sheet/Sheet";
@@ -130,17 +130,14 @@ const ParkingSetup: React.FC = () => {
   const rowsValue = (rows: ParkingTemplateRow[] = []) => rows.reduce((s, r) => s + (parseInt(r.Count, 10) || 0) * num(r.Charge), 0);
   const templateTotal = (blockId: number) => rowsTotal(parkingTemplates[blockId]);
   const templateValue = (blockId: number) => rowsValue(parkingTemplates[blockId]);
+  // One row per type (a block holds one charge per type): a new row takes the first type not yet used.
+  const unusedTypes = (blockId: number) => parkingTypes.filter((t) => !(parkingTemplates[blockId] || []).some((r) => r.ParkingType === t));
   const addTemplateRow = (blockId: number) =>
-    setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: parkingTypes[0] ?? "", Count: "1", Charge: "", GstRate: "" }] }));
+    setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: unusedTypes(blockId)[0] ?? "", Count: "1", Charge: "", GstRate: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<ParkingTemplateRow>) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).map((r, i) => (i === idx ? { ...r, ...patch } : r)) }));
-  // Another block's SAVED mix into this one's editor (its unsaved edits are not copied); applied on Save.
-  const copyMixFrom = (blockId: number, from: { Id: number; BlockName: string }) => {
-    setParkingTemplates((m) => ({ ...m, [blockId]: (savedMix[from.Id] || []).map((r) => ({ ...r })) }));
-    toast.info(`Block ${from.BlockName}'s mix copied — check it, then Save`);
-  };
 
   const handleSaveTemplate = async (blockId: number) => {
     const rows = parkingTemplates[blockId] || [];
@@ -193,6 +190,7 @@ const ParkingSetup: React.FC = () => {
   // Through Parking Slot Master's own endpoints — they enforce the booking / hold / allotment lock.
   const handleDeleteSlot = async (slot: Slot) => {
     if (!(await ask.confirm(`Delete parking slot "${slot.SlotNo}"?`, { okLabel: "Delete", danger: true }))) return;
+    setSavingSlot(true);
     try {
       const res = await fetchWithAuth(`/api/parking-slot-master/${slot.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
@@ -203,6 +201,8 @@ const ParkingSetup: React.FC = () => {
       invalidateSyncedMasters();
     } catch (e: any) {
       toast.error(translateError(e.message));
+    } finally {
+      setSavingSlot(false);
     }
   };
 
@@ -307,7 +307,6 @@ const ParkingSetup: React.FC = () => {
                 const locked = !rights.canEdit || (generatedCount > 0 && editingTemplateFor !== b.Id);
                 const total = templateTotal(b.Id);
                 const pending = b.ParkingSlotsToCreate || 0;
-                const copySources = blocks.filter((o) => o.Id !== b.Id && (savedMix[o.Id] || []).length > 0);
                 const openSlot = blockSlots.find((s) => s.Id === openSlotId) || null;
                 const openLock = openSlot ? lockOf(openSlot) : null;
                 return (
@@ -332,21 +331,6 @@ const ParkingSetup: React.FC = () => {
 
                     {/* ── The mix ── */}
                     <div className="px-3 py-2 overflow-x-auto thin-scroll">
-                      {!locked && copySources.length > 0 && (
-                        <label className="mb-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
-                          <Copy size={12} /> Same as another block?
-                          <select value="" aria-label="Copy the mix from another block"
-                            onChange={(e) => { const o = copySources.find((x) => String(x.Id) === e.target.value); if (o) copyMixFrom(b.Id, o); }}
-                            className={`${SMALL_INP} !w-48`}>
-                            <option value="">Copy mix from…</option>
-                            {copySources.map((o) => (
-                              <option key={o.Id} value={o.Id}>
-                                Block {o.BlockName} — {rowsTotal(savedMix[o.Id])} slots, {(savedMix[o.Id] || []).map((r) => r.ParkingType).join(", ")}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
                       <table className="w-full text-xs min-w-[420px]">
                         <thead>
                           <tr style={{ borderBottom: RULE }}>
@@ -373,7 +357,7 @@ const ParkingSetup: React.FC = () => {
                               <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
                                 <td className="!px-1 !py-1.5">
                                   <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })} className={`${SMALL_INP} max-w-[180px]`}>
-                                    {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                                    {parkingTypes.filter((t) => t === row.ParkingType || !rows.some((r) => r.ParkingType === t)).map((t) => <option key={t} value={t}>{t}</option>)}
                                   </select>
                                 </td>
                                 <td className="!px-1 !py-1.5">
@@ -401,7 +385,7 @@ const ParkingSetup: React.FC = () => {
                         <tfoot>
                           <tr>
                             <td className="!px-2 !pt-2">
-                              {!locked && <button onClick={() => addTemplateRow(b.Id)} className={`${TEXT_LINK} inline-flex items-center gap-1`}><Plus size={11} /> Add a type</button>}
+                              {!locked && unusedTypes(b.Id).length > 0 && <button onClick={() => addTemplateRow(b.Id)} className={`${TEXT_LINK} inline-flex items-center gap-1`}><Plus size={11} /> Add a type</button>}
                             </td>
                             <td className={`!px-2 !pt-2 text-right font-semibold ${NUM}`}>{total}</td>
                             <td colSpan={2} />
@@ -467,10 +451,10 @@ const ParkingSetup: React.FC = () => {
                                 <span className="ml-auto flex items-center gap-1.5">
                                   {rights.canEdit && (
                                     <button onClick={() => setEditingSlot({ SlotNo: openSlot.SlotNo || "", ParkingType: openSlot.ParkingType || parkingTypes[0] || "" })}
-                                      disabled={!!openLock} title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit</button>
+                                      disabled={!!openLock || savingSlot} title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit</button>
                                   )}
                                   {rights.canDelete && (
-                                    <button onClick={() => handleDeleteSlot(openSlot)} disabled={!!openLock}
+                                    <button onClick={() => handleDeleteSlot(openSlot)} disabled={!!openLock || savingSlot}
                                       title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5 !text-destructive !border-destructive`}><Trash2 size={11} /> Delete</button>
                                   )}
                                   <button onClick={() => setOpenSlotId(null)} aria-label="Close" className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground"><X size={13} /></button>
