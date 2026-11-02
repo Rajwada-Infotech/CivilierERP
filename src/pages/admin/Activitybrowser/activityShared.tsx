@@ -1,7 +1,7 @@
 // Shared pieces of the Activity Browser: drawing-sheet ink styles, the event and role marks,
 // and the small formatters both views use.
 import React, { useEffect, useState } from "react";
-import { Eye, FileDown, LogIn, LogOut, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { Eye, FileDown, LogIn, LogOut, Pencil, Plus, Settings, Trash2, type LucideIcon } from "lucide-react";
 import { parseDeviceInfo } from "@/utils/deviceFingerprint";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -40,7 +40,7 @@ export const KindTag: React.FC<{ kind: string; label?: string }> = ({ kind, labe
   <span className={`${TAG} ${KIND_INK[kind] ?? KIND_INK.read}`}>{label ?? kindLabel(kind)}</span>
 );
 
-const KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+const KIND_ICON: Record<string, LucideIcon> = {
   create: Plus, update: Pencil, delete: Trash2, export: FileDown, settings_change: Settings, read: Eye, login: LogIn, logout: LogOut,
 };
 
