@@ -824,6 +824,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+      qc.invalidateQueries({ queryKey: ["crm-my-work"] });
+      // Menu badges (Approval Inbox, My Work) re-count at once.
+      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -851,6 +854,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+      qc.invalidateQueries({ queryKey: ["crm-my-work"] });
+      // Menu badges (Approval Inbox, My Work) re-count at once.
+      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {

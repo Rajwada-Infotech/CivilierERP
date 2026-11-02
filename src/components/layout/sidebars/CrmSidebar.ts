@@ -10,10 +10,11 @@ import { NavItem } from "./SidebarPrimitives";
 //   -> Possession Notice -> Handover
 //
 // Every page keeps its own address; only where it sits in the menu changed.
+export const CRM_MY_WORK_PATH = "/crm/my-work";
 export const crmNavItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/crm/dashboard", pageKey: "crm-dashboard" },
   // Everything waiting on the signed-in person; the server picks the queues.
-  { label: "My Work", icon: Inbox, path: "/crm/my-work" },
+  { label: "My Work", icon: Inbox, path: CRM_MY_WORK_PATH },
 
   // ── Leads (SA handoff pool) ──────────────────────────────────────────────────
   { label: "Leads", icon: Users, path: "/crm/leads", pageKey: "crm-leads" },

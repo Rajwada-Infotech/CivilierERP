@@ -96,3 +96,11 @@ test("a project-restricted user's queues are limited to their projects", async (
   expect(mockQueries.filter((q) => q.includes("b.ProjectId IN (3,9)")).length).toBe(2);
   expect(mockQueries.filter((q) => q.includes("a.ProjectId IN (3,9)")).length).toBe(2);
 });
+
+test("the menu badge counts only the queues the person may act on", async () => {
+  mockPageRights.add("crm-welcome-calls:view");
+  mockApproverStages.add("MarketingHeadApproval");
+  const res = await request(app).get("/my-work/count");
+  expect(res.body).toEqual({ count: 4 }); // 2 + 2
+  expect(mockQueries.every((q) => /COUNT\(\*\)/.test(q))).toBe(true);
+});
