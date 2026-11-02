@@ -36,6 +36,7 @@ import { ParkingSelectionStep } from "./applications/ParkingSelectionStep";
 import { ExtraWorkSelectionStep } from "./applications/ExtraWorkSelectionStep";
 import { AttachmentsStep } from "./applications/AttachmentsStep";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -50,7 +51,8 @@ const CrmApplication: React.FC = () => {
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [activeStage, setActiveStage] = useState<Stage>("InProcess");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeStage, setActiveStage] = useUrlParam<Stage>("stage", "InProcess", STAGES);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);

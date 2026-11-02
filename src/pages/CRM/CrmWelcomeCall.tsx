@@ -19,7 +19,9 @@ import {
 import { WelcomeCallPdfDialog } from "./welcomeCalls/PreviewDialogs";
 import { IntakeDialog } from "./welcomeCalls/IntakeDialog";
 
-type View = "queue" | "recheck" | "history";
+import { useUrlParam } from "@/hooks/useUrlParam";
+const VIEWS = ["queue", "recheck", "history"] as const;
+type View = typeof VIEWS[number];
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const day = (v: unknown) => (v ? String(v).slice(0, 10) : "");
 
@@ -33,7 +35,8 @@ const CrmWelcomeCall: React.FC = () => {
   useSearchAsYouType(searchInput, (v) => { setSearch(v); setHistoryPage(1); });
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [historyPage, setHistoryPage] = useState(1);
-  const [view, setView] = useState<View>("queue");
+  // In the address, so a refresh or a shared link keeps it.
+  const [view, setView] = useUrlParam<View>("view", "queue", VIEWS);
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
   // Set only when a past call is opened from Call History: IntakeDialog then opens in "Edit call log" mode.
   const [activeCall, setActiveCall] = useState<any | null>(null);

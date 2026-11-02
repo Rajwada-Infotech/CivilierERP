@@ -13,6 +13,7 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 import { API, BrokerageMark, fmt } from "./brokerage/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 // Still fetched in full — the pending / with Finance / paid totals are worked out over the whole set (as on
 // Demands); company / project / block narrow it on the server. Same endpoint as Brokerage, without ?page=.
 async function fetchBrokerages(cpb: CrmCompanyProjectBlockValue): Promise<any[]> {
@@ -42,7 +43,8 @@ const CrmBrokerPayments: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("crm-brokerage");
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState("");
+  // In the address, so a refresh or a shared link keeps it.
+  const [tab, setTab] = useUrlParam<string>("tab", "", TABS.map((t) => t.k));
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [retrying, setRetrying] = useState<number | null>(null);
 

@@ -19,6 +19,7 @@ import { translateError } from "@/lib/translateError";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
 import { useCanApprove } from "@/hooks/useCanApprove";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const BASE = "/api/crm/booking-amendments";
 const PAGE_SIZE = 20;
 
@@ -74,7 +75,8 @@ export default function CrmBookingAmendments() {
   const { canEdit } = usePageRights("crm-bookings");
   const { currentUser, canDoAction } = useAuth();
   const qc = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Pending");
+  // In the address, so a refresh or a shared link keeps it.
+  const [statusFilter, setStatusFilter] = useUrlParam<StatusFilter>("status", "Pending");
   const [review, setReview] = useState<{ row: AmendmentRow; action: "approve" | "reject" } | null>(null);
   const [notes, setNotes] = useState("");
   const [searchInput, setSearchInput] = useState("");

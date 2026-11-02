@@ -25,6 +25,7 @@ import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings
 import { SheetMark } from "@/components/sheet/Sheet";
 import { useNavigate } from "react-router-dom";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const AMEND_API = "/api/crm/booking-amendments";
@@ -140,7 +141,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const canVerify = useCanApprove("crm-booking-verification") && canEdit;
   const navigate = useNavigate();
   const canRaiseDemand = canDoAction("crm-payments", "edit");
-  const [tab, setTab] = useState<Tab>("Booking");
+  // In the address (?bookingTab=, beside the page's ?view=), so a refresh or a shared link reopens the same tab;
+  // dropped again when the popup closes.
+  const [tab, setTab] = useUrlParam<Tab>("bookingTab", "Booking", TABS);
+  useEffect(() => () => setTab(""), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);

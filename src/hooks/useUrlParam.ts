@@ -6,9 +6,12 @@
 import { useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 
-export function useUrlParam<T extends string = string>(name: string, fallback = "" as T) {
+// `allowed`: the values the page knows (its tabs); anything else in the address
+// (an old or mistyped link) reads as the fallback instead of a blank page.
+export function useUrlParam<T extends string = string>(name: string, fallback = "" as T, allowed?: readonly string[]) {
   const [sp, setSp] = useSearchParams();
-  const value = (sp.get(name) ?? fallback) as T;
+  const raw = sp.get(name);
+  const value = (raw != null && (!allowed || allowed.includes(raw)) ? raw : fallback) as T;
   const setValue = useCallback((v: T | "") => {
     // From the live address, not the render's copy: two calls in one handler
     // (pick a company, clear the project) would otherwise undo each other.

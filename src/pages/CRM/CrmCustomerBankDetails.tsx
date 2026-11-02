@@ -19,6 +19,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { Block, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
 const BKG_API = "/api/crm/bookings";
@@ -267,7 +268,8 @@ const CrmCustomerBankDetails: React.FC = () => {
   usePageRights("crm-customer-bank-details");
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+  // In the address, so a refresh or a shared link keeps it.
+  const [statusFilter, setStatusFilter] = useUrlParam<StatusFilter>("status", "All", ["All", "Pending", "Complete"]);
   const [search, setSearch] = useState("");
   const [activeRow, setActiveRow] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);

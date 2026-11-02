@@ -19,6 +19,7 @@ import { NewCreditNoteDialog } from "./creditNotes/NewCreditNoteDialog";
 import { DetailDialog } from "./creditNotes/DetailDialog";
 import { exportCreditNotesXlsx } from "./creditNotes/exportXlsx";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const td = "!px-4 !py-3";
 const th = `!px-4 !py-2.5 text-left ${LBL}`;
 
@@ -88,7 +89,8 @@ const CrmCreditNotes: React.FC = () => {
   const [sp, setSp] = useSearchParams();
 
   const [selectedId, setSelectedId] = useState<number | null>(sp.get("id") ? Number(sp.get("id")) : null);
-  const [tab, setTab] = useState<Tab>("all");
+  // In the address, so a refresh or a shared link keeps it.
+  const [tab, setTab] = useUrlParam<Tab>("tab", "all", TABS.map(([t]) => t));
   const [page, setPage] = useState(1);
   const [period, setPeriod] = useState("fy");
   const P = periods();

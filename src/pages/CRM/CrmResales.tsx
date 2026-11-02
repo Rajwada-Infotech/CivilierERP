@@ -15,6 +15,7 @@ import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 import { localDay } from "./salesDeed/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/resales";
 
 // Resale & Buy-back — any sold property (plot, villa with its plot, flat, shop)
@@ -67,7 +68,8 @@ const statusText = (d: Deal) =>
 const statusTone = (s: string): "done" | "waiting" | "stopped" | "none" =>
   s === "Completed" ? "done" : s === "Rejected" ? "stopped" : s === "Cancelled" ? "none" : "waiting";
 
-type ResaleTab = "all" | "progress" | "resale" | "buyback" | "completed" | "cancelled";
+const RESALE_TABS = ["all", "progress", "resale", "buyback", "completed", "cancelled"] as const;
+type ResaleTab = typeof RESALE_TABS[number];
 
 const CrmResales: React.FC = () => {
   const rights = usePageRights("crm-resales");
@@ -80,7 +82,8 @@ const CrmResales: React.FC = () => {
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [form, setForm] = useState(emptyForm);
-  const [tab, setTab] = useState<ResaleTab>("all");
+  // In the address, so a refresh or a shared link keeps it.
+  const [tab, setTab] = useUrlParam<ResaleTab>("tab", "all", RESALE_TABS);
 
   const { data: deals = [], isLoading, isError, error, isFetching, refetch } = useQuery<Deal[]>({ queryKey: ["crm-resales"], queryFn: () => getJson(API) });
   const { data: holdings = [] } = useQuery<Holding[]>({ queryKey: ["crm-resale-holdings"], queryFn: () => getJson(`${API}/holdings`), enabled: open });

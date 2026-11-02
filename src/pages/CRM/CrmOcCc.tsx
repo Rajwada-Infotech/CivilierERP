@@ -16,6 +16,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/oc-cc";
 const PROJ_API = "/api/unit-master/projects";
 
@@ -319,7 +320,8 @@ function ProjectBoard({ board, canCreate, onAdd }: { board: Board; canCreate: bo
 const CrmOcCc: React.FC = () => {
   const qc = useQueryClient();
   const { canCreate, canEdit } = usePageRights("crm-oc-cc");
-  const [activeTab, setActiveTab] = useState<"All" | "Applied" | "Received">("All");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeTab, setActiveTab] = useUrlParam<"All" | "Applied" | "Received">("tab", "All", ["All", "Applied", "Received"]);
   const [detailRow, setDetailRow] = useState<any | null>(null);
   const [editLocked, setEditLocked] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);

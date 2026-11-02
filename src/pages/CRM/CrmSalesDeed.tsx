@@ -37,6 +37,7 @@ import { StepBar } from "@/components/crm/StepBar";
 import { QueryPaymentTab, useDeedQueryPayment } from "./salesDeed/QueryPaymentTab";
 import { RegistryTab, useDeedRegistry } from "./salesDeed/RegistryTab";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const CrmSalesDeed: React.FC = () => {
   const ask = useSheetAsk();
   const rights = usePageRights("crm-sales-deed");
@@ -49,7 +50,6 @@ const CrmSalesDeed: React.FC = () => {
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
   const deedIdParam = sp.get("deedId");
-  const tabDeepLink = sp.get("tab");
   const [deepLinkDone, setDeepLinkDone] = useState(false);
 
   const [searchInput, setSearchInput] = useState("");
@@ -78,7 +78,8 @@ const CrmSalesDeed: React.FC = () => {
   const [execSaving, setExecSaving] = useState(false);
   const [execEditing, setExecEditing] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<DeedTab>("Timeline");
+  // In the address (?tab=), so a refresh or a shared link opens the same tab.
+  const [activeTab, setActiveTab] = useUrlParam<DeedTab>("tab", "Timeline", DEED_TABS);
   const [assigningLegal, setAssigningLegal] = useState(false);
   const [selectedLegalExec, setSelectedLegalExec] = useState("");
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -195,9 +196,6 @@ const CrmSalesDeed: React.FC = () => {
     return () => { stop = true; };
   }, [deepLinkBookingId, deedIdParam, deepLinkDone, eligible.length, rights.canCreate]);
 
-  useEffect(() => {
-    if (tabDeepLink && detailId != null && (DEED_TABS as readonly string[]).includes(tabDeepLink)) setActiveTab(tabDeepLink as DeedTab);
-  }, [tabDeepLink, detailId]);
 
   useEffect(() => {
     if (!context?.agreement) return;
