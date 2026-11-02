@@ -8,7 +8,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { SheetMark, money } from "@/components/sheet/Sheet";
@@ -50,6 +50,10 @@ const slotStatus = (s: Slot): TileStatus => (s.LockAllotmentId || s.LockBookingN
 // "TSTRSD/A/P07" reads as "P07" on a tile; the full name is its tooltip.
 const shortName = (slotNo: string) => slotNo.split("/").pop() || slotNo;
 const COUNT0: Record<TileStatus, number> = { Available: 0, OnHold: 0, Booked: 0, Blocked: 0 };
+// The block list is rows of a CSS grid, not a <table>: an open block's own mix table
+// would otherwise be a table inside a table cell, which the app's table styles break.
+const ROW = "grid grid-cols-[minmax(100px,1fr)_minmax(150px,2.4fr)_84px_56px_64px_64px_88px_112px] items-center gap-x-2 min-w-[760px]";
+const CELL_NUM = "text-right tabular-nums";
 
 const ParkingSetup: React.FC = () => {
   const ask = useSheetAsk();
@@ -67,6 +71,8 @@ const ParkingSetup: React.FC = () => {
   const [generating, setGenerating] = useState<number | "all" | null>(null);
   // Which generated block's mix is open for editing (locked otherwise).
   const [editingTemplateFor, setEditingTemplateFor] = useState<number | null>(null);
+  // The one block opened below its row (its mix and slot map).
+  const [openBlockId, setOpenBlockId] = useState<number | null>(null);
   // The slot opened on a block's map.
   const [openSlotId, setOpenSlotId] = useState<number | null>(null);
   const [editingSlot, setEditingSlot] = useState<SlotEdit | null>(null);
@@ -130,17 +136,14 @@ const ParkingSetup: React.FC = () => {
   const rowsValue = (rows: ParkingTemplateRow[] = []) => rows.reduce((s, r) => s + (parseInt(r.Count, 10) || 0) * num(r.Charge), 0);
   const templateTotal = (blockId: number) => rowsTotal(parkingTemplates[blockId]);
   const templateValue = (blockId: number) => rowsValue(parkingTemplates[blockId]);
+  // One row per type (a block holds one charge per type): a new row takes the first type not yet used.
+  const unusedTypes = (blockId: number) => parkingTypes.filter((t) => !(parkingTemplates[blockId] || []).some((r) => r.ParkingType === t));
   const addTemplateRow = (blockId: number) =>
-    setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: parkingTypes[0] ?? "", Count: "1", Charge: "", GstRate: "" }] }));
+    setParkingTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { ParkingType: unusedTypes(blockId)[0] ?? "", Count: "1", Charge: "", GstRate: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<ParkingTemplateRow>) =>
     setParkingTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).map((r, i) => (i === idx ? { ...r, ...patch } : r)) }));
-  // Another block's SAVED mix into this one's editor (its unsaved edits are not copied); applied on Save.
-  const copyMixFrom = (blockId: number, from: { Id: number; BlockName: string }) => {
-    setParkingTemplates((m) => ({ ...m, [blockId]: (savedMix[from.Id] || []).map((r) => ({ ...r })) }));
-    toast.info(`Block ${from.BlockName}'s mix copied — check it, then Save`);
-  };
 
   const handleSaveTemplate = async (blockId: number) => {
     const rows = parkingTemplates[blockId] || [];
@@ -193,6 +196,7 @@ const ParkingSetup: React.FC = () => {
   // Through Parking Slot Master's own endpoints — they enforce the booking / hold / allotment lock.
   const handleDeleteSlot = async (slot: Slot) => {
     if (!(await ask.confirm(`Delete parking slot "${slot.SlotNo}"?`, { okLabel: "Delete", danger: true }))) return;
+    setSavingSlot(true);
     try {
       const res = await fetchWithAuth(`/api/parking-slot-master/${slot.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
@@ -203,6 +207,8 @@ const ParkingSetup: React.FC = () => {
       invalidateSyncedMasters();
     } catch (e: any) {
       toast.error(translateError(e.message));
+    } finally {
+      setSavingSlot(false);
     }
   };
 
@@ -268,85 +274,73 @@ const ParkingSetup: React.FC = () => {
 
       {projectId && status && step1Done && (
         <>
-          {/* ── The project's parking at a glance ── */}
-          <div className="bg-card" style={{ border: RULE }}>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-              {[
-                { label: "Planned", value: planned.toLocaleString("en-IN"), note: `${plural(blocks.filter((b) => (savedMix[b.Id] || []).length).length, "block")} with a saved mix` },
-                { label: "Created", value: created.toLocaleString("en-IN"), note: toCreate > 0 ? `${toCreate} still to create` : "every mix is filled" , warn: toCreate > 0 },
-                { label: "Free", value: stateCounts.Available.toLocaleString("en-IN"), note: "can be sold" },
-                { label: "On hold", value: stateCounts.OnHold.toLocaleString("en-IN"), note: "held for a customer" },
-                { label: "Booked", value: stateCounts.Booked.toLocaleString("en-IN"), note: "allotted to a booking" },
-                { label: "List value", value: money(value), note: "slots × charge, before GST", title: inr(value) },
-              ].map((x) => (
-                <div key={x.label} className="px-4 py-3 min-w-0" style={{ borderRight: RULE_SOFT, borderBottom: RULE_SOFT }} title={(x as any).title}>
-                  <p className={LBL}>{x.label}</p>
-                  <p className={`mt-1.5 font-heading font-bold tabular-nums text-lg whitespace-nowrap ${x.warn ? "text-destructive" : "text-foreground"}`}>{x.value}</p>
-                  <p className="mt-0.5 text-[0.6875rem] text-muted-foreground">{x.note}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
           <Section title="Parking, block by block" done={blocks.some((b) => b.ParkingSlotCount > 0)}
-            note="Each block's mix of types with its charge and GST, and a map of the slots made from it. Click a slot to rename, retype or delete it."
+            note="One row per block. Open a block to set its mix (types, slots, charge, GST) and see its slots."
             right={rights.canCreate && toCreate > 0 && (
               <button onClick={() => handleGenerate()} disabled={generating !== null} className={`${KEY_INK} h-8 px-3`}>
                 {generating === "all" ? "Creating…" : `Create all ${plural(toCreate, "parking slot")}`}
               </button>
             )}>
             <ParkingNamingPanel projectId={Number(projectId)} shortName={status.project?.ShortCode} blocks={blocks} canEdit={rights.canEdit} />
-            <Legend counts={stateCounts} />
 
-            {/* One block per row (two only on very wide screens): its mix table and slot map need the width. */}
-            <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+            {/* One row per block; one block open at a time below its row. */}
+            <div className="overflow-x-auto thin-scroll text-sm" style={{ border: RULE }}>
+              <div className={`${ROW} px-3 py-2`} style={{ borderBottom: RULE }}>
+                <span className={LBL}>Block</span>
+                <span className={LBL}>Mix</span>
+                <span className={`${LBL} text-right`}>Slots</span>
+                <span className={`${LBL} text-right`}>Free</span>
+                <span className={`${LBL} text-right`}>On hold</span>
+                <span className={`${LBL} text-right`}>Booked</span>
+                <span className={`${LBL} text-right`}>Value</span>
+                <span />
+              </div>
               {blocks.map((b) => {
                 const rows = parkingTemplates[b.Id] || [];
+                const saved = savedMix[b.Id] || [];
                 const blockSlots = slotsByBlock[b.Id] || [];
                 const generatedCount = b.ParkingSlotCount || 0;
                 const locked = !rights.canEdit || (generatedCount > 0 && editingTemplateFor !== b.Id);
                 const total = templateTotal(b.Id);
                 const pending = b.ParkingSlotsToCreate || 0;
-                const copySources = blocks.filter((o) => o.Id !== b.Id && (savedMix[o.Id] || []).length > 0);
-                const openSlot = blockSlots.find((s) => s.Id === openSlotId) || null;
+                const isOpen = openBlockId === b.Id;
+                const counts = blockSlots.reduce((c, sl) => ({ ...c, [slotStatus(sl)]: c[slotStatus(sl)] + 1 }), { ...COUNT0 });
+                const openSlot = blockSlots.find((sl) => sl.Id === openSlotId) || null;
                 const openLock = openSlot ? lockOf(openSlot) : null;
+                const toggle = () => { setOpenBlockId(isOpen ? null : b.Id); setOpenSlotId(null); setEditingSlot(null); };
                 return (
-                  <div key={b.Id} className={PANEL}>
-                    <div className="px-3 py-2.5 flex flex-wrap items-center gap-2" style={{ borderBottom: RULE_SOFT }}>
-                      <span className="text-sm font-semibold">Block {b.BlockName}</span>
-                      {generatedCount > 0
-                        ? <SheetMark text={`${plural(generatedCount, "slot")} created`} tone="done" />
-                        : <SheetMark text="Not created yet" tone="draft" />}
-                      {pending > 0 && generatedCount > 0 && <SheetMark text={`+${pending} to create`} tone="waiting" />}
-                      <div className="ml-auto flex items-center gap-1.5">
-                        {rights.canCreate && pending > 0 && editingTemplateFor !== b.Id && (
-                          <button onClick={() => handleGenerate(b.Id)} disabled={generating !== null} className={`${KEY_INK} h-7 px-2.5`}>
-                            <Plus size={11} /> {generating === b.Id ? "Creating…" : `Create ${pending}`}
-                          </button>
-                        )}
-                        {rights.canEdit && generatedCount > 0 && editingTemplateFor !== b.Id && (
-                          <button onClick={() => setEditingTemplateFor(b.Id)} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit mix</button>
-                        )}
+                  <React.Fragment key={b.Id}>
+                  <div role="button" tabIndex={0} onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+                    aria-expanded={isOpen}
+                    className={`${ROW} px-3 py-2 cursor-pointer transition-colors ${isOpen ? "bg-primary/5" : "hover:bg-primary/5"}`} style={{ borderBottom: RULE_SOFT }}>
+                    <span className="font-semibold whitespace-nowrap inline-flex items-center gap-1.5">{isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Block {b.BlockName}</span>
+                    <span className="text-xs text-muted-foreground truncate" title={saved.map((r) => `${r.ParkingType} ${r.Count}`).join(" · ") || undefined}>
+                      {saved.length ? saved.map((r) => `${r.ParkingType} ${r.Count}`).join(" · ") : <span className="italic">No mix yet</span>}
+                    </span>
+                    <span className={CELL_NUM}>{generatedCount}{rowsTotal(saved) ? <span className="text-muted-foreground"> / {rowsTotal(saved)}</span> : null}</span>
+                    <span className={CELL_NUM}>{counts.Available || "—"}</span>
+                    <span className={CELL_NUM}>{counts.OnHold || "—"}</span>
+                    <span className={CELL_NUM}>{counts.Booked || "—"}</span>
+                    <span className={`${CELL_NUM} whitespace-nowrap`} title={inr(rowsValue(saved))}>{rowsValue(saved) ? money(rowsValue(saved)) : "—"}</span>
+                    <span className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                      {rights.canCreate && pending > 0 && saved.length > 0 ? (
+                        <button onClick={() => handleGenerate(b.Id)} disabled={generating !== null} className={`${KEY_INK} h-7 px-2.5`}>
+                          <Plus size={11} /> {generating === b.Id ? "Creating…" : `Create ${pending}`}
+                        </button>
+                      ) : !saved.length && rights.canEdit ? (
+                        <button onClick={toggle} className={`${KEY_LINE} h-7 px-2.5`}>Set up</button>
+                      ) : null}
+                    </span>
+                  </div>
+                  {isOpen && (
+                  <div className="bg-card" style={{ borderBottom: RULE }}>
+                    {rights.canEdit && generatedCount > 0 && editingTemplateFor !== b.Id && (
+                      <div className="px-3 pt-2.5 flex justify-end max-w-3xl">
+                        <button onClick={() => setEditingTemplateFor(b.Id)} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit mix</button>
                       </div>
-                    </div>
-
-                    {/* ── The mix ── */}
-                    <div className="px-3 py-2 overflow-x-auto thin-scroll">
-                      {!locked && copySources.length > 0 && (
-                        <label className="mb-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
-                          <Copy size={12} /> Same as another block?
-                          <select value="" aria-label="Copy the mix from another block"
-                            onChange={(e) => { const o = copySources.find((x) => String(x.Id) === e.target.value); if (o) copyMixFrom(b.Id, o); }}
-                            className={`${SMALL_INP} !w-48`}>
-                            <option value="">Copy mix from…</option>
-                            {copySources.map((o) => (
-                              <option key={o.Id} value={o.Id}>
-                                Block {o.BlockName} — {rowsTotal(savedMix[o.Id])} slots, {(savedMix[o.Id] || []).map((r) => r.ParkingType).join(", ")}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
+                    )}
+                    {/* ── The mix (kept narrow: a type reads next to its numbers) ── */}
+                    <div className="px-3 py-2 overflow-x-auto thin-scroll max-w-3xl">
                       <table className="w-full text-xs min-w-[420px]">
                         <thead>
                           <tr style={{ borderBottom: RULE }}>
@@ -373,7 +367,7 @@ const ParkingSetup: React.FC = () => {
                               <tr key={idx} style={{ borderBottom: RULE_SOFT }}>
                                 <td className="!px-1 !py-1.5">
                                   <select value={row.ParkingType} onChange={(e) => updateTemplateRow(b.Id, idx, { ParkingType: e.target.value })} className={`${SMALL_INP} max-w-[180px]`}>
-                                    {parkingTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                                    {parkingTypes.filter((t) => t === row.ParkingType || !rows.some((r) => r.ParkingType === t)).map((t) => <option key={t} value={t}>{t}</option>)}
                                   </select>
                                 </td>
                                 <td className="!px-1 !py-1.5">
@@ -401,7 +395,7 @@ const ParkingSetup: React.FC = () => {
                         <tfoot>
                           <tr>
                             <td className="!px-2 !pt-2">
-                              {!locked && <button onClick={() => addTemplateRow(b.Id)} className={`${TEXT_LINK} inline-flex items-center gap-1`}><Plus size={11} /> Add a type</button>}
+                              {!locked && unusedTypes(b.Id).length > 0 && <button onClick={() => addTemplateRow(b.Id)} className={`${TEXT_LINK} inline-flex items-center gap-1`}><Plus size={11} /> Add a type</button>}
                             </td>
                             <td className={`!px-2 !pt-2 text-right font-semibold ${NUM}`}>{total}</td>
                             <td colSpan={2} />
@@ -413,7 +407,7 @@ const ParkingSetup: React.FC = () => {
                     </div>
 
                     {!locked && (
-                      <div className="px-3 pb-3 space-y-2">
+                      <div className="px-3 pb-3 space-y-2 max-w-3xl">
                         {generatedCount > 0 && (
                           <p className="text-xs text-muted-foreground">Saving creates the slots a raised count adds. Lowering a count doesn&apos;t remove slots already created — delete those on the map below.</p>
                         )}
@@ -467,10 +461,10 @@ const ParkingSetup: React.FC = () => {
                                 <span className="ml-auto flex items-center gap-1.5">
                                   {rights.canEdit && (
                                     <button onClick={() => setEditingSlot({ SlotNo: openSlot.SlotNo || "", ParkingType: openSlot.ParkingType || parkingTypes[0] || "" })}
-                                      disabled={!!openLock} title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit</button>
+                                      disabled={!!openLock || savingSlot} title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5`}><Pencil size={11} /> Edit</button>
                                   )}
                                   {rights.canDelete && (
-                                    <button onClick={() => handleDeleteSlot(openSlot)} disabled={!!openLock}
+                                    <button onClick={() => handleDeleteSlot(openSlot)} disabled={!!openLock || savingSlot}
                                       title={openLock ? "Booked or held — release it first" : undefined} className={`${KEY_LINE} h-7 px-2.5 !text-destructive !border-destructive`}><Trash2 size={11} /> Delete</button>
                                   )}
                                   <button onClick={() => setOpenSlotId(null)} aria-label="Close" className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground"><X size={13} /></button>
@@ -479,11 +473,25 @@ const ParkingSetup: React.FC = () => {
                             )}
                           </div>
                         )}
+                        <Legend counts={counts} />
                       </div>
                     )}
                   </div>
+                  )}
+                  </React.Fragment>
                 );
               })}
+              {/* The project's totals. */}
+              <div className={`${ROW} px-3 py-2.5 font-semibold`}>
+                <span className={LBL}>Project</span>
+                <span className="text-xs font-normal text-muted-foreground">{toCreate > 0 ? `${plural(toCreate, "slot")} still to create` : "Every saved mix is filled"}</span>
+                <span className={CELL_NUM}>{created}<span className="text-muted-foreground font-normal"> / {planned}</span></span>
+                <span className={CELL_NUM}>{stateCounts.Available}</span>
+                <span className={CELL_NUM}>{stateCounts.OnHold}</span>
+                <span className={CELL_NUM}>{stateCounts.Booked}</span>
+                <span className={`${CELL_NUM} whitespace-nowrap`} title={inr(value)}>{money(value)}</span>
+                <span />
+              </div>
             </div>
             <Link to="/crm/setup/parking-slot-master" className={`${TEXT_LINK} inline-block text-muted-foreground`}>All slot details in Parking Slot Master</Link>
           </Section>

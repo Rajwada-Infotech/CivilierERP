@@ -6,14 +6,17 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Trash2, ParkingSquare, IndianRupee, Lock } from "lucide-react";
 import { Select } from "@/components/ui/select";
-import { useGstRates, computeUnitParkingGst } from "@/lib/crmGst";
+import { inr, type PriceQuote } from "@/lib/crmPriceQuote";
 import { PARKING_API, KEY_INK } from "./config";
-import { GstBreakdownBox, GstGrandTotalText } from "./GstBreakdown";
+import { GstBreakdownBox } from "./GstBreakdown";
 
 // ── Step 2: Parking Selection ──────────────────────────────────────────────────
 export const ParkingSelectionStep: React.FC<{
   applicationId: number; projectId: string; blockId: string;
-  computedTotal: number;
+  // The sale's price from the server (usePriceQuote on the parent), its
+  // parking rows in the same order as this step's own list.
+  quote: PriceQuote | undefined;
+  quoteLoading?: boolean;
   // Same Draft/Pending gate as canEditUnitSelection on the parent — parking
   // picked here is still just an Application-stage hold (see crmParking.js
   // POST /standalone), converted into a real CrmParkingAllotment only once
@@ -22,7 +25,7 @@ export const ParkingSelectionStep: React.FC<{
   // or is expected imminently, and the pick can't change out from under it.
   canEdit: boolean;
   wizardAppStatus: string | null;
-}> = ({ applicationId, projectId, blockId, computedTotal, canEdit, wizardAppStatus }) => {
+}> = ({ applicationId, projectId, blockId, quote, quoteLoading, canEdit, wizardAppStatus }) => {
   const { data: allotments = [], refetch: refetchParking } = useQuery({
     queryKey: ["crm-app-parking", applicationId],
     queryFn: async () => {
@@ -106,10 +109,8 @@ export const ParkingSelectionStep: React.FC<{
           ? rateOverride
           : currentType.Charge
       ) || 0;
-      const addedTotal = parkingGstRates
-        ? Math.round((addedBase + (addedBase * computeUnitParkingGst(computedTotal, parkingBase + addedBase, parkingGstRates).rate / 100)) * 100) / 100
-        : Number(data.TotalAmount);
-      toast.success(`${currentType.ParkingType} added — ₹${addedTotal.toLocaleString("en-IN")}`);
+      // Its price with GST shows on the list once the quote refreshes.
+      toast.success(`${currentType.ParkingType} added — ${inr(addedBase)} before GST`);
       setSelectedType(""); setSelectedSlotId(""); setRateOverride(""); setRateEditing(false);
       refetchAll();
     } catch (e: any) {
@@ -134,16 +135,9 @@ export const ParkingSelectionStep: React.FC<{
     }
   };
 
-  // Pre-tax base for the GST preview — see RateSnapshot note on the GET
-  // /application/:applicationId route (both Allotment and Hold shapes carry it).
-  const parkingBase = (allotments as any[]).reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
-  const { data: parkingGstRates } = useGstRates();
-  const parkingGstPreview = parkingGstRates ? computeUnitParkingGst(computedTotal, parkingBase, parkingGstRates) : null;
-  const displayParkingTotal = (a: any) => {
-    const base = (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1);
-    if (!parkingGstPreview) return Number(a.TotalAmount || base);
-    return Math.round((base + (base * parkingGstPreview.rate / 100)) * 100) / 100;
-  };
+  // Each slot's price with GST, from the server's quote (same order as this list).
+  const displayParkingTotal = (a: any, i: number) =>
+    quote?.parking[i]?.total ?? (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1);
 
   return (
     <div className="space-y-4">
@@ -151,17 +145,21 @@ export const ParkingSelectionStep: React.FC<{
           as the Unit price preview on Step 1, instead of a 3-cell grid. */}
       <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
         <IndianRupee size={11} className="text-foreground shrink-0" />
-        Unit ₹{computedTotal.toLocaleString("en-IN")}
-        {parkingBase > 0 && ` + Parking base ₹${parkingBase.toLocaleString("en-IN")}`}
-        {" + GST = "}
-        <span className="font-semibold text-foreground">
-          Grand Total <GstGrandTotalText unitValue={computedTotal} parkingBase={parkingBase} />
-        </span>
+        {quote ? (
+          <>
+            Unit {inr(quote.unitValue)}
+            {quote.parkingBase > 0 && ` + Parking ${inr(quote.parkingBase)}`}
+            {quote.extraChargesTotal > 0 && ` + Extra charges ${inr(quote.extraChargesTotal)}`}
+            {quote.totalGstAmount > 0 && ` + GST ${inr(quote.totalGstAmount)}`}
+            {" = "}
+            <span className="font-semibold text-foreground">Grand Total {inr(quote.grandTotal)}</span>
+          </>
+        ) : <span>{quoteLoading ? "Working out the price…" : "Pick a unit and rate to see the price."}</span>}
       </div>
 
-      {/* GST preview — updates live the instant a parking type is added or
-          removed, since that can cross the ₹45L bracket. */}
-      {computedTotal > 0 && <GstBreakdownBox unitValue={computedTotal} parkingBase={parkingBase} />}
+      {/* GST — refreshes the moment a slot is added or removed, since parking
+          can move the sale across a GST band. */}
+      <GstBreakdownBox quote={quote} loading={quoteLoading} />
 
       {/* Already-added allotments */}
       <div className=" border border-border p-3 space-y-2">
@@ -180,10 +178,10 @@ export const ParkingSelectionStep: React.FC<{
         )}
         {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
-            {(allotments as any[]).map((a: any) => (
+            {(allotments as any[]).map((a: any, i: number) => (
               <div key={`${a.Kind}-${a.Id}`} className="flex items-center justify-between text-xs bg-muted/30 px-2.5 py-1.5">
                 <span className="flex items-center gap-1.5">
-                  {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{displayParkingTotal(a).toLocaleString("en-IN")}
+                  {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · {inr(displayParkingTotal(a, i))}
                   {a.Kind === "Hold" && (
                     <span title="Reserved — becomes a permanent allotment once this application's booking is created"
                       className="text-[0.625rem] font-semibold px-1.5 py-0.5 border border-foreground/30 bg-card text-foreground">

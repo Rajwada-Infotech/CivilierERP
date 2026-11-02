@@ -7,19 +7,18 @@ import { translateError } from "@/lib/translateError";
 import { KEY_INK } from "./config";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { FileText, Download, Check, ClipboardCheck, ShieldCheck, AlertTriangle, RefreshCw, X } from "lucide-react";
-import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import { useExtraWorkRate, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 
-// Live "what will this actually cost" preview for the Extra Charge add
-// form — 18% is fixed from the HSN Master "Extra Charges" row (useGstRates
-// fetches it live, never hardcoded), matching exactly what the backend will
-// charge once submitted.
-export function ExtraWorkGstPreview({ amount }: { amount: number }) {
-  const { data: rates, isLoading } = useGstRates();
-  if (isLoading || !rates) return null;
-  const gst = computeExtraWorkGst(amount, rates);
+// "What will this cost" preview for the Extra Charge add form, at the rate the
+// server says this booking's extra charges take (none on a completed
+// building, a plot sale's own rule on land).
+export function ExtraWorkGstPreview({ amount, bookingId }: { amount: number; bookingId: number }) {
+  const { data: rate } = useExtraWorkRate(bookingId);
+  if (rate == null) return null;
+  const gst = computeExtraWorkGst(amount, rate);
   return (
     <div className="flex items-center justify-between border border-foreground/30 bg-card px-3 py-2 text-xs text-foreground">
-      <span>GST ({gst.rate}%, fixed — HSN Master)</span>
+      <span>GST ({gst.rate}%)</span>
       <span className="font-semibold">{fmtInr(gst.gstAmount)} → Total {fmtInr(gst.total)}</span>
     </div>
   );

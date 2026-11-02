@@ -19,6 +19,9 @@ const mockDb = {
   blocks: [{ Id: 10, BlockName: "1", ProjectId: 1 }],
   mix: [],     // { BlockId, ParkingType, Count, SortOrder }
   slots: [],   // { Id, ProjectId, BlockId, SlotNo, ParkingType, IsActive }
+  // sp_getapplock: one holder per resource; the next waits until the holder's
+  // transaction ends (as SQL Server does).
+  locks: new Map(),
 };
 const mockShortfall = (blockId) => {
   const want = {};
@@ -33,11 +36,21 @@ const mockShortfall = (blockId) => {
 };
 
 jest.mock("../db", () => {
-  const request = () => {
+  const request = (tx = null) => {
     const inputs = {};
     const r = {
       input: (name, _type, value) => { inputs[name] = value; return r; },
       query: async (q) => {
+        if (q.includes("sp_getapplock")) {
+          while (mockDb.locks.has(inputs.r)) await mockDb.locks.get(inputs.r).released;
+          let release;
+          const released = new Promise((ok) => { release = ok; });
+          mockDb.locks.set(inputs.r, { released });
+          tx.held.push(() => { mockDb.locks.delete(inputs.r); release(); });
+          return { recordset: [] };
+        }
+        // Let another request run between statements, as a real server would.
+        await new Promise((ok) => setImmediate(ok));
         if (q.includes("FROM dbo.enterprise")) return { recordset: [mockDb.project] };
         if (q.includes("SELECT b.Id AS BlockId, b.BlockName")) {
           return { recordset: mockDb.blocks.filter((b) => mockShortfall(b.Id).some((x) => x.Missing > 0)).map((b) => ({ BlockId: b.Id, BlockName: b.BlockName })) };
@@ -60,10 +73,14 @@ jest.mock("../db", () => {
     };
     return r;
   };
-  const transaction = () => ({ begin: async () => {}, commit: async () => {}, rollback: async () => {}, request });
+  const transaction = () => {
+    const tx = { held: [] };
+    const end = async () => { tx.held.splice(0).forEach((free) => free()); };
+    return Object.assign(tx, { begin: async () => {}, commit: end, rollback: end, request: () => request(tx) });
+  };
   return {
     sql: new Proxy({}, { get: () => (x) => x }),
-    getPool: () => ({ request, transaction }),
+    getPool: () => ({ request: () => request(), transaction }),
   };
 });
 jest.mock("../redis", () => ({ bumpCacheVersion: async () => {}, getRedis: () => null }));
@@ -126,4 +143,11 @@ test("skips names a live slot already uses, and brings back a deactivated one", 
   const open = mockDb.slots.filter((s) => s.IsActive && s.ParkingType === "Open").map((s) => s.SlotNo);
   expect(open).toEqual(["EMP/1/P2", "EMP/1/P3", "EMP/1/P4", "EMP/1/P5", "EMP/1/P6"]);
   expect(mockDb.slots.find((s) => s.Id === 51).IsActive).toBe(true); // reused, not duplicated
+});
+
+test("two Create clicks at the same moment still make only the 5 missing slots", async () => {
+  const [a, b] = await Promise.all([generate(), generate()]);
+  expect(a.body.createdCount + b.body.createdCount).toBe(5);
+  expect(mockDb.slots.filter((s) => s.IsActive && s.ParkingType === "Open")).toHaveLength(5);
+  expect(mockDb.slots.filter((s) => s.IsActive)).toHaveLength(12);
 });

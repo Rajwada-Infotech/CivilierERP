@@ -340,6 +340,7 @@ async function crmCustomerGuard(req, res, next, value) {
 module.exports = {
   assertBookingAllowed,
   setupScopeGuard,
+  refuseOutOfScope,
   crmProjectGuards,
   crmViaBookingSql,
   crmCustomerGuard,
