@@ -1,4 +1,4 @@
-// Auto Project Setup's parking tab. Its own component with its own project, fetches and state: parking is
+// Auto Project Setup's parking tab. Its own component with its own fetches and state (the project is shared via the address): parking is
 // block-scoped only (dbo.ParkingSlot has no floor), so it never needed floors or units first, and a slow request on
 // one tab can't affect the other.
 import React, { useEffect, useState } from "react";
@@ -10,6 +10,7 @@ import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
 import { ParkingNamingPanel } from "./NamingPanel";
 import { ProjectPicker } from "./ProjectPicker";
@@ -32,8 +33,9 @@ const ParkingSetup: React.FC = () => {
   const ask = useSheetAsk();
   const qc = useQueryClient();
   const rights = usePageRights("crm-auto-project-setup");
-  const [companyId, setCompanyId] = useState("");
-  const [projectId, setProjectId] = useState("");
+  // In the address, shared with the setup tab (see CrmProjectAutoSetup).
+  const [companyId, setCompanyId] = useUrlParam("company");
+  const [projectId, setProjectId] = useUrlParam("project");
   const [parkingTemplates, setParkingTemplates] = useState<Record<number, ParkingTemplateRow[]>>({});
   const [savingTemplateBlockId, setSavingTemplateBlockId] = useState<number | null>(null);
   // null = idle; "all" = every block; a block id = that block only.
