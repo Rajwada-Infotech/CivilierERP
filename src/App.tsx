@@ -475,6 +475,7 @@ const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
 const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
 const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
 const CrmDashboard         = withCountUp(lazy(() => import("./pages/CRM/CrmDashboard")));
+const CrmMyWork            = lazy(() => import("./pages/CRM/CrmMyWork"));
 const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDetails"));
 const CrmBookingAmendments = lazy(() => import("./pages/CRM/CrmBookingAmendments"));
 const CrmBrokerage         = lazy(() => import("./pages/CRM/CrmBrokerage"));
@@ -2612,6 +2613,8 @@ function AppRoutes() {
       <Route path="/crm/customer-360"     element={<ProtectedRoute pageKey="crm-customer-360"><CrmCustomer360 /></ProtectedRoute>} />
       <Route path="/crm/loan-details"     element={<ProtectedRoute pageKey="crm-loan-details"><CrmLoanTracking /></ProtectedRoute>} />
       <Route path="/crm/dashboard"             element={<ProtectedRoute pageKey="crm-dashboard"><CrmDashboard /></ProtectedRoute>} />
+      {/* No page key: the server returns only the queues this person may act on. */}
+      <Route path="/crm/my-work"               element={<ProtectedRoute><CrmMyWork /></ProtectedRoute>} />
       <Route path="/crm/leads"                 element={<ProtectedRoute pageKey="crm-leads"><CrmLeads /></ProtectedRoute>} />
       <Route path="/crm/legal-milestones"      element={<ProtectedRoute pageKey="crm-legal-milestones"><CrmLegalMilestones /></ProtectedRoute>} />
       <Route path="/crm/noc"                   element={<ProtectedRoute pageKey="crm-noc"><CrmNoc /></ProtectedRoute>} />

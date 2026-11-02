@@ -1,4 +1,4 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2, ArrowRightLeft } from "lucide-react";
+import { ClipboardList, Inbox, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2, ArrowRightLeft } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Sidebar groups follow the real legal workflow sequence per Transfer of
@@ -12,6 +12,8 @@ import { NavItem } from "./SidebarPrimitives";
 //
 export const crmNavItems: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/crm/dashboard", pageKey: "crm-dashboard" },
+  // Everything waiting on the signed-in person; the server picks the queues.
+  { label: "My Work", icon: Inbox, path: "/crm/my-work" },
 
   // ── Leads (SA handoff pool) ──────────────────────────────────────────────────
   { label: "Leads", icon: Users, path: "/crm/leads", pageKey: "crm-leads" },
