@@ -1,6 +1,7 @@
 // Shared pieces of the Activity Browser: drawing-sheet ink styles, the event and role marks,
 // and the small formatters both views use.
 import React, { useEffect, useState } from "react";
+import { Eye, FileDown, LogIn, LogOut, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { parseDeviceInfo } from "@/utils/deviceFingerprint";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -38,6 +39,33 @@ export const kindLabel = (kind: string) => (kind === "settings_change" ? "settin
 export const KindTag: React.FC<{ kind: string; label?: string }> = ({ kind, label }) => (
   <span className={`${TAG} ${KIND_INK[kind] ?? KIND_INK.read}`}>{label ?? kindLabel(kind)}</span>
 );
+
+const KIND_ICON: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  create: Plus, update: Pencil, delete: Trash2, export: FileDown, settings_change: Settings, read: Eye, login: LogIn, logout: LogOut,
+};
+
+const KIND_DONE: Record<string, string> = { create: "created", update: "updated", delete: "deleted", export: "exported", settings_change: "settings", read: "opened", login: "sign-ins" };
+const kindDone = (kind: string) => KIND_DONE[kind] ?? kindLabel(kind);
+
+/** "5 created" with the kind's icon, drawn in the kind's ink: for a day's header, beside the day's total. */
+export const KindCount: React.FC<{ kind: string; count: number; onClick?: () => void; pressed?: boolean }> = ({ kind, count, onClick, pressed }) => {
+  const Icon = KIND_ICON[kind] ?? Eye;
+  const body = (
+    <>
+      <Icon size={10} className="shrink-0" />
+      <span className="tabular-nums">{count}</span> {kindDone(kind)}
+    </>
+  );
+  const ink = `${TAG} gap-1 ${KIND_INK[kind] ?? KIND_INK.read}`;
+  if (!onClick) return <span className={ink} title={`${count} ${kindDone(kind)}`}>{body}</span>;
+  // A tag that can be clicked to show only this kind; the chosen one is ringed.
+  return (
+    <button type="button" onClick={onClick} aria-pressed={pressed} title={pressed ? "Show everything again" : `Show only the ${kindDone(kind)} ones`}
+      className={`${ink} cursor-pointer hover:opacity-80 ${pressed ? "ring-2 ring-foreground ring-offset-1 ring-offset-card" : ""}`}>
+      {body}
+    </button>
+  );
+};
 
 export function roleLabel(role: string) {
   const map: Record<string, string> = { super_admin: "Super Admin", admin: "Admin", user: "User", dba: "DBA" };
