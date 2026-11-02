@@ -95,10 +95,10 @@ export default function CrmCustomers() {
 
   const columns: ColumnDef<any, unknown>[] = [
     {
-      accessorKey: "CustomerNo", header: "Customer", size: 220,
+      accessorKey: "CustomerNo", header: "Customer", size: 200,
       cell: ({ row: { original: c } }) => (
         <div className="leading-tight min-w-0">
-          <p className="text-sm font-medium text-foreground truncate">{c.CustomerName}</p>
+          <p className="text-sm font-medium text-foreground line-clamp-2 break-words">{c.CustomerName}</p>
           <p className="text-[0.6875rem] text-muted-foreground font-heading tabular-nums truncate">{c.CustomerNo}{c.LeadUid ? ` · from ${c.LeadUid}` : ""}</p>
         </div>
       ),
@@ -113,15 +113,15 @@ export default function CrmCustomers() {
       ),
     },
     {
-      id: "location", header: "City", size: 140, enableSorting: false,
+      id: "location", header: "City", size: 120, enableSorting: false,
       cell: ({ row: { original: c } }) => <span className="text-xs">{[c.PermanentCity, c.PermanentState].filter(Boolean).join(", ") || "—"}</span>,
     },
     {
-      id: "projects", header: "Projects", size: 200, enableSorting: false,
+      id: "projects", header: "Projects", size: 180, enableSorting: false,
       cell: ({ row: { original: c } }) => {
         const names = String(c.ProjectNames || "").split("|").filter(Boolean);
         return names.length ? (
-          <span className="text-xs block truncate max-w-[200px]" title={names.join(", ")}>
+          <span className="text-xs block line-clamp-2 break-words" title={names.join(", ")}>
             {names.slice(0, 2).join(", ")}{names.length > 2 ? ` +${names.length - 2}` : ""}
           </span>
         ) : <span className="text-xs text-muted-foreground">None yet</span>;

@@ -244,21 +244,23 @@ const CrmServiceTickets: React.FC = () => {
             </div>
 
             <div className="overflow-x-auto thin-scroll">
-              <table className="w-full text-sm min-w-[1100px]">
+              {/* Category sits with the subject and the rating with the status, so the
+                  actions stay on screen without scrolling sideways. */}
+              <table className="w-full text-sm min-w-[900px]">
                 <thead>
                   <tr style={{ borderBottom: RULE }}>
-                    <th className={th}>Ticket</th><th className={th}>Customer</th><th className={th}>Category</th><th className={th}>Subject</th>
+                    <th className={th}>Ticket</th><th className={th}>Customer</th><th className={th}>Subject</th>
                     <th className={th}>Priority</th><th className={th}>Assigned to</th><th className={th}>SLA due</th><th className={th}>Status</th>
-                    <th className={th}>Rating</th><th className={th}>Actions</th>
+                    <th className={th}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {isError ? (
-                    <tr><td colSpan={10} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                    <tr><td colSpan={8} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
                   ) : isLoading ? (
-                    <tr><td colSpan={10} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
+                    <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
                   ) : tickets.length === 0 ? (
-                    <tr><td colSpan={10} className={`${td} text-center text-muted-foreground`}>{search || statusFilter || cpb.projectId ? "No ticket matches." : "No service tickets yet."}</td></tr>
+                    <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>{search || statusFilter || cpb.projectId ? "No ticket matches." : "No service tickets yet."}</td></tr>
                   ) : tickets.map((t: any) => {
                     const overdue = isOverdue(t);
                     return (
@@ -268,9 +270,9 @@ const CrmServiceTickets: React.FC = () => {
                           <div className="font-medium leading-snug"><ApplicantNames name={t.ApplicantName} bookingId={t.BookingId} applicationId={t.ApplicationId} /></div>
                           <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{t.BookingNo} · {t.UnitNo}</div>
                         </td>
-                        <td className={`${td} text-xs`}>{words(t.Category || "")}</td>
                         <td className={td}>
                           <div className="max-w-xs leading-snug">{t.Subject}</div>
+                          {t.Category && <div className="mt-0.5 text-[0.6875rem] text-muted-foreground">{words(t.Category)}</div>}
                           {t.RaisedByCustomer && <div className="mt-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">From the customer</div>}
                         </td>
                         <td className={td}>
@@ -286,11 +288,9 @@ const CrmServiceTickets: React.FC = () => {
                           {statusTone(t.Status) === "none"
                             ? <span className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{words(t.Status)}</span>
                             : <SheetMark text={words(t.Status)} tone={statusTone(t.Status) as "done" | "waiting" | "stopped"} />}
-                        </td>
-                        <td className={td}>
-                          {t.CustomerRating
-                            ? <span className="inline-flex items-center gap-0.5 text-xs font-heading tabular-nums"><Star size={12} fill="currentColor" /> {t.CustomerRating}/5</span>
-                            : <span className="text-muted-foreground">—</span>}
+                          {t.CustomerRating ? (
+                            <div className="mt-1 inline-flex items-center gap-0.5 text-xs font-heading tabular-nums" title="Customer rating"><Star size={12} fill="currentColor" /> {t.CustomerRating}/5</div>
+                          ) : null}
                         </td>
                         <td className={td}>
                           {rights.canEdit ? (
