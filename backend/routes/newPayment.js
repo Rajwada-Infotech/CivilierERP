@@ -2940,7 +2940,11 @@ router.get("/:id/posting", async (req, res) => {
       if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
+    // Paid straight to expense ledger(s) (Direct Expense Payment): those ledgers are the debit side, shown by name.
+    const previewAllocations = await require("../services/expenseHeadAllocation").getAllocations(pool, sql, "NewPayment", pmt.PPaymentID);
+
     const accounts = {
+      expenseHeads: previewAllocations.map((a) => ({ id: a.lHeadId, label: a.lHeadName, code: a.lHeadCode ?? null, amount: a.amount })),
       // Plain party name when one resolved — matches how a Journal
       // Voucher's own posting display names its ledgers (e.g. "Pinaki
       // Chandra", not "Supplier/Creditor Payable — Pinaki Chandra"), and

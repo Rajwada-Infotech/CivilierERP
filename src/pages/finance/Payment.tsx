@@ -5591,7 +5591,9 @@ const Payment: React.FC = () => {
                           const tdsAmt = isPayment ? (entry.tdsAmount ?? 0) : 0;
                           const rows = isPayment
                             ? [
-                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const, amount: entry.amount },
+                                ...((entry.accounts?.expenseHeads?.length ?? 0) > 0
+                                  ? entry.accounts!.expenseHeads!.map((h: { label: string; code?: string | null; amount: number }) => ({ label: h.label, code: h.code ?? undefined, side: "debit" as const, amount: h.amount }))
+                                  : [{ label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const, amount: entry.amount }]),
                                 { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const, amount: entry.amount - tdsAmt },
                                 ...(tdsAmt > 0
                                   ? [{ label: entry.accounts?.tdsPayable?.label ?? "TDS Payable A/c", code: entry.accounts?.tdsPayable?.code, side: "credit" as const, amount: tdsAmt }]
