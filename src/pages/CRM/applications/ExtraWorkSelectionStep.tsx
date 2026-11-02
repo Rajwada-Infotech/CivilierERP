@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Trash2, IndianRupee, Lock, Wallet } from "lucide-react";
-import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import { computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import type { PriceQuote } from "@/lib/crmPriceQuote";
 import { EXTRA_CHARGE_API, KEY_INK } from "./config";
 
 // ── Step 3: Extra Charges ──────────────────────────────────────────────────────────
@@ -17,10 +18,12 @@ import { EXTRA_CHARGE_API, KEY_INK } from "./config";
 // backend) — free to add/remove pre-approval, frozen once Approved.
 export const ExtraWorkSelectionStep: React.FC<{
   applicationId: number;
-  computedTotal: number;
+  // The sale's price from the server — its Extra Work rate is the one this
+  // sale takes (a plot sale's own rule, none on a completed building).
+  quote: PriceQuote | undefined;
   canEdit: boolean;
   wizardAppStatus: string | null;
-}> = ({ applicationId, computedTotal, canEdit, wizardAppStatus }) => {
+}> = ({ applicationId, quote, canEdit, wizardAppStatus }) => {
   const { data: charges = [], refetch } = useQuery({
     queryKey: ["crm-app-extra-charges", applicationId],
     queryFn: async () => {
@@ -28,7 +31,6 @@ export const ExtraWorkSelectionStep: React.FC<{
       return r.ok ? r.json() : [];
     },
   });
-  const { data: rates } = useGstRates();
 
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
@@ -68,15 +70,15 @@ export const ExtraWorkSelectionStep: React.FC<{
     }
   };
 
-  const preview = amount && Number(amount) > 0 && rates ? computeExtraWorkGst(Number(amount), rates) : null;
+  const preview = amount && Number(amount) > 0 && quote ? computeExtraWorkGst(Number(amount), quote.extraRate) : null;
 
   return (
     <div className="space-y-4">
       <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
         <IndianRupee size={11} className="text-foreground shrink-0" />
-        Unit {fmtInr(computedTotal)}
+        Unit {fmtInr(quote?.unitValue ?? 0)}
         {chargesTotal > 0 && ` + Extra Charges ${fmtInr(chargesTotal)}`}
-        {" — Extra Charges is optional and never affects the Unit+Parking GST bracket, only its own fixed 18% (HSN Master)."}
+        {quote ? ` — optional; taxed at its own ${quote.extraRate}% and never moves the unit's GST band.` : ""}
       </div>
 
       <div className=" border border-border p-3 space-y-2">
@@ -119,7 +121,7 @@ export const ExtraWorkSelectionStep: React.FC<{
             className="w-full text-sm border border-border px-2 py-1.5 bg-background" />
           {preview && (
             <div className="flex items-center justify-between border border-foreground/30 bg-card px-3 py-2 text-xs text-foreground">
-              <span>GST ({preview.rate}%, fixed — HSN Master)</span>
+              <span>GST ({preview.rate}%)</span>
               <span className="font-semibold">{fmtInr(preview.gstAmount)} → Total {fmtInr(preview.total)}</span>
             </div>
           )}

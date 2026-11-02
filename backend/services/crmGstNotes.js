@@ -658,6 +658,10 @@ async function applyAdjustment(pool, id, user) {
   // After commit — each step is idempotent and never undoes the credit note.
   try {
     await require("./crmGst").recalculateBookingGst(pool, n.BookingId);
+    // A note tied to a milestone has already moved that milestone itself. One
+    // on the booking as a whole changes only the total, so the unpaid steps
+    // must follow it, or the schedule still asks for the old price.
+    if (!n.MilestoneId) await require("./crmWorkflowGuards").recalculateRemainingMilestones(pool, n.BookingId);
   } catch (err) {
     console.error("[crmGstNotes] Critical post-commit failure:", err);
     throw err;
@@ -789,6 +793,10 @@ async function reverseAdjustment(pool, n, user) {
   } catch (e) { try { await tx.rollback(); } catch { /* rolled back */ } throw e; }
   try {
     await require("./crmGst").recalculateBookingGst(pool, n.BookingId);
+    // A note tied to a milestone has already moved that milestone itself. One
+    // on the booking as a whole changes only the total, so the unpaid steps
+    // must follow it, or the schedule still asks for the old price.
+    if (!n.MilestoneId) await require("./crmWorkflowGuards").recalculateRemainingMilestones(pool, n.BookingId);
   } catch (err) {
     console.error("[crmGstNotes] Critical post-commit failure:", err);
     throw err;

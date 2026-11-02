@@ -1,5 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
+const { unitPrice, rateSqlType } = require("../services/bookingUnits");
 const { returnLeadToPool } = require("../services/saHandoff");
 const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const multer = require("multer");
@@ -566,7 +567,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const existingArea = oldRow.AreaSqFt;
 
     const total = b.TotalValue != null ? parseFloat(b.TotalValue)
-                : (existingArea && rate ? Math.round(existingArea * rate) : null);
+                : (existingArea && rate ? unitPrice(existingArea, rate) : null);
 
     // Changing the payment plan on a booking that already has milestone
     // history is NOT a cosmetic FK swap — the actual payment schedule
@@ -647,7 +648,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         .input("unit",  sql.NVarChar(100), b.UnitNo || null)
         .input("blk",   sql.NVarChar(100), b.BlockName   || null)
         .input("flr",   sql.NVarChar(100), b.FloorName   || null)
-        .input("rate",  sql.Decimal(18,2), rate)
+        .input("rate",  rateSqlType(), rate)
         .input("tot",   sql.Decimal(18,2), total)
         .input("bamt",  sql.Decimal(18,2), effectiveBookingAmount)
         .input("bdate", sql.Date,          b.BookingDate || null)
@@ -880,7 +881,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     const rate = oldRow.RatePerSqFt != null ? Number(oldRow.RatePerSqFt)
                : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
     const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
-    const total = area && rate ? Math.round(area * rate) : oldRow.TotalValue;
+    const total = area && rate ? unitPrice(area, rate) : oldRow.TotalValue;
     // Re-pointing a real legal transaction to a different physical unit,
     // its GST recalc, the (conditional) full payment-schedule regeneration,
     // the permanent change-log entry, and the audit log are one event —
@@ -905,7 +906,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
         .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
         .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
-        .input("rate",             sql.Decimal(18,2), rate)
+        .input("rate",             rateSqlType(), rate)
         .input("tot",   sql.Decimal(18,2), total)
         .input("ppid",  sql.Int, newPlanId)
         .input("ub",    sql.Int, actor)
@@ -928,7 +929,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       // protected against a second sale.
       const moved = await tx.request()
         .input("id", sql.Int, id).input("old", sql.Int, oldUnitId).input("uid", sql.Int, newUnitId)
-        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), rate).input("tot", sql.Decimal(18, 2), total)
+        .input("area", sql.Decimal(18, 2), area).input("rate", rateSqlType(), rate).input("tot", sql.Decimal(18, 2), total)
         .input("ub", sql.Int, actor)
         .query(`
           UPDATE dbo.CrmBookingUnit SET UnitId = @uid, AreaSqFt = @area, RatePerSqFt = ISNULL(@rate, RatePerSqFt),
@@ -937,7 +938,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
         `);
       if (!moved.rowsAffected[0]) {
         await tx.request().input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
-          .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), rate).input("tot", sql.Decimal(18, 2), total).input("ub", sql.Int, actor)
+          .input("area", sql.Decimal(18, 2), area).input("rate", rateSqlType(), rate).input("tot", sql.Decimal(18, 2), total).input("ub", sql.Int, actor)
           .query(`
             INSERT INTO dbo.CrmBookingUnit (BookingId, UnitId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
             VALUES (@id, @uid, @area, @rate, @tot, N'Active', 1, @ub, SYSDATETIME())

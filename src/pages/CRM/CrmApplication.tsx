@@ -21,14 +21,14 @@ import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useGstRates, computeUnitParkingGst } from "@/lib/crmGst";
+import { usePriceQuote, inr } from "@/lib/crmPriceQuote";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
-import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, parseMilestones, inputCls, labelCls } from "./applications/config";
-import { GstBreakdownBox } from "./applications/GstBreakdown";
+import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, inputCls, labelCls } from "./applications/config";
+import { GstBreakdownBox, QuoteSchedule, gstReason } from "./applications/GstBreakdown";
 import { CoApplicantStep } from "./applications/CoApplicantStep";
 import { ApplicationFormPdfDialog } from "./applications/ApplicationFormPdfDialog";
 import { BankDetailsStep } from "./applications/BankDetailsStep";
@@ -176,6 +176,19 @@ const CrmApplication: React.FC = () => {
     },
     enabled: viewingAppId != null,
   });
+  // The opened application's price, GST and schedule — from the server, the
+  // same functions that price its booking (see the wizard's quote below).
+  const viewingApp = viewingAppDetail?.application;
+  const { data: viewingQuote } = usePriceQuote(viewingApp ? {
+    unitIds: viewingApp.PreferredUnitIdsCsv ? String(viewingApp.PreferredUnitIdsCsv).split(",") : (viewingApp.PreferredUnitId != null ? [viewingApp.PreferredUnitId] : []),
+    plotIds: viewingApp.PreferredPlotIdsCsv ? String(viewingApp.PreferredPlotIdsCsv).split(",") : [],
+    ratePerSqFt: viewingApp.RatePerSqFt,
+    parkingBases: (viewingAppParking as any[]).map((pk) => (Number(pk.RateSnapshot) || 0) * (Number(pk.Quantity) || 1)),
+    extraAmounts: (viewingAppExtraCharges as any[]).map((c) => Number(c.Amount) || 0),
+    paymentPlanId: viewingApp.PaymentPlanId,
+    bookingAmount: viewingApp.BookingAmount ?? viewingApp.TokenValue,
+    customerId: viewingApp.CustomerId,
+  } : null);
   // Invoices for the application's linked booking — same source and shape
   // the Booking Detail page uses, rendered through the shared CrmInvoiceList
   // so they read identically everywhere. Read-only here; invoices are
@@ -208,7 +221,6 @@ const CrmApplication: React.FC = () => {
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
   const { data: rateTiers = [] } = useQuery({ queryKey: ["crm-brokerage-rate-tiers"], queryFn: fetchBrokerageRateTiers, staleTime: 5 * 60_000 });
   const { data: blockPlanTags = [] } = useQuery({ queryKey: ["crm-app-block-plan-tags"], queryFn: fetchBlockPlanTags, staleTime: 5 * 60_000 });
-  const { data: crmGstRates } = useGstRates();
   // Same queryKey ParkingSelectionStep (Step 2) uses for this applicationId
   // — react-query dedupes/caches across the two, so the Details tab (Step
   // 6) can show the parking total without firing its own separate fetch.
@@ -220,10 +232,6 @@ const CrmApplication: React.FC = () => {
     },
     enabled: applicationId != null,
   });
-  // Pre-tax base (RateSnapshot x Quantity) — for the GST preview box, which
-  // needs to compute its own rate/amount from a clean base, not sum a
-  // TotalAmount that may already carry a different (soon to be replaced) rate.
-  const detailParkingBase = (detailParkingAllotments as any[]).reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
   // Same queryKey ExtraWorkSelectionStep (Step 3) uses for this applicationId.
   const { data: detailExtraCharges = [] } = useQuery({
     queryKey: ["crm-app-extra-charges", applicationId],
@@ -511,11 +519,12 @@ const CrmApplication: React.FC = () => {
   const totalAreaSqFt = useMemo(() => (
     selectedPlots.length
       ? selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0)
-      : Number(selectedUnit?.AreaSqFt) || 0
-  ), [selectedUnit, selectedPlots]);
+      : (units as any[]).filter((u: any) => form.PreferredUnitIds.includes(String(u.Id))).reduce((sum: number, u: any) => sum + (Number(u.AreaSqFt) || 0), 0)
+  ), [units, form.PreferredUnitIds, selectedPlots]);
   const computedTotal = useMemo(() => {
     const rate = Number(form.RatePerSqFt) || 0;
-    return totalAreaSqFt && rate ? Math.round(totalAreaSqFt * rate) : 0;
+    // To the paisa — the server's unitPrice rule, so this echo and the quote agree.
+    return totalAreaSqFt && rate ? Math.round(totalAreaSqFt * rate * 100) / 100 : 0;
   }, [totalAreaSqFt, form.RatePerSqFt]);
 
   // Total Value can be typed directly instead of Rate — the rate is back-
@@ -545,10 +554,19 @@ const CrmApplication: React.FC = () => {
     const rate = Math.round((total / totalAreaSqFt) * 10000) / 10000;
     setForm((f) => ({ ...f, RatePerSqFt: String(rate) }));
   };
-  const unitParkingGstPreview = useMemo(
-    () => (crmGstRates ? computeUnitParkingGst(computedTotal, detailParkingBase, crmGstRates) : null),
-    [crmGstRates, computedTotal, detailParkingBase],
-  );
+  // The price, GST and payment schedule, from the server — the same functions
+  // that will price the booking (src/lib/crmPriceQuote.ts). Parking and extra
+  // charges already picked on this application are included.
+  const { data: quote, isFetching: quoteLoading } = usePriceQuote(hasInventorySelection ? {
+    unitIds: form.PreferredUnitIds,
+    plotIds: form.PreferredPlotIds,
+    ratePerSqFt: form.RatePerSqFt || null,
+    parkingBases: (detailParkingAllotments as any[]).map((pk) => (Number(pk.RateSnapshot) || 0) * (Number(pk.Quantity) || 1)),
+    extraAmounts: (detailExtraCharges as any[]).map((c) => Number(c.Amount) || 0),
+    paymentPlanId: form.PaymentPlanId || null,
+    bookingAmount: form.TokenValue || null,
+    customerId: form.CustomerId || null,
+  } : null);
 
   // Brief, real-money preview of the plan actually picked — Booking is the
   // plan's own fixed ₹ (never a % — see CrmPaymentPlans.tsx), every
@@ -558,14 +576,7 @@ const CrmApplication: React.FC = () => {
     (paymentPlans as any[]).find((p: any) => String(p.Id) === form.PaymentPlanId) || null,
     [paymentPlans, form.PaymentPlanId]
   );
-  const selectedPlanMilestones = useMemo(() => parseMilestones(selectedPaymentPlan?.MilestonesJson), [selectedPaymentPlan]);
   const selectedPlanBookingAmount = Number(selectedPaymentPlan?.BookingAmount || 0);
-  // Extra Charges's own GST-inclusive total folds into GrandTotal (and, once a
-  // real Booking exists, into the same shared %-based milestones via
-  // recalculateRemainingMilestones) exactly like Parking — this preview
-  // needs to include it too, or it understates what each later milestone %
-  // will actually resolve to once the booking is created.
-  const selectedPlanRemainder = Math.max(0, (unitParkingGstPreview?.total ?? computedTotal) + detailExtraChargesTotal - selectedPlanBookingAmount);
 
   // Token Amount defaults to the plan's own fixed Booking Amount the moment
   // a plan is picked — Token Type is no longer a free "Percentage vs Amount"
@@ -1709,9 +1720,9 @@ const CrmApplication: React.FC = () => {
                   {selectedUnit && (
                     <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
                       <IndianRupee size={11} className="text-foreground shrink-0" />
-                      {form.RatePerSqFt && computedTotal ? (
+                      {form.RatePerSqFt && quote ? (
                         <span>
-                          {selectedUnit.AreaSqFt} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span>
+                          {quote.areaSqFt.toLocaleString("en-IN")} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">{inr(quote.unitValue)}</span>
                         </span>
                       ) : (
                         <span>Enter Rate (₹/sqft) to see the full price.</span>
@@ -1721,8 +1732,8 @@ const CrmApplication: React.FC = () => {
                   {isPlottedProject && selectedPlots.length > 0 && (
                     <div className=" border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
                       <IndianRupee size={11} className="text-foreground shrink-0" />
-                      {form.RatePerSqFt && computedTotal ? (
-                        <span>{selectedPlots.length} plot{selectedPlots.length === 1 ? "" : "s"} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span></span>
+                      {form.RatePerSqFt && quote ? (
+                        <span>{selectedPlots.length} plot{selectedPlots.length === 1 ? "" : "s"} · {quote.areaSqFt.toLocaleString("en-IN")} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">{inr(quote.unitValue)}</span></span>
                       ) : <span>Enter Rate (₹/sqft) to see the combined plot price.</span>}
                     </div>
                   )}
@@ -1771,10 +1782,7 @@ const CrmApplication: React.FC = () => {
                       including any Parking already picked on Step 2 in this
                       same application, so staff see the real combined
                       bracket from the very start, not just at the very end. */}
-                  {form.RatePerSqFt && computedTotal ? (
-                    isPlottedProject ? <div className=" border border-foreground/30 bg-card p-4"><p className="text-xs font-semibold text-foreground">Land sale</p><p className="mt-1 text-[0.6875rem] text-muted-foreground">Selected plots are sold as land. GST is not applicable to this land value.</p></div>
-                      : <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
-                  ) : null}
+                  {hasInventorySelection && form.RatePerSqFt ? <GstBreakdownBox quote={quote} loading={quoteLoading} /> : null}
 
                   {/* Payment Plan — mandatory the moment a unit is picked.
                       Options are this unit's own tagged plans (set in Unit
@@ -1807,31 +1815,9 @@ const CrmApplication: React.FC = () => {
                         <p className="text-[0.6875rem] text-muted-foreground">No payment plans tagged anywhere in this unit's hierarchy — showing every active plan instead.</p>
                       )}
 
-                      {/* Brief plan breakdown — Booking is the plan's own
-                          fixed ₹ (never a %), everything after it splits
-                          100% of (Total Value - Booking) the same way
-                          generateMilestonesForBooking computes it for a real
-                          Booking. Purely a preview here — nothing is saved
-                          until the actual Booking is created. */}
-                      {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                        <div className=" border border-foreground/30 bg-card px-3 py-2 space-y-1">
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Booking</span>
-                            <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
-                          </div>
-                          {selectedPlanMilestones.slice(1).map((m, i) => (
-                            <div key={i} className="flex items-center justify-between text-xs text-muted-foreground">
-                              <span className="truncate pr-2">{m.name} <span className="text-[0.625rem]">({m.pct}%)</span></span>
-                              <span className="font-semibold text-foreground shrink-0">
-                                {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
-                              </span>
-                            </div>
-                          ))}
-                          {!computedTotal && (
-                            <p className="text-[0.625rem] text-muted-foreground pt-0.5">Enter Rate (₹/sqft) to see ₹ amounts for each step.</p>
-                          )}
-                        </div>
-                      )}
+                      {/* The schedule this plan gives at this price — the
+                          server's split, the same one the booking stores. */}
+                      {selectedPaymentPlan && <QuoteSchedule quote={quote} />}
                     </div>
                   )}
 
@@ -1951,7 +1937,8 @@ const CrmApplication: React.FC = () => {
               applicationId={applicationId}
               projectId={form.ProjectId}
               blockId={form.BlockId}
-              computedTotal={computedTotal}
+              quote={quote}
+              quoteLoading={quoteLoading}
               canEdit={canEditUnitSelection}
               wizardAppStatus={wizardAppStatus}
             />
@@ -1960,7 +1947,7 @@ const CrmApplication: React.FC = () => {
           {step === 3 && applicationId != null && (
             <ExtraWorkSelectionStep
               applicationId={applicationId}
-              computedTotal={computedTotal}
+              quote={quote}
               canEdit={canEditUnitSelection}
               wizardAppStatus={wizardAppStatus}
             />
@@ -2019,10 +2006,7 @@ const CrmApplication: React.FC = () => {
                 </div>
               )}
 
-              {hasInventorySelection && computedTotal > 0 && (
-                isPlottedProject ? <div className=" border border-foreground/30 bg-card px-3 py-2 text-xs"><p className="font-semibold text-foreground">Land sale</p><p className="mt-0.5 text-muted-foreground">GST not applicable to the selected plot value.</p></div>
-                  : <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
-              )}
+              {hasInventorySelection && <GstBreakdownBox quote={quote} loading={quoteLoading} />}
 
               {/* Extra Charges — separate from the Unit+Parking GST bracket
                   entirely (own fixed 18% HSN rate, never affects which
@@ -2044,26 +2028,9 @@ const CrmApplication: React.FC = () => {
                 </div>
               )}
 
-              {/* Payment plan breakdown — identical math to the Step 1
-                  preview (Booking is the plan's own fixed ₹, everything
-                  after it splits 100% of Total - Booking). */}
-              {selectedPaymentPlan && selectedPlanMilestones.length > 0 && (
-                <div className=" border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1">
-                  <p className="font-semibold text-foreground">{selectedPaymentPlan.PlanName} — Payment Breakdown</p>
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>Booking</span>
-                    <span className="font-semibold text-foreground">₹{selectedPlanBookingAmount.toLocaleString("en-IN")}</span>
-                  </div>
-                  {selectedPlanMilestones.slice(1).map((m, i) => (
-                    <div key={i} className="flex items-center justify-between text-muted-foreground">
-                      <span className="truncate pr-2">{m.name} <span className="text-[0.625rem]">({m.pct}%)</span></span>
-                      <span className="font-semibold text-foreground shrink-0">
-                        {computedTotal ? `₹${Math.round((selectedPlanRemainder * m.pct) / 100).toLocaleString("en-IN")}` : "—"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* The payment schedule at this price — the server's split. */}
+              <QuoteSchedule quote={quote} title={selectedPaymentPlan ? `${selectedPaymentPlan.PlanName} — Payment Breakdown` : "Payment Breakdown"}
+                className="border border-primary/20 bg-primary/5 px-3 py-2 text-xs space-y-1" />
 
               {/* Payment Details — the actual token capture. These columns
                   already existed on CrmApplication and were already read by
@@ -2264,20 +2231,17 @@ const CrmApplication: React.FC = () => {
             const a = viewingAppDetail.application;
             const booking = (viewingAppDetail.bookings || [])[0];
             const isPlotSale = !!a.IsPlotSale;
-            const unitArea = Number(isPlotSale ? a.PlotAreaSqFt : a.UnitAreaSqFt) || 0;
-            const unitRate = Number(a.RatePerSqFt) || 0;
-            const unitTotal = unitArea && unitRate ? Math.round(unitArea * unitRate) : 0;
+            const unitArea = viewingQuote?.areaSqFt ?? (Number(isPlotSale ? a.PlotAreaSqFt : a.UnitAreaSqFt) || 0);
             const parkingRows = viewingAppParking as any[];
-            const parkingBase = parkingRows.reduce((s, p) => s + (Number(p.RateSnapshot) || 0) * (Number(p.Quantity) || 1), 0);
-            // Land is outside GST, so a plot sale gets no Unit+Parking GST.
-            const unitParkingGst = !isPlotSale && crmGstRates ? computeUnitParkingGst(unitTotal, parkingBase, crmGstRates) : null;
+            const unitRate = Number(a.RatePerSqFt) || 0;
+            // Every money figure below is the server's quote (viewingQuote).
+            const vq = viewingQuote;
+            const unitTotal = vq?.unitValue ?? 0;
+            const parkingBase = vq?.parkingBase ?? 0;
             const plan = (paymentPlans as any[]).find((p: any) => String(p.Id) === String(a.PaymentPlanId)) || null;
-            const planMilestones = parseMilestones(plan?.MilestonesJson);
-            const planBookingAmount = Number(plan?.BookingAmount || 0);
             const extraChargeRows = viewingAppExtraCharges as any[];
-            const extraChargesTotal = extraChargeRows.reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
-            const grandTotal = (unitParkingGst?.total ?? (unitTotal + parkingBase)) + extraChargesTotal;
-            const planRemainder = Math.max(0, grandTotal - planBookingAmount);
+            const extraChargesTotal = vq?.extraChargesTotal ?? 0;
+            const grandTotal = vq?.grandTotal ?? 0;
 
             // reusable mini row helper
             const Row = ({ label, value, full }: { label: string; value: React.ReactNode; full?: boolean }) => (
@@ -2510,10 +2474,10 @@ const CrmApplication: React.FC = () => {
                         <span className="font-medium">₹{extraChargesTotal.toLocaleString("en-IN")}</span>
                       </div>
                     )}
-                    {unitParkingGst && (
+                    {vq && vq.totalGstAmount > 0 && (
                       <div className="flex justify-between text-xs text-muted-foreground">
                         <span>GST</span>
-                        <span>₹{(unitParkingGst.total - unitTotal - parkingBase).toLocaleString("en-IN")}</span>
+                        <span>{inr(vq.totalGstAmount)}</span>
                       </div>
                     )}
                     {grandTotal > 0 && (
@@ -2522,28 +2486,10 @@ const CrmApplication: React.FC = () => {
                         <span>₹{grandTotal.toLocaleString("en-IN")}</span>
                       </div>
                     )}
-                    {/* Payment plan milestone schedule */}
-                    {plan && planMilestones.length > 0 && grandTotal > 0 && (
-                      <div className="pt-3 mt-1 border-t border-border">
-                        <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mb-1.5">Payment Schedule · {plan.PlanName || a.PaymentPlanName}</p>
-                        <table className="w-full text-xs tabular-nums">
-                          <tbody>
-                            <tr className="border-b border-border/60">
-                              <td className="py-1.5 text-muted-foreground">Booking</td>
-                              <td className="py-1.5 text-right text-muted-foreground w-14">fixed</td>
-                              <td className="py-1.5 text-right font-medium w-28">₹{planBookingAmount.toLocaleString("en-IN")}</td>
-                            </tr>
-                            {planMilestones.slice(1).map((m, i) => (
-                              <tr key={i} className="border-b border-border/60 last:border-0">
-                                <td className="py-1.5 text-muted-foreground pr-2">{m.name}</td>
-                                <td className="py-1.5 text-right text-muted-foreground w-14">{m.pct}%</td>
-                                <td className="py-1.5 text-right font-medium w-28">₹{Math.round((planRemainder * m.pct) / 100).toLocaleString("en-IN")}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                    {vq && <p className="text-[0.625rem] text-muted-foreground">{gstReason(vq)}</p>}
+                    {/* Payment schedule at this price — the server's split. */}
+                    <QuoteSchedule quote={vq} title={`Payment Schedule${plan?.PlanName || a.PaymentPlanName ? ` · ${plan?.PlanName || a.PaymentPlanName}` : ""}`}
+                      className="pt-3 mt-1 border-t border-border space-y-1 text-xs [&>p:first-child]:text-[0.625rem] [&>p:first-child]:uppercase [&>p:first-child]:tracking-wide [&>p:first-child]:text-muted-foreground [&>p:first-child]:font-normal" />
                     {/* Extra work detail */}
                     {extraChargeRows.length > 0 && (
                       <div className="pt-2 border-t border-border space-y-1">
