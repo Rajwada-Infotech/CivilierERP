@@ -20,7 +20,11 @@ import { SheetShell, SheetMark, statusTone, Dimension } from "@/components/sheet
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { toast } from "sonner";
-import { formatINR } from "@/utils/formatCurrency";
+import { formatINR as formatINRWhole } from "@/utils/formatCurrency";
+
+// Entries are recorded to the paisa, so this page shows them that way everywhere (it rounded ₹29.50 to ₹30). Same as the
+// Payment and Journal Voucher pages.
+const formatINR = (value: unknown, options?: { decimals?: number }) => formatINRWhole(value, { decimals: 2, ...options });
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import {
