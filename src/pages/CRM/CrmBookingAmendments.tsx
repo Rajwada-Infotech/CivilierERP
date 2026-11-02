@@ -19,6 +19,7 @@ import { translateError } from "@/lib/translateError";
 import { KEY_INK, KEY_LINE, KEY_RED, LBL, RULE, RULE_SOFT } from "./customers/config";
 import { useCanApprove } from "@/hooks/useCanApprove";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const BASE = "/api/crm/booking-amendments";
 const PAGE_SIZE = 20;
 
@@ -74,7 +75,8 @@ export default function CrmBookingAmendments() {
   const { canEdit } = usePageRights("crm-bookings");
   const { currentUser, canDoAction } = useAuth();
   const qc = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Pending");
+  // In the address, so a refresh or a shared link keeps it.
+  const [statusFilter, setStatusFilter] = useUrlParam<StatusFilter>("status", "Pending");
   const [review, setReview] = useState<{ row: AmendmentRow; action: "approve" | "reject" } | null>(null);
   const [notes, setNotes] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -118,37 +120,37 @@ export default function CrmBookingAmendments() {
   });
 
   const columns: ColumnDef<AmendmentRow>[] = [
-    { header: "Booking", accessorKey: "BookingNo", size: 170,
+    // Customer sits with the booking and the reason with the change, so the
+    // Approve / Reject buttons stay on screen without scrolling sideways.
+    { header: "Booking", accessorKey: "BookingNo", size: 180,
       cell: ({ row }) => (
         <div className="min-w-0">
           <div className="font-heading text-xs font-semibold tabular-nums">{row.original.BookingNo}</div>
+          <div className="text-xs font-medium break-words"><ApplicantNames name={row.original.ApplicantName} bookingId={row.original.BookingId} /></div>
           <div className="text-[0.6875rem] text-muted-foreground truncate">{[row.original.ProjectName, row.original.UnitNo].filter(Boolean).join(" · ")}</div>
         </div>
       ) },
-    { header: "Customer", accessorKey: "ApplicantName", size: 170,
-      cell: ({ row }) => <span className="text-xs font-medium"><ApplicantNames name={row.original.ApplicantName} bookingId={row.original.BookingId} /></span> },
-    { header: "Change", accessorKey: "ChangeType", size: 230,
+    { header: "Change", accessorKey: "ChangeType", size: 240,
       cell: ({ row }) => {
         const entries = proposedEntries(row.original.ProposedChange);
         return (
           <div className="min-w-0">
             <div className="text-xs font-medium">{changeLabel(row.original.ChangeType, row.original.Action)}</div>
             {entries.length > 0 && <div className="mt-0.5 text-[0.6875rem] text-muted-foreground truncate">{entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}</div>}
+            {row.original.Reason && <div className="mt-0.5 text-[0.6875rem] text-muted-foreground line-clamp-2" title={row.original.Reason}>Reason: {row.original.Reason}</div>}
           </div>
         );
       } },
-    { header: "Reason", accessorKey: "Reason", size: 180,
-      cell: ({ row }) => <span className="text-xs text-muted-foreground block truncate" title={row.original.Reason}>{row.original.Reason || "—"}</span> },
-    { header: "Requested", accessorKey: "RequestedByName", size: 150,
+    { header: "Requested", accessorKey: "RequestedByName", size: 140,
       cell: ({ row }) => (
         <div>
           <div className="text-xs font-medium">{row.original.RequestedByName || "—"}</div>
           <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{fmtIstDateTime(row.original.RequestedAt)}</div>
         </div>
       ) },
-    { header: "Status", accessorKey: "Status", size: 170,
+    { header: "Status", accessorKey: "Status", size: 160,
       cell: ({ row }) => (
-        <div className="min-w-0">
+        <div className="min-w-0 whitespace-normal">
           <SheetMark text={row.original.Status} tone={statusTone(row.original.Status)} />
           {row.original.ReviewedByName && (
             <div className="text-[0.6875rem] text-muted-foreground mt-0.5">by {row.original.ReviewedByName} · {fmtIstDateTime(row.original.ReviewedAt)}</div>

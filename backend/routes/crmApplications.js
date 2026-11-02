@@ -1276,16 +1276,29 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     const app = appRes.recordset[0];
     if (!app) return res.status(404).json({ error: "Application not found" });
 
+    // A booking not yet fully approved is deleted with its application (the
+    // booking's own delete, same checks); a fully approved one needs Cancellation.
     const activeBooking = await pool.request().input("id", sql.Int, id).query(`
-      SELECT TOP 1 Id, BookingNo, Status
+      SELECT TOP 1 Id, BookingNo, Status, DirectorApprovedAt, ConfirmedAt
       FROM dbo.CrmBooking
       WHERE ApplicationId = @id AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}
     `);
     if (activeBooking.recordset.length) {
       const b = activeBooking.recordset[0];
-      return res.status(400).json({
-        error: `Cannot delete application ${app.ApplicationNo} because it has an active booking (${b.BookingNo}, ${b.Status}). Delete the unprogressed booking first, or use Cancellation Request if it has progressed.`,
-      });
+      const { softDeleteBooking, isBookingFullyApproved } = require("./crmBookings");
+      if (isBookingFullyApproved(b)) {
+        return res.status(400).json({
+          error: `Cannot delete application ${app.ApplicationNo} — its booking ${b.BookingNo} is fully approved. Use Cancellation Request instead.`,
+        });
+      }
+      try {
+        await softDeleteBooking(pool, b.Id, actorId(req));
+      } catch (e) {
+        return res.status(e.status || 500).json({ error: e.status ? e.message : "Could not delete the booking of this application." });
+      }
+      // The booking delete cancelled the application; re-read for the steps below.
+      app.Status = (await pool.request().input("id", sql.Int, id)
+        .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @id")).recordset[0]?.Status || app.Status;
     }
 
     const progressed = await pool.request().input("aid", sql.Int, id).query(`

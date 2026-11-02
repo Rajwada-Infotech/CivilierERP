@@ -26,6 +26,7 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { translateError } from "@/lib/translateError";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "./customers/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/pre-possession";
 
 const MANUAL_CHECKS = [
@@ -308,7 +309,8 @@ const CrmPrePossession: React.FC = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [createPrefillId, setCreatePrefillId] = useState<string | undefined>(undefined);
   const [checkLoading, setCheckLoading] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab] = useState<"checks" | "gateway">("checks");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeTab, setActiveTab] = useUrlParam<"checks" | "gateway">("tab", "checks", ["checks", "gateway"]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   // Each tab keeps its own page / sort / filters.

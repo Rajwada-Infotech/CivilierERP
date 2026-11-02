@@ -371,8 +371,8 @@ export default function CrmOnAccount() {
   ];
   const tabCount = (v: string) => (v === "" ? summary?.TotalCount : v === "Unapplied" ? summary?.UnappliedCount : v === "PartiallyApplied" ? summary?.PartialCount : summary?.AppliedCount) ?? 0;
   const tabClass = (on: boolean) => `inline-flex items-center gap-2 px-3 h-9 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] shrink-0 transition-colors ${on ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/5"}`;
-  const th = `!px-3 !py-2.5 text-left ${LBL}`;
-  const td = "!px-3 !py-2.5";
+  const th = `!px-2.5 !py-2.5 text-left ${LBL}`;
+  const td = "!px-2.5 !py-2.5";
   const dateInp = "!h-9 !rounded-none !shadow-none border-foreground/40 bg-card !px-2.5 text-xs tabular-nums";
 
   return (
@@ -431,21 +431,22 @@ export default function CrmOnAccount() {
             </div>
 
             <div className="overflow-x-auto thin-scroll">
-              <table className="w-full text-sm min-w-[980px]">
+              <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr style={{ borderBottom: RULE }}>
-                    <th className={`${th} w-8`} /><th className={th}>Received</th><th className={th}>Receipt · ref</th><th className={th}>Customer · booking</th>
-                    <th className={th}>Mode</th><th className={`${th} !text-right`}>Deposited</th><th className={`${th} !text-right`}>Applied</th>
-                    <th className={`${th} !text-right`}>Balance</th><th className={th}>State</th><th className={th} />
+                    {/* Date, mode and state sit with the receipt, so the row fits a 1366px laptop. */}
+                    <th className={`${th} w-8`} /><th className={th}>Receipt</th><th className={th}>Customer · booking</th>
+                    <th className={`${th} !text-right`}>Deposited</th><th className={`${th} !text-right`}>Applied</th>
+                    <th className={`${th} !text-right`}>Balance</th><th className={th} />
                   </tr>
                 </thead>
                 <tbody>
                   {isError ? (
-                    <tr><td colSpan={10} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                    <tr><td colSpan={7} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
                   ) : isLoading && !data ? (
-                    <tr><td colSpan={10} className={`${td} text-center text-muted-foreground`}>Loading deposits…</td></tr>
+                    <tr><td colSpan={7} className={`${td} text-center text-muted-foreground`}>Loading deposits…</td></tr>
                   ) : deposits.length === 0 ? (
-                    <tr><td colSpan={10} className={`${td} text-center text-muted-foreground`}>{hasFilters ? "No deposit matches these filters." : "No on-account deposits yet."}</td></tr>
+                    <tr><td colSpan={7} className={`${td} text-center text-muted-foreground`}>{hasFilters ? "No deposit matches these filters." : "No on-account deposits yet."}</td></tr>
                   ) : deposits.map((d) => {
                     const isExp = expanded.has(d.Id);
                     return (
@@ -453,22 +454,21 @@ export default function CrmOnAccount() {
                         <tr onClick={() => toggle(d.Id)} className={`align-top cursor-pointer hover:bg-primary/5 transition-colors ${d.Status === "Applied" ? "text-muted-foreground" : ""}`}
                           style={{ borderBottom: isExp ? undefined : RULE_SOFT }}>
                           <td className={`${td} text-muted-foreground`}>{isExp ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
-                          <td className={`${td} whitespace-nowrap tabular-nums text-xs`}>{fd(d.ReceivedDate)}</td>
                           <td className={td}>
                             <div className="font-heading text-xs font-semibold tabular-nums text-foreground">{d.ReceiptNo || <span className="italic font-normal text-muted-foreground">Pending</span>}</div>
-                            {d.TransactionRef && <div className="mt-0.5 text-[0.6875rem] text-muted-foreground tabular-nums truncate max-w-[140px]">{d.TransactionRef}</div>}
+                            <div className="mt-0.5 text-[0.6875rem] text-muted-foreground tabular-nums">{[fd(d.ReceivedDate), d.PaymentMode].filter(Boolean).join(" · ")}</div>
+                            <div className="mt-1"><DepositMark s={d.Status} /></div>
+                            {d.TransactionRef && <div className="text-[0.6875rem] text-muted-foreground tabular-nums truncate max-w-[140px]">{d.TransactionRef}</div>}
                           </td>
-                          <td className={`${td} max-w-[260px]`}>
+                          <td className={`${td} max-w-[170px]`}>
                             <div className="text-xs font-medium text-foreground truncate"><ApplicantNames name={d.ApplicantName} bookingId={d.BookingId} /></div>
                             <div className="mt-0.5 text-[0.6875rem] text-muted-foreground truncate">
                               <span className="font-heading tabular-nums">{d.BookingNo}</span>{d.ProjectName ? ` · ${d.ProjectName}` : ""}{d.UnitNo ? ` · ${d.UnitNo}` : ""}
                             </div>
                           </td>
-                          <td className={`${td} text-xs`}>{d.PaymentMode || "—"}</td>
                           <td className={`${td} text-right font-heading tabular-nums ${d.Status === "Bounced" ? "text-destructive line-through" : "text-foreground"}`}>{fmt(d.Amount)}</td>
                           <td className={`${td} text-right font-heading tabular-nums`}>{d.AppliedAmount > 0 ? fmt(d.AppliedAmount) : "—"}</td>
                           <td className={`${td} text-right font-heading font-semibold tabular-nums text-foreground`}>{d.AvailableBalance > 0 ? fmt(d.AvailableBalance) : "—"}</td>
-                          <td className={td}><DepositMark s={d.Status} /></td>
                           <td className={`${td} text-right`} onClick={(e) => e.stopPropagation()}>
                             <div className="inline-flex items-center gap-1.5">
                               {canEdit && d.Status !== "Applied" && d.Status !== "Bounced" && d.AvailableBalance > 0 && <button onClick={() => setAdjusting(d)} className={`${KEY_LINE} h-8 px-3`}>Adjust</button>}
@@ -479,7 +479,7 @@ export default function CrmOnAccount() {
                         {isExp && (
                           <tr style={{ borderBottom: RULE_SOFT }}>
                             <td />
-                            <td colSpan={9} className="!p-0"><MilestoneSchedule deposit={d} /></td>
+                            <td colSpan={6} className="!p-0"><MilestoneSchedule deposit={d} /></td>
                           </tr>
                         )}
                       </React.Fragment>
@@ -489,11 +489,11 @@ export default function CrmOnAccount() {
                 {deposits.length > 0 && (
                   <tfoot>
                     <tr style={{ borderTop: RULE }}>
-                      <td colSpan={5} className={`${td} ${LBL}`}>This page · {deposits.length} deposit{deposits.length === 1 ? "" : "s"}</td>
+                      <td colSpan={3} className={`${td} ${LBL}`}>This page · {deposits.length} deposit{deposits.length === 1 ? "" : "s"}</td>
                       <td className={`${td} text-right font-heading font-bold tabular-nums`}>{fmt(pageCR)}</td>
                       <td className={`${td} text-right font-heading font-bold tabular-nums`}>{pageDR > 0 ? fmt(pageDR) : "—"}</td>
                       <td className={`${td} text-right font-heading font-bold tabular-nums`}>{pageBAL > 0 ? fmt(pageBAL) : "—"}</td>
-                      <td colSpan={2} />
+                      <td />
                     </tr>
                   </tfoot>
                 )}

@@ -8,33 +8,6 @@ import { docStatusColor } from "../agreement/Timeline";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "../customers/config";
 import { DeedTab, StepState, docNextStep, fmtBytes, fmtDate, mimeIcon } from "./config";
 
-export function DeedStepper({ steps, activeTab, onStepClick }: { steps: { label: string; state: StepState; tab: DeedTab }[]; activeTab: DeedTab; onStepClick: (t: DeedTab) => void }) {
-  return (
-    <div className="flex items-center overflow-x-auto thin-scroll pb-1">
-      {steps.map((s, i) => (
-        <React.Fragment key={s.label}>
-          <button onClick={() => onStepClick(s.tab)}
-            className={`flex items-center gap-1.5 shrink-0 px-2 py-1.5 hover:bg-primary/10 transition-colors ${activeTab === s.tab ? "bg-primary/10" : ""}`}>
-            <span className={`w-6 h-6 flex items-center justify-center text-[0.625rem] font-bold shrink-0 border ${
-              s.state === "done" ? "bg-foreground text-card border-foreground"
-              : s.state === "current" ? "bg-card text-foreground border-foreground border-2"
-              : "bg-card text-muted-foreground border-foreground/25"}`}>
-              {s.state === "done" ? <Check size={11} /> : <span className="font-heading tabular-nums">{i + 1}</span>}
-            </span>
-            <span className={`font-heading text-[0.625rem] font-semibold uppercase tracking-[0.08em] whitespace-nowrap leading-tight ${
-              s.state === "upcoming" ? "text-muted-foreground/60" : "text-foreground"}`}>
-              {s.label}
-            </span>
-          </button>
-          {i < steps.length - 1 && (
-            <div className={`w-4 h-px mx-0.5 shrink-0 ${steps[i + 1].state !== "upcoming" ? "bg-foreground" : "bg-foreground/20"}`} />
-          )}
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
-
 /** A ruled panel: a lettered head (with whatever sits on its right) over its content. */
 export function Panel({ title, icon, right, children, className = "" }: { title: string; icon?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (

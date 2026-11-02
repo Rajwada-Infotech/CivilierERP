@@ -20,6 +20,7 @@ import {
 import { InvoicePreviewDialog, VoidInvoiceDialog } from "./invoices/InvoiceDialogs";
 import { GenerateInvoiceDialog } from "./invoices/GenerateInvoiceDialog";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const INVOICED_TABS = [
   { value: "", label: "All bookings", key: "all" },
   { value: "none", label: "Not invoiced", key: "none" },
@@ -36,7 +37,8 @@ const CrmInvoices: React.FC = () => {
   const canVoid = !!currentUser?.role && INVOICE_VOID_ROLES.includes(currentUser.role);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [view, setView] = useState<"grouped" | "flat">("grouped");
+  // In the address, so a refresh or a shared link keeps it.
+  const [view, setView] = useUrlParam<"grouped" | "flat">("view", "grouped", ["grouped", "flat"]);
   const [type, setType] = useState("");
   const [invoicedStatus, setInvoicedStatus] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });

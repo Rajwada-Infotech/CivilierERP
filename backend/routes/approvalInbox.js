@@ -161,7 +161,7 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
 
   const map = MODULE_MAP[item.Module];
 
-  // Gates outside the level engine (received-payment, crm-money-receipts,
+  // Gates outside the level engine (received-payment,
   // crm-booking-amendment...) are single-step: level 1 in Approval Setup.
   if (!map) {
     const ok = await isApproverFor(item.Module, viewerUserId, role);
@@ -1244,35 +1244,6 @@ function buildInboxQueries(module, projectScope = null) {
         JOIN dbo.CrmBooking b     ON b.Id = c.BookingId
         JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
         WHERE c.Status = 'Pending'${pp("b.ProjectId")}
-      `);
-    }
-
-    if (!module || module === "crm-money-receipts") {
-      queries.push(`
-        SELECT
-          'crm-money-receipts'                  AS Module,
-          'CRM Money Receipt'                   AS ModuleLabel,
-          CAST(mr.Id AS NVARCHAR)               AS RecordId,
-          mr.ReceiptNo                          AS Reference,
-          mr.ReceivedDate                       AS RecordDate,
-          mr.Status,
-          CAST(NULL AS NVARCHAR)                AS ContractorName,
-          a.ApplicantName                       AS SupplierName,
-          mr.Amount                             AS Amount,
-          ${NULL_EXTRA}
-          CAST(ISNULL(u_cr.name, CAST(mr.CreatedBy AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
-          ISNULL(CAST(u_appr.name AS NVARCHAR(255)), '') AS ApprovedBy,
-          ISNULL(CAST(mr.ApprovedAt AS NVARCHAR), '')    AS ApprovedAt,
-          ISNULL(CAST(u_bnc.name AS NVARCHAR(255)), '')  AS RejectedBy,
-          ISNULL(CAST(mr.BouncedReason AS NVARCHAR(MAX)), '') AS RejectionNote,
-          ISNULL(mr.UpdatedAt, mr.CreatedAt)    AS LastModified
-        FROM dbo.CrmMoneyReceipt mr
-        JOIN dbo.CrmBooking b     ON b.Id = mr.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.Users u_cr   ON u_cr.id   = mr.CreatedBy
-        LEFT JOIN dbo.Users u_appr ON u_appr.id = mr.ApprovedBy
-        LEFT JOIN dbo.Users u_bnc  ON u_bnc.id  = mr.BouncedBy
-        WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL${pp("b.ProjectId")}
       `);
     }
 

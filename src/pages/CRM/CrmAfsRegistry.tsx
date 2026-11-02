@@ -30,6 +30,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/afs-registry";
 const BKG_API = "/api/crm/bookings";
 
@@ -159,7 +160,8 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const [detailRow, setDetailRow] = useState<any | null>(null);
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [filterStatus, setFilterStatus] = useState<"all" | "Pending" | "Scheduled" | "Completed">("all");
+  // In the address, so a refresh or a shared link keeps it.
+  const [filterStatus, setFilterStatus] = useUrlParam<"all" | "Pending" | "Scheduled" | "Completed">("status", "all", ["all", "Pending", "Scheduled", "Completed"]);
 
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-afs-registry", cpb], queryFn: () => fetchAll(cpb),

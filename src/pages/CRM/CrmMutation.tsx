@@ -23,6 +23,7 @@ import { downloadFile, fetchFileBlob, fmtDate, localDay, roleKey } from "./sales
 import { DocRow, Panel } from "./salesDeed/parts";
 import { useCanApprove } from "@/hooks/useCanApprove";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/mutation";
 const STATUS_LABEL: Record<string, string> = { Applied: "Applied", QueryRaised: "Query raised", Approved: "Approved" };
 const mutTone = (s: string): "done" | "waiting" | "stopped" => s === "Approved" ? "done" : s === "QueryRaised" ? "stopped" : "waiting";
@@ -79,7 +80,8 @@ const CrmMutation: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const [detailId, setDetailId] = useState<number | null>(mutationIdParam && /^\d+$/.test(mutationIdParam) ? Number(mutationIdParam) : null);
-  const [activeTab, setActiveTab] = useState<DetailTab>("Overview");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeTab, setActiveTab] = useUrlParam<DetailTab>("tab", "Overview", ["Overview", "Documents", "History"]);
   const [deepLinkDone, setDeepLinkDone] = useState(false);
 
   const [queryOpen, setQueryOpen] = useState(false);
@@ -384,7 +386,7 @@ const CrmMutation: React.FC = () => {
                   <SheetMark text={STATUS_LABEL[detail.Status] || detail.Status} tone={mutTone(detail.Status)} />
                 </div>
 
-                <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+                <div className="flex flex-wrap items-stretch bg-card" style={{ border: RULE }}>
                   {(["Overview", "Documents", "History"] as DetailTab[]).map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)}
                       className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${

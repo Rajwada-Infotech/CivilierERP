@@ -213,17 +213,19 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
     <div className="bg-card" style={{ border: RULE }}>
       <div className={head} style={{ borderBottom: RULE }}>Payment schedule</div>
       <div className="overflow-x-auto thin-scroll">
-        <table className="w-full text-sm min-w-[1100px]">
+        {/* Department, paid date and reference share cells with their neighbours,
+            so the row fits a laptop screen without scrolling sideways. */}
+        <table className="w-full text-sm min-w-[900px]">
           <thead>
             <tr style={{ borderBottom: RULE }}>
-              <th className={th}>#</th><th className={th}>Milestone</th><th className={th}>Dept</th><th className={th}>Due</th>
-              <th className={`${th} !text-right`}>Amount due</th><th className={`${th} !text-right`}>Paid</th><th className={th}>Paid on</th>
-              <th className={`${th} !text-right`}>Balance</th><th className={th}>Status</th><th className={th}>Mode</th><th className={th}>Ref / remarks</th><th className={th} />
+              <th className={th}>#</th><th className={th}>Milestone</th><th className={th}>Due</th>
+              <th className={`${th} !text-right`}>Amount due</th><th className={`${th} !text-right`}>Paid</th>
+              <th className={`${th} !text-right`}>Balance</th><th className={th}>Status</th><th className={th}>Mode · ref</th><th className={th} />
             </tr>
           </thead>
           <tbody>
             {milestones.length === 0 ? (
-              <tr><td colSpan={12} className={`${td} text-center text-muted-foreground`}>No milestones on this booking.</td></tr>
+              <tr><td colSpan={9} className={`${td} text-center text-muted-foreground`}>No milestones on this booking.</td></tr>
             ) : milestones.map((m) => {
               const overdue = isOverdue(m);
               // Money on-account already covers this milestone: it shows "Paid (on-account)" (and no Pay / Waive,
@@ -249,9 +251,9 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                         {m.DemandRaisedOn && <span className="text-[0.625rem] text-muted-foreground tabular-nums">{fmtDate(m.DemandRaisedOn)}</span>}
                       </div>
                     )}
+                    {m.ResponsibleDepartment && <div className="text-[0.6875rem] text-muted-foreground mt-1">Dept: {m.ResponsibleDepartment}</div>}
                     {m.RequiredDocuments && <div className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[200px]" title={m.RequiredDocuments}>Docs: {m.RequiredDocuments}</div>}
                   </td>
-                  <td className={`${td} text-xs text-muted-foreground`}>{m.ResponsibleDepartment || "—"}</td>
                   <td className={`${td} text-xs tabular-nums whitespace-nowrap ${overdue ? "text-destructive font-semibold" : ""}`}>{fmtDate(m.DueDate)}</td>
                   <td className={`${td} text-right`}>
                     {noAmount
@@ -262,8 +264,8 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   <td className={`${td} text-right`}>
                     <div className="font-heading tabular-nums whitespace-nowrap">{fmt(m.AmountPaid)}</div>
                     {Number(m.PendingVerificationAmount) > 0 && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap">+{fmt(m.PendingVerificationAmount)} pending</div>}
+                    {m.PaidDate && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap">on {fmtDate(m.PaidDate)}</div>}
                   </td>
-                  <td className={`${td} text-xs tabular-nums whitespace-nowrap`}>{m.PaidDate ? fmtDate(m.PaidDate) : <span className="text-muted-foreground">—</span>}</td>
                   <td className={`${td} text-right whitespace-nowrap`}>
                     {m.Status === "Waived" ? <span className="text-muted-foreground">—</span>
                       : covered ? <span className="inline-flex items-center gap-1 text-xs font-semibold"><Wallet size={12} /> Covered</span>
@@ -278,11 +280,13 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   <td className={`${td} text-xs`}>
                     <div>{m.PaymentMode || "—"}</div>
                     {m.DepositBankName && <div className="text-[0.6875rem] text-muted-foreground mt-1 truncate max-w-[120px]" title={m.DepositBankName}>{m.DepositBankName}</div>}
-                  </td>
-                  <td className={`${td} text-xs`}>
-                    <span className="font-heading tabular-nums">{m.TransactionRef || "—"}</span>
-                    {m.Remarks && (
-                      <button onClick={() => onRemarks(m)} title={m.Remarks} className="ml-1.5 text-muted-foreground hover:text-foreground align-middle inline-flex"><MessageSquare size={11} /></button>
+                    {(m.TransactionRef || m.Remarks) && (
+                      <div className="mt-1 text-[0.6875rem] text-muted-foreground">
+                        <span className="font-heading tabular-nums">{m.TransactionRef}</span>
+                        {m.Remarks && (
+                          <button onClick={() => onRemarks(m)} title={m.Remarks} className={`${m.TransactionRef ? "ml-1.5 " : ""}hover:text-foreground align-middle inline-flex`}><MessageSquare size={11} /></button>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className={td}>

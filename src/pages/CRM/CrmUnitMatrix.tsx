@@ -10,6 +10,8 @@ import { getSocket } from "@/lib/socket";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRememberedProject } from "@/hooks/useRememberedProject";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
@@ -198,8 +200,10 @@ export function UnitMatrixPage() {
   const navigate = useNavigate();
   const rights = usePageRights("crm-unit-matrix");
   const qc = useQueryClient();
-  const [projectId, setProjectId] = useState("");
-  const [blockId, setBlockId] = useState("");
+  const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["unit-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
+  // Opens on the project last viewed here (or the only one).
+  const [projectId, setProjectId] = useRememberedProject("unit-matrix", projects);
+  const [blockId, setBlockId] = useUrlParam("block");
   const [holdTarget, setHoldTarget] = useState<MatrixUnit | null>(null);
   const [infoTarget, setInfoTarget] = useState<MatrixUnit | null>(null);
 
@@ -215,9 +219,6 @@ export function UnitMatrixPage() {
     return () => { sock.off("matrix:update", onUpdate); };
   }, [projectId, qc]);
 
-  const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["unit-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
-  // One project only: open it straight away.
-  useEffect(() => { if (!projectId && projects.length === 1) setProjectId(String(projects[0].Id)); }, [projects, projectId]);
   const { data: blocks = [] } = useQuery({
     queryKey: ["unit-matrix-blocks", projectId],
     queryFn: () => fetchOptions<Option>(`${API}/blocks?projectId=${projectId}`),

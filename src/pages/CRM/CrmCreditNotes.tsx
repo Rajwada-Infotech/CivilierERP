@@ -19,6 +19,7 @@ import { NewCreditNoteDialog } from "./creditNotes/NewCreditNoteDialog";
 import { DetailDialog } from "./creditNotes/DetailDialog";
 import { exportCreditNotesXlsx } from "./creditNotes/exportXlsx";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const td = "!px-4 !py-3";
 const th = `!px-4 !py-2.5 text-left ${LBL}`;
 
@@ -88,7 +89,8 @@ const CrmCreditNotes: React.FC = () => {
   const [sp, setSp] = useSearchParams();
 
   const [selectedId, setSelectedId] = useState<number | null>(sp.get("id") ? Number(sp.get("id")) : null);
-  const [tab, setTab] = useState<Tab>("all");
+  // In the address, so a refresh or a shared link keeps it.
+  const [tab, setTab] = useUrlParam<Tab>("tab", "all", TABS.map(([t]) => t));
   const [page, setPage] = useState(1);
   const [period, setPeriod] = useState("fy");
   const P = periods();
@@ -239,20 +241,21 @@ const CrmCreditNotes: React.FC = () => {
             ) : (
               <>
                 <div className="overflow-x-auto thin-scroll">
-                  <table className="w-full text-sm min-w-[1080px]">
+                  {/* The type sits under the document number, so the row fits a laptop screen. */}
+                  <table className="w-full text-sm min-w-[900px]">
                     <thead>
                       <tr style={{ borderBottom: RULE }}>
-                        <th className={th}>Document</th><th className={th}>Type</th><th className={th}>Customer · property</th><th className={th}>Against</th>
+                        <th className={th}>Document</th><th className={th}>Customer · property</th><th className={th}>Against</th>
                         <th className={`${th} !text-right`}>Taxable</th><th className={`${th} !text-right`}>GST</th><th className={`${th} !text-right`}>Total</th><th className={th}>State</th>
                       </tr>
                     </thead>
                     <tbody>
                       {isError ? (
-                        <tr><td colSpan={8} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                        <tr><td colSpan={7} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
                       ) : isLoading && !listResponse ? (
-                        <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
+                        <tr><td colSpan={7} className={`${td} text-center text-muted-foreground`}>Loading…</td></tr>
                       ) : rows.length === 0 ? (
-                        <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>No credit notes for this period and these filters.</td></tr>
+                        <tr><td colSpan={7} className={`${td} text-center text-muted-foreground`}>No credit notes for this period and these filters.</td></tr>
                       ) : rows.map((n: any) => {
                         const kind = kindOf(n);
                         const dead = kind === "cancelled";
@@ -261,13 +264,13 @@ const CrmCreditNotes: React.FC = () => {
                             style={{ borderBottom: RULE_SOFT, boxShadow: n.CancelApprovalStatus === "Pending" ? "inset 3px 0 0 hsl(var(--destructive))" : undefined }}>
                             <td className={td}>
                               <div className={`font-heading text-xs font-semibold tabular-nums ${dead ? "line-through" : "text-foreground"}`}>{n.DocNo || (kind === "request" ? REQ_LABEL[n.Status] : "Certificate")}</div>
-                              <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{day(n.DocDate)}</div>
+                              <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums">{day(n.DocDate)} · {KIND[kind].short}</div>
                               {n.CancelApprovalStatus === "Pending" && <div className="mt-1 text-[0.6875rem] font-semibold text-destructive">Cancellation asked</div>}
                             </td>
-                            <td className={`${td} text-xs whitespace-nowrap`}>{KIND[kind].short}</td>
                             <td className={`${td} max-w-[240px]`}>
-                              <div className="text-xs font-medium truncate text-foreground">{n.CustomerName || "—"}</div>
-                              <div className="mt-1 text-[0.6875rem] text-muted-foreground truncate">{n.Property} · <span className="font-heading tabular-nums">{n.BookingNo}</span>{n.ProjectName ? ` · ${n.ProjectName}` : ""}</div>
+                              {/* Wraps (two lines at most) instead of widening the table. */}
+                              <div className="text-xs font-medium line-clamp-2 break-words text-foreground">{n.CustomerName || "—"}</div>
+                              <div className="mt-1 text-[0.6875rem] text-muted-foreground line-clamp-2 break-words">{n.Property} · <span className="font-heading tabular-nums">{n.BookingNo}</span>{n.ProjectName ? ` · ${n.ProjectName}` : ""}</div>
                             </td>
                             <td className={td}>
                               <div className="font-heading text-xs tabular-nums truncate max-w-[160px]">{n.AgainstRef || n.RefundNo || "—"}</div>

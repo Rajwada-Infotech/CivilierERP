@@ -439,7 +439,8 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
     const blocks = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
         b.Id, b.BlockName, b.ProjectTypeId AS OwnTypeId,
-        (SELECT COUNT(*) FROM dbo.ParkingSlot ps WHERE ps.BlockId = b.Id AND ps.IsActive = 1) AS ParkingSlotCount
+        (SELECT COUNT(*) FROM dbo.ParkingSlot ps WHERE ps.BlockId = b.Id AND ps.IsActive = 1) AS ParkingSlotCount,
+        (SELECT ISNULL(SUM(sf.Missing), 0) FROM (${parkingShortfallSql("b.Id")}) sf) AS ParkingSlotsToCreate
       FROM dbo.BlockMaster b
       WHERE b.ProjectId = @pid AND b.IsActive = 1
       ORDER BY b.Id
@@ -1201,6 +1202,34 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
 // delete straight through the existing parking-slot-master endpoints (which
 // already enforce the shared booking/hold lock check — not duplicated
 // here).
+// Active parking slots with what holds each one (allotment -> booking, live
+// hold), for one block or a whole project. `where` is a trusted SQL condition
+// on alias s. One query shape for both routes below.
+const parkingSlotsSql = (where) => `
+  SELECT s.Id, s.ProjectId, s.BlockId, s.SlotNo, s.ParkingType, s.IsActive,
+    pa.Id AS LockAllotmentId, bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
+  FROM dbo.ParkingSlot s
+  LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
+  LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
+  LEFT JOIN dbo.CrmInventoryHold h
+    ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
+  WHERE ${where} AND s.IsActive = 1
+  ORDER BY s.BlockId, s.SlotNo`;
+
+// GET /projects/:projectId/parking-slots — every block's slots in one call,
+// for the Parking tab's slot maps and project totals.
+router.get("/projects/:projectId/parking-slots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const projectId = parseId(req.params.projectId);
+    if (projectId === null) return res.status(400).json({ error: "Invalid project id" });
+    const slots = await getPool().request().input("pid", sql.Int, projectId).query(parkingSlotsSql("s.ProjectId = @pid"));
+    res.json({ slots: slots.recordset });
+  } catch (e) {
+    console.error("[crm-project-auto-setup] GET /projects/:projectId/parking-slots error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   const pool = getPool();
   try {
@@ -1210,17 +1239,7 @@ router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup
       .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
 
-    const slots = await pool.request().input("bid", sql.Int, blockId).query(`
-      SELECT s.Id, s.ProjectId, s.BlockId, s.SlotNo, s.ParkingType, s.IsActive,
-        pa.Id AS LockAllotmentId, bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
-      FROM dbo.ParkingSlot s
-      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-      WHERE s.BlockId = @bid AND s.IsActive = 1
-      ORDER BY s.SlotNo
-    `);
+    const slots = await pool.request().input("bid", sql.Int, blockId).query(parkingSlotsSql("s.BlockId = @bid"));
     res.json({ slots: slots.recordset });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /blocks/:id/parking-slots error:", e.message);
@@ -1513,16 +1532,29 @@ async function getBlockUnitSequence(pool, blockId) {
 // ParkingType). Unlike Units, this sequence's own length IS the block's
 // total slot count to generate — there's no separate per-floor count step,
 // since dbo.ParkingSlot has no FloorNo (Parking is Block-scoped only).
-async function getBlockParkingSequence(pool, blockId) {
-  const rows = await pool.request().input("bid", sql.Int, blockId).query(`
-    SELECT ParkingType, Count FROM dbo.CrmProjectAutoSetupParkingTemplate
-    WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder
-  `);
-  const sequence = [];
-  for (const r of rows.recordset) {
-    for (let i = 0; i < r.Count; i++) sequence.push(r.ParkingType);
-  }
-  return sequence;
+// A block's parking still to create, per type: what its saved mix asks for
+// minus the active slots of that type it already has. Counted by TYPE, not by
+// name — a block's existing slots can carry an older naming pattern (EMP/CP1)
+// that the current one (EMP/1/P1) would never match, and counting by name
+// made "create" duplicate every one of them. Read by the status (the "+N to
+// create" figure) and by POST /generate-parking-slots, so the two always agree.
+// `blockIdExpr` is a trusted SQL expression (b.Id or @bid).
+// How many names to try in one block before giving up on the pattern.
+const MAX_PARKING_NAME_TRIES = 5000;
+function parkingShortfallSql(blockIdExpr) {
+  return `
+    SELECT t.ParkingType, t.SortOrder,
+      CASE WHEN t.Wanted > ISNULL(x.Have, 0) THEN t.Wanted - ISNULL(x.Have, 0) ELSE 0 END AS Missing
+    FROM (
+      SELECT ParkingType, MIN(SortOrder) AS SortOrder, SUM(Count) AS Wanted
+      FROM dbo.CrmProjectAutoSetupParkingTemplate
+      WHERE BlockId = ${blockIdExpr} AND IsActive = 1
+      GROUP BY ParkingType
+    ) t
+    OUTER APPLY (
+      SELECT COUNT(*) AS Have FROM dbo.ParkingSlot ps
+      WHERE ps.BlockId = ${blockIdExpr} AND ps.IsActive = 1 AND ps.ParkingType = t.ParkingType
+    ) x`;
 }
 
 // POST /generate-units — the final commit. For every eligible floor
@@ -1941,19 +1973,14 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
   }
 });
 
-// POST /generate-parking-slots — the Parking commit, mirroring
-// POST /generate-units but Block-scoped (dbo.ParkingSlot has no FloorNo).
-// For every Block that has a saved Parking template with a total > 0
-// (optionally filtered to BlockIds), generates real dbo.ParkingSlot rows
-// named `${ProjectShortCode}/${BlockName}/P${seq}` where seq is a 2-digit,
-// per-block sequence (P01, P02, ...) — plain, not type-prefixed. ParkingType
-// for each seq comes from cycling the Block's own template sequence (see
-// getBlockParkingSequence), same repeating-pattern behavior generate-units
-// uses for UnitType. Idempotent/additive: re-running after raising a
-// template's total only fills in the new seq numbers; an existing active
-// slot at a given seq is left untouched (its ParkingType is NOT rewritten
-// even if the template changed — matches generate-units' "already active,
-// leave it alone" rule for real inventory).
+// POST /generate-parking-slots — the Parking commit, Block-scoped
+// (dbo.ParkingSlot has no FloorNo). For every Block with a saved Parking mix
+// (optionally only BlockIds), creates exactly the slots its mix still lacks,
+// type by type (parkingShortfallSql), in the mix's order. Each new slot takes
+// the next name the block's naming pattern gives that is not already used in
+// the block; a deactivated slot of that name is brought back instead.
+// Idempotent/additive: existing slots are never renamed, retyped or removed,
+// and a second run creates nothing.
 router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
   const pool = getPool();
   const createdBy = req.user?.userId || null;
@@ -1968,14 +1995,10 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
 
     const req0 = pool.request().input("pid", sql.Int, projectId);
     let query = `
-      SELECT b.Id AS BlockId, b.BlockName,
-        ISNULL(t.total, 0) AS TemplateTotal
+      SELECT b.Id AS BlockId, b.BlockName
       FROM dbo.BlockMaster b
-      OUTER APPLY (
-        SELECT SUM(Count) AS total FROM dbo.CrmProjectAutoSetupParkingTemplate
-        WHERE BlockId = b.Id AND IsActive = 1
-      ) t
-      WHERE b.ProjectId = @pid AND b.IsActive = 1 AND ISNULL(t.total, 0) > 0
+      WHERE b.ProjectId = @pid AND b.IsActive = 1
+        AND (SELECT ISNULL(SUM(sf.Missing), 0) FROM (${parkingShortfallSql("b.Id")}) sf) > 0
     `;
     if (blockIds && blockIds.length) {
       req0.input("ids", sql.NVarChar(sql.MAX), blockIds.join(","));
@@ -1989,50 +2012,56 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
     const { SCOPE, towerNumbers, resolvePattern, nameFor } = require("../services/namingPattern");
     const towers = await towerNumbers(pool, projectId);
     for (const block of blocks.recordset) {
-      const sequence = await getBlockParkingSequence(pool, block.BlockId);
+      const shortfall = (await pool.request().input("bid", sql.Int, block.BlockId)
+        .query(`${parkingShortfallSql("@bid")} ORDER BY t.SortOrder`)).recordset.filter((r) => r.Missing > 0);
       const pattern = await resolvePattern(pool, { projectId, blockId: block.BlockId, scope: SCOPE.PARKING });
+      const nameAt = (seq) => nameFor(pattern, SCOPE.PARKING, { shortCode, blockName: block.BlockName, towerNo: towers.get(block.BlockId), seq });
 
-      for (let seq = 1; seq <= sequence.length; seq++) {
-        const slotNo = nameFor(pattern, SCOPE.PARKING, { shortCode, blockName: block.BlockName, towerNo: towers.get(block.BlockId), seq });
-        const parkingType = sequence[seq - 1];
-
-        // Wrap the check+INSERT in a transaction with UPDLOCK so that two
-        // concurrent generate-parking-slots requests for the same project
-        // serialise on a per-slot-number basis — same fix as generate-units.
-        const tx = pool.transaction();
-        await tx.begin();
-        try {
-          const dupe = await tx.request()
-            .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId).input("slot", sql.NVarChar(50), slotNo)
-            .query("SELECT Id, IsActive FROM dbo.ParkingSlot WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND SlotNo = @slot");
-
-          if (dupe.recordset.length) {
-            if (!dupe.recordset[0].IsActive) {
-              await tx.request().input("id", sql.Int, dupe.recordset[0].Id).input("type", sql.NVarChar(50), parkingType)
-                .query("UPDATE dbo.ParkingSlot SET IsActive = 1, ParkingType = ISNULL(ParkingType, @type), UpdatedAt = SYSDATETIME() WHERE Id = @id");
-              await tx.commit();
-              totalCreated++;
-            } else {
-              // Already active — leave it alone, it's already real inventory.
-              await tx.commit();
-            }
-          } else {
-            await tx.request()
-              .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId)
-              .input("slot", sql.NVarChar(50), slotNo).input("type", sql.NVarChar(50), parkingType)
-              .input("cb", sql.Int, createdBy)
-              .query(`
-                INSERT INTO dbo.ParkingSlot (ProjectId, BlockId, SlotNo, ParkingType, IsActive, CreatedBy, CreatedAt)
-                VALUES (@pid, @bid, @slot, @type, 1, @cb, SYSDATETIME())
-              `);
-            await tx.commit();
-            totalCreated++;
+      let seq = 0;
+      for (const { ParkingType: parkingType, Missing } of shortfall) {
+        for (let made = 0; made < Missing;) {
+          seq++;
+          // A pattern whose names never change with the number would loop for ever.
+          if (seq > MAX_PARKING_NAME_TRIES) {
+            throw Object.assign(new Error(`Block ${block.BlockName}: its parking naming pattern gives no free slot name — check the pattern in Naming`), { status: 400 });
           }
-        } catch (txErr) {
-          try { await tx.rollback(); } catch (_) { /* already rolled back */ }
-          throw txErr;
+          const slotNo = nameAt(seq);
+          // Wrap the check+INSERT in a transaction with UPDLOCK so that two
+          // concurrent generate-parking-slots requests for the same project
+          // serialise on a per-slot-number basis — same fix as generate-units.
+          const tx = pool.transaction();
+          await tx.begin();
+          try {
+            const dupe = await tx.request()
+              .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId).input("slot", sql.NVarChar(50), slotNo)
+              .query("SELECT Id, IsActive FROM dbo.ParkingSlot WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND SlotNo = @slot");
+            if (dupe.recordset.length && dupe.recordset[0].IsActive) {
+              // Name taken by a live slot — real inventory, left alone; try the next name.
+              await tx.commit();
+              continue;
+            }
+            if (dupe.recordset.length) {
+              await tx.request().input("id", sql.Int, dupe.recordset[0].Id).input("type", sql.NVarChar(50), parkingType)
+                .query("UPDATE dbo.ParkingSlot SET IsActive = 1, ParkingType = @type, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+            } else {
+              await tx.request()
+                .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId)
+                .input("slot", sql.NVarChar(50), slotNo).input("type", sql.NVarChar(50), parkingType)
+                .input("cb", sql.Int, createdBy)
+                .query(`
+                  INSERT INTO dbo.ParkingSlot (ProjectId, BlockId, SlotNo, ParkingType, IsActive, CreatedBy, CreatedAt)
+                  VALUES (@pid, @bid, @slot, @type, 1, @cb, SYSDATETIME())
+                `);
+            }
+            await tx.commit();
+          } catch (txErr) {
+            try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+            throw txErr;
+          }
+          made++;
+          totalCreated++;
+          if (sample.length < 5) sample.push(slotNo);
         }
-        if (sample.length < 5) sample.push(slotNo);
       }
     }
 
@@ -2040,7 +2069,7 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
     res.status(201).json({ message: "Parking slots generated", createdCount: totalCreated, sample, blocksGenerated: blocks.recordset.length });
   } catch (e) {
     console.error("[crm-project-auto-setup] POST /generate-parking-slots error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

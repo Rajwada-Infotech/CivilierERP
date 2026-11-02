@@ -34,6 +34,7 @@ import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/afs-query-payment";
 const BKG_API = "/api/crm/bookings";
 
@@ -393,7 +394,8 @@ const CrmAfsQueryPayment: React.FC<{
   const [sendingInfo, setSendingInfo] = useState(false);
   const [proofFile, setProofFile] = useState<StagedFile | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<"all" | "Pending" | "InfoSent" | "Confirmed">("all");
+  // In the address, so a refresh or a shared link keeps it.
+  const [filterStatus, setFilterStatus] = useUrlParam<"all" | "Pending" | "InfoSent" | "Confirmed">("status", "all", ["all", "Pending", "InfoSent", "Confirmed"]);
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const infoInputRef = useRef<HTMLInputElement>(null);

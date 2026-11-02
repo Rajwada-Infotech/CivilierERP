@@ -114,16 +114,16 @@ const CrmBooking: React.FC = () => {
 
   const canDeleteBooking = (b: any) =>
     isAdmin
+    // Until fully approved (the server has the final word, incl. money checks).
     && b.Status !== CrmStatus.APPROVED
-    && b.WorkflowStage === "Review"
-    && !b.ReadyForApprovalAt
+    && b.WorkflowStage !== "Confirmed"
     && !b.AgreementId
     && Number(b.TotalCleared || 0) <= 0
     && Number(b.MRReceivedTotal || 0) <= 0
     && Number(b.ApprovedOnAccount || 0) <= 0;
 
   const handleDeleteBooking = async (b: any) => {
-    if (!(await ask.confirm(`Delete booking ${b.BookingNo}? Only allowed before approval or any progress; the application returns to the pre-booking list.`, { okLabel: "Delete", danger: true }))) return;
+    if (!(await ask.confirm(`Delete booking ${b.BookingNo}? Allowed until the booking is fully approved; the application returns to the pre-booking list.`, { okLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetchWithAuth(`${API}/${b.Id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
@@ -137,28 +137,36 @@ const CrmBooking: React.FC = () => {
   };
 
   const columns: ColumnDef<any, unknown>[] = [
+    // Columns are combined so the whole row — status and next step included —
+    // fits a laptop screen without scrolling sideways.
     { accessorKey: "BookingNo", header: "Booking", size: 120,
-      cell: (i) => <span className="font-heading text-xs font-semibold tabular-nums text-foreground">{i.row.original.BookingNo}</span> },
+      cell: (i) => (
+        <div>
+          <div className="font-heading text-xs font-semibold tabular-nums text-foreground">{i.row.original.BookingNo}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</div>
+        </div>
+      ) },
     { accessorKey: "ApplicantName", header: "Customer", size: 170,
       cell: (i) => (
         <div className="min-w-0">
-          <div className="font-medium truncate"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.Id} applicationId={i.row.original.ApplicationId} /></div>
+          {/* Joint buyers wrap onto a second line instead of widening the table. */}
+          <div className="font-medium line-clamp-2 break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.Id} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground tabular-nums">{i.row.original.Mobile}</div>
         </div>
       ) },
-    { id: "projectUnit", header: "Project / unit", size: 190, enableSorting: false,
+    { id: "projectUnit", header: "Property", size: 180, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         return (
           <div className="min-w-0">
             <div className="truncate">{b.ProjectName || "—"}</div>
-            <div className="text-xs text-muted-foreground truncate">{[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / ")}</div>
+            <div className="text-xs text-muted-foreground truncate">
+              {[[b.UnitNo, b.BlockName, b.FloorName].filter(Boolean).join(" / "), b.AreaSqFt ? `${b.AreaSqFt} sq ft` : null].filter(Boolean).join(" · ")}
+            </div>
           </div>
         );
       } },
-    { accessorKey: "AreaSqFt", header: "Area", size: 90,
-      cell: (i) => <span className="text-xs tabular-nums">{i.row.original.AreaSqFt ? `${i.row.original.AreaSqFt} sq ft` : "—"}</span> },
-    { id: "value", header: "Value / received", size: 190, enableSorting: false,
+    { id: "value", header: "Value / received", size: 170, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         const storedGrand = Number(b.GrandTotal ?? 0);
@@ -178,29 +186,37 @@ const CrmBooking: React.FC = () => {
                   <div className="h-full bg-foreground" style={{ width: `${clearedPct}%` }} />
                   <div className="h-full" style={{ width: `${onAccPct}%`, background: "repeating-linear-gradient(135deg, hsl(var(--foreground)) 0, hsl(var(--foreground)) 1px, transparent 1px, transparent 3px)" }} />
                 </div>
-                <div className="text-[0.625rem] text-muted-foreground tabular-nums">
-                  {fmt(cleared)} cleared{onAcc > 0 ? ` · ${fmt(onAcc)} on account` : ""}{outstanding > 0 ? ` · ${fmt(outstanding)} due` : ""}
+                {/* One short figure each, so the column stays narrow. */}
+                <div className="flex flex-wrap gap-x-2 text-[0.625rem] text-muted-foreground tabular-nums">
+                  <span>{fmt(cleared)} cleared</span>
+                  {onAcc > 0 && <span>{fmt(onAcc)} on account</span>}
+                  {outstanding > 0 && <span className="text-foreground">{fmt(outstanding)} due</span>}
                 </div>
               </>
+            )}
+            {Number(b.BookingAmount) > 0 && (
+              <div className="text-[0.625rem] text-muted-foreground tabular-nums">Booking amount {fmt(b.BookingAmount)}</div>
             )}
           </div>
         );
       } },
-    { accessorKey: "BookingAmount", header: "Booking amt", size: 105,
-      cell: (i) => <span className="tabular-nums">{fmt(i.row.original.BookingAmount)}</span> },
-    { accessorKey: "Status", header: "Status", size: 120,
+    { accessorKey: "Status", header: "Status", size: 150,
       cell: (i) => {
         const b = i.row.original;
+        // Where a pending booking sits in its approval chain.
+        const stageNote = b.Status !== CrmStatus.PENDING ? null
+          : b.WorkflowStage && b.WorkflowStage !== "Review" ? `Waiting: ${workflowStageLabel[b.WorkflowStage] || "approval"}`
+          : b.ReadyForApprovalAt ? "Ready for Marketing Head approval"
+          : "In Data Review";
         return (
           <div className="space-y-1">
             <SheetMark text={b.Status} tone={bookingTone(b.Status)} />
+            {stageNote && <div className="text-[0.6875rem] text-muted-foreground leading-snug">{stageNote}</div>}
             {b.IsFrozen && <div className="flex items-center gap-1 text-[0.625rem] font-medium text-destructive"><Lock size={10} /> Frozen</div>}
           </div>
         );
       } },
-    { accessorKey: "BookingDate", header: "Date", size: 95,
-      cell: (i) => <span className="text-xs text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</span> },
-    { id: "actions", header: "Next", size: 230, enableSorting: false,
+    { id: "actions", header: "Next", size: 170, enableSorting: false,
       cell: (i) => {
         const b = i.row.original;
         const step = getNextStep(b);
@@ -213,14 +229,9 @@ const CrmBooking: React.FC = () => {
           <div className="flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
             {/* submitOnly: Approve/Reject happen in the Approval Inbox only. */}
             <ApprovalActions status={b.Status} recordId={b.Id} endpoint={API} submitOnly onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })} />
-            {b.Status === CrmStatus.PENDING && (
-              b.WorkflowStage && b.WorkflowStage !== "Review" ? (
-                <span className="text-[0.6875rem] text-muted-foreground">Waiting: {workflowStageLabel[b.WorkflowStage] || "approval"}</span>
-              ) : b.ReadyForApprovalAt ? (
-                <span className="text-[0.6875rem] text-muted-foreground">Ready for Marketing Head approval</span>
-              ) : (
-                <button onClick={() => openBooking(b.Id)} className={`${KEY_LINE} h-7 px-2`}>Review checklist <ChevronRight size={11} /></button>
-              )
+            {/* The stage itself is shown in Status; only Data Review has a button here. */}
+            {b.Status === CrmStatus.PENDING && (!b.WorkflowStage || b.WorkflowStage === "Review") && !b.ReadyForApprovalAt && (
+              <button onClick={() => openBooking(b.Id)} className={`${KEY_LINE} h-7 px-2`}>Review checklist <ChevronRight size={11} /></button>
             )}
             {step ? (
               <button onClick={() => navigate(step.path)} className={`${KEY_INK} h-7 px-2`}>{step.label} <ChevronRight size={11} /></button>

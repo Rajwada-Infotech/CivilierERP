@@ -10,7 +10,10 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle } from "lucide-react";
+import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,7 +25,6 @@ import { useGstRates, computeUnitParkingGst } from "@/lib/crmGst";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { DateInput } from "@/components/ui/date-input";
-import { BodyPortal } from "@/components/ui/body-portal";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { useSearchAsYouType } from "@/hooks/useSearchAsYouType";
 import { API, EMPTY_FORM, BANK_DETAIL_API, PARKING_API, EXTRA_CHARGE_API, CO_APPLICANT_API, PAY_MODES, STATUSES, appTone, RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED, fetchProjectBanks, fetchAllBanks, PAGE_SIZE, type ApplicationListFilters, fetchApplicationsList, fetchStageCounts, fetchAppDetail, STAGES, type Stage, stageLabel, stageIcon, normalizeRole, fetchCustomers, fetchLeadOptions, fetchCompanies, fetchProjects, fetchUnits, fetchPlots, fetchBrokers, fetchPaymentPlans, fetchBlockPlanTags, type RateTier, fetchBrokerageRateTiers, parseMilestones, inputCls, labelCls } from "./applications/config";
@@ -34,6 +36,7 @@ import { ParkingSelectionStep } from "./applications/ParkingSelectionStep";
 import { ExtraWorkSelectionStep } from "./applications/ExtraWorkSelectionStep";
 import { AttachmentsStep } from "./applications/AttachmentsStep";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -48,7 +51,8 @@ const CrmApplication: React.FC = () => {
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [activeStage, setActiveStage] = useState<Stage>("InProcess");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeStage, setActiveStage] = useUrlParam<Stage>("stage", "InProcess", STAGES);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
@@ -435,7 +439,8 @@ const CrmApplication: React.FC = () => {
   // On a Converted application the booking is live and has real financial
   // history; the backend rejects deletes in that state, so don't offer the
   // button either (misleading to show a destructive action that will always fail).
-  const canDeleteApplication = (app: any) => !!app && isAdmin && app.Stage !== "Converted";
+  // Until its booking is fully approved; a not-yet-approved booking is deleted with it.
+  const canDeleteApplication = (app: any) => !!app && isAdmin && !(app.Stage === "Converted" && app.BookingStatus === CrmStatus.APPROVED);
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -804,7 +809,9 @@ const CrmApplication: React.FC = () => {
       // is already done), never above 6, never above 1 without one.
       const savedStep = Number(app.CurrentStep) || 1;
       const resumeStep = hasProject ? Math.min(6, Math.max(firstStepAfterProject, savedStep)) : 1;
-      setStep(wantStep ? Math.min(resumeStep, Math.max(1, wantStep)) : resumeStep);
+      // A plot sale has no Parking step (2): a link to it opens Extra Charges instead.
+      const linked = wantStep === 2 && firstStepAfterProject === 3 ? 3 : wantStep;
+      setStep(linked ? Math.min(resumeStep, Math.max(1, linked)) : resumeStep);
       setMaxStepReached(resumeStep);
       setDialogOpen(true);
       offerDraft(app.Id, loadedForm);
@@ -1059,7 +1066,7 @@ const CrmApplication: React.FC = () => {
     }
   };
   const handleDeleteApplication = async (a: any) => {
-    requestConfirm(`Delete application ${a.ApplicationNo}? This is only allowed before a live booking has progressed.`, async () => {
+    requestConfirm(`Delete application ${a.ApplicationNo}? Its booking, if not yet fully approved, is deleted with it.`, async () => {
       try {
         const res = await fetchWithAuth(`${API}/${a.Id}`, { method: "DELETE" });
         const data = await res.json().catch(() => ({}));
@@ -1106,7 +1113,7 @@ const CrmApplication: React.FC = () => {
     }
   };
   const convertedColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 120,
+    { accessorKey: "ApplicationNo", header: "Application", size: 120,
       cell: (i) => (
         <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-primary hover:underline">
           {i.getValue() as string}
@@ -1116,24 +1123,26 @@ const CrmApplication: React.FC = () => {
        inProcessColumns above. Sizes across this set are generous (sum
        ~1420px) so table-layout:fixed fills a normal desktop card
        edge-to-edge instead of bunching columns on the left. */
-      accessorKey: "ApplicantName", header: "Applicant", size: 210,
+      accessorKey: "ApplicantName", header: "Applicant", size: 190,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="font-medium text-foreground break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
           </div>
         </div>
       ) },
-    { accessorKey: "BookingNo", header: "Booking", size: 190,
+    // Booked-on date sits under the booking so the row fits a laptop screen.
+    { accessorKey: "BookingNo", header: "Booking", size: 170,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-heading tabular-nums text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}</div>
           <SheetMark text={i.row.original.BookingStatus || "—"} tone={i.row.original.BookingStatus ? appTone(i.row.original.BookingStatus) : "none"} />
         </div>
       ) },
-    { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
+    { id: "unitProject", header: "Unit / Project", size: 200, enableSorting: false,
       cell: (i) => (
         <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
           {[i.row.original.BookingProjectName, i.row.original.BookingUnitNo].filter(Boolean).join(" · ") || "—"}
@@ -1144,49 +1153,52 @@ const CrmApplication: React.FC = () => {
         const val = i.row.original.BookingGrandTotal ?? i.row.original.BookingTotalValue;
         return <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs font-medium">{val ? `₹${Number(val).toLocaleString("en-IN")}` : "—"}</span>;
       } },
-    { accessorKey: "BookingDate", header: "Booked On", size: 130,
-      cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
-          {i.row.original.BookingDate ? String(i.row.original.BookingDate).slice(0, 10) : "—"}
-        </span>
-      ) },
-    { id: "actions", header: "", size: 240, enableSorting: false,
-      cell: (i) => (
-        <div className="flex items-center gap-3 flex-wrap">
-          <button onClick={() => navigate(`/crm/bookings?applicationId=${i.row.original.Id}`)}
-            className="flex items-center gap-1 text-xs text-primary hover:underline">
-            <Building2 size={12} /> View Booking <ChevronRight size={12} />
-          </button>
-          {i.row.original.Stage === "Converted" && (
-            <button onClick={() => setPdfDialogApp({ id: i.row.original.Id, no: i.row.original.ApplicationNo })}
-              title="Preview / download Application Form PDF"
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline">
-              <FileText size={12} /> Form
-            </button>
-          )}
-          {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId
-            && i.row.original.BookingStatus !== CrmStatus.CANCELLED
-            && i.row.original.DeedStatus !== "Registered" && (
-            <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
-              className="flex items-center gap-1 text-xs text-destructive hover:underline">
-              <Ban size={12} /> Request Cancellation
-            </button>
-          )}
-          {i.row.original.DeedStatus === "Registered" && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
-              <Ban size={12} /> Deed Registered
-            </span>
-          )}
-        </div>
-      ) },
+    { id: "actions", header: "", size: 80, enableSorting: false,
+      cell: (i) => {
+        const r = i.row.original;
+        const canRequestCxl = (canEditApplications || canRequestBookingCancellation) && r.BookingId
+          && r.BookingStatus !== CrmStatus.CANCELLED && r.DeedStatus !== "Registered";
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                <MoreHorizontal size={15} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 rounded-none">
+              <DropdownMenuItem onClick={() => openApplication(r.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate(`/crm/bookings?applicationId=${r.Id}`)} className="gap-2"><Building2 size={14} /> View booking</DropdownMenuItem>
+              {r.Stage === "Converted" && (
+                <DropdownMenuItem onClick={() => setPdfDialogApp({ id: r.Id, no: r.ApplicationNo })} className="gap-2"><FileText size={14} /> Application form (PDF)</DropdownMenuItem>
+              )}
+              {canRequestCxl && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate(`/crm/cancellations?bookingId=${r.BookingId}`)} className="gap-2 text-destructive focus:text-destructive">
+                    <Ban size={14} /> Request cancellation
+                  </DropdownMenuItem>
+                </>
+              )}
+              {r.DeedStatus === "Registered" && (
+                <DropdownMenuItem disabled className="gap-2" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+                  <Ban size={14} /> Deed registered — no cancellation
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      } },
   ];
 
   const inProcessColumns: ColumnDef<any, unknown>[] = [
-    { accessorKey: "ApplicationNo", header: "App No", size: 120,
+    // Columns are combined so status and actions fit a laptop screen without
+    // scrolling sideways; nothing shown before is dropped.
+    { accessorKey: "ApplicationNo", header: "Application", size: 120,
       cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">
-          {i.getValue() as string}
-        </span>
+        <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
+          <div className="font-heading tabular-nums text-xs font-semibold text-foreground hover:underline">{i.getValue() as string}</div>
+          <div className="text-[0.6875rem] text-muted-foreground tabular-nums">{i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}</div>
+        </div>
       ) },
     {/* Mobile folded into this cell (as a second line, same pattern used on
        CrmLeads/CrmCustomers) instead of its own column — one less dedicated
@@ -1195,40 +1207,38 @@ const CrmApplication: React.FC = () => {
        across this whole set are generous (sum ~1420px) so table-layout:fixed
        fills a normal desktop card edge-to-edge instead of leaving the
        columns bunched on the left with dead space after Date. */
-      accessorKey: "ApplicantName", header: "Applicant", size: 220,
+      accessorKey: "ApplicantName", header: "Applicant", size: 180,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
-          <div className="font-medium text-foreground"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
+          <div className="font-medium text-foreground break-words"><ApplicantNames name={i.row.original.ApplicantName} bookingId={i.row.original.BookingId} applicationId={i.row.original.ApplicationId} /></div>
           <div className="text-xs text-muted-foreground">
             {i.row.original.Mobile}
             {i.row.original.LeadUid ? ` · Lead: ${i.row.original.LeadUid}` : ""}
           </div>
         </div>
       ) },
-    { id: "interestedProject", header: "Interested Project", size: 220, enableSorting: false,
+    { id: "interestedProject", header: "Interested in", size: 170, enableSorting: false,
       cell: (i) => {
         const r = i.row.original;
         const typeBit = [r.BhkPreference, r.PropertyType].filter(Boolean).join(" · ") || r.UnitTypeFromMaster || "";
         return (
-          <span onClick={() => openApplication(r.Id)} className="cursor-pointer">
-            {[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}
-          </span>
+          <div onClick={() => openApplication(r.Id)} className="cursor-pointer">
+            <div>{[r.InterestedProject, typeBit].filter(Boolean).join(" · ") || "—"}</div>
+            {r.RatePerSqFt ? <div className="text-xs text-muted-foreground tabular-nums">₹{Number(r.RatePerSqFt).toLocaleString("en-IN")}/sqft</div> : null}
+          </div>
         );
       } },
-    { accessorKey: "Source", header: "Source", size: 170,
+    { accessorKey: "Source", header: "Source / assigned", size: 150,
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">
           <div>{i.row.original.Source || "—"}</div>
           <div className="text-muted-foreground">
             {[i.row.original.PlatformName, i.row.original.CampaignName, i.row.original.AdName].filter(Boolean).join(" › ") || i.row.original.ChannelPartnerName || ""}
           </div>
+          {i.row.original.AssigneeName && <div className="text-muted-foreground">To {i.row.original.AssigneeName}</div>}
         </div>
       ) },
-    { accessorKey: "RatePerSqFt", header: "Rate", size: 130,
-      cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
-    { accessorKey: "AssigneeName", header: "Assigned To", size: 140,
-      cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "Status", header: "Status", size: 130,
+    { accessorKey: "Status", header: "Status", size: 190,
       cell: (i) => {
         const r = i.row.original;
         // When a live Booking exists (Stage='Converted'), the Application's
@@ -1241,8 +1251,9 @@ const CrmApplication: React.FC = () => {
         const displayStatus = r.Stage !== "Converted" ? r.Status
           : r.BookingStatus === CrmStatus.APPROVED ? "Booked" : "In Approval";
         return (
-          <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5">
-            <SheetMark text={displayStatus} tone={appTone(displayStatus)} />
+          // The pinned Status column is nowrap; the notes under the mark wrap.
+          <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5 whitespace-normal">
+            <span className="whitespace-nowrap"><SheetMark text={displayStatus} tone={appTone(displayStatus)} /></span>
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
@@ -1252,165 +1263,118 @@ const CrmApplication: React.FC = () => {
                 {r.BookingNo} · {r.BookingStatus}
               </div>
             )}
-          </div>
-        );
-      } },
-    { accessorKey: "CreatedAt", header: "Date", size: 110,
-      cell: (i) => (
-        <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs text-muted-foreground">
-          {i.row.original.CreatedAt ? String(i.row.original.CreatedAt).slice(0, 10) : "—"}
-        </span>
-      ) },
-    { id: "actions", header: "", size: 200, enableSorting: false,
-      cell: (i) => {
-        const a = i.row.original;
-        const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
-        return (
-          <div className="flex flex-col gap-1.5 py-0.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {activeStage === "InProcess" ? (
-                <>
-                  {canResume && (
-                    <button
-                      onClick={() => loadApplicationIntoWizard(a.Id)}
-                      disabled={loadingApplication}
-                      className={`${KEY_INK} h-7 px-2`}
-                    >
-                      <PlayCircle size={12} /> {loadingApplication ? "Loading..." : isResumable(a) ? "Resume" : a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit"}
-                    </button>
-                  )}
-                  {/* There is no Application-level Approve/Reject anymore —
-                      this renders nothing for a normal Pending application
-                      (submitOnly hides Approve/Reject even if status were
-                      Pending, and Approved/Cancelled/Expired render nothing
-                      either way). It only still shows a "Submit" button for
-                      the legacy case of an application some old data has
-                      sitting at Rejected — a real resubmit back to Pending,
-                      see crmApplications.js PUT /:id/submit. */}
-                  <ApprovalActions
-                    status={a.Status}
-                    recordId={a.Id}
-                    endpoint={API}
-                    submitOnly
-                    onSuccess={(_action, data) => {
-                      qc.invalidateQueries({ queryKey: ["crm-apps"] });
-                      if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
-                    }}
-                  />
-                  {/* Create Booking — only when the application has been properly
-                      submitted (Status=Pending) AND a unit was picked. Draft
-                      applications haven't been submitted yet so the wizard may
-                      not be complete. Stage=Converted means a booking already
-                      exists — retry path is not needed. */}
-                  {a.Status === CrmStatus.PENDING && a.Stage !== "Converted" && (
-                    a.UnitUnavailableForBooking ? (
-                      <span
-                        className="flex items-center gap-1 text-[0.6875rem] text-destructive"
-                        title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created."
-                      >
-                        <XCircle size={12} /> Unit unavailable
-                      </span>
-                    ) : a.PreferredUnitId == null ? (
-                      <span
-                        className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground"
-                        title="No unit was selected in the application — edit the application and pick a unit first."
-                      >
-                        <AlertTriangle size={12} /> No unit selected
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => handleCreateBooking(a)}
-                        disabled={creatingBookingId === a.Id}
-                        className={`${KEY_INK} h-7 px-2`}
-                      >
-                        <Building2 size={12} /> {creatingBookingId === a.Id ? "Creating..." : "Create Booking"}
-                      </button>
-                    )
-                  )}
-                  {canCancelApplication(a) && (
-                    <button
-                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Ban size={12} /> Cancel
-                    </button>
-                  )}
-                  {canDeleteApplication(a) && (
-                    <button
-                      onClick={() => handleDeleteApplication(a)}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  {canCancelApplication(a) && (
-                    <button
-                      onClick={() => { setCancellingApp(a); setCancelRemarks(""); }}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Ban size={12} /> Cancel
-                    </button>
-                  )}
-                  {canDeleteApplication(a) && (
-                    <button
-                      onClick={() => handleDeleteApplication(a)}
-                      className={`${KEY_LINE} h-7 px-2 !text-destructive !border-destructive`}
-                    >
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  )}
-                </>
-              )}
-              {/* Application Form PDF — only after Level 1 verification (Stage=Converted,
-                  i.e. the Application is Approved and a live Booking exists).
-                  Backend enforces the same gate; this hides the button before that point. */}
-              {a.Stage === "Converted" && (
-                <button
-                  onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })}
-                  title="Preview / download Application Form PDF"
-                  className={`${KEY_LINE} h-7 px-2`}
-                >
-                  <FileText size={12} /> Form
-                </button>
-              )}
-            </div>
-            {/* Status hint lives on its own line as a plain caption, never
-                inline with the buttons — that inline mixing (a link, a
-                sentence, another link, all wrapping unpredictably in a
-                210px cell) was what made this column look broken. */}
-            {/* Status hint — contextual caption below the action buttons */}
-            {activeStage === "InProcess" && a.Status === CrmStatus.DRAFT && (
+            {/* Where it stands and what is next, beside the status itself. */}
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.Stage !== "Converted" && r.UnitUnavailableForBooking && (
+              <span className="flex items-center gap-1 text-[0.6875rem] text-destructive"
+                title="This application's picked unit is currently booked or held by a different application — re-pick a unit before a booking can be created.">
+                <XCircle size={10} /> Unit unavailable — re-pick a unit
+              </span>
+            )}
+            {activeStage === "InProcess" && r.Status === CrmStatus.DRAFT && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
                 <Clock size={10} /> Not submitted yet — complete the wizard and submit
               </span>
             )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId == null && (
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.PreferredUnitId == null && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-foreground">
                 <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
               </span>
             )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && a.Stage !== "Converted" && (
+            {activeStage === "InProcess" && r.Status === CrmStatus.PENDING && r.PreferredUnitId != null && r.Stage !== "Converted" && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
               </span>
             )}
-            {activeStage === "InProcess" && a.Stage === "Converted" && (
+            {activeStage === "InProcess" && r.Stage === "Converted" && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
-                <Clock size={10} /> Booking {a.BookingNo || ""} — {a.BookingStatus === CrmStatus.PENDING
-                  ? `pending ${bookingWorkflowStageLabel[a.BookingWorkflowStage] || "approval"}`
-                  : a.BookingStatus}
+                <Clock size={10} /> Booking {r.BookingNo || ""} — {r.BookingStatus === CrmStatus.PENDING
+                  ? `pending ${bookingWorkflowStageLabel[r.BookingWorkflowStage] || "approval"}`
+                  : r.BookingStatus}
               </span>
             )}
-            {activeStage !== "InProcess" && !canCancelApplication(a) && (
+            {activeStage !== "InProcess" && !canCancelApplication(r) && (
               <span className="text-[0.6875rem] text-muted-foreground">
-                {a.BookingNo && a.BookingStatus === CrmStatus.CANCELLED
+                {r.BookingNo && r.BookingStatus === CrmStatus.CANCELLED
                   ? `Booking cancelled — application closed`
-                  : `${a.Status} — no further action`}
+                  : `${r.Status} — no further action`}
               </span>
             )}
+          </div>
+        );
+      } },
+    { id: "actions", header: "", size: 110, enableSorting: false,
+      cell: (i) => {
+        const a = i.row.original;
+        const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
+        // Only an unfinished application keeps a button on the row (Resume);
+        // everything else lives in the ⋯ menu.
+        const resumeOnRow = canResume && isResumable(a);
+        const editLabel = a.Status === CrmStatus.REJECTED ? "Fix & Resubmit" : "Edit";
+        const canCreateBooking = activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.Stage !== "Converted"
+          && !a.UnitUnavailableForBooking && a.PreferredUnitId != null;
+        const hasMenu = (canResume && !resumeOnRow) || canCreateBooking || a.Stage === "Converted"
+          || canCancelApplication(a) || canDeleteApplication(a);
+        return (
+          <div className="flex flex-col gap-1.5 py-0.5">
+            <div className="flex items-center gap-1.5">
+              {resumeOnRow && (
+                <button onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
+                  <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
+                </button>
+              )}
+              {/* Legacy only: a Rejected application from old data gets its resubmit. */}
+              {activeStage === "InProcess" && (
+                <ApprovalActions
+                  status={a.Status}
+                  recordId={a.Id}
+                  endpoint={API}
+                  submitOnly
+                  onSuccess={(_action, data) => {
+                    qc.invalidateQueries({ queryKey: ["crm-apps"] });
+                    if (data?.bookingError) qc.invalidateQueries({ queryKey: ["unit-master"] });
+                  }}
+                />
+              )}
+              {hasMenu && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="h-7 w-7 inline-flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-primary/10" title="More actions">
+                      <MoreHorizontal size={15} />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52 rounded-none">
+                    <DropdownMenuItem onClick={() => openApplication(a.Id)} className="gap-2"><FileText size={14} /> View details</DropdownMenuItem>
+                    {canResume && !resumeOnRow && (
+                      <DropdownMenuItem onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className="gap-2">
+                        <PlayCircle size={14} /> {editLabel}
+                      </DropdownMenuItem>
+                    )}
+                    {canCreateBooking && (
+                      <DropdownMenuItem onClick={() => handleCreateBooking(a)} disabled={creatingBookingId === a.Id} className="gap-2">
+                        <Building2 size={14} /> {creatingBookingId === a.Id ? "Creating..." : "Create booking"}
+                      </DropdownMenuItem>
+                    )}
+                    {/* Application Form PDF — only once a live booking exists (backend enforces the same gate). */}
+                    {a.Stage === "Converted" && (
+                      <DropdownMenuItem onClick={() => setPdfDialogApp({ id: a.Id, no: a.ApplicationNo })} className="gap-2">
+                        <FileText size={14} /> Application form (PDF)
+                      </DropdownMenuItem>
+                    )}
+                    {(canCancelApplication(a) || canDeleteApplication(a)) && <DropdownMenuSeparator />}
+                    {canCancelApplication(a) && (
+                      <DropdownMenuItem onClick={() => { setCancellingApp(a); setCancelRemarks(""); }} className="gap-2 text-destructive focus:text-destructive">
+                        <Ban size={14} /> Cancel application
+                      </DropdownMenuItem>
+                    )}
+                    {canDeleteApplication(a) && (
+                      <DropdownMenuItem onClick={() => handleDeleteApplication(a)} className="gap-2 text-destructive focus:text-destructive">
+                        <Trash2 size={14} /> Delete
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
         );
       } },
@@ -1514,7 +1478,8 @@ const CrmApplication: React.FC = () => {
         <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4 rounded-none" style={{ border: RULE }}>
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
-              <Building2 size={14} /> New application
+              {/* An existing one (resumed draft, or Edit / Fix & Resubmit) has its number: not "new". */}
+              <Building2 size={14} /> {applicationNo ? "Application" : "New application"}
               {applicationNo ? <span className="text-muted-foreground font-medium tabular-nums normal-case tracking-normal text-sm">· {applicationNo}</span> : null}
             </DialogTitle>
           </DialogHeader>
@@ -2679,15 +2644,12 @@ const CrmApplication: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Plain div overlay — avoids nested Radix Dialog focus-trap conflict
-          when Cancel is opened from inside the view dialog (same fix pattern
-          as CoApplicant: two Radix Dialogs open at once freeze outer buttons). */}
-      {cancellingApp && (
-        <BodyPortal><div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
-          onClick={() => { setCancellingApp(null); setCancelRemarks(""); }}>
-          <div className="bg-background border border-border w-full max-w-md p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold font-heading">Cancel Application?</h3>
+      {/* A real dialog layered over the view dialog (elevated): a body-level
+          overlay sat outside the open view dialog, which blocks typing and
+          clicks there. */}
+      <Dialog open={!!cancellingApp} onOpenChange={(o) => { if (!o) { setCancellingApp(null); setCancelRemarks(""); } }}>
+        <DialogContent hideCloseButton elevated className="max-w-md rounded-none space-y-4" style={{ border: RULE }}>
+            <DialogHeader><DialogTitle className="text-base font-semibold font-heading">Cancel Application?</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 <span className="font-heading tabular-nums text-foreground">{cancellingApp?.ApplicationNo}</span> for{" "}
@@ -2723,9 +2685,8 @@ const CrmApplication: React.FC = () => {
                 {cancelling ? "Cancelling..." : "Cancel Application"}
               </button>
             </div>
-          </div>
-        </div></BodyPortal>
-      )}
+        </DialogContent>
+      </Dialog>
       {pdfDialogApp && (
         <ApplicationFormPdfDialog
           applicationId={pdfDialogApp.id}
