@@ -10,7 +10,8 @@
 const { getPool, sql } = require("../db");
 
 const CACHE_MS = 5000;
-const OFF = Object.freeze({ active: false, enforced: false, title: null, message: null, startedAt: null, startsAt: null, endsAt: null, updatedBy: null });
+const OFF = Object.freeze({ active: false, enforced: false, variant: "maintenance", title: null, message: null, startedAt: null, startsAt: null, endsAt: null, updatedBy: null });
+const VARIANTS = ["maintenance", "unavailable"];
 
 let cache = null; // { at, state }
 
@@ -21,6 +22,7 @@ function fromRow(row) {
   return {
     active: true,
     enforced: true, // worked out against the clock on every read, see withEnforced()
+    variant: row.Variant === "unavailable" ? "unavailable" : "maintenance",
     title: row.Title || null,
     message: row.Message || null,
     startedAt: iso(row.StartedAt),
@@ -50,10 +52,11 @@ async function getMaintenanceState({ fresh = false } = {}) {
 }
 
 /** Turns maintenance on or off. Throws {status: 503} when migration 548 has not run. */
-async function setMaintenance({ active, title, message, startsAt, endsAt, by }) {
+async function setMaintenance({ active, variant, title, message, startsAt, endsAt, by }) {
   const req = getPool()
     .request()
     .input("active", sql.Bit, active ? 1 : 0)
+    .input("variant", sql.NVarChar(20), active && VARIANTS.includes(variant) ? variant : "maintenance")
     .input("title", sql.NVarChar(120), active ? title || null : null)
     .input("message", sql.NVarChar(500), active ? message || null : null)
     .input("startsAt", sql.DateTime2, active && startsAt ? new Date(startsAt) : null)
@@ -62,17 +65,17 @@ async function setMaintenance({ active, title, message, startsAt, endsAt, by }) 
   try {
     await req.query(`
       UPDATE dbo.SystemMaintenance
-         SET IsActive = @active, Title = @title, Message = @message, StartsAt = @startsAt, EndsAt = @endsAt,
+         SET IsActive = @active, Variant = @variant, Title = @title, Message = @message, StartsAt = @startsAt, EndsAt = @endsAt,
              StartedAt = CASE WHEN @active = 1 THEN SYSUTCDATETIME() ELSE StartedAt END,
              UpdatedBy = @by, UpdatedAt = SYSUTCDATETIME()
        WHERE Id = 1;
       IF @@ROWCOUNT = 0
-        INSERT INTO dbo.SystemMaintenance (Id, IsActive, Title, Message, StartedAt, StartsAt, EndsAt, UpdatedBy)
-        VALUES (1, @active, @title, @message, CASE WHEN @active = 1 THEN SYSUTCDATETIME() END, @startsAt, @endsAt, @by);
+        INSERT INTO dbo.SystemMaintenance (Id, IsActive, Variant, Title, Message, StartedAt, StartsAt, EndsAt, UpdatedBy)
+        VALUES (1, @active, @variant, @title, @message, CASE WHEN @active = 1 THEN SYSUTCDATETIME() END, @startsAt, @endsAt, @by);
     `);
   } catch (err) {
-    if (/Invalid object name|Invalid column name 'StartsAt'/i.test(err.message)) {
-      const e = new Error("Maintenance mode needs migrations 548 and 549 - ask an administrator to run the database migrations.");
+    if (/Invalid object name|Invalid column name '(StartsAt|Variant)'/i.test(err.message)) {
+      const e = new Error("Maintenance mode needs migrations 548, 549 and 615 - ask an administrator to run the database migrations.");
       e.status = 503;
       throw e;
     }

@@ -25,12 +25,17 @@ router.put("/", authMiddleware, async (req, res) => {
   if (!isSuperAdmin(req.user?.role)) {
     return res.status(403).json({ error: "Only a super admin can change maintenance mode." });
   }
-  const { active, title, message, endsAt, startInMinutes } = req.body || {};
+  const { active, variant, title, message, endsAt, startInMinutes } = req.body || {};
   if (typeof active !== "boolean") return res.status(400).json({ error: "active must be true or false." });
+  if (variant !== undefined && variant !== "maintenance" && variant !== "unavailable") {
+    return res.status(400).json({ error: "variant must be maintenance or unavailable." });
+  }
+  // The 404 page is a hard stop: it holds everyone at once and has no countdown or end time to show.
+  const unavailable = variant === "unavailable";
 
   // How long people get to finish what they are doing: 0 holds everyone at once.
   let startsAt = null;
-  if (active && startInMinutes !== undefined && startInMinutes !== null) {
+  if (active && !unavailable && startInMinutes !== undefined && startInMinutes !== null) {
     const m = Number(startInMinutes);
     if (!Number.isInteger(m) || m < 0 || m > MAX_WARNING_MINUTES) {
       return res.status(400).json({ error: `startInMinutes must be a whole number from 0 to ${MAX_WARNING_MINUTES}.` });
@@ -39,7 +44,7 @@ router.put("/", authMiddleware, async (req, res) => {
   }
 
   let ends = null;
-  if (active && endsAt) {
+  if (active && !unavailable && endsAt) {
     ends = new Date(endsAt);
     if (Number.isNaN(ends.getTime())) return res.status(400).json({ error: "endsAt is not a valid date and time." });
     if (ends.getTime() <= Date.now()) return res.status(400).json({ error: "The expected end must be in the future." });
@@ -52,6 +57,7 @@ router.put("/", authMiddleware, async (req, res) => {
   try {
     const state = await setMaintenance({
       active,
+      variant,
       title: cleanTitle,
       message: cleanMessage,
       startsAt,

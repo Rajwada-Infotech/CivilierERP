@@ -20,6 +20,7 @@ const isSuperAdmin = (role) => String(role || "").toLowerCase().replace(/[\s-]+/
 function maintenanceBody(state) {
   return {
     code: "MAINTENANCE",
+    variant: state.variant || "maintenance",
     error: state.message || "The system is under maintenance. Please try again shortly.",
     title: state.title,
     message: state.message,
