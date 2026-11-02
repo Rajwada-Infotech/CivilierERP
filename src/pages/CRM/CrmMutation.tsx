@@ -386,7 +386,7 @@ const CrmMutation: React.FC = () => {
                   <SheetMark text={STATUS_LABEL[detail.Status] || detail.Status} tone={mutTone(detail.Status)} />
                 </div>
 
-                <div className="flex items-stretch overflow-x-auto thin-scroll bg-card" style={{ border: RULE }}>
+                <div className="flex flex-wrap items-stretch bg-card" style={{ border: RULE }}>
                   {(["Overview", "Documents", "History"] as DetailTab[]).map((t) => (
                     <button key={t} onClick={() => setActiveTab(t)}
                       className={`px-4 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] whitespace-nowrap shrink-0 transition-colors ${

@@ -64,9 +64,9 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Buyer Payments: the buyer's money (not the company's Finance payments) ───
+  // ── Finance: the buyer's money — milestones, demands, receipts, refunds ─────
   {
-    label: "Buyer Payments",
+    label: "Finance",
     icon: IndianRupee,
     children: [
       { label: "Payment Milestones", path: "/crm/payments",        pageKey: "crm-payments"        },

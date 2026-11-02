@@ -809,7 +809,9 @@ const CrmApplication: React.FC = () => {
       // is already done), never above 6, never above 1 without one.
       const savedStep = Number(app.CurrentStep) || 1;
       const resumeStep = hasProject ? Math.min(6, Math.max(firstStepAfterProject, savedStep)) : 1;
-      setStep(wantStep ? Math.min(resumeStep, Math.max(1, wantStep)) : resumeStep);
+      // A plot sale has no Parking step (2): a link to it opens Extra Charges instead.
+      const linked = wantStep === 2 && firstStepAfterProject === 3 ? 3 : wantStep;
+      setStep(linked ? Math.min(resumeStep, Math.max(1, linked)) : resumeStep);
       setMaxStepReached(resumeStep);
       setDialogOpen(true);
       offerDraft(app.Id, loadedForm);
@@ -1476,7 +1478,8 @@ const CrmApplication: React.FC = () => {
         <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4 rounded-none" style={{ border: RULE }}>
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-[0.75rem] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
-              <Building2 size={14} /> New application
+              {/* An existing one (resumed draft, or Edit / Fix & Resubmit) has its number: not "new". */}
+              <Building2 size={14} /> {applicationNo ? "Application" : "New application"}
               {applicationNo ? <span className="text-muted-foreground font-medium tabular-nums normal-case tracking-normal text-sm">· {applicationNo}</span> : null}
             </DialogTitle>
           </DialogHeader>

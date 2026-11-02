@@ -1202,6 +1202,34 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
 // delete straight through the existing parking-slot-master endpoints (which
 // already enforce the shared booking/hold lock check — not duplicated
 // here).
+// Active parking slots with what holds each one (allotment -> booking, live
+// hold), for one block or a whole project. `where` is a trusted SQL condition
+// on alias s. One query shape for both routes below.
+const parkingSlotsSql = (where) => `
+  SELECT s.Id, s.ProjectId, s.BlockId, s.SlotNo, s.ParkingType, s.IsActive,
+    pa.Id AS LockAllotmentId, bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
+  FROM dbo.ParkingSlot s
+  LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
+  LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
+  LEFT JOIN dbo.CrmInventoryHold h
+    ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
+  WHERE ${where} AND s.IsActive = 1
+  ORDER BY s.BlockId, s.SlotNo`;
+
+// GET /projects/:projectId/parking-slots — every block's slots in one call,
+// for the Parking tab's slot maps and project totals.
+router.get("/projects/:projectId/parking-slots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  try {
+    const projectId = parseId(req.params.projectId);
+    if (projectId === null) return res.status(400).json({ error: "Invalid project id" });
+    const slots = await getPool().request().input("pid", sql.Int, projectId).query(parkingSlotsSql("s.ProjectId = @pid"));
+    res.json({ slots: slots.recordset });
+  } catch (e) {
+    console.error("[crm-project-auto-setup] GET /projects/:projectId/parking-slots error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   const pool = getPool();
   try {
@@ -1211,17 +1239,7 @@ router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup
       .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
 
-    const slots = await pool.request().input("bid", sql.Int, blockId).query(`
-      SELECT s.Id, s.ProjectId, s.BlockId, s.SlotNo, s.ParkingType, s.IsActive,
-        pa.Id AS LockAllotmentId, bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId
-      FROM dbo.ParkingSlot s
-      LEFT JOIN dbo.CrmParkingAllotment pa ON pa.ParkingSlotId = s.Id AND pa.IsActive = 1
-      LEFT JOIN dbo.CrmBooking bk ON bk.Id = pa.BookingId
-      LEFT JOIN dbo.CrmInventoryHold h
-        ON h.EntityType = 'Parking' AND h.EntityId = s.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-      WHERE s.BlockId = @bid AND s.IsActive = 1
-      ORDER BY s.SlotNo
-    `);
+    const slots = await pool.request().input("bid", sql.Int, blockId).query(parkingSlotsSql("s.BlockId = @bid"));
     res.json({ slots: slots.recordset });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /blocks/:id/parking-slots error:", e.message);
