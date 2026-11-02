@@ -227,6 +227,7 @@ export function useApprovalReview({ item, open, onClose, onActionDone }: Approva
     const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
       { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
       ...(hidePartyField ? [] : [{ label: "Party", value: party }]),
+      ...(item.CompanyName ? [{ label: "Company", value: item.CompanyName }] : []),
       ...(item.ProjectName ? [{ label: "Project", value: item.ProjectName }] : []),
       { label: "Created By", value: item.CreatedBy || "—" },
       usesRungDetail

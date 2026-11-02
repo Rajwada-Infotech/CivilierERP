@@ -5,6 +5,7 @@ router.use(apiRateLimit);
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
 const { projectPredicate, ebResolvedProjectSql, paymentProjectSql } = require("../services/projectScope");
+const { enrichInboxRows } = require("../services/inboxEnrichment");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
@@ -357,7 +358,7 @@ const withProjectName = (base, expr) =>
 
 // A payment row's person and project, read from the payment itself (the row is queried unaliased, so NewPayment.* qualifies):
 // the party it pays, else its invoice's supplier, a merged invoice's, its contract's party, else the expense ledgers it is
-// paid straight to. The project cell also names the company, as a payment has both.
+// paid straight to. Its company is filled by the common layer (services/inboxEnrichment.js).
 const PAYMENT_PAYEE_SQL = `COALESCE(
   (SELECT TOP 1 ISNULL(ph.DisplayName, ph.LHeadName) FROM dbo.AccountHeadMaster ph WHERE ph.LHeadId = NewPayment.PPartyId),
   (SELECT TOP 1 pe1.EName FROM dbo.ExpenseBooking pe1 WHERE pe1.EDocNo = NewPayment.PExpenseRef),
@@ -368,11 +369,7 @@ const PAYMENT_PAYEE_SQL = `COALESCE(
   STUFF((SELECT N', ' + ah.LHeadName FROM dbo.ExpenseHeadAllocation ea JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = ea.LHeadId
     WHERE ea.SourceType = N'NewPayment' AND ea.SourceId = NewPayment.PPaymentID ORDER BY ea.AllocationId
     FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N''))`;
-const PAYMENT_PROJECT_LABEL_SQL = (() => {
-  const project = `(SELECT TOP 1 pj.name FROM dbo.enterprise pj WHERE pj.id = ${paymentProjectSql("NewPayment")})`;
-  const company = "(SELECT TOP 1 co.name FROM dbo.enterprise co WHERE co.id = TRY_CAST(NewPayment.PCompany AS INT))";
-  return `NULLIF(CONCAT(${project}, CASE WHEN ${project} IS NOT NULL AND ${company} IS NOT NULL THEN N' · ' ELSE N'' END, ${company}), N'')`;
-})();
+const PAYMENT_PROJECT_LABEL_SQL = `(SELECT TOP 1 pj.name FROM dbo.enterprise pj WHERE pj.id = ${paymentProjectSql("NewPayment")})`;
 
 // Received Payment variant: a CRM payment (CrmBookingId set) is entered in
 // CRM WITHOUT a deposit bank — Accounts fills the bank on the Received
@@ -1589,7 +1586,8 @@ router.get("/", async (req, res) => {
 
     const rows = await runInboxQueries(pool, queries);
 
-    res.json(await filterVisibleToViewer(rows, req));
+    // Every row gets the common person / company / project, then keeps what is special to its own document type.
+    res.json(await enrichInboxRows(pool, await filterVisibleToViewer(rows, req)));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({

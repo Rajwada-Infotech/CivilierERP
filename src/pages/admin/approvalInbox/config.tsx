@@ -24,6 +24,9 @@ export interface InboxItem {
   // material-issue-return, debit-note. NULL for everything else (payments,
   // CRM modules, ...), which have no single project to show.
   ProjectName: string | null;
+  // The company the document belongs to. Every document type shows the same person / company / project / amount; what is
+  // special to a type (a godown route, a voucher summary ...) comes after. Filled by the backend's common layer.
+  CompanyName?: string | null;
   Amount: number | null;
   CreatedBy: string | null;
   ApprovedBy: string | null;
