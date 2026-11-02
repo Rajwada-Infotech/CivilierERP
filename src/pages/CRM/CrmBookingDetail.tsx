@@ -9,8 +9,9 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
-import { Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
+import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
 import { BookingStatement } from "@/components/crm/BookingStatement";
@@ -1145,32 +1146,43 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   Deed Registered — cancellation not applicable
                 </span>
               )}
-              {/* Offered only to those who may raise a cancellation (the server checks the same right). */}
+              {/* Offered only to those who may raise a cancellation (the server checks the same right).
+                  Kept in a menu: a red button beside the title read as the page's main action. */}
               {booking && booking.Status !== 'Cancelled' && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
-                <button onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className={`${KEY_LINE} h-9 px-3 shrink-0 !text-destructive !border-destructive`}>
-                  <AlertTriangle size={13} /> Request cancellation
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`${KEY_LINE} h-9 w-9 shrink-0`} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56 rounded-none">
+                    <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
+                      <AlertTriangle size={14} /> Request cancellation
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
         </DialogHeader>
 
-        {isLoading || !booking ? (
+        {isLoading ? (
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
+        ) : !booking ? (
+          // fetchDetail returns null for a missing / deleted booking or one outside the user's projects.
+          <div className="py-16 text-center text-sm text-muted-foreground">This booking could not be found — it may have been deleted, or it belongs to a project you can't open.</div>
         ) : (
           <div className="min-w-0">
-            <div className="bg-card px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ border: RULE }}>
-              <div className="min-w-0">
-                <div className={LBL}>Current stage</div>
-                <div className={`text-sm font-semibold ${closed ? "text-destructive" : ""}`}>
-                  {closed ? `${booking.Status} — no further steps` : bookingWorkflowStageLabel[currentStage] || currentStage}
-                </div>
-                {booking.StageRemarks && (
-                  <div className="mt-1 px-2 py-1.5 text-xs text-foreground" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
-                    <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
-                  </div>
-                )}
+            {/* The current stage is on the Journey bar's "Now" line below; only
+                what needs reading first is called out here. */}
+            {closed && (
+              <div className="px-3 py-2 text-sm font-semibold text-destructive" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+                {booking.Status} — no further steps
               </div>
-            </div>
+            )}
+            {booking.StageRemarks && (
+              <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+                <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
+                <div><span className="font-semibold">Sent back for correction ({bookingWorkflowStageLabel[currentStage] || currentStage}): </span>{booking.StageRemarks}</div>
+              </div>
+            )}
 
             {booking.IsFrozen && (
               <div className="flex items-start gap-2 border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs">

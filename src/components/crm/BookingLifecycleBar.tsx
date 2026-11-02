@@ -85,6 +85,9 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
         {data.steps.map((step, i) => {
           const clickable = !!step.link && step.status !== "locked";
           const isLast = i === data.steps.length - 1;
+          // Several steps can be open at once (a welcome call can happen while
+          // the booking is still in approval); only the one in "Now" is lit.
+          const isNow = step.key === data.current;
           return (
             <React.Fragment key={step.key}>
               <button
@@ -93,13 +96,15 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
                 title={step.blockedBy ?? (step.date ? `${step.label} — ${step.date}` : step.label)}
                 className={`inline-flex items-center gap-1 border px-2 py-0.5 text-[0.6875rem] leading-none transition-colors
                   ${step.status === "done" ? "border-foreground/30 bg-card text-foreground" : ""}
-                  ${step.status === "active" ? "border-primary/40 bg-primary/10 text-foreground font-semibold" : ""}
+                  ${step.status === "active" && isNow ? "border-primary/40 bg-primary/10 text-foreground font-semibold" : ""}
+                  ${step.status === "active" && !isNow ? "border-border bg-card text-foreground" : ""}
                   ${step.status === "locked" ? "border-transparent bg-muted/30 text-muted-foreground/40" : ""}
                   ${clickable ? "cursor-pointer" : step.status === "locked" ? "cursor-default" : ""}
                 `}
               >
                 {step.status === "done" && <CheckCircle2 size={10} className="shrink-0" />}
-                {step.status === "active" && <Circle size={6} className="fill-primary text-foreground shrink-0 animate-pulse" />}
+                {step.status === "active" && isNow && <Circle size={6} className="fill-primary text-foreground shrink-0 animate-pulse" />}
+                {step.status === "active" && !isNow && <Circle size={6} className="text-muted-foreground shrink-0" />}
                 {step.status === "locked" && <Lock size={8} className="shrink-0" />}
                 {step.label}
                 {step.stage && <span className="font-normal text-muted-foreground">· {step.stage}</span>}
