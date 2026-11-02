@@ -1,6 +1,6 @@
 // By User, right side: one person's figures and their activity, day by day.
-import React from "react";
-import { Loader2, Download } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2, Download } from "lucide-react";
 import type { SessionEvent, UserActivitySummary, UserActivityType } from "@/api/userActivityApi";
 import { describeActivity } from "./describeActivity";
 import { ChangeDetails } from "./ChangeDetails";
@@ -8,43 +8,9 @@ import { KindTag, LBL, KEY_LINE, RULE, RoleTag, chip } from "./activityShared";
 import { ago } from "./PeopleList";
 
 const IST = "Asia/Kolkata";
-const timeIst = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: IST });
-const dayLabelIst = (key: string) =>
+export const timeIst = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: IST });
+export const dayLabelIst = (key: string) =>
   new Date(`${key}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", year: "numeric", timeZone: IST });
-
-/** Build and trigger a CSV download of all loaded activity rows, grouped by date. */
-function exportActivityCsv(
-  days: { key: string; items: SessionEvent[] }[],
-  userName: string
-) {
-  const headers = ["Date", "Time (IST)", "Kind", "Action", "Subject", "Where", "Record", "IP"];
-  const rows: string[][] = [];
-  for (const g of days) {
-    const dateLabel = dayLabelIst(g.key);
-    for (const e of g.items) {
-      const d = describeActivity(e);
-      rows.push([
-        dateLabel,
-        timeIst(e.timestamp),
-        d.kind,
-        d.verb,
-        d.subject || "",
-        d.where || "",
-        d.record || "",
-        e.ipAddress && e.ipAddress !== "unknown" ? e.ipAddress : "",
-      ]);
-    }
-  }
-  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
-  const csv = [headers.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))].join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `activity-${userName.replace(/\s+/g, "-")}.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
 
 export const TYPES: { key: UserActivityType; label: string }[] = [
   { key: "changes", label: "Changes" },
@@ -89,7 +55,23 @@ export const PersonActivity: React.FC<{
   hasMore: boolean;
   loadingMore: boolean;
   loadMore: () => void;
-}> = ({ current, type, setType, total, days, loading, hasMore, loadingMore, loadMore }) => (
+  /** Download the whole selected period for this person, day by day (not only the days loaded here). */
+  onExport: () => void;
+  exporting: boolean;
+}> = ({ current, type, setType, total, days, loading, hasMore, loadingMore, loadMore, onExport, exporting }) => {
+  // Each day is a closed line (the date and how many things were done) until it is opened.
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  useEffect(() => setOpen(new Set()), [current?.userId, type]);
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allOpen = days.length > 0 && days.every((g) => open.has(g.key));
+
+  return (
   <div className="bg-card min-w-0" style={{ border: RULE }}>
     {!current ? (
       <p className="p-10 text-center text-sm text-muted-foreground">Pick a person to see what they did.</p>
@@ -125,6 +107,15 @@ export const PersonActivity: React.FC<{
             <span className={`${LBL} ml-auto`}>
               {total.toLocaleString("en-IN")} event{total === 1 ? "" : "s"}
             </span>
+            {days.length > 0 && (
+              <button type="button" onClick={() => setOpen(allOpen ? new Set() : new Set(days.map((g) => g.key)))} className={`${KEY_LINE} h-7 px-2.5`}>
+                {allOpen ? "Collapse all" : "Expand all"}
+              </button>
+            )}
+            <button type="button" onClick={onExport} disabled={exporting || total === 0} className={`${KEY_LINE} h-7 px-2.5`} title="Download every day of the selected period as an Excel file">
+              {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              {exporting ? "Exporting…" : "Export"}
+            </button>
           </div>
         </div>
 
@@ -138,13 +129,22 @@ export const PersonActivity: React.FC<{
           ) : (
             days.map((g) => (
               <section key={g.key}>
-                <h4 className="sticky top-0 z-[1] bg-card py-2 flex items-baseline gap-2" style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground))" }}>
-                  <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{dayLabelIst(g.key)}</span>
-                  <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{g.items.length}</span>
+                <h4 className="sticky top-0 z-[1] bg-card m-0" style={{ boxShadow: "inset 0 -1px 0 hsl(var(--foreground))" }}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(g.key)}
+                    aria-expanded={open.has(g.key)}
+                    className="w-full py-2 flex items-center gap-2 text-left hover:bg-primary/5"
+                  >
+                    {open.has(g.key) ? <ChevronDown size={13} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={13} className="shrink-0 text-muted-foreground" />}
+                    <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{dayLabelIst(g.key)}</span>
+                    <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{g.items.length}</span>
+                  </button>
                 </h4>
-                {g.items.map((e) => (
-                  <EventRow key={e.id || `${e.timestamp}-${e.resource}`} e={e} />
-                ))}
+                {open.has(g.key) &&
+                  g.items.map((e) => (
+                    <EventRow key={e.id || `${e.timestamp}-${e.resource}`} e={e} />
+                  ))}
               </section>
             ))
           )}
@@ -157,4 +157,5 @@ export const PersonActivity: React.FC<{
       </>
     )}
   </div>
-);
+  );
+};
