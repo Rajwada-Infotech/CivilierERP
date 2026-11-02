@@ -295,7 +295,7 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
   );
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div className="sheet-frame bg-card w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
         {/* Header */}
         <div className="p-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: RULE }}>
@@ -1267,7 +1267,7 @@ export default function CompanyMaster() {
 
         {/* Delete confirm modal */}
         {deleteConfirm !== null && createPortal(
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 backdrop-blur-sm">
             <div className="sheet-frame bg-card p-6 w-80" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
               <div className="pb-3 mb-4" style={{ borderBottom: RULE }}>
                 <div>

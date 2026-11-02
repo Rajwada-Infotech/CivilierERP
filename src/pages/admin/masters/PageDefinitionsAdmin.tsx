@@ -508,7 +508,7 @@ export default function PageDefinitionsAdmin() {
 
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={closeDrawer}
@@ -705,7 +705,7 @@ export default function PageDefinitionsAdmin() {
 
       {/* ── Delete Confirm ── */}
       {deleteTarget && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setDeleteTarget(null)}

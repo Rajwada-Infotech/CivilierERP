@@ -444,7 +444,7 @@ function ProjectViewModal({
     });
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div className="sheet-frame bg-card w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" style={DIALOG_STYLE}>
         <div className="p-5 flex items-center justify-between flex-shrink-0" style={{ borderBottom: RULE }}>
           <div className="flex items-center gap-3">
@@ -1754,7 +1754,7 @@ export default function ProjectMaster() {
 
         {/* Delete Confirmation */}
         {deleteConfirm !== null && createPortal(
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 backdrop-blur-sm">
             <div className="sheet-frame bg-card p-6 w-80" style={DIALOG_STYLE}>
               <div className="pb-3 mb-4" style={{ borderBottom: RULE }}>
                 <div>
@@ -1788,7 +1788,7 @@ export default function ProjectMaster() {
 
         {/* Super Admin: Delete Project + ALL Transactions */}
         {cascadeTarget !== null && createPortal(
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 backdrop-blur-sm">
             <div className="sheet-frame bg-card p-6 w-[26rem]" style={{ ...DIALOG_STYLE, border: "1px solid hsl(var(--destructive))" }}>
               <div className="pb-3 mb-4" style={{ borderBottom: "1px solid hsl(var(--destructive))" }}>
                 <div>

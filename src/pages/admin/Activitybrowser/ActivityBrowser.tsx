@@ -228,7 +228,7 @@ const ActivityBrowser: React.FC = () => {
 
       {confirmClearOpen && (
         <BodyPortal>
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background/60 backdrop-blur-sm">
             <div className="sheet-frame w-full max-w-sm bg-card p-6" style={{ margin: 0, border: RULE, boxShadow: "8px 8px 0 hsl(var(--foreground) / 0.12)" }}>
               <div className="pb-3 mb-3" style={{ borderBottom: RULE }}>
                 <p className={LBL}>Activity log</p>

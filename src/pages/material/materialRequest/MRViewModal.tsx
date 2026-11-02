@@ -32,10 +32,10 @@ export function MRViewModal({ m }: { m: MRState }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
+      className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
     >
-      <div className="sheet-frame bg-card w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true" aria-label="Material request">
+      <div className="sheet-frame bg-card w-full max-w-5xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true" aria-label="Material request">
 
         {/* ── Sticky header ── */}
         <div className="sticky top-0 bg-card z-10" style={{ borderBottom: RULE }}>

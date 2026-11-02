@@ -78,7 +78,7 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("buyer", "Buyer", "Parties", UserTick, "PAN, Aadhaar & land documents"),
   S("seller", "Seller", "Parties", UserMinus, "PAN, Aadhaar & title documents"),
   S("owner", "Owner", "Parties", Crown1, "Recorded owners of land"),
-  S("customer", "Customer", "Parties", People, "Customers with identity & documents"),
+  S("customer", "Legal Customer", "Parties", People, "Legal module customers — not the Sales / CRM customers"),
   S("witness", "Witness", "Parties", Eye, "Deed witnesses & ID proof"),
   S("advocate", "Advocate", "Parties", Judge, "Enrolment, practice & chamber"),
 ];

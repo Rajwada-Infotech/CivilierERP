@@ -23,8 +23,8 @@ export function IRDetail({ m }: { m: IssueReturnState }) {
   ];
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && close()}>
-      <div className="sheet-frame bg-card w-full max-w-3xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true" aria-label={`Issue return ${d.DocNo}`}>
+    <div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 p-0 sm:p-4" onClick={(e) => e.target === e.currentTarget && close()}>
+      <div className="sheet-frame bg-card w-full max-w-3xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true" aria-label={`Issue return ${d.DocNo}`}>
         <div className="sticky top-0 bg-card z-10 flex items-start justify-between gap-2 px-5 py-4" style={{ borderBottom: RULE }}>
           <div className="min-w-0">
             <p className={LBL}>Issue return</p>

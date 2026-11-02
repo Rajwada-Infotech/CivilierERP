@@ -447,7 +447,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   // never paint above the header no matter how high its own z-index is).
   // Same fix ActivityDetailModal.tsx already uses.
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
       <div
         className="sheet-frame relative w-full max-w-4xl bg-card flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150"
