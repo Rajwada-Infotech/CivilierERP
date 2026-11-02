@@ -434,19 +434,19 @@ export default function CrmOnAccount() {
               <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr style={{ borderBottom: RULE }}>
-                    {/* Date and mode sit under the receipt, so the row fits a laptop screen. */}
+                    {/* Date, mode and state sit with the receipt, so the row fits a 1366px laptop. */}
                     <th className={`${th} w-8`} /><th className={th}>Receipt</th><th className={th}>Customer · booking</th>
                     <th className={`${th} !text-right`}>Deposited</th><th className={`${th} !text-right`}>Applied</th>
-                    <th className={`${th} !text-right`}>Balance</th><th className={th}>State</th><th className={th} />
+                    <th className={`${th} !text-right`}>Balance</th><th className={th} />
                   </tr>
                 </thead>
                 <tbody>
                   {isError ? (
-                    <tr><td colSpan={8} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
+                    <tr><td colSpan={7} className={`${td} text-center text-destructive`}>{(error as Error)?.message}</td></tr>
                   ) : isLoading && !data ? (
-                    <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>Loading deposits…</td></tr>
+                    <tr><td colSpan={7} className={`${td} text-center text-muted-foreground`}>Loading deposits…</td></tr>
                   ) : deposits.length === 0 ? (
-                    <tr><td colSpan={8} className={`${td} text-center text-muted-foreground`}>{hasFilters ? "No deposit matches these filters." : "No on-account deposits yet."}</td></tr>
+                    <tr><td colSpan={7} className={`${td} text-center text-muted-foreground`}>{hasFilters ? "No deposit matches these filters." : "No on-account deposits yet."}</td></tr>
                   ) : deposits.map((d) => {
                     const isExp = expanded.has(d.Id);
                     return (
@@ -457,6 +457,7 @@ export default function CrmOnAccount() {
                           <td className={td}>
                             <div className="font-heading text-xs font-semibold tabular-nums text-foreground">{d.ReceiptNo || <span className="italic font-normal text-muted-foreground">Pending</span>}</div>
                             <div className="mt-0.5 text-[0.6875rem] text-muted-foreground tabular-nums">{[fd(d.ReceivedDate), d.PaymentMode].filter(Boolean).join(" · ")}</div>
+                            <div className="mt-1"><DepositMark s={d.Status} /></div>
                             {d.TransactionRef && <div className="text-[0.6875rem] text-muted-foreground tabular-nums truncate max-w-[140px]">{d.TransactionRef}</div>}
                           </td>
                           <td className={`${td} max-w-[170px]`}>
@@ -468,7 +469,6 @@ export default function CrmOnAccount() {
                           <td className={`${td} text-right font-heading tabular-nums ${d.Status === "Bounced" ? "text-destructive line-through" : "text-foreground"}`}>{fmt(d.Amount)}</td>
                           <td className={`${td} text-right font-heading tabular-nums`}>{d.AppliedAmount > 0 ? fmt(d.AppliedAmount) : "—"}</td>
                           <td className={`${td} text-right font-heading font-semibold tabular-nums text-foreground`}>{d.AvailableBalance > 0 ? fmt(d.AvailableBalance) : "—"}</td>
-                          <td className={td}><DepositMark s={d.Status} /></td>
                           <td className={`${td} text-right`} onClick={(e) => e.stopPropagation()}>
                             <div className="inline-flex items-center gap-1.5">
                               {canEdit && d.Status !== "Applied" && d.Status !== "Bounced" && d.AvailableBalance > 0 && <button onClick={() => setAdjusting(d)} className={`${KEY_LINE} h-8 px-3`}>Adjust</button>}
@@ -479,7 +479,7 @@ export default function CrmOnAccount() {
                         {isExp && (
                           <tr style={{ borderBottom: RULE_SOFT }}>
                             <td />
-                            <td colSpan={7} className="!p-0"><MilestoneSchedule deposit={d} /></td>
+                            <td colSpan={6} className="!p-0"><MilestoneSchedule deposit={d} /></td>
                           </tr>
                         )}
                       </React.Fragment>
@@ -493,7 +493,7 @@ export default function CrmOnAccount() {
                       <td className={`${td} text-right font-heading font-bold tabular-nums`}>{fmt(pageCR)}</td>
                       <td className={`${td} text-right font-heading font-bold tabular-nums`}>{pageDR > 0 ? fmt(pageDR) : "—"}</td>
                       <td className={`${td} text-right font-heading font-bold tabular-nums`}>{pageBAL > 0 ? fmt(pageBAL) : "—"}</td>
-                      <td colSpan={2} />
+                      <td />
                     </tr>
                   </tfoot>
                 )}

@@ -441,7 +441,8 @@ const CrmMoneyReceipts: React.FC = () => {
                         style={{ borderBottom: RULE_SOFT, boxShadow: bounced ? "inset 3px 0 0 hsl(var(--destructive))" : undefined }}>
                         <td className={td}>
                           <div className="font-heading text-xs font-semibold tabular-nums">{g.bookingNo}</div>
-                          <div className="mt-1 text-xs truncate max-w-[22rem]">
+                          {/* Wraps (two lines at most): a one-line name pushed the arrow off a 1366px screen. */}
+                          <div className="mt-1 text-xs line-clamp-2 break-words max-w-[22rem]">
                             <ApplicantNames name={g.applicantName} bookingId={g.bookingId} />
                             {g.mobile && <span className="text-muted-foreground tabular-nums"> · {g.mobile}</span>}
                           </div>
