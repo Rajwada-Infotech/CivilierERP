@@ -16,9 +16,10 @@ export const crmNavItems: NavItem[] = [
   // ── Leads (SA handoff pool) ──────────────────────────────────────────────────
   { label: "Leads", icon: Users, path: "/crm/leads", pageKey: "crm-leads" },
 
-  // ── Sales: from buyer to confirmed booking ───────────────────────────────────
+  // ── Buyers & Bookings: from buyer to confirmed booking ──────────────────────
+  // Not "Sales" — that is the ERP's own Sales module (sale orders / invoices).
   {
-    label: "Sales",
+    label: "Buyers & Bookings",
     icon: ClipboardList,
     children: [
       { label: "Customers",               path: "/crm/customers",             pageKey: "crm-customers"           },
@@ -30,9 +31,10 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Inventory: units and parking ─────────────────────────────────────────────
+  // ── Units & Parking ──────────────────────────────────────────────────────────
+  // Not "Inventory" — that reads as material stock.
   {
-    label: "Inventory",
+    label: "Units & Parking",
     icon: Grid3x3,
     children: [
       { label: "Unit Matrix",     path: "/crm/unit-matrix",     pageKey: "crm-unit-matrix"     },
@@ -62,9 +64,9 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Payments: the buyer's money ──────────────────────────────────────────────
+  // ── Buyer Payments: the buyer's money (not the company's Finance payments) ───
   {
-    label: "Payments",
+    label: "Buyer Payments",
     icon: IndianRupee,
     children: [
       { label: "Payment Milestones", path: "/crm/payments",        pageKey: "crm-payments"        },
@@ -78,9 +80,9 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Brokers ──────────────────────────────────────────────────────────────────
+  // ── Brokerage ────────────────────────────────────────────────────────────────
   {
-    label: "Brokers",
+    label: "Brokerage",
     icon: Key,
     children: [
       { label: "Brokerage",      path: "/crm/brokerage",       pageKey: "crm-brokerage" },
