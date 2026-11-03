@@ -65,6 +65,7 @@ import {
   CornerDownRight,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
+import { fmtIstDateTime, parseServerUtc } from "@/lib/istTime";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,12 +74,15 @@ function fmt(d: string | null | undefined): string {
   try { return format(parseISO(d), "dd MMM yyyy"); } catch { return d; }
 }
 
+// When an entry was ticked clear. The server stores UTC and sends it with no zone marker, so it is read as UTC and shown
+// in India time whatever the device's own timezone is (parseISO read it as the device's local time).
 function fmtDT(d: string | null | undefined): { date: string; time: string } {
   if (!d) return { date: "—", time: "" };
-  try {
-    const parsed = parseISO(d);
-    return { date: format(parsed, "dd MMM yyyy"), time: format(parsed, "hh:mm a") };
-  } catch { return { date: d, time: "" }; }
+  if (!parseServerUtc(d)) return { date: d, time: "" };
+  return {
+    date: fmtIstDateTime(d, { day: "2-digit", month: "short", year: "numeric" }),
+    time: fmtIstDateTime(d, { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase(),
+  };
 }
 
 function isCleared(e: BrsEntry): boolean {
