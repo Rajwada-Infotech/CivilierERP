@@ -15,7 +15,7 @@ const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
-const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage } = require("../services/crmOnAccountCoverage");
+const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage, pendingVerificationEntries } = require("../services/crmOnAccountCoverage");
 const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
@@ -822,14 +822,16 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   // would make it impossible to ever submit a payment past Milestone 1.
   // Virtual coverage (money genuinely on-account, even if not yet swept)
   // is the right predecessor check instead.
-  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo))) {
+  // Money already entered and waiting for Finance counts: payments are entered
+  // one after another, and verified in any order (crmOnAccountCoverage.js).
+  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
     const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
       .query(`
         SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
         WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
         ORDER BY MilestoneNo
       `);
-    throw new ReceiptError(`Cannot pay "${targetRow.MilestoneName}" — "${earlier.recordset[0]?.MilestoneName || "an earlier milestone"}" is still due first`);
+    throw new ReceiptError(`Cannot pay "${targetRow.MilestoneName}" — "${earlier.recordset[0]?.MilestoneName || "an earlier milestone"}" is still due first — enter its payment first (it may still be waiting for Finance)`);
   }
 
   // Every CRM payment now submits into Finance's existing Received Payment
@@ -932,7 +934,9 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   // Same virtual-coverage predecessor check as submission time (see
   // createReceiptForMilestone above) — real Status can't be the gate here
   // either, for the same reason.
-  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo))) {
+  // Money already entered and waiting for Finance counts: payments are entered
+  // one after another, and verified in any order (crmOnAccountCoverage.js).
+  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
     const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
       .query(`
         SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
@@ -1212,7 +1216,6 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     const totalPaid = milRes.recordset.reduce((s, m) => s + (m.AmountPaid || 0), 0);
     const balance = activeMilestones.reduce((s, m) => s + Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
     const waivedDue = waivedMilestones.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
-    const overdue   = milRes.recordset.filter((m) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date()).length;
 
     // VirtuallyCovered: money is genuinely on-account for this milestone
     // even though the real sweep (Status='Paid') only fires automatically
@@ -1221,7 +1224,42 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     // Pending/Overdue on money that's already, verifiably, in hand.
     const { milestones: coverage } = await getBookingOnAccountCoverage(pool, bid);
     const coverageById = new Map(coverage.map((c) => [c.Id, c.VirtuallyCovered]));
-    const milestones = milRes.recordset.map((m) => ({ ...m, VirtuallyCovered: !!coverageById.get(m.Id) }));
+    // The same, counting money entered but not yet verified by Finance.
+    const { milestones: entered } = await getBookingOnAccountCoverage(pool, bid, { withPendingVerification: true });
+    const enteredById = new Map(entered.map((c) => [c.Id, c.VirtuallyCovered]));
+
+    // Each milestone's money stage — one answer, so the screen never guesses:
+    //   Adjusted        settled on the milestone
+    //   Verified        Finance-verified money held On Account covers it
+    //   InVerification  covered once the entries waiting for Finance are verified
+    //   null            nothing entered for it yet
+    const stageOf = (m) => {
+      if (m.Status === "Waived") return "Waived";
+      if (m.Status === CrmStatus.PAID || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0)) return "Adjusted";
+      if (coverageById.get(m.Id)) return "Verified";
+      if (enteredById.get(m.Id)) return "InVerification";
+      return null;
+    };
+    const milestones = milRes.recordset.map((m) => ({ ...m, VirtuallyCovered: !!coverageById.get(m.Id), MoneyStage: stageOf(m) }));
+    // Overdue = past due with no money for it, verified or entered.
+    const overdue = milestones.filter((m) => m.MoneyStage == null && m.DueDate && new Date(m.DueDate) < new Date()).length;
+
+    // The booking's money by stage. Collected = everything Finance has
+    // verified (adjusted onto milestones + held On Account).
+    const pending = await pendingVerificationEntries(pool, bid);
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const held = Number(oaRes.recordset[0]?.OnAccountAvailable) || 0;
+    const inVerification = round2(pending.reduce((a, r) => a + Number(r.RPAmount || 0), 0));
+    const collected = round2(totalPaid + held);
+    const money = {
+      adjusted: round2(totalPaid), held, collected,
+      inVerification, inVerificationCount: pending.length,
+      toCollect: Math.max(0, round2(totalDue - collected - inVerification)),
+      entries: pending.map((r) => ({
+        id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
+        ref: r.RPTransactionID, milestone: r.MilestoneName || null, enteredBy: r.RPCreatedBy, enteredAt: r.RPCreatedAt,
+      })),
+    };
 
     res.json({
       booking: {
@@ -1231,6 +1269,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       },
       milestones,
       summary: { totalDue, totalPaid, balance, waivedDue, waivedCount: waivedMilestones.length, overdue },
+      money,
     });
   } catch (e) {
     console.error("[crm-payments] GET /booking/:id error:", e.message);

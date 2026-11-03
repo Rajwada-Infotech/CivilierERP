@@ -29,8 +29,18 @@ export const pct = (paid: number, due: number) => (due > 0 ? Math.min(100, Math.
 /** Today in local time (toISOString gave yesterday before 05:30 IST). */
 export const todayStr = () => localDay();
 
-/** Is this milestone past its due date and still pending? */
-export const isOverdue = (m: any) => m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
+/**
+ * A milestone's money stage, as the server decides it (crmPayments.js GET
+ * /booking/:id, MoneyStage) — the one set of words the cards and rows use.
+ */
+export const MONEY_STAGE: Record<string, { label: string; tone: "done" | "waiting"; hint: string }> = {
+  Adjusted: { label: "Paid", tone: "done", hint: "Settled on this milestone" },
+  Verified: { label: "Verified · on account", tone: "done", hint: "Finance verified the money; it is held On Account and settles on the milestones once the full booking amount is in" },
+  InVerification: { label: "With Finance", tone: "waiting", hint: "Payment entered — waiting for Finance to verify it" },
+};
+
+/** Past its due date with no money for it — verified or entered. */
+export const isOverdue = (m: any) => m.MoneyStage == null && m.Status === "Pending" && m.DueDate && new Date(m.DueDate) < new Date();
 
 export async function fetchMilestones(bookingId: string): Promise<any> {
   if (!bookingId) return null;

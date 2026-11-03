@@ -1011,7 +1011,9 @@ router.put("/:id/approve", allowApprover, async (req, res) => {
       // once the WHOLE booking (money for every later milestone included) is
       // already on-account. Checking real Status here would make it
       // impossible to ever approve a payment past Milestone 1.
-      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo))) {
+      // Entries still waiting for verification count, so Finance can verify
+      // a booking's payments in any order (crmOnAccountCoverage.js).
+      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
         const predecessor = await tx.request()
           .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
             SELECT TOP 1 p.MilestoneName
