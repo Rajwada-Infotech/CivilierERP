@@ -186,12 +186,14 @@ async function createMoneyReceiptAfterDataReview(pool, bookingId, actorUserId) {
 }
 
 /**
- * The booking's money receipt is drawn from the application's token amount,
+ * The booking's money receipt is drawn from the booking's token amount,
  * payment mode and cheque / transaction details when the booking is first
- * sent. A booking sent back to Data Review can have those corrected; the
- * receipt still waiting (Pending / Bounced, not yet with Finance) is redrawn
- * from the corrected values, so the re-sent booking does not carry the old
- * amount to Finance. Once with Finance it never changes here.
+ * sent. A booking sent back to Data Review can have those corrected (the
+ * application's re-submit copies them onto the booking); when it is sent
+ * again, the receipt still waiting (Pending / Bounced, not yet with Finance)
+ * is redrawn from the booking, so it does not carry the old amount to
+ * Finance. Once with Finance it never changes here. Called by
+ * PUT /api/crm/bookings/:id/ready-for-approval.
  */
 async function refreshUnsentMoneyReceipt(pool, bookingId) {
   const mr = (await pool.request().input("bid", sql.Int, bookingId).query(`
