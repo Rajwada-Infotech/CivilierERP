@@ -24,7 +24,7 @@ const router = express.Router();
 router.use(apiRateLimit);
 
 const PAGE = "legal-land-master";
-const SECTIONS = ["Property", "Ownership", "Legal", "Purchase / Sale", "Registration"];
+const SECTIONS = ["Property", "Ownership", "Legal", "Purchase / Sale", "Registration", "Loan & Mortgage", "Mutation", "Payment", "Tax", "Survey & Valuation", "Other"];
 const REVIEWS = ["Pending", "Verified", "Rejected", "Reattachment Required"];
 
 const idParam = (v) => {
@@ -99,7 +99,9 @@ router.get("/:landId", requirePageRight(PAGE, "view"), async (req, res) => {
     const [docs, required] = await Promise.all([
       pool.request().input("Land", sql.Int, landId).query(`
         SELECT d.DocumentId, d.DocumentCode, d.DocTypeId, dt.DocTypeName, d.RelatedSection, d.Title, d.DocumentNo, d.DocumentDate,
-               d.IssuingAuthority, d.CurrentVersionNo, d.Remarks, d.IsActive,
+               d.IssuingAuthority, d.CurrentVersionNo, d.Remarks, d.IsActive, d.RegistrationDate, d.RelatedOwner, d.Description,
+               d.RelatedLegalRecordId, (SELECT lr.RecordType + ISNULL(' ' + lr.CaseNumber, '') FROM dbo.LegalLandLegalRecord lr WHERE lr.LegalRecordId = d.RelatedLegalRecordId) AS RelatedLegalRecord,
+               d.RelatedMortgageId, (SELECT m.LenderName + ISNULL(' · ' + m.LoanAccountRef, '') FROM dbo.LegalMortgage m WHERE m.MortgageId = d.RelatedMortgageId) AS RelatedMortgage,
                v.VersionId, v.FileId, f.FileName, v.UploadedAt, v.ReviewStatus, v.ReviewedAt, v.ReviewRemarks,
                (SELECT name FROM dbo.users WHERE id = v.UploadedBy) AS UploadedByName,
                (SELECT name FROM dbo.users WHERE id = v.ReviewedBy) AS ReviewedByName,
@@ -144,33 +146,47 @@ router.post("/:landId", requirePageRight(PAGE, "edit"), async (req, res) => {
   const fileId = idParam(b.fileId);
   const title = text(b.title, 200);
   const date = dateOrNull(b.documentDate);
+  const regDate = dateOrNull(b.registrationDate);
+  // What the document belongs to on this land (optional): a legal record or a loan / mortgage.
+  const legalRecordId = idParam(b.relatedLegalRecordId);
+  const mortgageId = idParam(b.relatedMortgageId);
   if (!docTypeId) return res.status(400).json({ error: "Choose the document type" });
   if (!SECTIONS.includes(b.relatedSection)) return res.status(400).json({ error: `Related section must be one of: ${SECTIONS.join(", ")}` });
   if (!title) return res.status(400).json({ error: "Enter the document title" });
   if (!fileId) return res.status(400).json({ error: "Upload the file" });
   if (date.error) return res.status(400).json({ error: date.error });
+  if (regDate.error) return res.status(400).json({ error: "Registration date is not valid" });
 
   const tx = new sql.Transaction(getPool());
   try {
     await tx.begin();
-    const ok = (await tx.request().input("Land", sql.Int, landId).input("Type", sql.Int, docTypeId).input("File", sql.Int, fileId).query(`
+    const ok = (await tx.request().input("Land", sql.Int, landId).input("Type", sql.Int, docTypeId).input("File", sql.Int, fileId)
+      .input("Legal", sql.Int, legalRecordId).input("Mort", sql.Int, mortgageId).query(`
       SELECT (SELECT COUNT(*) FROM dbo.LegalLand WHERE LandId = @Land) AS land,
              (SELECT COUNT(*) FROM dbo.LegalDocumentType WHERE DocTypeId = @Type AND IsActive = 1) AS type,
-             (SELECT COUNT(*) FROM dbo.LegalMasterFile WHERE FileId = @File) AS f`)).recordset[0];
+             (SELECT COUNT(*) FROM dbo.LegalMasterFile WHERE FileId = @File) AS f,
+             (SELECT COUNT(*) FROM dbo.LegalLandLegalRecord WHERE LegalRecordId = @Legal AND LandId = @Land) AS legal,
+             (SELECT COUNT(*) FROM dbo.LegalMortgage WHERE MortgageId = @Mort AND LandId = @Land) AS mort`)).recordset[0];
     const refuse = async (msg) => { await tx.rollback(); return res.status(400).json({ error: msg }); };
     if (!ok.land) return refuse("Land property not found");
     if (!ok.type) return refuse("Choose an active document type");
     if (!ok.f) return refuse("The uploaded file was not found — upload it again");
+    if (legalRecordId && !ok.legal) return refuse("The related legal record is not on this land");
+    if (mortgageId && !ok.mort) return refuse("The related loan / mortgage is not on this land");
     const ins = await tx.request()
       .input("Prefix", sql.NVarChar(20), codePrefix("DOC"))
       .input("Land", sql.Int, landId).input("Type", sql.Int, docTypeId).input("Section", sql.NVarChar(30), b.relatedSection)
       .input("Title", sql.NVarChar(200), title).input("No", sql.NVarChar(100), text(b.documentNo, 100))
       .input("Date", sql.Date, date.value).input("Authority", sql.NVarChar(200), text(b.issuingAuthority, 200))
       .input("Remarks", sql.NVarChar(1000), text(b.remarks, 1000)).input("UserId", sql.Int, req.user?.userId || null)
+      .input("RegDate", sql.Date, regDate.value).input("Owner", sql.NVarChar(200), text(b.relatedOwner, 200))
+      .input("Legal", sql.Int, legalRecordId).input("Mort", sql.Int, mortgageId).input("Desc", sql.NVarChar(1000), text(b.description, 1000))
       .query(`
-        INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, DocumentDate, IssuingAuthority, CurrentVersionNo, Remarks, CreatedBy)
+        INSERT INTO dbo.LegalLandDocument (DocumentCode, LandId, DocTypeId, RelatedSection, Title, DocumentNo, DocumentDate, IssuingAuthority, CurrentVersionNo, Remarks,
+                                           RegistrationDate, RelatedOwner, RelatedLegalRecordId, RelatedMortgageId, Description, CreatedBy)
         OUTPUT INSERTED.DocumentId AS id, INSERTED.DocumentCode AS code
-        SELECT ${nextCodeSql("LegalLandDocument", "DocumentCode", "@Prefix")}, @Land, @Type, @Section, @Title, @No, @Date, @Authority, 1, @Remarks, @UserId`);
+        SELECT ${nextCodeSql("LegalLandDocument", "DocumentCode", "@Prefix")}, @Land, @Type, @Section, @Title, @No, @Date, @Authority, 1, @Remarks,
+               @RegDate, @Owner, @Legal, @Mort, @Desc, @UserId`);
     const doc = ins.recordset[0];
     await tx.request().input("Doc", sql.Int, doc.id).input("File", sql.Int, fileId).input("UserId", sql.Int, req.user?.userId || null)
       .query("INSERT INTO dbo.LegalLandDocumentVersion (DocumentId, VersionNo, FileId, UploadedBy) VALUES (@Doc, 1, @File, @UserId)");

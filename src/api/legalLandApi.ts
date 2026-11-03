@@ -30,6 +30,7 @@ export interface LandPipeline {
     LandId: number; LandCode: string; LandName: string; DistrictName: string | null; MouzaId: number | null; MouzaName: string | null;
     JLNo: string | null; Area: number | null; UnitName: string | null; LandStatus: string; WorkflowStatus: string | null;
     IsOnHold: boolean; IsActive: boolean; EnquiryNo: string | null; IsCancelled: boolean; CancelReason: string | null; CancelledAt: string | null;
+    EntryType?: "New Acquisition" | "Existing / Backlog";
   };
   hold: { HoldCategory: string; HoldReason: string; HoldDate: string; ExpectedReviewDate: string | null; HeldByName: string | null } | null;
   steps: PipelineStep[];
@@ -42,6 +43,8 @@ export interface LandPipeline {
 
 export interface LandStats {
   totalLands: number; activeEnquiries: number; inProgress: number; onHold: number; pendingVerification: number; completed: number;
+  /** Existing / backlog land (already owned; no pipeline). */
+  backlogLands: number;
   recent: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null; IsOnHold: boolean; MouzaName: string | null; JLNo: string | null }[];
   pendingRegistration: number;
   mutationPending: number;
@@ -67,6 +70,21 @@ const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "Cont
 export const getLandStats = async () => handle<LandStats>(await fetchWithAuth(`${BASE}/stats`));
 export const getLandPipeline = async (id: number) => handle<LandPipeline>(await fetchWithAuth(`${BASE}/${id}`));
 export const getLandAudit = async (id: number) => handle<AuditEvent[]>(await fetchWithAuth(`${BASE}/${id}/audit`));
+
+/** A land's profile overview (both entry types): identity, current owners and record counts. */
+export interface LandOverview {
+  land: {
+    LandId: number; LandCode: string; LandName: string; EntryType: "New Acquisition" | "Existing / Backlog"; LandStatus: string;
+    PossessionStatus: string | null; WorkflowStatus: string | null; IsOnHold: boolean; IsActive: boolean; Area: number | null; UnitName: string | null;
+    LocationAddress: string | null; AcquisitionDate: string | null; AcquisitionDateApprox: boolean;
+    RsDagNo: string | null; LrDagNo: string | null; RsKhatianNo: string | null; LrKhatianNo: string | null;
+    DistrictName: string | null; MouzaName: string | null; JLNo: string | null; CreatedAt: string; LastUpdated: string; CreatedByName: string | null;
+  };
+  owners: { OwnerName: string | null; SharePct: number; ValidFrom: string; VerificationStatus: string }[];
+  counts: Record<"ownershipRecords" | "transfers" | "documents" | "documentsUnverified" | "activeCases" | "legalRecords" | "legalHistory" | "activeMortgages" | "mortgages"
+    | "mutations" | "payments" | "taxRecords" | "valuations" | "landRecords" | "awaitingVerification", number>;
+}
+export const getLandOverview = async (id: number) => handle<LandOverview>(await fetchWithAuth(`${BASE}/${id}/overview`));
 export const moveLandStep = async (id: number, code: string, body: { status: StepStatus; remarks?: string; skipReason?: string }) =>
   handle<{ message: string; reverify: string[] }>(await fetchWithAuth(`${BASE}/${id}/steps/${code}`, post(body)));
 export const holdLand = async (id: number, body: { category: string; reason: string; expectedReviewDate?: string; remarks?: string }) =>

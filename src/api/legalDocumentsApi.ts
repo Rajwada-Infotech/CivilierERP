@@ -10,6 +10,8 @@ export interface LandDocument {
   DocumentNo: string | null; DocumentDate: string | null; IssuingAuthority: string | null; CurrentVersionNo: number; Remarks: string | null;
   VersionId: number; FileId: number; FileName: string; UploadedAt: string; UploadedByName: string | null;
   ReviewStatus: ReviewStatus; ReviewedAt: string | null; ReviewedByName: string | null; ReviewRemarks: string | null; Versions: number;
+  RegistrationDate?: string | null; RelatedOwner?: string | null; Description?: string | null;
+  RelatedLegalRecordId?: number | null; RelatedLegalRecord?: string | null; RelatedMortgageId?: number | null; RelatedMortgage?: string | null;
 }
 export interface RequiredDocument {
   docTypeId: number; docTypeName: string; requirement: "Required" | "Conditional" | "Optional"; stage: string; allowNA: boolean;
@@ -35,7 +37,8 @@ const send = (method: string, body?: unknown): RequestInit => ({ method, headers
 
 export const getLandDocuments = async (landId: number) => handle<LandDocuments>(await fetchWithAuth(`${BASE}/${landId}`));
 export const getDocumentVersions = async (docId: number) => handle<DocumentVersion[]>(await fetchWithAuth(`${BASE}/doc/${docId}/versions`));
-export const addLandDocument = async (landId: number, body: { docTypeId: number; relatedSection: string; title: string; documentNo?: string; documentDate?: string; issuingAuthority?: string; remarks?: string; fileId: number }) =>
+export const addLandDocument = async (landId: number, body: { docTypeId: number; relatedSection: string; title: string; documentNo?: string; documentDate?: string; issuingAuthority?: string; remarks?: string; fileId: number;
+  registrationDate?: string; relatedOwner?: string; relatedLegalRecordId?: number | null; relatedMortgageId?: number | null; description?: string }) =>
   handle<{ id: number; message: string }>(await fetchWithAuth(`${BASE}/${landId}`, send("POST", body)));
 export const addDocumentVersion = async (docId: number, fileId: number, remarks?: string) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/doc/${docId}/versions`, send("POST", { fileId, remarks })));

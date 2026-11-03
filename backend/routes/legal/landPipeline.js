@@ -59,7 +59,7 @@ const requireApprove = async (req, res) => {
 async function loadLand(conn, id) {
   const r = await conn.request().input("Id", sql.Int, id).query(`
     SELECT l.LandId, l.LandCode, l.LandName, l.DistrictId, l.MouzaId, l.Area, l.AreaUnitId, l.EnquiryId,
-           l.LandStatus, l.WorkflowStatus, l.IsOnHold, l.IsActive, l.CreatedAt, l.IsCancelled, l.CancelReason, l.CancelledAt,
+           l.LandStatus, l.WorkflowStatus, l.IsOnHold, l.IsActive, l.CreatedAt, l.IsCancelled, l.CancelReason, l.CancelledAt, l.EntryType,
            d.DistrictName, m.MouzaName, m.JLNo, u.UnitName, e.EnquiryNo
     FROM dbo.LegalLand l
     LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
@@ -349,10 +349,12 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
       SELECT
         (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1) AS totalLands,
         (SELECT COUNT(*) FROM dbo.LegalLandEnquiry WHERE IsActive = 1 AND EnquiryStatus IN ('New', 'Under Review', 'Interested', 'On Hold')) AS activeEnquiries,
-        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND IsOnHold = 0 AND ISNULL(WorkflowStatus, '') <> 'Completed') AS inProgress,
+        -- Pipeline counts are of new acquisitions only; existing / backlog land has no pipeline.
+        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND EntryType = N'New Acquisition' AND IsOnHold = 0 AND ISNULL(WorkflowStatus, '') <> 'Completed') AS inProgress,
         (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND IsOnHold = 1) AS onHold,
         (SELECT COUNT(DISTINCT LandId) FROM dbo.LegalWorkflowStepState WHERE Status = 'Pending Verification') AS pendingVerification,
-        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND WorkflowStatus = 'Completed') AS completed;
+        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND EntryType = N'New Acquisition' AND WorkflowStatus = 'Completed') AS completed,
+        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND EntryType = N'Existing / Backlog') AS backlogLands;
       SELECT TOP 8 l.LandId, l.LandCode, l.LandName, l.WorkflowStatus, l.IsOnHold, m.MouzaName, m.JLNo, l.CreatedAt
       FROM dbo.LegalLand l LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       WHERE l.IsActive = 1 ORDER BY ISNULL(l.UpdatedAt, l.CreatedAt) DESC;
@@ -386,6 +388,58 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   } catch (err) {
     console.error("[legal-land] stats:", err.message);
     res.status(500).json({ error: "Could not load land statistics" });
+  }
+});
+
+// The land's profile overview: identity, current owners and the counts of what is recorded against it.
+router.get("/:id/overview", requirePageRight(LAND_PAGE, "view"), async (req, res) => {
+  const id = idParam(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const r = await getPool().request().input("Id", sql.Int, id).query(`
+      SELECT l.LandId, l.LandCode, l.LandName, l.EntryType, l.LandStatus, l.PossessionStatus, l.WorkflowStatus, l.IsOnHold, l.IsActive,
+             l.Area, u.UnitName, l.LocationAddress, l.AcquisitionDate, l.AcquisitionDateApprox, l.RsDagNo, l.LrDagNo, l.RsKhatianNo, l.LrKhatianNo,
+             d.DistrictName, m.MouzaName, m.JLNo, l.CreatedAt, ISNULL(l.UpdatedAt, l.CreatedAt) AS LastUpdated,
+             (SELECT name FROM dbo.users WHERE id = l.CreatedBy) AS CreatedByName
+      FROM dbo.LegalLand l
+      LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
+      LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
+      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+      WHERE l.LandId = @Id;
+      SELECT ISNULL(o.OwnerName, p.FullName) AS OwnerName, o.SharePct, o.ValidFrom, o.VerificationStatus
+      FROM dbo.LegalOwnershipRecord o LEFT JOIN dbo.LegalPerson p ON p.PersonId = o.PersonId
+      WHERE o.LandId = @Id AND o.IsActive = 1 AND o.ValidTo IS NULL ORDER BY o.SharePct DESC;
+      SELECT
+        (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1) AS ownershipRecords,
+        (SELECT COUNT(*) FROM dbo.LegalOwnershipEvent WHERE LandId = @Id AND IsActive = 1) AS transfers,
+        (SELECT COUNT(*) FROM dbo.LegalLandDocument WHERE LandId = @Id AND IsActive = 1) AS documents,
+        (SELECT COUNT(*) FROM dbo.LegalLandDocument dd JOIN dbo.LegalLandDocumentVersion v ON v.DocumentId = dd.DocumentId AND v.VersionNo = dd.CurrentVersionNo
+           WHERE dd.LandId = @Id AND dd.IsActive = 1 AND v.ReviewStatus <> N'Verified') AS documentsUnverified,
+        (SELECT COUNT(*) FROM dbo.LegalCase c LEFT JOIN dbo.LegalLookupValue s ON s.LookupId = c.LegalStatusId
+           WHERE c.LandId = @Id AND c.IsActive = 1 AND ISNULL(s.Name, N'') NOT IN (N'Closed', N'Disposed', N'Resolved', N'Dismissed')) AS activeCases,
+        (SELECT COUNT(*) FROM dbo.LegalLandLegalRecord WHERE LandId = @Id AND IsActive = 1) AS legalRecords,
+        -- The Legal history tab holds both court cases and the other legal records.
+        (SELECT COUNT(*) FROM dbo.LegalLandLegalRecord WHERE LandId = @Id AND IsActive = 1)
+          + (SELECT COUNT(*) FROM dbo.LegalCase WHERE LandId = @Id AND IsActive = 1) AS legalHistory,
+        (SELECT COUNT(*) FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1
+           AND (LoanStatus IN (N'Active', N'Overdue') OR MortgageStatus IN (N'Mortgage Active', N'Loan Outstanding', N'Release Pending'))) AS activeMortgages,
+        (SELECT COUNT(*) FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1) AS mortgages,
+        (SELECT COUNT(*) FROM dbo.LegalMutation WHERE LandId = @Id AND IsActive = 1) AS mutations,
+        (SELECT COUNT(*) FROM dbo.LegalPayment WHERE LandId = @Id AND IsActive = 1) AS payments,
+        (SELECT COUNT(*) FROM dbo.LegalLandTax WHERE LandId = @Id AND IsActive = 1) AS taxRecords,
+        (SELECT COUNT(*) FROM dbo.LegalValuation WHERE LandId = @Id AND IsActive = 1) AS valuations,
+        (SELECT COUNT(*) FROM dbo.LegalLandRsRecord WHERE LandId = @Id AND IsActive = 1) + (SELECT COUNT(*) FROM dbo.LegalLandLrRecord WHERE LandId = @Id AND IsActive = 1) AS landRecords,
+        -- Everything recorded but still waiting for a verifier (data entered is not data verified).
+        (SELECT COUNT(*) FROM dbo.LegalOwnershipRecord WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> N'Verified')
+          + (SELECT COUNT(*) FROM dbo.LegalOwnershipEvent WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> N'Verified')
+          + (SELECT COUNT(*) FROM dbo.LegalLandLegalRecord WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> N'Verified')
+          + (SELECT COUNT(*) FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1 AND VerificationStatus <> N'Verified') AS awaitingVerification;`);
+    const [land] = r.recordsets[0];
+    if (!land) return res.status(404).json({ error: "Land not found" });
+    res.json({ land, owners: r.recordsets[1], counts: r.recordsets[2][0] });
+  } catch (err) {
+    console.error("[legal-land] overview:", err.message);
+    res.status(500).json({ error: "Could not load the land overview" });
   }
 });
 

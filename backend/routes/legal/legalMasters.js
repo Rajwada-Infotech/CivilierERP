@@ -320,6 +320,21 @@ router.get("/summary", anyLegalView, listCache, async (req, res) => {
   }
 });
 
+// The official sites (Setup → Official Portal Link) as quick links for anyone in the Legal module — opened in a new
+// tab to check land details by hand. Nothing is sent to or read from those sites.
+router.get("/portal-links", anyLegalView, listCache, async (_req, res) => {
+  try {
+    const r = await getPool().request().query(`
+      SELECT l.LinkId, l.LinkLabel, l.ServiceType, l.Url, l.FallbackInstructions, l.LastTestedDate, o.OfficeName
+      FROM dbo.LegalPortalLink l LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = l.OfficeId
+      WHERE l.IsActive = 1 ORDER BY l.ServiceType, l.LinkLabel`);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[legal-masters] portal links:", err.message);
+    res.status(500).json({ error: "Could not load the portal links" });
+  }
+});
+
 router.get("/lookup/:ref", anyLegalView, listCache, async (req, res) => {
   const { ref } = req.params;
   try {
