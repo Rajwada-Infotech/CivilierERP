@@ -185,6 +185,42 @@ async function createMoneyReceiptAfterDataReview(pool, bookingId, actorUserId) {
   return createMoneyReceiptForBooking(pool, bookingId, {}, actorUserId, { skipIfExists: true });
 }
 
+/**
+ * The booking's money receipt is drawn from the application's token amount,
+ * payment mode and cheque / transaction details when the booking is first
+ * sent. A booking sent back to Data Review can have those corrected; the
+ * receipt still waiting (Pending / Bounced, not yet with Finance) is redrawn
+ * from the corrected values, so the re-sent booking does not carry the old
+ * amount to Finance. Once with Finance it never changes here.
+ */
+async function refreshUnsentMoneyReceipt(pool, bookingId) {
+  const mr = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 Id, Amount FROM dbo.CrmMoneyReceipt
+    WHERE BookingId = @bid AND Status IN ('Pending', 'Bounced') AND ReceivedPaymentId IS NULL
+    ORDER BY CreatedAt DESC`)).recordset[0];
+  if (!mr) return null;
+  const d = await getBookingReceiptDefaults(pool, bookingId);
+  const amount = Number(d.TokenValue != null ? d.TokenValue : d.BookingAmount);
+  if (!(amount > 0)) return null;
+  const mode = cleanString(d.PaymentMode) || "Other";
+  await updateMoneyReceipt(pool, mr.Id, {
+    Amount: amount, PaymentMode: mode,
+    ChequeNo: mode === "Cheque" ? cleanString(d.ChequeNo) || cleanString(d.TransactionRef) : null,
+    ChequeDate: mode === "Cheque" ? d.ChequeDate : null,
+    TransactionRef: mode === "Cheque" ? null : cleanString(d.TransactionRef),
+    DepositBankName: cleanString(d.DepositBankName),
+  });
+  // The GST split follows the amount (updateMoneyReceipt keeps the old split).
+  const g = await getBookingGstInputs(pool, bookingId);
+  const { gstAmount, baseAmount } = splitGstByRateOrBlend(amount, {
+    gstRate: g.UnitParkingGstRate, totalGstAmount: g.TotalGstAmount, grandTotal: g.GrandTotal,
+  });
+  await pool.request().input("id", sql.Int, mr.Id).input("gst", sql.Decimal(18, 2), gstAmount).input("base", sql.Decimal(18, 2), baseAmount)
+    .query("UPDATE dbo.CrmMoneyReceipt SET GSTAmount = @gst, BaseAmount = @base WHERE Id = @id AND ReceivedPaymentId IS NULL");
+  await generateMoneyReceiptPdf(pool, mr.Id);
+  return { id: mr.Id, from: Number(mr.Amount), to: amount };
+}
+
 // ── Edit / resubmit / bounce (Pending <-> Bounced, pre-approval only) ──────
 
 async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
@@ -498,6 +534,7 @@ module.exports = {
   isMoneyReceiptApprover,
   createMoneyReceiptForBooking,
   createMoneyReceiptAfterDataReview,
+  refreshUnsentMoneyReceipt,
   updateMoneyReceipt,
   resubmitMoneyReceipt,
   bounceMoneyReceipt,

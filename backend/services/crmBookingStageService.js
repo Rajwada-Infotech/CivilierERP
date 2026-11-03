@@ -118,6 +118,8 @@ async function getStageState(pool, bookingId, viewer = null) {
     RejectedFromStage: row.RejectedFromStage,
     RejectedBy: row.RejectedBy,
     RejectedAt: row.RejectedAt,
+    // Where a send-back from here may go (default first) — SEND_BACK_TARGETS.
+    SendBackTo: SEND_BACK_TARGETS[row.WorkflowStage] || [],
     MarketingHeadApprovedAt: row.MarketingHeadApprovedAt,
     MarketingHeadApprovedBy: row.MarketingHeadApprovedBy,
     DirectorApprovedAt: row.DirectorApprovedAt,
@@ -208,6 +210,23 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Re-checked under the booking's lock: a double click (or two verifiers)
+    // must send it only once — the second finds it already sent — and an item
+    // flagged in the same moment must still stop it.
+    const locked = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT WorkflowStage, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
+    if (!locked || !locked.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(locked.Status)) {
+      throw Object.assign(new Error("This booking is no longer active"), { status: 400 });
+    }
+    if (locked.WorkflowStage !== STAGE_REVIEW) {
+      throw Object.assign(new Error(`Booking has already been sent — it is at '${stageLabel(locked.WorkflowStage)}'`), { status: 409 });
+    }
+    const open = (await tx.request().input("aid", sql.Int, row.ApplicationId).query(`
+      SELECT COUNT(*) AS N FROM dbo.CrmApplicationVerificationChecklist WITH (UPDLOCK, HOLDLOCK)
+      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus <> 'Checked'`)).recordset[0].N;
+    if (open > 0) {
+      throw Object.assign(new Error(`Complete the data review checklist first — ${open} item(s) still not checked`), { status: 400 });
+    }
     await tx.request().input("bid", sql.Int, bookingId)
       .query(`
         UPDATE dbo.CrmBooking SET
@@ -307,6 +326,15 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Still live? A delete (or cancellation) can commit between this
+    // request's first read and the approval above — then the approval must
+    // not stand: the throw runs the compensation below (Status back,
+    // approval row removed).
+    const live = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT IsActive, Status FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
+    if (!live || !live.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(live.Status)) {
+      throw Object.assign(new Error("This booking was deleted or cancelled while it was being approved — nothing was approved"), { status: 409 });
+    }
     await tx.request()
       .input("bid", sql.Int, bookingId)
       .input("stg", sql.NVarChar(40), nextStage)
@@ -430,7 +458,22 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
 // mandatory (the whole point is to tell the preparer what to fix). The
 // LevelData remains untouched (the stage never clears), so a re-approve
 // after correction works cleanly.
-async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark) {
+// Where a send-back from each stage may go. One step back by default; the
+// Director may also send it straight to Data Review when the application
+// itself needs correcting. Either way every approval after that point is
+// cleared, so the booking runs the whole chain again from there.
+const SEND_BACK_TARGETS = {
+  [STAGE_MARKETING]: [STAGE_REVIEW],
+  [STAGE_DIRECTOR]: [STAGE_MARKETING, STAGE_REVIEW],
+};
+
+// The same targets as a SQL column (comma-separated, default first) for list queries.
+function sendBackTargetsSql(stageColumn) {
+  const whens = Object.entries(SEND_BACK_TARGETS).map(([from, to]) => `WHEN N'${from}' THEN N'${to.join(",")}'`).join(" ");
+  return `CASE ${stageColumn} ${whens} END`;
+}
+
+async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark, { toStage = null } = {}) {
   if (stage === STAGE_CONFIRMED) {
     const e = new Error("This booking is already confirmed — it can't be sent back; cancel or amend it instead");
     e.status = 409;
@@ -449,7 +492,11 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
     throw e;
   }
 
-  const prevStage = stage === STAGE_MARKETING ? STAGE_REVIEW : STAGE_MARKETING;
+  const targets = SEND_BACK_TARGETS[stage] || [];
+  if (toStage && !targets.includes(toStage)) {
+    throw Object.assign(new Error(`From '${stageLabel(stage)}' a booking can be sent back to: ${targets.map(stageLabel).join(" or ")}`), { status: 400 });
+  }
+  const prevStage = toStage || targets[0] || STAGE_REVIEW;
 
   // The stage bounce-back, its stage-log entry, and the approval-level reset
   // (clear stale Approved rows + record the BouncedBack action) are one
@@ -568,6 +615,8 @@ module.exports = {
   STAGE_CONFIRMED,
   WORKFLOW_STAGES,
   STAGE_LABELS,
+  SEND_BACK_TARGETS,
+  sendBackTargetsSql,
   stageLabel,
   getStageState,
   submitForApproval,

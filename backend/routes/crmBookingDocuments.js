@@ -241,6 +241,7 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
         try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
         throw txErr;
       }
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId }, ["Documents"], "document uploaded");
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
       console.error("[crm-booking-documents] application upload error:", e.message);
@@ -319,6 +320,7 @@ router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-call
     }
 
     await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBookingDocument WHERE Id = @id");
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { bookingId: docRow.recordset[0].BookingId }, ["Documents"], "document deleted");
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-booking-documents] DELETE error:", e.message);
