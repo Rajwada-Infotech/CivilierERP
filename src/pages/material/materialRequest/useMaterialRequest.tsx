@@ -703,12 +703,13 @@ export function useMaterialRequest() {
               preloaded={approvalTrails.get(String(row.original.MRId)) ?? null}
               preloadedLoading={approvalTrailsLoading}
             />
-            {pending &&
+            {/* Only once something has been ordered: with no PO / transfer left (or none yet), nothing is "pending" against it. */}
+            {pending && pending.totalOrdered > 0 &&
               (pending.totalPending > 0 ? (
                 <SheetMark text={`Pending · ${pending.totalPending} qty`} tone="waiting" />
-              ) : pending.totalOrdered > 0 ? (
+              ) : (
                 <SheetMark text="Completed" tone="done" />
-              ) : null)}
+              ))}
           </div>
         );
       },

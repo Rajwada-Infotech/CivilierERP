@@ -14,7 +14,7 @@ const SKIP = [
   /^\/api\/home\/usage/,
   /^\/api\/users\/(login|logout|refresh)/,
   /^\/api\/doc-search/,
-  /\/(preview|naming-preview|validate|calculate|bulk-search)(\?|$)/,
+  /\/(preview|naming-preview|validate|calculate|bulk-search|price-quote)(\?|$)/,
 ];
 
 const ACTION = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };

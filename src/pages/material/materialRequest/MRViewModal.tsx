@@ -47,12 +47,13 @@ export function MRViewModal({ m }: { m: MRState }) {
               </h2>
               <div className="flex flex-wrap items-center gap-2 mt-2">
                 <SheetMark text={status} tone={statusTone(status)} />
-                {pending &&
+                {/* Only once something has been ordered: with no PO / transfer left (or none yet), nothing is "pending" against it. */}
+                {pending && pending.totalOrdered > 0 &&
                   (pending.totalPending > 0 ? (
                     <SheetMark text={`Pending · ${pending.totalPending} qty`} tone="waiting" />
-                  ) : pending.totalOrdered > 0 ? (
+                  ) : (
                     <SheetMark text="Completed" tone="done" />
-                  ) : null)}
+                  ))}
                 <span className={`${TAG} ${PRIORITY_COLOR[priority] ?? PRIORITY_COLOR.Normal}`}>{priority}</span>
               </div>
             </div>

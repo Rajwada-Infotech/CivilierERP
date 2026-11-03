@@ -1,14 +1,17 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, TickCircle, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21 } from "iconsax-react";
-import { ArrowRight, ChevronRight, CheckCircle2, CircleAlert, ExternalLink } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, TickCircle, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21, Note1, Chart, MoneySend } from "iconsax-react";
+import { ArrowRight, ChevronRight, CheckCircle2, CircleAlert, ExternalLink, Search, Trash2, AlertTriangle, Eye } from "lucide-react";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { LegalShell, LEGAL_ACCENT as ACCENT, LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 import { getLegalSummary } from "@/api/legalMastersApi";
-import { getLandStats } from "@/api/legalLandApi";
+import { getLandStats, deleteLand, type LandSummaryItem } from "@/api/legalLandApi";
 import { LEGAL_MASTERS, LEGAL_MASTER_GROUPS, legalMasterPath } from "./legalMasters";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 // What has to be in place before a deed registration task can run end to end (search → deed → L1 → L2).
 const READINESS: { key: string; label: string; hint: string }[] = [
@@ -29,9 +32,39 @@ const PARTY_KEYS = ["owner", "seller", "buyer", "customer", "witness"] as const;
 export default function LegalDashboard() {
   usePageRights("legal-dashboard");
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-summary"], queryFn: getLegalSummary, staleTime: 60 * 1000 });
   const landRights = usePageRights("legal-land-master");
   const { data: land } = useQuery({ queryKey: ["legal-land-stats"], queryFn: getLandStats, staleTime: 60 * 1000, enabled: landRights.canView });
+
+  const [landSearch, setLandSearch] = useState("");
+  const [landToDelete, setLandToDelete] = useState<LandSummaryItem | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (l: LandSummaryItem) => deleteLand(l.LandId, l.LandCode),
+    onSuccess: (res) => {
+      toast.success(res.message);
+      queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["legal-summary"] });
+      setLandToDelete(null);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Could not delete land");
+    },
+  });
+
+  const filteredLands = useMemo(() => {
+    const list = land?.allLands || [];
+    if (!landSearch.trim()) return list;
+    const q = landSearch.toLowerCase();
+    return list.filter(
+      (l) =>
+        l.LandCode?.toLowerCase().includes(q) ||
+        l.LandName?.toLowerCase().includes(q) ||
+        l.MouzaName?.toLowerCase().includes(q) ||
+        l.DistrictName?.toLowerCase().includes(q)
+    );
+  }, [land?.allLands, landSearch]);
 
   // Counts are of active records, which is what each table shows first (its Active tab).
   const active = (key: string) => data?.masters[key]?.active ?? 0;
@@ -47,7 +80,7 @@ export default function LegalDashboard() {
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal" }]} />
-      <LegalShell title="Legal" subtitle="Land records, deed registration & approvals" icon={Judge}>
+      <LegalShell title="Company Land Records" subtitle="Centralized property registers, ownership history, and document archive" icon={Judge}>
         <div className="space-y-5">
           {error && <div className={`${card} p-4 text-sm text-destructive`}>Could not load the Legal summary: {(error as Error).message}</div>}
 
@@ -55,55 +88,51 @@ export default function LegalDashboard() {
           <div className="border border-border p-4 sm:p-6">
             <div className="flex flex-wrap items-end justify-between gap-5">
               <div className="min-w-0">
-                <p className="label">Setup readiness</p>
+                <p className="label">Company Land Portfolio</p>
                 <h2 className="mt-1 text-2xl sm:text-3xl font-heading font-bold leading-tight text-foreground">
-                  Setup {isLoading ? "—" : `${ready} of ${readiness.length}`} ready
+                  {land?.totalLands ?? 0} Properties Registered
                 </h2>
                 <p className="mt-1.5 text-sm text-muted-foreground">
-                  {isLoading ? "Loading…" : firstGap ? <>Next: <b>{firstGap.label}</b> — {firstGap.hint}.</> : "Every master needed for deed registration is in place."}
+                  Central digital record book for all company-owned properties, historical owners, and land records.
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => navigate("/legal/search")}
+                  onClick={() => navigate("/legal/land/properties")}
                   className="inline-flex items-center gap-1.5 border border-foreground bg-card px-3.5 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10"
                 >
-                  Registration Search
+                  Register Existing Land
                 </button>
                 <button
-                  onClick={() => navigate("/legal/deeds")}
+                  onClick={() => navigate("/legal/land/properties")}
                   className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-card hover:opacity-85"
                   style={{ background: LEGAL_GRADIENT }}
                 >
-                  Deed Dossiers <ArrowRight size={14} />
+                  Open Land Register <ArrowRight size={14} />
                 </button>
               </div>
             </div>
-            <div className="mt-5 h-1.5 bg-muted overflow-hidden">
-              <div className="h-full transition-all" style={{ width: `${(ready / readiness.length) * 100}%`, background: LEGAL_GRADIENT }} />
-            </div>
           </div>
 
-          {/* ── Land Management pipeline ── */}
+          {/* ── Land Portfolio Quick Access ── */}
           {land && (
             <div className={`${card} p-4 sm:p-5`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className={eyebrow}>Land Management</p>
+                <p className={eyebrow}>Land Portfolio Overview</p>
                 <button onClick={() => navigate("/legal/land/properties")} className="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                   All land properties <ChevronRight size={13} />
                 </button>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
                 {([
-                  ["Land properties", land.totalLands, Global, "/legal/land/properties"],
-                  ["Existing / backlog land", land.backlogLands ?? 0, Building4, "/legal/land/properties?filter=backlog"],
-                  ["Active enquiries", land.activeEnquiries, MessageQuestion, "/legal/land/enquiries"],
-                  ["In progress", land.inProgress, Timer1, "/legal/land/properties?filter=in-progress"],
-                  ["Pending verification", land.pendingVerification, ShieldTick, "/legal/land/properties?filter=pending-verification"],
-                  ["On hold", land.onHold, PauseCircle, "/legal/land/properties?filter=on-hold"],
-                  ["Pending registration", land.pendingRegistration, DocumentText, "/legal/land/reports"],
-                  ["Mutation pending", land.mutationPending, Map1, "/legal/land/reports"],
-                  ["Completed", land.completed, TickCircle, "/legal/land/properties?filter=completed"],
+                  ["All Properties", land.totalLands, Global, "/legal/land/properties"],
+                  ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries"],
+                  ["Newly Acquired", land.totalLands - (land.backlogLands ?? 0), TickCircle, "/legal/land/properties"],
+                  ["Existing / Backlog", land.backlogLands ?? 0, Building4, "/legal/land/properties"],
+                  ["Land Sales", land.completed ?? 0, MoneySend, "/legal/land/sales"],
+                  ["RS Records", land.totalLands, Note1, "/legal/land/rs-register"],
+                  ["LR Records of Rights", land.totalLands, DocumentText, "/legal/land/lr-register"],
+                  ["Land Reports", "8 Reports", Chart, "/legal/land/reports"],
                 ] as const).map(([label, value, Icon, path]) => (
                   <button key={label} onClick={() => navigate(path)} className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3 text-left transition-transform hover:-translate-y-0.5">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-card" style={{ background: LEGAL_GRADIENT }}><Icon size={16} /></span>
@@ -117,11 +146,11 @@ export default function LegalDashboard() {
               {land.recent.length > 0 && (
                 <div className="mt-4 divide-y divide-border/60">
                   {land.recent.map((l) => (
-                    <button key={l.LandId} onClick={() => navigate(`/legal/land/properties/${l.LandId}/profile`)} className="flex w-full items-center gap-3 py-2 text-left text-sm hover:bg-muted/40 rounded-md px-1.5">
+                    <button key={l.LandId} onClick={() => navigate(`/legal/land/properties/${l.LandId}`)} className="flex w-full items-center gap-3 py-2 text-left text-sm hover:bg-muted/40 rounded-md px-1.5">
                       <span className="font-mono text-xs text-muted-foreground w-28 shrink-0">{l.LandCode}</span>
                       <span className="min-w-0 flex-1 truncate text-foreground">{l.LandName}{l.MouzaName ? <span className="text-muted-foreground"> · {l.MouzaName} (J.L. {l.JLNo ?? "-"})</span> : null}</span>
-                      <span className={`hidden sm:inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[0.6875rem] ${l.IsOnHold ? "border-amber-500/40 bg-amber-500/10 text-amber-600" : "border-border text-muted-foreground"}`}>
-                        {l.IsOnHold ? "On hold" : l.WorkflowStatus ?? "—"}
+                      <span className="hidden sm:inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[0.6875rem] border-border text-muted-foreground">
+                        {l.WorkflowStatus ?? "Active"}
                       </span>
                     </button>
                   ))}
@@ -129,6 +158,159 @@ export default function LegalDashboard() {
               )}
             </div>
           )}
+
+          {/* ── ALL REGISTERED COMPANY LANDS TABLE ── */}
+          <div className={`${card} p-4 sm:p-5`}>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-base font-heading font-bold text-foreground">All Registered Company Lands</h3>
+                <p className="text-xs text-muted-foreground">
+                  Complete register of all company-owned properties with verification, approval status, and management controls.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={landSearch}
+                    onChange={(e) => setLandSearch(e.target.value)}
+                    placeholder="Search by code, title, mouza..."
+                    className="h-8 rounded-lg border border-border bg-background pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-48 sm:w-64"
+                  />
+                </div>
+                <button
+                  onClick={() => navigate("/legal/land/properties")}
+                  className="h-8 inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-semibold hover:bg-muted"
+                >
+                  + Add Land
+                </button>
+              </div>
+            </div>
+
+            {(!land?.allLands || land.allLands.length === 0) ? (
+              <div className="py-10 text-center text-xs text-muted-foreground">
+                No lands recorded yet. Click "Add Land" or "Register Existing Land" to add your first property.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-muted/40 border-y border-border/60 text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2.5">Land ID</th>
+                      <th className="px-3 py-2.5">Property Title</th>
+                      <th className="px-3 py-2.5">Mouza & District</th>
+                      <th className="px-3 py-2.5">Area</th>
+                      <th className="px-3 py-2.5">Entry Type</th>
+                      <th className="px-3 py-2.5">Verification</th>
+                      <th className="px-3 py-2.5">L1 Legal</th>
+                      <th className="px-3 py-2.5">L2 Approval</th>
+                      <th className="px-3 py-2.5">Land Status</th>
+                      <th className="px-3 py-2.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {filteredLands.map((item) => (
+                      <tr key={item.LandId} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-3 py-2.5 font-mono font-semibold text-primary">
+                          <button
+                            onClick={() => navigate(`/legal/land/properties/${item.LandId}`)}
+                            className="hover:underline flex items-center gap-1"
+                          >
+                            {item.LandCode}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2.5 font-medium text-foreground">
+                          <button
+                            onClick={() => navigate(`/legal/land/properties/${item.LandId}`)}
+                            className="hover:underline text-left"
+                          >
+                            {item.LandName}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground">
+                          {item.MouzaName ? `${item.MouzaName}${item.JLNo ? ` (J.L. ${item.JLNo})` : ""}` : "—"}
+                          {item.DistrictName ? ` · ${item.DistrictName}` : ""}
+                        </td>
+                        <td className="px-3 py-2.5 font-semibold text-foreground whitespace-nowrap">
+                          {item.Area !== null ? `${item.Area} ${item.UnitName ?? ""}` : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground">
+                          {item.EntryType ?? "Newly Acquired"}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
+                              item.VerificationStatus === "Verified"
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                : item.VerificationStatus === "Rejected"
+                                ? "bg-red-500/10 text-red-600 border-red-500/20"
+                                : "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                            }`}
+                          >
+                            {item.VerificationStatus ?? "Draft"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
+                              item.L1Status === "Approved"
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                : item.L1Status === "Returned"
+                                ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                : "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                            }`}
+                          >
+                            {item.L1Status ?? "Pending"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${
+                              item.L2Status === "Approved"
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                : item.L2Status === "Returned"
+                                ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                : item.L2Status === "Rejected"
+                                ? "bg-red-500/10 text-red-600 border-red-500/20"
+                                : "bg-purple-500/10 text-purple-600 border-purple-500/20"
+                            }`}
+                          >
+                            {item.L2Status ?? "Pending"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] border border-border text-foreground">
+                            {item.LandStatus ?? "Owned"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => navigate(`/legal/land/properties/${item.LandId}`)}
+                              className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[0.6875rem] font-medium text-foreground hover:bg-muted"
+                              title="View full land profile"
+                            >
+                              <Eye size={12} /> View
+                            </button>
+                            {landRights.canDelete && (
+                              <button
+                                onClick={() => setLandToDelete(item)}
+                                className="inline-flex items-center gap-1 rounded border border-destructive/30 px-2 py-1 text-[0.6875rem] font-medium text-destructive hover:bg-destructive/10"
+                                title="Delete land and all related records"
+                              >
+                                <Trash2 size={12} /> Delete
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
           {/* ── Land Management work lists ── */}
           {land && (
@@ -324,6 +506,57 @@ export default function LegalDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Modal: Permanent Land Deletion */}
+        <Dialog open={!!landToDelete} onOpenChange={() => setLandToDelete(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle size={18} /> Delete Land Property
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground pt-1">
+                This action is permanent and cannot be reversed.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2 text-sm">
+              <p>
+                Are you sure you want to permanently delete property{" "}
+                <b className="text-foreground">{landToDelete?.LandCode}</b> (
+                <span className="text-foreground">{landToDelete?.LandName}</span>)?
+              </p>
+              <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive space-y-1">
+                <p className="font-semibold">All associated records will be permanently removed:</p>
+                <ul className="list-disc pl-4 space-y-0.5 text-[0.6875rem]">
+                  <li>Ownership records & historical chain of transfers</li>
+                  <li>RS and LR Record of Rights (Khatians & Dags)</li>
+                  <li>Document archive & uploaded file attachments</li>
+                  <li>Legal cases, disputes, mortgages, and court orders</li>
+                  <li>Mutation records & certificate history</li>
+                  <li>Payment records, transactions, and tax receipts</li>
+                  <li>Audit trails & workflow state history</li>
+                </ul>
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setLandToDelete(null)}
+                disabled={deleteMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => landToDelete && deleteMutation.mutate(landToDelete)}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Permanently Delete Land"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </LegalShell>
     </>
   );

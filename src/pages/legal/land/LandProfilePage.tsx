@@ -1,56 +1,83 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Global } from "iconsax-react";
-import { FileText, GitBranch, Pencil } from "lucide-react";
+import { FileText, Pencil, ShieldCheck, CheckCircle2, RotateCcw, XCircle, Clock, AlertTriangle, Send } from "lucide-react";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
-import { getLandOverview, getLandAudit, type LandOverview } from "@/api/legalLandApi";
+import {
+  getLandOverview,
+  getLandAudit,
+  verifyLand,
+  submitLandForL1,
+  actionLandL1,
+  actionLandL2,
+  type LandOverview,
+} from "@/api/legalLandApi";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { DocumentsStep } from "./steps/DocumentsStep";
 
-// The central land profile: one page per Land ID, for both entry types. New Acquisition land also has its
-// 31-step pipeline (linked from here); Existing / Backlog land is entered and maintained only here.
-// Every section is the same shared record table, so add / edit / verify, Active-Inactive and the audit trail
-// behave the same everywhere. Nothing here starts a purchase, payment, registration or mutation.
+// The Central Land Details Profile: complete property record, one page per Land ID.
+// Every section maintains historical records linked directly to this property.
 
 const LAND_PAGE = "legal-land-master";
 const table = (key: string, label: string) => ({ pageKey: LAND_PAGE, key, label });
 
-type TabKey = "overview" | "basic" | "ownership" | "transfers" | "records" | "documents" | "legal" | "loans" | "mutation" | "payments" | "tax" | "survey" | "photos" | "activity";
+type TabKey =
+  | "overview"
+  | "basic"
+  | "ownership"
+  | "transfers"
+  | "records"
+  | "documents"
+  | "legal"
+  | "loans"
+  | "mutation"
+  | "payments"
+  | "tax"
+  | "survey"
+  | "photos"
+  | "activity";
+
 const TABS: { key: TabKey; label: string; count?: keyof LandOverview["counts"] }[] = [
   { key: "overview", label: "Overview" },
-  { key: "basic", label: "Basic information" },
-  { key: "ownership", label: "Ownership history", count: "ownershipRecords" },
-  { key: "transfers", label: "Acquisition & transfers", count: "transfers" },
-  { key: "records", label: "Land records (RS / LR)", count: "landRecords" },
+  { key: "basic", label: "Basic Information" },
+  { key: "ownership", label: "Ownership History", count: "ownershipRecords" },
+  { key: "transfers", label: "Acquisition & Purchase", count: "transfers" },
+  { key: "records", label: "Land Records (RS / LR)", count: "landRecords" },
   { key: "documents", label: "Documents", count: "documents" },
-  { key: "legal", label: "Legal history", count: "legalHistory" },
-  { key: "loans", label: "Loan & mortgage", count: "mortgages" },
-  { key: "mutation", label: "Mutation history", count: "mutations" },
-  { key: "payments", label: "Payment history", count: "payments" },
-  { key: "tax", label: "Land tax (Khajna)", count: "taxRecords" },
-  { key: "survey", label: "Survey & valuation", count: "valuations" },
-  { key: "photos", label: "Photos & notes" },
-  { key: "activity", label: "Activity" },
+  { key: "legal", label: "Legal Information", count: "legalHistory" },
+  { key: "loans", label: "Loan & Mortgage", count: "mortgages" },
+  { key: "mutation", label: "Mutation Records", count: "mutations" },
+  { key: "payments", label: "Payment History", count: "payments" },
+  { key: "tax", label: "Land Tax (Khajna)", count: "taxRecords" },
+  { key: "survey", label: "Survey & Valuation", count: "valuations" },
+  { key: "photos", label: "Notes & Attachments" },
+  { key: "activity", label: "Activity History" },
 ];
 
-// The history of an existing land, in the order it is usually entered (shown as "Next steps" on its Overview).
-const NEXT_STEPS: { tab: TabKey; label: string; count: keyof LandOverview["counts"]; hint: string }[] = [
-  { tab: "ownership", label: "Ownership history", count: "ownershipRecords", hint: "Earliest known owner, then every change up to the company" },
-  { tab: "records", label: "Land records (RS / LR)", count: "landRecords", hint: "RS and LR Khatian / Dag entries" },
-  { tab: "documents", label: "Documents", count: "documents", hint: "Deeds, khatian copies, mutation order, receipts — what you have" },
-  { tab: "legal", label: "Legal history", count: "legalHistory", hint: "Court cases, orders, notices, title reports" },
-  { tab: "loans", label: "Loan & mortgage", count: "mortgages", hint: "Past and current loans on this land" },
-  { tab: "mutation", label: "Mutation history", count: "mutations", hint: "Each mutation and its order" },
-  { tab: "payments", label: "Payment history", count: "payments", hint: "What was paid for the land, and when" },
-  { tab: "tax", label: "Land tax (Khajna)", count: "taxRecords", hint: "Receipts year by year" },
-  { tab: "survey", label: "Survey & valuation", count: "valuations", hint: "Surveys and valuations" },
+const QUICK_SECTIONS: { tab: TabKey; label: string; count: keyof LandOverview["counts"]; hint: string }[] = [
+  { tab: "ownership", label: "Ownership History", count: "ownershipRecords", hint: "Earliest known owner, then every change up to the company" },
+  { tab: "transfers", label: "Acquisition & Purchase", count: "transfers", hint: "Sale deed numbers, dates, purchase price & consideration" },
+  { tab: "records", label: "Land Records (RS / LR)", count: "landRecords", hint: "RS and LR Khatian / Dag entries and mappings" },
+  { tab: "documents", label: "Documents Archive", count: "documents", hint: "Deeds, khatian copies, mutation orders, tax receipts" },
+  { tab: "legal", label: "Legal Information", count: "legalHistory", hint: "Court cases, dispute records, orders, notices, legal opinions" },
+  { tab: "loans", label: "Loan & Mortgage", count: "mortgages", hint: "Past and current bank loans and mortgages on this land" },
+  { tab: "mutation", label: "Mutation Records", count: "mutations", hint: "Each mutation application, case number, and order" },
+  { tab: "payments", label: "Payment History", count: "payments", hint: "Past payments, advances, and final settlements for the land" },
+  { tab: "tax", label: "Land Tax (Khajna)", count: "taxRecords", hint: "Land revenue and khajna receipts year by year" },
+  { tab: "survey", label: "Survey & Valuation", count: "valuations", hint: "Boundary surveys, maps, and market valuation reports" },
 ];
 
-const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+const fmtDate = (d: string | null | undefined) =>
+  d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const box = "border border-border p-4";
 const label = "text-[0.625rem] font-heading font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 
@@ -78,14 +105,25 @@ const Activity: React.FC<{ landId: number }> = ({ landId }) => {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead><tr className="text-left">{["When", "Who", "Action", "Record", "Remarks"].map((h) => <th key={h} className="px-2 py-2">{h}</th>)}</tr></thead>
+        <thead>
+          <tr className="text-left">
+            {["When", "Who", "Action", "Record", "Remarks"].map((h) => (
+              <th key={h} className="px-2 py-2">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
           {data.map((a) => (
             <tr key={a.EventId}>
               <td className="whitespace-nowrap px-2 py-2 text-xs text-muted-foreground">{new Date(a.CreatedAt).toLocaleString("en-IN")}</td>
               <td className="px-2 py-2">{a.UserName ?? "—"}</td>
               <td className="px-2 py-2">{a.Action}</td>
-              <td className="px-2 py-2 text-xs text-muted-foreground">{a.EntityType}{a.EntityId ? ` #${a.EntityId}` : ""}</td>
+              <td className="px-2 py-2 text-xs text-muted-foreground">
+                {a.EntityType}
+                {a.EntityId ? ` #${a.EntityId}` : ""}
+              </td>
               <td className="px-2 py-2 text-xs text-muted-foreground">{a.Remarks ?? ""}</td>
             </tr>
           ))}
@@ -102,39 +140,399 @@ export default function LandProfilePage() {
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
   const tab = (TABS.find((t) => t.key === params.get("tab"))?.key ?? "overview") as TabKey;
-  const setTab = (t: TabKey) => { params.set("tab", t); setParams(params, { replace: true }); };
+  const setTab = (t: TabKey) => {
+    params.set("tab", t);
+    setParams(params, { replace: true });
+  };
 
-  const { data, error, isLoading } = useQuery({ queryKey: ["legal-land-overview", landId], queryFn: () => getLandOverview(landId), enabled: landId > 0 });
+  const { data, error, isLoading } = useQuery({
+    queryKey: ["legal-land-overview", landId],
+    queryFn: () => getLandOverview(landId),
+    enabled: landId > 0,
+  });
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["legal-land-overview", landId] });
     queryClient.invalidateQueries({ queryKey: ["legal-land-audit", landId] });
+    queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
   };
+
+  const [actionModal, setActionModal] = useState<{
+    type: "verify" | "submit-l1" | "action-l1" | "action-l2";
+    action?: "Approve" | "Return" | "Reject";
+    title: string;
+    hint: string;
+  } | null>(null);
+  const [remarks, setRemarks] = useState("");
+
+  const verifyMutation = useMutation({
+    mutationFn: (r?: string) => verifyLand(landId, r),
+    onSuccess: (res) => {
+      toast.success(res.message);
+      refresh();
+      setActionModal(null);
+      setRemarks("");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const submitL1Mutation = useMutation({
+    mutationFn: () => submitLandForL1(landId),
+    onSuccess: (res) => {
+      toast.success(res.message);
+      refresh();
+      setActionModal(null);
+      setRemarks("");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const actionL1Mutation = useMutation({
+    mutationFn: (p: { action: "Approve" | "Return"; remarks: string }) =>
+      actionLandL1(landId, p.action, p.remarks),
+    onSuccess: (res) => {
+      toast.success(res.message);
+      refresh();
+      setActionModal(null);
+      setRemarks("");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const actionL2Mutation = useMutation({
+    mutationFn: (p: { action: "Approve" | "Return" | "Reject"; remarks: string }) =>
+      actionLandL2(landId, p.action, p.remarks),
+    onSuccess: (res) => {
+      toast.success(res.message);
+      refresh();
+      setActionModal(null);
+      setRemarks("");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const handleModalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!actionModal) return;
+    if (actionModal.type === "verify") {
+      verifyMutation.mutate(remarks);
+    } else if (actionModal.type === "submit-l1") {
+      submitL1Mutation.mutate();
+    } else if (actionModal.type === "action-l1") {
+      actionL1Mutation.mutate({ action: actionModal.action as "Approve" | "Return", remarks });
+    } else if (actionModal.type === "action-l2") {
+      actionL2Mutation.mutate({ action: actionModal.action as "Approve" | "Return" | "Reject", remarks });
+    }
+  };
+
+  const isPending =
+    verifyMutation.isPending ||
+    submitL1Mutation.isPending ||
+    actionL1Mutation.isPending ||
+    actionL2Mutation.isPending;
 
   const land = data?.land;
   const c = data?.counts;
-  const isBacklog = land?.EntryType === "Existing / Backlog";
   const btn = "inline-flex items-center gap-1.5 border border-foreground px-3 py-1.5 text-xs font-heading font-semibold uppercase tracking-[0.08em] hover:bg-primary/10";
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Legal", "Land Management", land ? land.LandCode : "Land"]} />
+      <Breadcrumbs items={["Dashboard", "Legal", "Land Register", land ? land.LandCode : "Property"]} />
       <LegalShell
-        title={land ? `${land.LandCode} · ${land.LandName}` : "Land"}
-        subtitle={land ? `${land.MouzaName ?? "—"}${land.JLNo ? ` (J.L. ${land.JLNo})` : ""} · ${land.DistrictName ?? "—"} · ${land.Area ?? "—"} ${land.UnitName ?? ""}` : undefined}
+        title={land ? `${land.LandCode} · ${land.LandName}` : "Property"}
+        subtitle={
+          land
+            ? `${land.MouzaName ?? "—"}${land.JLNo ? ` (J.L. ${land.JLNo})` : ""} · ${land.DistrictName ?? "—"} · ${
+                land.Area ?? "—"
+              } ${land.UnitName ?? ""}`
+            : undefined
+        }
         icon={Global}
-        action={land && (
-          <div className="flex flex-wrap gap-2">
-            {!isBacklog && <button className={btn} onClick={() => navigate(`/legal/land/properties/${landId}`)}><GitBranch size={13} /> Acquisition pipeline</button>}
-            <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}><Pencil size={13} /> Edit basic info</button>
-            <button className={btn} onClick={() => navigate(`/legal/land/properties/${landId}/details`)}><FileText size={13} /> Full report & PDF</button>
-          </div>
-        )}
+        action={
+          land && (
+            <div className="flex flex-wrap gap-2">
+              <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
+                <Pencil size={13} /> Edit basic info
+              </button>
+              <button className={btn} onClick={() => navigate(`/legal/land/properties/${landId}/details`)}>
+                <FileText size={13} /> Full report & PDF
+              </button>
+            </div>
+          )
+        }
       >
-        {error && <p className="text-sm text-destructive">Could not load this land: {(error as Error).message}</p>}
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {error && <p className="text-sm text-destructive">Could not load this land property: {(error as Error).message}</p>}
+        {isLoading && <p className="text-sm text-muted-foreground">Loading land property profile…</p>}
         {land && c && (
           <div className="space-y-5">
-            {/* Tabs — they wrap on narrow screens instead of scrolling off. */}
+            {/* ── LAND-WISE VERIFICATION & TWO-LEVEL APPROVAL RAIL ── */}
+            <div className="rounded-xl border border-border/80 bg-card p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
+                <div>
+                  <h4 className="text-xs font-heading font-bold uppercase tracking-wider text-muted-foreground">
+                    Land Verification & Two-Level Approval Rail
+                  </h4>
+                  <p className="mt-0.5 text-xs text-foreground">
+                    Workflow Status:{" "}
+                    <b className="font-semibold text-primary">{land.WorkflowStatus ?? "Draft"}</b>
+                  </p>
+                </div>
+
+                {/* Quick Action Buttons */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {land.VerificationStatus !== "Verified" && (
+                    <button
+                      onClick={() => {
+                        setActionModal({
+                          type: "verify",
+                          title: "Verify Land Data",
+                          hint: "Confirm that initial land entry and documentation have been reviewed and verified.",
+                        });
+                        setRemarks("");
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
+                    >
+                      <CheckCircle2 size={13} /> Verify Land Data
+                    </button>
+                  )}
+
+                  {land.VerificationStatus === "Verified" &&
+                    land.L1Status !== "Approved" &&
+                    land.L1Status !== "Pending" && (
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "submit-l1",
+                            title: "Submit for L1 Review",
+                            hint: "Forward this verified property to the Legal Officer for L1 review.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
+                      >
+                        <Send size={13} /> Submit for L1 Review
+                      </button>
+                    )}
+
+                  {land.L1Status === "Pending" && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l1",
+                            action: "Return",
+                            title: "Return from L1 Review",
+                            hint: "Return this land to Draft status for necessary corrections.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+                      >
+                        <RotateCcw size={13} /> Return to Draft
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l1",
+                            action: "Approve",
+                            title: "L1 Approve Land Record",
+                            hint: "Formally approve Level 1 review and forward to Level 2 Executive Approval.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 shadow-sm"
+                      >
+                        <CheckCircle2 size={13} /> L1 Approve & Forward
+                      </button>
+                    </div>
+                  )}
+
+                  {land.L1Status === "Approved" && land.L2Status === "Pending" && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l2",
+                            action: "Return",
+                            title: "Return from L2 Approval",
+                            hint: "Return this land back to L1 Legal Review.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+                      >
+                        <RotateCcw size={13} /> Return to L1
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l2",
+                            action: "Reject",
+                            title: "Reject Land Record",
+                            hint: "Reject this property acquisition / entry.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20"
+                      >
+                        <XCircle size={13} /> Reject
+                      </button>
+                      <button
+                        onClick={() => {
+                          setActionModal({
+                            type: "action-l2",
+                            action: "Approve",
+                            title: "L2 Final Approval",
+                            hint: "Grant executive / partner final sign-off. Property status becomes Active / Owned.",
+                          });
+                          setRemarks("");
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm"
+                      >
+                        <ShieldCheck size={13} /> L2 Final Sign-Off
+                      </button>
+                    </div>
+                  )}
+
+                  {land.L2Status === "Approved" && (
+                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 size={14} /> Fully Approved & Active Land Record
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 4 Steps Stepper */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-3">
+                {/* Step 1: Data Entry */}
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 1</span>
+                    <CheckCircle2 size={14} className="text-emerald-600" />
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">Data Entry</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">Initial property record created</p>
+                </div>
+
+                {/* Step 2: Verification */}
+                <div className={`rounded-lg border p-2.5 ${
+                  land.VerificationStatus === "Verified"
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : "border-amber-500/30 bg-amber-500/10"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 2</span>
+                    {land.VerificationStatus === "Verified" ? (
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                    ) : (
+                      <Clock size={14} className="text-amber-600" />
+                    )}
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">Data Verification</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    {land.VerificationStatus === "Verified" ? "Verified" : "Draft / Needs Verification"}
+                  </p>
+                </div>
+
+                {/* Step 3: L1 Legal Review */}
+                <div className={`rounded-lg border p-2.5 ${
+                  land.L1Status === "Approved"
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : land.L1Status === "Returned"
+                    ? "border-amber-500/30 bg-amber-500/10"
+                    : "border-blue-500/30 bg-blue-500/10"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 3</span>
+                    {land.L1Status === "Approved" ? (
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                    ) : land.L1Status === "Returned" ? (
+                      <RotateCcw size={14} className="text-amber-600" />
+                    ) : (
+                      <Clock size={14} className="text-blue-600" />
+                    )}
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">L1 Legal Review</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    {land.L1Status === "Approved"
+                      ? `Approved by ${land.L1ReviewerName || "Legal Officer"}`
+                      : land.L1Status === "Returned"
+                      ? "Returned for edits"
+                      : "Pending Legal Review"}
+                  </p>
+                </div>
+
+                {/* Step 4: L2 Executive Approval */}
+                <div className={`rounded-lg border p-2.5 ${
+                  land.L2Status === "Approved"
+                    ? "border-emerald-500/30 bg-emerald-500/10"
+                    : land.L2Status === "Returned"
+                    ? "border-amber-500/30 bg-amber-500/10"
+                    : land.L2Status === "Rejected"
+                    ? "border-destructive/30 bg-destructive/10"
+                    : "border-purple-500/30 bg-purple-500/10"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">Step 4</span>
+                    {land.L2Status === "Approved" ? (
+                      <ShieldCheck size={14} className="text-emerald-600" />
+                    ) : land.L2Status === "Rejected" ? (
+                      <XCircle size={14} className="text-destructive" />
+                    ) : (
+                      <Clock size={14} className="text-purple-600" />
+                    )}
+                  </div>
+                  <p className="mt-1 font-semibold text-xs text-foreground">L2 Executive Approval</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">
+                    {land.L2Status === "Approved"
+                      ? `Signed off by ${land.L2ApproverName || "Executive"}`
+                      : land.L2Status === "Rejected"
+                      ? "Rejected"
+                      : land.L2Status === "Returned"
+                      ? "Returned to L1"
+                      : "Pending Executive Sign-off"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal: Action confirmation dialog */}
+            <Dialog open={!!actionModal} onOpenChange={() => setActionModal(null)}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>{actionModal?.title}</DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground">
+                    {actionModal?.hint}
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleModalSubmit} className="space-y-4 py-2">
+                  <div>
+                    <Label htmlFor="remarks">
+                      Comments / Remarks {actionModal?.action === "Return" || actionModal?.action === "Reject" ? "*" : "(Optional)"}
+                    </Label>
+                    <Textarea
+                      id="remarks"
+                      value={remarks}
+                      onChange={(e) => setRemarks(e.target.value)}
+                      placeholder="Add instructions or justification for this decision..."
+                      required={actionModal?.action === "Return" || actionModal?.action === "Reject"}
+                      rows={3}
+                      className="mt-1"
+                    />
+                  </div>
+                  <DialogFooter className="gap-2 sm:gap-0">
+                    <Button type="button" variant="outline" onClick={() => setActionModal(null)} disabled={isPending}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={isPending}>
+                      {isPending ? "Processing..." : "Confirm"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+
+            {/* 14 Tabs — responsive wrap */}
             <div className="flex flex-wrap gap-1.5" role="tablist">
               {TABS.map((t) => (
                 <button
@@ -142,178 +540,325 @@ export default function LandProfilePage() {
                   role="tab"
                   aria-selected={tab === t.key}
                   onClick={() => setTab(t.key)}
-                  className={`border px-2.5 py-1.5 text-xs font-heading font-semibold ${tab === t.key ? "border-foreground bg-foreground text-card" : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"}`}
+                  className={`border px-2.5 py-1.5 text-xs font-heading font-semibold transition-colors ${
+                    tab === t.key
+                      ? "border-foreground bg-foreground text-card"
+                      : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
+                  }`}
                 >
-                  {t.label}{t.count !== undefined ? <span className="ml-1 tabular-nums opacity-70">{c[t.count]}</span> : null}
+                  {t.label}
+                  {t.count !== undefined && c[t.count] !== undefined ? (
+                    <span className="ml-1 tabular-nums opacity-70">({c[t.count]})</span>
+                  ) : null}
                 </button>
               ))}
             </div>
 
+            {/* TAB 1: OVERVIEW */}
             {tab === "overview" && (
               <div className="space-y-4">
-                {isBacklog && (
-                  <div className={box}>
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <p className="label">Next steps — enter this land's history</p>
-                      <p className="text-xs text-muted-foreground">{NEXT_STEPS.filter((s) => c[s.count] > 0).length} of {NEXT_STEPS.length} sections have records · enter what you have, in any order</p>
-                    </div>
-                    <ol className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {NEXT_STEPS.map((s, i) => {
-                        const done = c[s.count] > 0;
-                        return (
-                          <li key={s.tab}>
-                            <button onClick={() => setTab(s.tab)} className={`flex w-full items-start gap-2.5 border px-3 py-2 text-left hover:bg-primary/5 ${done ? "border-border" : "border-foreground"}`}>
-                              <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-[0.625rem] font-bold ${done ? "bg-foreground text-card" : "border border-foreground text-foreground"}`}>{done ? "✓" : i + 1}</span>
-                              <span className="min-w-0">
-                                <span className="block text-sm font-semibold text-foreground">{s.label}{done ? <span className="ml-1 font-normal text-muted-foreground">· {c[s.count]}</span> : null}</span>
-                                <span className="block text-xs text-muted-foreground">{done ? "Added — open to add more or verify" : s.hint}</span>
-                              </span>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                  </div>
-                )}
+                {/* Basic property summary card */}
                 <div className={`${box} grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4`}>
                   <Field k="Land ID" v={land.LandCode} />
+                  <Field k="Property title" v={land.LandName} />
                   <Field k="Entry type" v={land.EntryType} />
-                  <Field k="Land status" v={land.IsOnHold ? `${land.LandStatus} (on hold)` : land.LandStatus} />
-                  <Field k="Possession" v={land.PossessionStatus ?? "Not recorded"} />
-                  <Field k="Location" v={land.LocationAddress ?? `${land.MouzaName ?? ""}${land.JLNo ? ` J.L. ${land.JLNo}` : ""}`} />
+                  <Field k="Land status" v={land.LandStatus} />
+                  <Field k="Possession" v={land.PossessionStatus ?? "In Possession"} />
+                  <Field k="Acquisition type" v={land.AcquisitionType || "Purchase"} />
+                  <Field
+                    k="Acquisition date"
+                    v={
+                      land.AcquisitionDate
+                        ? `${fmtDate(land.AcquisitionDate)}${land.AcquisitionDateApprox ? " (approx.)" : ""}`
+                        : "Not recorded"
+                    }
+                  />
+                  <Field k="Software entry date" v={fmtDate(land.CreatedAt)} />
+                  <Field k="Location" v={land.LocationAddress ?? `${land.MouzaName ?? ""}${land.JLNo ? ` (J.L. ${land.JLNo})` : ""}`} />
                   <Field k="Total area" v={land.Area !== null ? `${land.Area} ${land.UnitName ?? ""}` : null} />
-                  <Field k="Acquired" v={land.AcquisitionDate ? `${fmtDate(land.AcquisitionDate)}${land.AcquisitionDateApprox ? " (approx.)" : ""}` : "Not recorded"} />
+                  <Field k="District" v={land.DistrictName} />
                   <Field k="Last updated" v={fmtDate(land.LastUpdated)} />
                 </div>
+
+                {/* Current Recorded Owner(s) */}
                 <div className={box}>
-                  <p className={label}>Current recorded owner(s)</p>
+                  <p className={label}>Current Recorded Owner(s)</p>
                   {data.owners.length ? (
                     <ul className="mt-2 space-y-1 text-sm">
                       {data.owners.map((o, i) => (
                         <li key={i} className="flex flex-wrap items-center gap-2">
-                          <span className="text-foreground">{o.OwnerName ?? "—"}</span>
-                          <span className="text-muted-foreground">{Number(o.SharePct)}% since {fmtDate(o.ValidFrom)}</span>
-                          <span className="border border-border px-1.5 text-[0.625rem] uppercase tracking-wider">{o.VerificationStatus}</span>
+                          <span className="font-semibold text-foreground">{o.OwnerName ?? "—"}</span>
+                          <span className="text-muted-foreground">
+                            {Number(o.SharePct)}% share since {fmtDate(o.ValidFrom)}
+                          </span>
+                          <span className="border border-border px-1.5 py-0.5 text-[0.625rem] uppercase tracking-wider text-muted-foreground">
+                            {o.VerificationStatus}
+                          </span>
                         </li>
                       ))}
                     </ul>
-                  ) : <p className="mt-1 text-sm text-muted-foreground">No owner recorded yet — add the ownership history.</p>}
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">No owner recorded yet — add ownership history.</p>
+                  )}
                 </div>
+
+                {/* Summary Metrics */}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                   {([
-                    ["Active court cases", c.activeCases, "legal"], ["Active mortgages", c.activeMortgages, "loans"],
-                    ["Documents", c.documents, "documents"], ["Documents not verified", c.documentsUnverified, "documents"],
-                    ["Records awaiting verification", c.awaitingVerification, "ownership"], ["Tax receipts", c.taxRecords, "tax"],
+                    ["Active court cases", c.activeCases, "legal"],
+                    ["Active mortgages", c.activeMortgages, "loans"],
+                    ["Documents", c.documents, "documents"],
+                    ["Documents pending verification", c.documentsUnverified, "documents"],
+                    ["Ownership records", c.ownershipRecords, "ownership"],
+                    ["Tax receipts", c.taxRecords, "tax"],
                   ] as const).map(([k, v, t]) => (
-                    <button key={k} onClick={() => setTab(t)} className={`${box} text-left hover:bg-primary/5`}>
+                    <button key={k} onClick={() => setTab(t)} className={`${box} text-left hover:bg-primary/5 transition-colors`}>
                       <p className="text-2xl font-heading font-bold tabular-nums text-foreground">{v}</p>
                       <p className="mt-1 text-[0.6875rem] leading-tight text-muted-foreground">{k}</p>
                     </button>
                   ))}
                 </div>
+
+                {/* Quick Section Navigator */}
+                <div className={box}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="label">Land Information Sections — Complete Property Record</p>
+                    <p className="text-xs text-muted-foreground">
+                      {QUICK_SECTIONS.filter((s) => c[s.count] > 0).length} of {QUICK_SECTIONS.length} sections have records · enter
+                      information gradually in any order
+                    </p>
+                  </div>
+                  <ol className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {QUICK_SECTIONS.map((s, i) => {
+                      const done = c[s.count] > 0;
+                      return (
+                        <li key={s.tab}>
+                          <button
+                            onClick={() => setTab(s.tab)}
+                            className={`flex w-full items-start gap-2.5 border px-3 py-2 text-left hover:bg-primary/5 transition-colors ${
+                              done ? "border-border" : "border-foreground"
+                            }`}
+                          >
+                            <span
+                              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center text-[0.625rem] font-bold ${
+                                done ? "bg-foreground text-card" : "border border-foreground text-foreground"
+                              }`}
+                            >
+                              {done ? "✓" : i + 1}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-foreground">
+                                {s.label}
+                                {done ? <span className="ml-1 font-normal text-muted-foreground">· {c[s.count]}</span> : null}
+                              </span>
+                              <span className="block text-xs text-muted-foreground">{done ? "Records added" : s.hint}</span>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+
                 <GovtSiteLinks />
-                <p className="text-xs text-muted-foreground">
-                  Entered on {fmtDate(land.CreatedAt)}{land.CreatedByName ? ` by ${land.CreatedByName}` : ""}. Entered information is not verified until a verifier marks it Verified.
-                </p>
               </div>
             )}
 
+            {/* TAB 2: BASIC INFORMATION */}
             {tab === "basic" && (
               <div className={`${box} grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3`}>
-                <Field k="Land name" v={land.LandName} />
+                <Field k="Land ID" v={land.LandCode} />
+                <Field k="Property title" v={land.LandName} />
                 <Field k="Entry type" v={land.EntryType} />
                 <Field k="District" v={land.DistrictName} />
+                <Field k="Sub-division" v={land.SubDivisionName} />
+                <Field k="Block" v={land.BlockName} />
                 <Field k="Mouza" v={land.MouzaName} />
                 <Field k="J.L. number" v={land.JLNo} />
                 <Field k="RS Dag / Plot" v={land.RsDagNo} />
                 <Field k="LR Dag / Plot" v={land.LrDagNo} />
                 <Field k="RS Khatian" v={land.RsKhatianNo} />
                 <Field k="LR Khatian" v={land.LrKhatianNo} />
-                <Field k="Total area" v={land.Area !== null ? `${land.Area} ${land.UnitName ?? ""}` : null} />
+                <Field k="Total land area" v={land.Area !== null ? `${land.Area} ${land.UnitName ?? ""}` : null} />
+                <Field k="Land classification" v={land.LandTypeName} />
                 <Field k="Land status" v={land.LandStatus} />
-                <Field k="Possession" v={land.PossessionStatus} />
-                <Field k="Acquisition date" v={land.AcquisitionDate ? `${fmtDate(land.AcquisitionDate)}${land.AcquisitionDateApprox ? " (approx.)" : ""}` : null} />
-                <Field k="Data entry date" v={fmtDate(land.CreatedAt)} />
-                <Field k="Address" v={land.LocationAddress} />
-                <div className="sm:col-span-2 lg:col-span-3">
-                  <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}><Pencil size={13} /> Edit basic information</button>
+                <Field k="Possession status" v={land.PossessionStatus ?? "In Possession"} />
+                <Field k="Acquisition type" v={land.AcquisitionType || "Purchase"} />
+                <Field
+                  k="Acquisition date"
+                  v={
+                    land.AcquisitionDate
+                      ? `${fmtDate(land.AcquisitionDate)}${land.AcquisitionDateApprox ? " (approx.)" : ""}`
+                      : null
+                  }
+                />
+                <Field k="Software entry date" v={fmtDate(land.CreatedAt)} />
+                <Field k="North boundary" v={land.NorthBoundary} />
+                <Field k="South boundary" v={land.SouthBoundary} />
+                <Field k="East boundary" v={land.EastBoundary} />
+                <Field k="West boundary" v={land.WestBoundary} />
+                <Field
+                  k="GPS coordinates"
+                  v={land.GpsLatitude && land.GpsLongitude ? `${land.GpsLatitude}, ${land.GpsLongitude}` : null}
+                />
+                <Field k="Full location address" v={land.LocationAddress} />
+                <Field k="Internal remarks" v={land.Remarks} />
+                <div className="sm:col-span-2 lg:col-span-3 pt-2">
+                  <button className={btn} onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
+                    <Pencil size={13} /> Edit basic information
+                  </button>
                 </div>
               </div>
             )}
 
-            {tab === "ownership" && params.get("new") === "1" && (
-              <p className="border border-foreground px-3 py-2 text-xs">
-                <b>{land.LandCode} saved.</b> Start with the ownership history — the earliest owner you know, then each change up to the company.
-                The other sections are under <button className="underline" onClick={() => setTab("overview")}>Overview → Next steps</button>.
-              </p>
-            )}
+            {/* TAB 3: OWNERSHIP HISTORY */}
             {tab === "ownership" && (
-              <Section title="Ownership history" note="Every owner from the earliest known one to today. A change never overwrites an old owner — it closes their period and adds the new owner(s).">
+              <Section
+                title="Complete Ownership History"
+                note="Maintain all previous and current owners from the earliest known owner to today. Adding a new owner closes the previous period without overwriting history."
+              >
                 <OwnershipStep landId={landId} onSaved={refresh} />
               </Section>
             )}
 
+            {/* TAB 4: ACQUISITION & PURCHASE DETAILS */}
             {tab === "transfers" && (
-              <Section title="Acquisition & transfer history" note="How the land passed from owner to owner — sale, inheritance, gift, partition — with the deed and registration details. Add a transfer from Ownership history (Record ownership change); edit or verify it here.">
-                <LegalMasterTable entry={table("ownership-event", "Ownership Transfer")} parentId={landId} noAdd onSaved={refresh} />
-              </Section>
-            )}
-
-            {tab === "records" && (
               <div className="space-y-6">
-                <Section title="RS records"><LegalMasterTable entry={table("land-rs-record", "RS Record")} parentId={landId} onSaved={refresh} /></Section>
-                <Section title="LR Records of Rights"><LegalMasterTable entry={table("land-lr-record", "LR Record of Rights")} parentId={landId} onSaved={refresh} /></Section>
+                <Section
+                  title="Ownership Transfers & Acquisitions"
+                  note="Historical record of how the land was acquired and transferred — purchase, inheritance, gift, partition — with deed numbers and registration dates."
+                >
+                  <LegalMasterTable entry={table("ownership-event", "Ownership Transfer")} parentId={landId} onSaved={refresh} />
+                </Section>
+                <Section
+                  title="Purchase & Consideration Details"
+                  note="Financial and contract details of property purchases: consideration price, advance amount, settlement, and payment proofs."
+                >
+                  <LegalMasterTable entry={table("land-transaction", "Purchase / Acquisition")} parentId={landId} onSaved={refresh} />
+                </Section>
               </div>
             )}
 
+            {/* TAB 5: LAND RECORDS (RS / LR) */}
+            {tab === "records" && (
+              <div className="space-y-6">
+                <Section
+                  title="Revisional Survey (RS) Records"
+                  note="RS Khatian, RS Plot (Dag) numbers, recorded holder names, and land classifications."
+                >
+                  <LegalMasterTable entry={table("land-rs-record", "RS Record")} parentId={landId} onSaved={refresh} />
+                </Section>
+                <Section
+                  title="Land Reforms (LR) Records of Rights (RoR)"
+                  note="LR Khatian (Parcha), LR Plot (Dag) numbers, and mapping from old RS plots."
+                >
+                  <LegalMasterTable entry={table("land-lr-record", "LR Record of Rights")} parentId={landId} onSaved={refresh} />
+                </Section>
+              </div>
+            )}
+
+            {/* TAB 6: DOCUMENTS ARCHIVE */}
             {tab === "documents" && (
-              <Section title="Document archive" note={isBacklog ? "Add the documents you have — none is mandatory for existing land. Each upload keeps its versions." : undefined}>
+              <Section
+                title="Centralized Document Archive"
+                note="Complete document storage for this property: Sale Deeds, Parent Deeds, Khatians, Mutation Certificates, Tax Receipts, Court Orders, Survey Reports, and Bank NOCs."
+              >
                 <DocumentsStep landId={landId} onSaved={refresh} />
               </Section>
             )}
 
+            {/* TAB 7: LEGAL INFORMATION */}
             {tab === "legal" && (
               <div className="space-y-6">
-                <Section title="Court cases"><LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh} /></Section>
-                <Section title="Other legal records" note="Orders, judgments, notices, affidavits, power of attorney, NOCs, title and due-diligence reports. Records only — nothing is filed or sent.">
+                <Section
+                  title="Court Cases & Disputes"
+                  note="Past and ongoing court cases, plaintiffs, defendants, advocates, and case statuses."
+                >
+                  <LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh} />
+                </Section>
+                <Section
+                  title="Legal Orders, Notices & Opinions"
+                  note="Judgments, court orders, legal notices, legal opinions, and due-diligence clearance reports."
+                >
                   <LegalMasterTable entry={table("land-legal-record", "Legal Record")} parentId={landId} onSaved={refresh} />
                 </Section>
               </div>
             )}
 
+            {/* TAB 8: LOAN & MORTGAGE */}
             {tab === "loans" && (
-              <Section title="Loan & mortgage history" note="Closed loans stay on record — set the loan status to Closed and the release date instead of deleting.">
+              <Section
+                title="Loan & Mortgage History"
+                note="Historical and active mortgages, bank loans, loan amounts, release dates, and bank NOCs. Closed loans are preserved."
+              >
                 <LegalMasterTable entry={table("mortgage", "Mortgage & Loan")} parentId={landId} onSaved={refresh} />
               </Section>
             )}
 
+            {/* TAB 9: MUTATION RECORDS */}
             {tab === "mutation" && (
               <div className="space-y-6">
-                <Section title="Mutation history"><LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh} /></Section>
-                <Section title="New Khatian / RoR after mutation"><LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} /></Section>
+                <Section
+                  title="Mutation Applications & Certificates"
+                  note="BL&LRO mutation case numbers, previous and new owners, order dates, and certificate records."
+                >
+                  <LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh} />
+                </Section>
+                <Section
+                  title="New Khatian / RoR Post-Mutation"
+                  note="New Khatian and plot records created following mutation."
+                >
+                  <LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} />
+                </Section>
               </div>
             )}
 
+            {/* TAB 10: PAYMENT HISTORY */}
             {tab === "payments" && (
-              <Section title="Payment history" note="Past payments for this land. Recording one here does not start any payment.">
+              <Section
+                title="Payment & Transaction History"
+                note="Historical financial payments for this land: advances, installments, and final settlements with payment modes and references."
+              >
                 <LegalMasterTable entry={table("payment", "Payment")} parentId={landId} onSaved={refresh} />
               </Section>
             )}
 
+            {/* TAB 11: LAND TAX (KHAJNA) */}
             {tab === "tax" && (
-              <Section title="Land tax (Khajna)"><LegalMasterTable entry={table("land-tax", "Land Tax (Khajna)")} parentId={landId} onSaved={refresh} /></Section>
+              <Section
+                title="Land Revenue & Tax (Khajna) History"
+                note="Year-by-year land tax payments, receipt numbers, payment dates, amounts, and receipt uploads."
+              >
+                <LegalMasterTable entry={table("land-tax", "Land Tax (Khajna)")} parentId={landId} onSaved={refresh} />
+              </Section>
             )}
 
+            {/* TAB 12: SURVEY & VALUATION */}
             {tab === "survey" && (
-              <Section title="Survey & valuation"><LegalMasterTable entry={table("valuation", "Valuation & Survey")} parentId={landId} onSaved={refresh} /></Section>
+              <Section
+                title="Survey & Valuation Records"
+                note="Land survey reports, physical boundary checks, survey maps, and historical property valuation estimates."
+              >
+                <LegalMasterTable entry={table("valuation", "Valuation & Survey")} parentId={landId} onSaved={refresh} />
+              </Section>
             )}
 
+            {/* TAB 13: NOTES & ATTACHMENTS */}
             {tab === "photos" && (
-              <Section title="Photos & notes"><LegalMasterTable entry={table("land-photo", "Land Photo")} parentId={landId} onSaved={refresh} /></Section>
+              <Section
+                title="Site Photographs, Maps & Notes"
+                note="Photographs of the land property, boundary markers, site maps, and internal notes."
+              >
+                <LegalMasterTable entry={table("land-photo", "Land Photo")} parentId={landId} onSaved={refresh} />
+              </Section>
             )}
 
+            {/* TAB 14: ACTIVITY HISTORY */}
             {tab === "activity" && (
-              <Section title="Activity" note="Who added, changed or removed what on this land, with the old and new values kept in the audit trail.">
+              <Section
+                title="Activity & Audit Trail"
+                note="Complete system audit history: who entered, modified, or updated records on this land, with timestamped logs."
+              >
                 <Activity landId={landId} />
               </Section>
             )}
