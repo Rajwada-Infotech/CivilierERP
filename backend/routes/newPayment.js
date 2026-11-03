@@ -457,10 +457,20 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         -- Journal Voucher this payment settles (JVLineId, migration 417) —
         -- so the list's Expense Ref column can show a JV chip the same way
         -- it shows an invoice/GRN chip, instead of a bare "—".
-        (
-          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
-          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
-          WHERE jvl.LineID = np.JVLineId
+        COALESCE(
+          (
+            SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+            JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+            WHERE jvl.LineID = np.JVLineId
+          ),
+          -- a payment settling several JV lines (migration 620) lists them all
+          (
+            SELECT STRING_AGG(jv2.JVNo, ', ') WITHIN GROUP (ORDER BY jv2.JVNo)
+            FROM dbo.PaymentJvLineLink pjl
+            JOIN dbo.JournalVoucherLines jvl2 ON jvl2.LineID = pjl.JVLineId
+            JOIN dbo.JournalVoucher jv2 ON jv2.JVID = jvl2.JVID
+            WHERE pjl.PPaymentID = np.PPaymentID
+          )
         )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
