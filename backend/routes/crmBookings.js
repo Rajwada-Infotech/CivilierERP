@@ -349,7 +349,11 @@ router.get("/", requireAnyPageRight(BOOKING_PICKER_RIGHTS, "view"), async (req, 
     }
     // The status counts cover every status under the other filters, so the figures don't change with the status pick.
     const countsWhere = `WHERE ${conds.join(" AND ")}`;
-    if (status) {
+    const sentBackCond = status ? require("../services/crmAttentionConditions").sentBackFilterSql(status, "b.Id", "BookingId") : null;
+    if (sentBackCond) {
+      // "Sent back" / "Resubmitted" — the shared rule, not a status column.
+      conds.push(sentBackCond);
+    } else if (status) {
       bind("st", sql.NVarChar(30), status);
       conds.push("b.Status = @st");
     } else if (!includeCancelled) {

@@ -1,4 +1,4 @@
-import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack } from "@/constants/crmStatuses";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
@@ -23,7 +23,9 @@ import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./bookings/DetailParts";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { checklistStep } from "./applications/config";
+import { useSentBack, sinceLabel } from "@/components/crm/CrmListToolbar";
 
 import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/bookings";
@@ -809,6 +811,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectRemark, setRejectRemark] = useState("");
   const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
+  // Sent back by an approval: who sent it, whose turn it is now (crmStatuses.bookingSendBack).
+  const sendBack = bookingSendBack(currentStage, booking?.RejectedFromStage);
+  const { data: sentBackData } = useSentBack();
+  const sendBackRow = ((sentBackData?.rows || []) as any[]).find((r) => r.Kind === "booking" && r.BookingId === booking?.Id && r.State === "SentBack");
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
   // nothing to verify, submit or approve, and nothing is overdue on it.
   const closed = isBookingClosed(booking?.Status);
@@ -1121,10 +1127,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               )
             )}
             {interactive && it.CheckStatus === "NeedsRecheck" && (
-              <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
-                className="mt-1 text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
-                I've revised this — resend for recheck
-              </button>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {/* Where the flagged data is edited: the application, at the step that holds it. */}
+                {booking?.ApplicationId && (
+                  <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=${checklistStep(it.ItemKey)}`}
+                    className="text-[0.625rem] px-1.5 py-0.5 bg-foreground text-card border border-foreground hover:opacity-90">
+                    Correct in application ›
+                  </Link>
+                )}
+                <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
+                  className="text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
+                  I've revised this — resend for recheck
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1184,7 +1199,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             {booking.StageRemarks && (
               <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
                 <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
-                <div><span className="font-semibold">Sent back for correction ({bookingWorkflowStageLabel[currentStage] || currentStage}): </span>{booking.StageRemarks}</div>
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div>
+                    <span className="font-semibold">Sent back by {sendBack.from}{sendBackRow?.ByName ? ` (${sendBackRow.ByName}${sendBackRow.At ? `, ${sinceLabel(sendBackRow.At)}` : ""})` : ""}: </span>
+                    “{booking.StageRemarks}”
+                  </div>
+                  <div className="text-muted-foreground">{sendBack.next}</div>
+                </div>
+                {/* The action for whoever's turn it is. */}
+                {sendBack.preparerCorrects ? (
+                  booking.ApplicationId && (
+                    <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=1`}
+                      className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:opacity-90">
+                      Correct in application ›
+                    </Link>
+                  )
+                ) : (
+                  <Link to="/admin/approval/inbox"
+                    className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground hover:text-card">
+                    Open in Approval Inbox ›
+                  </Link>
+                )}
               </div>
             )}
 

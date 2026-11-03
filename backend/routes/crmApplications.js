@@ -198,7 +198,10 @@ function buildApplicationFilters(req0, query, projectScope = null) {
   const { status, search, companyId, projectId, blockId } = query;
   const conds = ["a.IsActive = 1"];
   if (projectScope) conds.push(projectPredicate(projectScope, "a.ProjectId", "").trim());
-  if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
+  // "Sent back" / "Resubmitted" — the shared rule (its booking's approval or data review), not a status column.
+  const sentBackCond = status ? require("../services/crmAttentionConditions").sentBackFilterSql(status, "a.Id", "ApplicationId") : null;
+  if (sentBackCond) conds.push(sentBackCond);
+  else if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
   if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
   if (projectId) { req0.input("projectId", sql.Int, parseInt(projectId, 10)); conds.push("a.ProjectId = @projectId"); }
   // um joins the application's PreferredUnitId, which a LAND application does
@@ -797,7 +800,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
 
-    res.json({ success: true });
+    // A new unit in another block than the parking already picked: say so.
+    const parkingWarning = unitIsChanging && newUnitId
+      ? await require("../services/crmEntityCreation").parkingOutsideUnitBlock(pool, { applicationId: id, unitId: newUnitId })
+      : null;
+    res.json({ success: true, parkingWarning });
   } catch (e) {
     console.error("[crm-applications] PUT error:", e.message);
     res.status(500).json({ error: e.message });

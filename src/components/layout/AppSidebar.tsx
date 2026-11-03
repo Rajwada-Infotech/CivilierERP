@@ -45,7 +45,7 @@ import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
-import { crmNavItems } from "./sidebars/CrmSidebar";
+import { crmNavItems, withSentBackBadges } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
 import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
@@ -211,8 +211,8 @@ const MODULE_HEADER: Record<
 // the tab is hidden) and re-polls at once when a page fires `refreshEvent`
 // (after an approve or reject), so a badge drops without waiting for the next
 // tick. `url` null = not polled (the module is not open).
-function usePolledCount(url: string | null, refreshEvent: string) {
-  const [count, setCount] = useState(0);
+function usePolledData(url: string | null, refreshEvent: string) {
+  const [data, setData] = useState<any>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failRef = useRef(0);
   // Guards against state updates / rescheduling from a fetch that resolves
@@ -220,7 +220,7 @@ function usePolledCount(url: string | null, refreshEvent: string) {
   const mountedRef = useRef(true);
 
   useEffect(() => {
-    if (!url) { setCount(0); return; }
+    if (!url) { setData(null); return; }
     mountedRef.current = true;
     const poll = () => {
       if (!mountedRef.current) return;
@@ -235,7 +235,7 @@ function usePolledCount(url: string | null, refreshEvent: string) {
         .then((d) => {
           if (!mountedRef.current) return;
           failRef.current = 0;
-          setCount(d.count ?? 0);
+          setData(d);
           timerRef.current = setTimeout(poll, 60_000);
         })
         .catch(() => {
@@ -258,7 +258,11 @@ function usePolledCount(url: string | null, refreshEvent: string) {
     };
   }, [url, refreshEvent]);
 
-  return count;
+  return data;
+}
+
+function usePolledCount(url: string | null, refreshEvent: string) {
+  return usePolledData(url, refreshEvent)?.count ?? 0;
 }
 
 // ── AppSidebar (nav panel) ────────────────────────────────────────────────────
@@ -271,6 +275,8 @@ export const AppSidebar = () => {
   useAppVersion();
   // Module-wide Approval Inbox.
   const pendingApprovalCount = usePolledCount("/api/approval-inbox/count", "approval-action");
+  // CRM entries sent back / resubmitted, per menu path (badges below).
+  const crmSentBack = usePolledData(activeModule === "crm" ? "/api/crm/dashboard/sent-back" : null, "approval-action");
   // Civil Work DPR's own per-assignment approvals (dependencyActivityAssignmentApi.ts).
   const civilWorkDprApprovalCount = usePolledCount("/api/dependency-activity-assignment/approvals/pending-count", "civilworkdpr-approval-action");
 
@@ -374,7 +380,7 @@ export const AppSidebar = () => {
         raw = salesAutomationNavItems;
         break;
       case "crm":
-        raw = crmNavItems;
+        raw = withSentBackBadges(crmNavItems, crmSentBack?.byPath);
         break;
       case "loan":
         raw = loanNavItems;
