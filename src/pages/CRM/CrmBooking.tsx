@@ -236,7 +236,11 @@ const CrmBooking: React.FC = () => {
             <ApprovalActions status={b.Status} recordId={b.Id} endpoint={API} submitOnly onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })} />
             {/* The stage itself is shown in Status; only Data Review has a button here. */}
             {/* Sent back: correct it; resubmitted: recheck it — in place of the plain checklist button. */}
-            {sentBackByBooking.get(b.Id) ? (
+            {sentBackByBooking.get(b.Id) === "Reapprove" ? (
+              <button onClick={() => navigate("/admin/approval/inbox")} className={`${KEY_LINE} h-7 px-2`} title="With the approver — approve again, or send back to Data Review">
+                Re-approve <ChevronRight size={11} />
+              </button>
+            ) : sentBackByBooking.get(b.Id) ? (
               <button onClick={() => openBooking(b.Id)} className={`${sentBackByBooking.get(b.Id) === "SentBack" ? KEY_INK : KEY_LINE} h-7 px-2`}>
                 {sentBackByBooking.get(b.Id) === "SentBack" ? "Correct" : "Recheck"} <ChevronRight size={11} />
               </button>

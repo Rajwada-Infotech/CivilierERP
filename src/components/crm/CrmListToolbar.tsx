@@ -3,6 +3,7 @@ import { Link, useInRouterContext, useLocation } from "react-router-dom";
 import { QueryClientContext, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CornerUpLeft, RotateCcw, Search, X } from "lucide-react";
 import { SheetMark } from "@/components/sheet/Sheet";
+import { bookingSendBack } from "@/constants/crmStatuses";
 import { cn } from "@/lib/utils";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -197,12 +198,17 @@ function SentBackPanelInner() {
  * review), keyed by its id — for a list's buttons. Sent back wins over
  * resubmitted when it has both.
  */
-export function useSentBackStates(by: "ApplicationId" | "BookingId"): Map<number, keyof typeof SENT_BACK_STATE> {
+export type RowTurn = keyof typeof SENT_BACK_STATE | "Reapprove";
+export function useSentBackStates(by: "ApplicationId" | "BookingId"): Map<number, RowTurn> {
   const { data } = useSentBack();
-  const m = new Map<number, keyof typeof SENT_BACK_STATE>();
+  const m = new Map<number, RowTurn>();
   for (const r of (data?.rows || []) as any[]) {
     if (r.Kind !== "booking" && r.Kind !== "review") continue;
-    if (m.get(r[by]) !== "SentBack") m.set(r[by], r.State);
+    // Sent back to an approval stage: that approver's turn, not a correction.
+    const turn: RowTurn = r.State === "SentBack" && r.Kind === "booking" && !bookingSendBack(r.Stage, r.FromStage).preparerCorrects
+      ? "Reapprove" : r.State;
+    const had = m.get(r[by]);
+    if (had !== "SentBack") m.set(r[by], had === "Reapprove" && turn === "Resubmitted" ? had : turn);
   }
   return m;
 }
@@ -237,7 +243,11 @@ export function SentBackNote({ applicationId, bookingId }: { applicationId?: num
       title={sb.rows.map((r) => `${r.Item || r.area}: ${r.Reason || "no reason given"} (${r.ByName || "—"}, ${sinceLabel(r.At)})`).join("\n")}>
       {sentBack ? <CornerUpLeft size={10} className="mt-[2px] shrink-0" /> : <RotateCcw size={10} className="mt-[2px] shrink-0" />}
       <span className="line-clamp-2">
-        {sentBack ? `Sent back${sb.first.ByName ? ` by ${sb.first.ByName}` : ""}` : "Resubmitted — recheck"}
+        {sentBack
+          ? sb.first.Kind === "booking"
+            ? `Sent back by ${bookingSendBack(sb.first.Stage, sb.first.FromStage).from}${sb.first.ByName ? ` (${sb.first.ByName})` : ""} — with ${bookingSendBack(sb.first.Stage, sb.first.FromStage).now}`
+            : `Sent back${sb.first.ByName ? ` by ${sb.first.ByName}` : ""}`
+          : "Resubmitted — recheck"}
         {items.length ? ` · ${items.join(", ")}` : ""} — {reason}
       </span>
     </span>

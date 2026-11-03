@@ -79,7 +79,7 @@ const OWN_SENT_BACK = {
 };
 
 // Every source as one row shape:
-//   Kind, RecordId, RecordNo, BookingId, BookingNo, ProjectId, ApplicationId, State, Item, ItemKey, Reason, ByName, At
+//   Kind, RecordId, RecordNo, BookingId, BookingNo, ProjectId, ApplicationId, Stage, FromStage, State, Item, ItemKey, Reason, ByName, At
 function sentBackRowsSql() {
   const { MODULE_MAP } = require("./approvalService");
   const engine = Object.entries(ENGINE_SENT_BACK).map(([key, m]) => {
@@ -89,7 +89,7 @@ function sentBackRowsSql() {
     const x = (c) => `x.[${c}]`;
     return `
     SELECT N'${key}' AS Kind, ${x(mm.pk)} AS RecordId, ${m.no ? `CAST(${x(m.no)} AS NVARCHAR(60))` : "b.BookingNo"} AS RecordNo,
-           b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId,
+           b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId, b.WorkflowStage AS Stage, b.RejectedFromStage AS FromStage,
            CASE WHEN ${x(mm.status)} = 'Rejected' THEN '${SENT_BACK}' ELSE '${RESUBMITTED}' END AS State,
            CAST(NULL AS NVARCHAR(200)) AS Item, CAST(NULL AS NVARCHAR(50)) AS ItemKey, al.Note AS Reason, al.ApproverEmail AS ByName, al.ActionAt AS At
     FROM ${mm.table} x
@@ -104,7 +104,7 @@ function sentBackRowsSql() {
     // Booking approval: a reject bounces it back one stage and stamps
     // RejectedFromStage + StageRemarks; sent again, it is back at the stage
     // that bounced it until that stage approves.
-    `SELECT N'booking' AS Kind, b.Id AS RecordId, b.BookingNo AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId,
+    `SELECT N'booking' AS Kind, b.Id AS RecordId, b.BookingNo AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId, b.WorkflowStage AS Stage, b.RejectedFromStage AS FromStage,
             CASE WHEN b.RejectedFromStage IS NOT NULL THEN '${SENT_BACK}' ELSE '${RESUBMITTED}' END AS State,
             CAST(NULL AS NVARCHAR(200)) AS Item, CAST(NULL AS NVARCHAR(50)) AS ItemKey,
             CASE WHEN b.RejectedFromStage IS NOT NULL THEN b.StageRemarks ELSE lg.Remarks END AS Reason,
@@ -118,7 +118,7 @@ function sentBackRowsSql() {
      WHERE ${LIVE_BOOKING_SQL} AND (b.RejectedFromStage IS NOT NULL OR (lg.Stage IS NOT NULL AND b.WorkflowStage = lg.Stage))`,
     // Data review: a flagged item keeps its reason in Remarks; the
     // preparer's resubmit puts it back to Pending with that reason on it.
-    `SELECT N'review' AS Kind, c.Id AS RecordId, b.BookingNo AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId,
+    `SELECT N'review' AS Kind, c.Id AS RecordId, b.BookingNo AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId, b.WorkflowStage AS Stage, b.RejectedFromStage AS FromStage,
             CASE WHEN c.CheckStatus = 'NeedsRecheck' THEN '${SENT_BACK}' ELSE '${RESUBMITTED}' END AS State,
             CAST(c.ItemLabel AS NVARCHAR(200)) AS Item, CAST(c.ItemKey AS NVARCHAR(50)) AS ItemKey, c.Remarks AS Reason, cu.name AS ByName, c.CheckedAt AS At
      FROM dbo.CrmApplicationVerificationChecklist c
@@ -129,7 +129,7 @@ function sentBackRowsSql() {
     // Payments Finance returned: open until a newer entry for the same
     // milestone (or the booking's account) is made; that newer entry is then
     // "resubmitted" while it waits for Finance.
-    `SELECT N'payment' AS Kind, rp.RPPaymentID AS RecordId, CAST(rp.RPDocNo AS NVARCHAR(60)) AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId,
+    `SELECT N'payment' AS Kind, rp.RPPaymentID AS RecordId, CAST(rp.RPDocNo AS NVARCHAR(60)) AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId, b.WorkflowStage AS Stage, b.RejectedFromStage AS FromStage,
             '${SENT_BACK}' AS State, CAST(ISNULL(m.MilestoneName, N'On Account') AS NVARCHAR(200)) AS Item, CAST(NULL AS NVARCHAR(50)) AS ItemKey,
             rp.RPRejectionNote AS Reason, rp.RPRejectedBy AS ByName, rp.RPRejectedAt AS At
      FROM dbo.ReceivedPayment rp
@@ -139,7 +139,7 @@ function sentBackRowsSql() {
        AND NOT EXISTS (SELECT 1 FROM dbo.ReceivedPayment n WHERE n.CrmBookingId = rp.CrmBookingId
                        AND ISNULL(n.CrmMilestoneId, 0) = ISNULL(rp.CrmMilestoneId, 0)
                        AND n.RPPaymentID > rp.RPPaymentID AND n.RPStatus <> N'Rejected')`,
-    `SELECT N'payment' AS Kind, rp.RPPaymentID AS RecordId, CAST(rp.RPDocNo AS NVARCHAR(60)) AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId,
+    `SELECT N'payment' AS Kind, rp.RPPaymentID AS RecordId, CAST(rp.RPDocNo AS NVARCHAR(60)) AS RecordNo, b.Id AS BookingId, b.BookingNo, b.ProjectId, b.ApplicationId, b.WorkflowStage AS Stage, b.RejectedFromStage AS FromStage,
             '${RESUBMITTED}' AS State, CAST(ISNULL(m.MilestoneName, N'On Account') AS NVARCHAR(200)) AS Item, CAST(NULL AS NVARCHAR(50)) AS ItemKey,
             prev.RPRejectionNote AS Reason, prev.RPRejectedBy AS ByName, prev.RPRejectedAt AS At
      FROM dbo.ReceivedPayment rp
