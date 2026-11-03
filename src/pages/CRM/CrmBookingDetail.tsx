@@ -1,4 +1,4 @@
-import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, BOOKING_STAGE_REVIEW, BOOKING_STAGE_DIRECTOR } from "@/constants/crmStatuses";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
@@ -825,10 +825,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [bookingRequesting, setBookingRequesting] = useState(false);
   const [stageActioning, setStageActioning] = useState<"approve" | "reject" | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
+  // Director only: back to the Marketing Head (default) or straight to Data Review.
+  const [rejectTo, setRejectTo] = useState<string | null>(null);
   const [rejectRemark, setRejectRemark] = useState("");
   const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
   // Sent back by an approval: who sent it, whose turn it is now (crmStatuses.bookingSendBack).
   const sendBack = bookingSendBack(currentStage, booking?.RejectedFromStage);
+  const sendBackChain = bookingSendBackChain(stageState?.history);
   const { data: sentBackData } = useSentBack();
   const sendBackRow = ((sentBackData?.rows || []) as any[]).find((r) => r.Kind === "booking" && r.BookingId === booking?.Id && r.State === "SentBack");
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
@@ -866,13 +869,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`${API}/${bookingId}/reject`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note: rejectRemark.trim() }),
+        body: JSON.stringify({ note: rejectRemark.trim(), toStage: rejectTo }),
       });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Reject failed");
       toast.success(`Sent back to ${resData.label || "previous stage"}`);
       setRejectOpen(false);
       setRejectRemark("");
+      setRejectTo(null);
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -1208,10 +1212,20 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
                 <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0 space-y-1">
-                  <div>
-                    <span className="font-semibold">Sent back by {sendBack.from}{sendBackRow?.ByName ? ` (${sendBackRow.ByName}${sendBackRow.At ? `, ${sinceLabel(sendBackRow.At)}` : ""})` : ""}: </span>
-                    “{booking.StageRemarks}”
-                  </div>
+                  {sendBackChain.length > 1 ? (
+                    // Sent back more than once this round — every reason, oldest first.
+                    sendBackChain.map((c, i) => (
+                      <div key={i} className={i === sendBackChain.length - 1 ? "" : "text-muted-foreground"}>
+                        <span className="font-semibold">{c.from} → {c.to}{c.byName ? ` (${c.byName}${c.at ? `, ${sinceLabel(c.at)}` : ""})` : ""}: </span>
+                        “{c.remark}”
+                      </div>
+                    ))
+                  ) : (
+                    <div>
+                      <span className="font-semibold">Sent back by {sendBack.from}{sendBackRow?.ByName ? ` (${sendBackRow.ByName}${sendBackRow.At ? `, ${sinceLabel(sendBackRow.At)}` : ""})` : ""}: </span>
+                      “{booking.StageRemarks}”
+                    </div>
+                  )}
                   <div className="text-muted-foreground">{sendBack.next}</div>
                 </div>
                 {/* The action for whoever's turn it is. */}
@@ -3066,6 +3080,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         <DialogHeader>
           <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
         </DialogHeader>
+        {currentStage === BOOKING_STAGE_DIRECTOR && (
+          <div className="space-y-1.5 text-sm">
+            {[
+              { to: null, label: "To the Marketing Head", note: "to approve again, or send on to Data Review" },
+              { to: BOOKING_STAGE_REVIEW, label: "To Data Review", note: "the application needs correcting — it is then verified and approved by the Marketing Head and you again" },
+            ].map((o) => (
+              <label key={String(o.to)} className="flex items-start gap-2 cursor-pointer">
+                <input type="radio" name="reject-to" className="mt-1" checked={rejectTo === o.to} onChange={() => setRejectTo(o.to)} />
+                <span><span className="font-medium">{o.label}</span> <span className="text-muted-foreground text-xs">— {o.note}</span></span>
+              </label>
+            ))}
+          </div>
+        )}
         <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
           placeholder="What needs to be corrected? (required)"
           className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />

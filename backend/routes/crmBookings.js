@@ -1228,7 +1228,8 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     const pool = getPool();
     if (await assertNotFrozen(pool, id, res)) return;
     const stageRow = await getStageState(pool, id);
-    const result = await rejectStageRequest(pool, id, stageRow?.WorkflowStage, userEmail, req.user?.role, actorId(req), req.body?.note || req.body?.remarks);
+    const result = await rejectStageRequest(pool, id, stageRow?.WorkflowStage, userEmail, req.user?.role, actorId(req), req.body?.note || req.body?.remarks,
+      { toStage: req.body?.toStage || null });
     // Sent back: tell whoever it now waits on, with the reason.
     try {
       const bk = (await pool.request().input("id", sql.Int, id).query(`

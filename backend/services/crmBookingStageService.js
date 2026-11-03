@@ -456,7 +456,16 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
 // mandatory (the whole point is to tell the preparer what to fix). The
 // LevelData remains untouched (the stage never clears), so a re-approve
 // after correction works cleanly.
-async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark) {
+// Where a send-back from each stage may go. One step back by default; the
+// Director may also send it straight to Data Review when the application
+// itself needs correcting. Either way every approval after that point is
+// cleared, so the booking runs the whole chain again from there.
+const SEND_BACK_TARGETS = {
+  [STAGE_MARKETING]: [STAGE_REVIEW],
+  [STAGE_DIRECTOR]: [STAGE_MARKETING, STAGE_REVIEW],
+};
+
+async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark, { toStage = null } = {}) {
   if (stage === STAGE_CONFIRMED) {
     const e = new Error("This booking is already confirmed — it can't be sent back; cancel or amend it instead");
     e.status = 409;
@@ -475,7 +484,11 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
     throw e;
   }
 
-  const prevStage = stage === STAGE_MARKETING ? STAGE_REVIEW : STAGE_MARKETING;
+  const targets = SEND_BACK_TARGETS[stage] || [];
+  if (toStage && !targets.includes(toStage)) {
+    throw Object.assign(new Error(`From '${stageLabel(stage)}' a booking can be sent back to: ${targets.map(stageLabel).join(" or ")}`), { status: 400 });
+  }
+  const prevStage = toStage || targets[0] || STAGE_REVIEW;
 
   // The stage bounce-back, its stage-log entry, and the approval-level reset
   // (clear stale Approved rows + record the BouncedBack action) are one
@@ -594,6 +607,7 @@ module.exports = {
   STAGE_CONFIRMED,
   WORKFLOW_STAGES,
   STAGE_LABELS,
+  SEND_BACK_TARGETS,
   stageLabel,
   getStageState,
   submitForApproval,
