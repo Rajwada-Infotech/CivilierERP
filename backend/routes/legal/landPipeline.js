@@ -1375,7 +1375,8 @@ router.get("/:id/dossier", requirePageRight(LAND_PAGE, "view"), async (req, res)
     const r = await getPool().request().input("Id", sql.Int, id).query(`
       SELECT l.LandCode, l.LandName, l.LocationAddress, l.Area, u.UnitName, lt.LandTypeName, l.LandStatus, l.WorkflowStatus, l.IsOnHold, l.IsCancelled,
              d.DistrictName, sd.SubDivisionName, b.BlockName, v.VillageName, ps.StationName, mu.BodyName AS Municipality, m.MouzaName, m.JLNo,
-             l.NorthBoundary, l.SouthBoundary, l.EastBoundary, l.WestBoundary, l.GpsLatitude, l.GpsLongitude, e.EnquiryNo, l.CreatedAt
+             l.NorthBoundary, l.SouthBoundary, l.EastBoundary, l.WestBoundary, l.GpsLatitude, l.GpsLongitude, e.EnquiryNo, l.CreatedAt,
+             l.EntryType, l.PossessionStatus, l.AcquisitionDate, l.AcquisitionDateApprox, l.RsDagNo, l.LrDagNo, l.RsKhatianNo, l.LrKhatianNo
         FROM dbo.LegalLand l
         LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId LEFT JOIN dbo.LegalLandType lt ON lt.LandTypeId = l.LandTypeId
         LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId LEFT JOIN dbo.LegalSubDivision sd ON sd.SubDivisionId = l.SubDivisionId
@@ -1412,10 +1413,22 @@ router.get("/:id/dossier", requirePageRight(LAND_PAGE, "view"), async (req, res)
       SELECT s.StepNo, s.StepCode, s.StepName, ISNULL(st.Status, N'Not Started') AS Status, st.UpdatedAt,
              (SELECT name FROM dbo.users WHERE id = st.UpdatedBy) AS UpdatedByName
         FROM dbo.LegalWorkflowStep s LEFT JOIN dbo.LegalWorkflowStepState st ON st.StepCode = s.StepCode AND st.LandId = @Id
-        WHERE s.IsActive = 1 ORDER BY s.StepNo;`);
-    const [land, owners, chain, records, documents, legal, transactions, deeds, mutations, steps] = r.recordsets;
+        WHERE s.IsActive = 1 ORDER BY s.StepNo;
+      SELECT RecordType, CaseNumber, CourtAuthority, FilingDate, OrderDate, RecordStatus, DocFileId, VerificationStatus,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = DocFileId) AS DocFileName FROM dbo.LegalLandLegalRecord WHERE LandId = @Id AND IsActive = 1 ORDER BY FilingDate, LegalRecordId;
+      SELECT LenderName, ISNULL(LoanType, (SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = MortgageTypeId)) AS LoanType, LoanAmount, OutstandingAmount, LoanStartDate,
+             LoanClosureDate, ISNULL(LoanStatus, MortgageStatus) AS LoanStatus, MortgageDeedNo, VerificationStatus FROM dbo.LegalMortgage WHERE LandId = @Id AND IsActive = 1 ORDER BY LoanStartDate, MortgageId;
+      SELECT p.PaymentDate, (SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = p.TxnTypeId) AS TxnType, p.Amount, p.Payer, p.Payee,
+             (SELECT Name FROM dbo.LegalLookupValue WHERE LookupId = p.PaymentModeId) AS PaymentMode, ISNULL(p.TransactionRef, p.BankRef) AS Ref, p.ReceiptNo, p.ReceiptFileId AS DocFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = p.ReceiptFileId) AS DocFileName, p.VerificationStatus
+        FROM dbo.LegalPayment p WHERE p.LandId = @Id AND p.IsActive = 1 ORDER BY p.PaymentDate, p.PaymentId;
+      SELECT TaxYear, PaymentDate, Amount, ReceiptNo, RelatedOwner, ReceiptFileId AS DocFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = ReceiptFileId) AS DocFileName, VerificationStatus FROM dbo.LegalLandTax WHERE LandId = @Id AND IsActive = 1 ORDER BY TaxYear;
+      SELECT ValuationDate, EstimatedMarketValue, GovernmentValuation, ValuationSource, Surveyor, SurveyDate, ValuationFileId AS DocFileId,
+             (SELECT FileName FROM dbo.LegalMasterFile WHERE FileId = ValuationFileId) AS DocFileName, VerificationStatus FROM dbo.LegalValuation WHERE LandId = @Id AND IsActive = 1 ORDER BY ValuationDate;`);
+    const [land, owners, chain, records, documents, legal, transactions, deeds, mutations, steps, legalRecords, loans, payments, taxes, valuations] = r.recordsets;
     if (!land[0]) return res.status(404).json({ error: "Land property not found" });
-    res.json({ land: land[0], owners, chain, records, documents, legal, transactions, deeds, mutations, steps });
+    res.json({ land: land[0], owners, chain, records, documents, legal, transactions, deeds, mutations, steps, legalRecords, loans, payments, taxes, valuations });
   } catch (err) {
     console.error("[legal-land] dossier:", err.message);
     res.status(500).json({ error: "Could not load the land details" });

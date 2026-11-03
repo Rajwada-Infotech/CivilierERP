@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DocumentText } from "iconsax-react";
 import { ArrowLeft, Download } from "lucide-react";
+import { printLegalSheet } from "@/lib/legalPrint";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell, LEGAL_ACCENT } from "@/components/legal/LegalShell";
 import { getLandDossier } from "@/api/legalLandApi";
@@ -25,16 +26,16 @@ const cell = (v: unknown): React.ReactNode =>
     : typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) ? fmtDate(v)
     : typeof v === "number" ? v.toLocaleString("en-IN") : String(v);
 
-/** A section; `step` links it to its pipeline step on the land's page. */
-const Section: React.FC<{ title: string; step?: string; landId?: number; children: React.ReactNode }> = ({ title, step, landId, children }) => {
+/** A section; `to` links it to where it is edited (the pipeline step, or the Land Profile tab for existing land). */
+const Section: React.FC<{ title: string; to?: string; toLabel?: string; children: React.ReactNode }> = ({ title, to, toLabel = "Open", children }) => {
   const navigate = useNavigate();
   return (
     <section className="break-inside-avoid border-t border-border pt-4 print:pt-3">
       <div className="mb-2 flex items-center flex-wrap justify-between gap-2">
         <h3 className="text-xs font-heading font-semibold uppercase tracking-[0.16em]" style={{ color: LEGAL_ACCENT }}>{title}</h3>
-        {step && landId ? (
-          <button className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline print:hidden" onClick={() => navigate(`/legal/land/properties/${landId}?step=${step}`)}>
-            Open in pipeline →
+        {to ? (
+          <button className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline print:hidden" onClick={() => navigate(to)}>
+            {toLabel} →
           </button>
         ) : null}
       </div>
@@ -66,38 +67,41 @@ export default function LandDetailsPage() {
   const id = Number(useParams().id);
   const navigate = useNavigate();
   const { data, isLoading, error } = useQuery({ queryKey: ["legal-land-dossier", id], queryFn: () => getLandDossier(id), enabled: id > 0 });
-  const print = () => {
-    document.body.classList.add("legal-printing");
-    const done = () => { document.body.classList.remove("legal-printing"); window.removeEventListener("afterprint", done); };
-    window.addEventListener("afterprint", done);
-    window.print();
-  };
+  const print = () => printLegalSheet();
   const L = data?.land ?? {};
   const kv = (k: string, v: unknown) => <div><dt className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">{k}</dt><dd className="text-sm text-foreground">{cell(v)}</dd></div>;
   const current = (data?.owners ?? []).filter((o) => !o.ValidTo);
+  // Existing / backlog land has no purchase pipeline: its sections open on the Land Profile tabs instead.
+  const backlog = L.EntryType === "Existing / Backlog";
+  const home = backlog ? `/legal/land/properties/${id}/profile` : `/legal/land/properties/${id}`;
+  const at = (step: string, tab: string) => ({
+    to: backlog ? `${home}?tab=${tab}` : `${home}?step=${step}`,
+    toLabel: backlog ? "Open in Land Profile" : "Open in pipeline",
+  });
+  const lat = L.GpsLatitude, lng = L.GpsLongitude;
 
   return (
     <>
-      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Land Properties", path: "/legal/land/properties" }, { label: String(L.LandCode ?? "…"), path: `/legal/land/properties/${id}` }, { label: "Full details" }]} />
+      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Land Register", path: "/legal/land/properties" }, { label: String(L.LandCode ?? "…"), path: home }, { label: "Full details" }]} />
       <LegalShell
         title={`${String(L.LandCode ?? "")} · ${String(L.LandName ?? "")}`}
         subtitle="Everything recorded on this land"
         icon={DocumentText}
         action={
           <div className="flex gap-2 print:hidden">
-            <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={() => navigate(`/legal/land/properties/${id}`)}><ArrowLeft size={13} /><span className="hidden sm:inline">Pipeline</span></button>
+            <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted" onClick={() => navigate(home)}><ArrowLeft size={13} /><span className="hidden sm:inline">{backlog ? "Land Profile" : "Pipeline"}</span></button>
             <button className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-card" style={{ background: LEGAL_ACCENT }} disabled={!data} onClick={print}><Download size={13} /> Download PDF</button>
           </div>
         }
       >
         {error ? <p className="p-6 text-destructive">{(error as Error).message}</p> : isLoading || !data ? <p className="p-6 text-muted-foreground">Loading…</p> : (
           <div className="legal-print space-y-4 rounded-2xl border border-border bg-card p-4 sm:p-6 print:border-0 print:p-0">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="hidden flex-wrap items-baseline justify-between gap-2 print:flex">
               <h2 className="text-xl font-heading font-bold text-foreground">{String(L.LandCode)} — {String(L.LandName)}</h2>
               <span className="text-xs text-muted-foreground">Printed {fmtDate(new Date().toISOString())} · CivilierERP Legal</span>
             </div>
 
-            <Section title="Property" step="PROPERTY" landId={id}>
+            <Section title="Property" {...at("PROPERTY", "basic")}>
               <dl className="grid gap-3 sm:grid-cols-3">
                 {kv("Mouza (J.L.)", L.MouzaName ? `${L.MouzaName} (${L.JLNo ?? "-"})` : null)}
                 {kv("District", L.DistrictName)}
@@ -107,40 +111,61 @@ export default function LandDetailsPage() {
                 {kv("Area", L.Area != null ? `${Number(L.Area)} ${L.UnitName ?? ""}` : null)}
                 {kv("Land type", L.LandTypeName)}
                 {kv("Land status", L.LandStatus)}
-                {kv("Workflow", L.IsCancelled ? "Cancelled" : L.IsOnHold ? "On hold" : L.WorkflowStatus)}
+                {kv("Entry type", L.EntryType)}
+                {backlog ? kv("Possession", L.PossessionStatus) : kv("Workflow", L.IsCancelled ? "Cancelled" : L.IsOnHold ? "On hold" : L.WorkflowStatus)}
+                {kv("Acquired on", L.AcquisitionDate ? `${fmtDate(L.AcquisitionDate)}${L.AcquisitionDateApprox ? " (approx.)" : ""}` : null)}
+                {kv("RS Dag / Khatian", [L.RsDagNo, L.RsKhatianNo].filter(Boolean).join(" / "))}
+                {kv("LR Dag / Khatian", [L.LrDagNo, L.LrKhatianNo].filter(Boolean).join(" / "))}
                 {kv("Address", L.LocationAddress)}
                 {kv("Boundaries N / S", [L.NorthBoundary, L.SouthBoundary].filter(Boolean).join(" / "))}
                 {kv("Boundaries E / W", [L.EastBoundary, L.WestBoundary].filter(Boolean).join(" / "))}
-                {kv("GPS", L.GpsLatitude ? `${L.GpsLatitude}, ${L.GpsLongitude}` : null)}
-                {kv("From enquiry", L.EnquiryNo)}
+                <div><dt className="text-[0.6875rem] uppercase tracking-wider text-muted-foreground">GPS</dt><dd className="text-sm text-foreground">
+                  {lat != null && lng != null ? <>{String(lat)}, {String(lng)} <a className="ml-1 text-xs underline print:hidden" href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noopener noreferrer">Map ↗</a></> : "—"}
+                </dd></div>
+                {!backlog && kv("From enquiry", L.EnquiryNo)}
               </dl>
             </Section>
 
-            <Section title="Current owners" step="OWNERSHIP" landId={id}>
+            <Section title="Current owners" {...at("OWNERSHIP", "ownership")}>
               <Table rows={current} cols={[["OwnerName", "Owner"], ["OwnerGuardian", "Father / husband"], ["SharePct", "Share %"], ["ValidFrom", "Since"], ["VerificationStatus", "Verification"]]} />
             </Section>
-            <Section title="Ownership chain" step="OWNERSHIP" landId={id}>
+            <Section title="Ownership chain" {...at("OWNERSHIP", "ownership")}>
               <Table rows={data.chain} cols={[["EventDate", "Date"], ["TransferType", "Type"], ["PreviousOwnerName", "From"], ["NewOwnerName", "To"], ["SharePct", "Share %"], ["DocumentNo", "Document"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
             </Section>
-            <Section title="RS / LR records" step="RECORD_MAPPING" landId={id}>
+            <Section title="RS / LR records" {...at("RECORD_MAPPING", "records")}>
               <Table rows={data.records} cols={[["Kind", "Record"], ["Khatian", "Khatian"], ["Dag", "Dag"], ["RecordedHolder", "Holder"], ["Area", "Area"], ["Share", "Share"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
             </Section>
-            <Section title="Documents" step="DOCUMENTS" landId={id}>
+            <Section title="Documents" {...at("DOCUMENTS", "documents")}>
               <Table rows={data.documents} cols={[["DocumentCode", "Code"], ["Title", "Title"], ["DocTypeName", "Type"], ["DocumentNo", "Number"], ["CurrentVersionNo", "Version"], ["DocFileId", "File"], ["ReviewStatus", "Review"]]} />
             </Section>
-            <Section title="Legal checks" step="CASE_MORTGAGE" landId={id}>
+            <Section title="Legal checks" {...at("CASE_MORTGAGE", "legal")}>
               <Table rows={data.legal} cols={[["Kind", "Item"], ["Detail", "Detail"], ["Status", "Result / status"]]} />
             </Section>
-            <Section title="Purchase & sale" step="PURCHASE_SALE" landId={id}>
+            <Section title="Legal records" {...at("CASE_MORTGAGE", "legal")}>
+              <Table rows={data.legalRecords ?? []} cols={[["RecordType", "Type"], ["CaseNumber", "Case / ref no."], ["CourtAuthority", "Court / authority"], ["FilingDate", "Filed"], ["OrderDate", "Order"], ["RecordStatus", "Status"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
+            </Section>
+            <Section title="Loans & mortgages" {...at("CASE_MORTGAGE", "loans")}>
+              <Table rows={data.loans ?? []} cols={[["LenderName", "Lender"], ["LoanType", "Type"], ["LoanAmount", "Amount ₹"], ["OutstandingAmount", "Outstanding ₹"], ["LoanStartDate", "Start"], ["LoanClosureDate", "Closed"], ["LoanStatus", "Status"], ["VerificationStatus", "Verification"]]} />
+            </Section>
+            <Section title="Payments" {...at("PURCHASE_SALE", "payments")}>
+              <Table rows={data.payments ?? []} cols={[["PaymentDate", "Date"], ["TxnType", "Type"], ["Amount", "Amount ₹"], ["Payer", "Paid by"], ["Payee", "Paid to"], ["PaymentMode", "Mode"], ["Ref", "Reference"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
+            </Section>
+            <Section title="Land tax (Khajna)" {...at("PROPERTY", "tax")}>
+              <Table rows={data.taxes ?? []} cols={[["TaxYear", "Year"], ["PaymentDate", "Paid on"], ["Amount", "Amount ₹"], ["ReceiptNo", "Receipt no."], ["RelatedOwner", "Owner"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
+            </Section>
+            <Section title="Survey & valuation" {...at("PROPERTY", "survey")}>
+              <Table rows={data.valuations ?? []} cols={[["ValuationDate", "Date"], ["EstimatedMarketValue", "Market value ₹"], ["GovernmentValuation", "Govt. value ₹"], ["ValuationSource", "Source"], ["Surveyor", "Surveyor"], ["SurveyDate", "Survey date"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
+            </Section>
+            {(!backlog || data.transactions.length > 0) && <Section title="Purchase & sale" {...at("PURCHASE_SALE", "transfers")}>
               <Table rows={data.transactions} cols={[["TransactionNo", "No."], ["TxnType", "Type"], ["BuyerName", "Buyer"], ["SellerNames", "Seller(s)"], ["Area", "Area"], ["TotalValue", "Value ₹"], ["Paid", "Verified paid ₹"], ["TxnStatus", "Status"]]} />
-            </Section>
-            <Section title="Deed & registration" step="DEED_PREP" landId={id}>
+            </Section>}
+            {(!backlog || data.deeds.length > 0) && <Section title="Deed & registration" {...at("DEED_PREP", "transfers")}>
               <Table rows={data.deeds} cols={[["DeedCode", "Deed"], ["DeedTypeName", "Type"], ["ConsiderationAmount", "Consideration ₹"], ["OfficeName", "Office"], ["RegisteredDeedNo", "Registered no."], ["RegistrationDate", "Registered on"], ["RegistrationStatus", "Status"]]} />
-            </Section>
-            <Section title="Mutation" step="MUTATION_APPLY" landId={id}>
+            </Section>}
+            <Section title="Mutation" {...at("MUTATION_APPLY", "mutation")}>
               <Table rows={data.mutations} cols={[["ApplicationNo", "Application"], ["OfficeName", "Office"], ["ApplicationStatus", "Status"], ["OrderNo", "Order"], ["OrderDate", "Order date"]]} />
             </Section>
-            <Section title="Pipeline">
+            {!backlog && <Section title="Pipeline">
               {/* Each step opens on the land's pipeline page. */}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -160,7 +185,7 @@ export default function LandDetailsPage() {
                   ))}</tbody>
                 </table>
               </div>
-            </Section>
+            </Section>}
           </div>
         )}
       </LegalShell>

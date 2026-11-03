@@ -197,7 +197,7 @@ export const startPurchaseFromOwners = async (id: number, body: { buyerName: str
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/purchase/from-owners`, post(body)));
 export const addOwnersToApprovals = async (id: number, agreementId: number) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}/approvals/from-owners`, post({ agreementId })));
-export type LandDossier = Record<"owners" | "chain" | "records" | "documents" | "legal" | "transactions" | "deeds" | "mutations" | "steps", Record<string, unknown>[]> & { land: Record<string, unknown> };
+export type LandDossier = Record<"owners" | "chain" | "records" | "documents" | "legal" | "transactions" | "deeds" | "mutations" | "steps" | "legalRecords" | "loans" | "payments" | "taxes" | "valuations", Record<string, unknown>[]> & { land: Record<string, unknown> };
 export const getLandDossier = async (id: number) => handle<LandDossier>(await fetchWithAuth(`${BASE}/${id}/dossier`));
 
 export const initDueDiligence = async (id: number) =>
