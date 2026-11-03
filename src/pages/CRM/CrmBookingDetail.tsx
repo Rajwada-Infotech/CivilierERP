@@ -833,6 +833,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // Sent back by an approval: who sent it, whose turn it is now (crmStatuses.bookingSendBack).
   const sendBack = bookingSendBack(currentStage, booking?.RejectedFromStage);
   const sendBackChain = bookingSendBackChain(stageState?.history);
+  // "Correct in application" opens the step of the first flagged item (else the first step).
+  const correctionStep = (() => {
+    const flagged = checklistItems.find((it: any) => it.CheckStatus === "NeedsRecheck");
+    return flagged ? checklistStep(flagged.ItemKey) : 1;
+  })();
   const { data: sentBackData } = useSentBack();
   const sendBackRow = ((sentBackData?.rows || []) as any[]).find((r) => r.Kind === "booking" && r.BookingId === booking?.Id && r.State === "SentBack");
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
@@ -1232,17 +1237,14 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 {/* The action for whoever's turn it is. */}
                 {sendBack.preparerCorrects ? (
                   booking.ApplicationId && (
-                    <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=1`}
+                    <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=${correctionStep}`}
                       className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:opacity-90">
                       Correct in application ›
                     </Link>
                   )
-                ) : (
-                  <Link to="/admin/approval/inbox"
-                    className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground hover:text-card">
-                    Open in Approval Inbox ›
-                  </Link>
-                )}
+                ) : canActOnStage ? (
+                  <span className="shrink-0 self-center text-[0.625rem] font-heading font-semibold uppercase tracking-[0.1em]">Yours — Approve or Reject at the foot of the page</span>
+                ) : null}
               </div>
             )}
 
