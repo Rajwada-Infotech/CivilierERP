@@ -52,11 +52,12 @@ export default function LandReportsPage() {
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Reports"]} />
       <LegalShell title="Land Reports" subtitle="Registers and status reports across every land property" icon={DocumentText}>
         {stats && (
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {([
-              ["Land properties", stats.totalLands], ["Active enquiries", stats.activeEnquiries], ["In progress", stats.inProgress],
-              ["Pending verification", stats.pendingVerification], ["On hold", stats.onHold], ["Pending registration", stats.pendingRegistration],
-              ["Mutation pending", stats.mutationPending], ["Completed", stats.completed],
+              ["Total Land Properties", stats.totalLands],
+              ["Existing / Backlog Records", stats.backlogLands ?? 0],
+              ["Properties On Hold", stats.onHold ?? 0],
+              ["Disposed / Transferred", stats.completed ?? 0],
             ] as const).map(([l, v]) => (
               <div key={l} className={`${card} p-3`}>
                 <div className="text-xl font-heading font-bold tabular-nums text-foreground">{v ?? 0}</div>
@@ -65,6 +66,16 @@ export default function LandReportsPage() {
             ))}
           </div>
         )}
+        {/* One tab per land: pick a land to see every report for just that land, or All. */}
+        <div className="mb-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted-foreground">Land:</span>
+          {[{ value: "", label: "All" }, ...(lands ?? []).map((l) => ({ value: l.label.split(" - ")[0], label: l.label }))].map((t) => (
+            <button key={t.value || "all"} onClick={() => setLandCode(t.value)} title={t.label}
+              className={`max-w-[260px] truncate border px-2.5 py-1 text-xs font-heading font-semibold transition-colors ${landCode === t.value ? "border-foreground bg-foreground text-card" : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
         <div ref={layoutRef} className={`grid gap-4 ${wide ? "grid-cols-[240px_minmax(0,1fr)]" : "grid-cols-1"}`}>
           <div className={`${card} p-3 ${wide ? "hidden" : ""}`}>
             <label className="text-[0.6875rem] uppercase tracking-[0.14em] text-muted-foreground" htmlFor="legal-report-picker">Report</label>
@@ -93,15 +104,9 @@ export default function LandReportsPage() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-base font-heading font-semibold text-foreground">{data?.title ?? "…"}</h3>
-                <p className="text-xs text-muted-foreground">{rows.length} row(s)</p>
+                <p className="text-xs text-muted-foreground">{rows.length} row(s){landCode && (hasLandCol ? ` · ${landCode}` : " · this report covers all land")}</p>
               </div>
               <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-                {hasLandCol && (
-                  <select className="min-w-0 rounded-lg border border-border bg-muted px-2.5 py-1.5 text-sm sm:w-52" value={landCode} onChange={(e) => setLandCode(e.target.value)} title="Filter by land">
-                    <option value="">All lands</option>
-                    {(lands ?? []).map((l) => <option key={l.value} value={l.label.split(" - ")[0]}>{l.label}</option>)}
-                  </select>
-                )}
                 <input className="min-w-0 flex-1 rounded-lg border border-border bg-muted px-2.5 py-1.5 text-sm sm:w-56 sm:flex-none" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
                 {rights.canExport && data && (
                   <button className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"

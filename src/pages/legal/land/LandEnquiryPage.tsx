@@ -79,16 +79,21 @@ export default function LandEnquiryPage() {
             const id = Number(raw.EnquiryId);
             const no = String(raw.EnquiryNo);
             const st = String(raw.EnquiryStatus);
+            // Latitude / longitude entered → open the plot on Google Maps.
+            const map = raw.GpsLatitude != null && raw.GpsLongitude != null && (
+              <a href={`https://www.google.com/maps?q=${raw.GpsLatitude},${raw.GpsLongitude}`} target="_blank" rel="noopener noreferrer" className={small} title="Open this plot on Google Maps">Map ↗</a>
+            );
             if (raw.LandId) {
-              return <button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className={small}>Open land</button>;
+              return <span className="inline-flex gap-1.5">{map}<button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className={small}>Open land</button></span>;
             }
-            if (!rights.canEdit) return null;
+            if (!rights.canEdit) return map || null;
             // Rejected / on hold: only Resume. Otherwise: Convert, Hold, Reject.
             if (st === "Rejected" || st === "On Hold") {
-              return <button onClick={() => changeStatus(id, no, "Under Review")} className={small}>Resume</button>;
+              return <span className="inline-flex gap-1.5">{map}<button onClick={() => changeStatus(id, no, "Under Review")} className={small}>Resume</button></span>;
             }
             return (
               <span className="inline-flex flex-wrap justify-end gap-1.5">
+                {map}
                 {landRights.canCreate && <button onClick={() => convert(id, no)} className={small}>Convert to land</button>}
                 <button onClick={() => changeStatus(id, no, "On Hold")} className={small}>Hold</button>
                 <button onClick={() => changeStatus(id, no, "Rejected")} className={`${small} text-rose-600`}>Reject</button>

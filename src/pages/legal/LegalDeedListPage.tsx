@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { DocumentUpload } from "iconsax-react";
@@ -38,10 +38,28 @@ export default function LegalDeedListPage() {
   const [consideration, setConsideration] = useState("");
   const [executiveId, setExecutiveId] = useState("");
 
-  const { data: deeds = [], isLoading } = useQuery({
+  const [filterStatus, setFilterStatus] = useState<"ALL" | "DRAFT" | "L1" | "L2" | "APPROVED">("ALL");
+
+  const { data: allDeeds = [], isLoading } = useQuery({
     queryKey: ["legal-deeds"],
     queryFn: getLegalDeeds,
   });
+
+  const deeds = useMemo(() => {
+    if (filterStatus === "DRAFT") {
+      return allDeeds.filter((d) => d.OverallStatus === "Dossier Created" || d.OverallStatus === "Awaiting Registered Deed");
+    }
+    if (filterStatus === "L1") {
+      return allDeeds.filter((d) => d.OverallStatus === "L1 Pending" || d.OverallStatus === "L1 Returned");
+    }
+    if (filterStatus === "L2") {
+      return allDeeds.filter((d) => d.OverallStatus === "L2 Pending" || d.OverallStatus === "L2 Returned");
+    }
+    if (filterStatus === "APPROVED") {
+      return allDeeds.filter((d) => d.L2Status === "Approved" || d.OverallStatus === "Completed" || d.OverallStatus === "L2 Approved");
+    }
+    return allDeeds;
+  }, [allDeeds, filterStatus]);
 
   const { data: deedTypes = [] } = useQuery({ queryKey: ["legal-lookup", "deed-type"], queryFn: () => getLegalLookup("deed-type") });
   const { data: offices = [] } = useQuery({ queryKey: ["legal-lookup", "registration-office"], queryFn: () => getLegalLookup("registration-office") });
@@ -88,27 +106,55 @@ export default function LegalDeedListPage() {
     });
   };
 
+  const tabBtn = (active: boolean) =>
+    `border px-2.5 py-1 text-xs font-heading font-semibold transition-colors ${
+      active
+        ? "border-foreground bg-foreground text-card"
+        : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
+    }`;
+
   return (
     <>
-      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Deed Registrations" }]} />
+      <Breadcrumbs items={[{ label: "Dashboard", path: "/home" }, { label: "Legal", path: "/legal" }, { label: "Land Deed Entries" }]} />
       <LegalShell
-        title="Land Deed Registration Tracker"
-        subtitle="Manage land purchase deeds, document checklists, and two-level approval lifecycle."
+        title="Land Deed Entries"
+        subtitle="Record land deeds, upload supporting evidence, and track two-level approval."
         icon={DocumentUpload}
       >
         <div className="flex flex-col gap-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="text-lg font-heading font-semibold text-foreground">Registered & In-Progress Deeds</h2>
+              <h2 className="text-lg font-heading font-semibold text-foreground">Land Deeds</h2>
               <p className="text-xs text-muted-foreground">
-                Track full evidence dossier, statutory fees, and approval chain before closing acquisition records.
+                All registered and in-progress land deeds with WB land identifiers (RS & LR).
               </p>
             </div>
-            {rights.canCreate && (
-              <Button onClick={() => setOpenCreateModal((v) => !v)} className="gap-2 bg-foreground text-card hover:bg-foreground/85">
-                {openCreateModal ? <><X size={16} /> Close</> : <><Plus size={16} /> New Deed Registration</>}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {rights.canCreate && (
+                <Button onClick={() => setOpenCreateModal((v) => !v)} className="gap-2 bg-foreground text-card hover:bg-foreground/85">
+                  {openCreateModal ? <><X size={16} /> Close</> : <><Plus size={16} /> New Deed Entry</>}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Status filter tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button className={tabBtn(filterStatus === "ALL")} onClick={() => setFilterStatus("ALL")}>
+              All ({allDeeds.length})
+            </button>
+            <button className={tabBtn(filterStatus === "DRAFT")} onClick={() => setFilterStatus("DRAFT")}>
+              Draft / Data Entry
+            </button>
+            <button className={tabBtn(filterStatus === "L1")} onClick={() => setFilterStatus("L1")}>
+              Pending L1 Review
+            </button>
+            <button className={tabBtn(filterStatus === "L2")} onClick={() => setFilterStatus("L2")}>
+              Pending L2 Approval
+            </button>
+            <button className={tabBtn(filterStatus === "APPROVED")} onClick={() => setFilterStatus("APPROVED")}>
+              Approved / Active
+            </button>
           </div>
 
           <div className="order-2 rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
@@ -117,9 +163,9 @@ export default function LegalDeedListPage() {
             ) : deeds.length === 0 ? (
               <div className="p-12 text-center">
                 <DocumentUpload className="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
-                <h3 className="text-base font-semibold text-foreground">No deed registrations started</h3>
+                <h3 className="text-base font-semibold text-foreground">No land deed entries found</h3>
                 <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                  Click "New Deed Registration" or launch a search from the Registration Search tab.
+                  Click "New Deed Entry" to record a new land deed.
                 </p>
               </div>
             ) : (
@@ -207,7 +253,7 @@ export default function LegalDeedListPage() {
         {/* New deed file — opens in the page above the list, closes on create or cancel */}
         {openCreateModal && (
           <div className="order-1 border border-border bg-card p-4 sm:p-5">
-            <h2 className="text-base font-heading font-semibold text-foreground">Open New Deed Registration Dossier</h2>
+            <h2 className="text-base font-heading font-semibold text-foreground">New Land Deed Entry</h2>
             <form onSubmit={handleCreateSubmit} className="space-y-4 py-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

@@ -232,9 +232,11 @@ interface TableProps {
   rowFilter?: (raw: LegalRow) => boolean;
   /** Called with the new row's id after an add (e.g. to open the new land's page). */
   onCreated?: (id: number) => void;
+  /** Values a new row always gets; these fields are left out of the form (still shown in the table). */
+  fixed?: Record<string, string>;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated, fixed }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
@@ -272,9 +274,9 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   );
   // A pick filtered by the (hidden) parent behaves as if the parent were in the form.
   const formFields = useMemo(
-    () => fields.map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
+    () => fields.filter((f) => !fixed || !(f.name in fixed)).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, lookups, parentField, JSON.stringify(defaults)],
+    [fields, lookups, parentField, JSON.stringify(defaults), JSON.stringify(fixed)],
   );
   const extras = useMemo(() => master?.extras ?? [], [master]);
   const data = useMemo(
@@ -334,7 +336,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
       if (event.action === "add") {
-        const added = await addLegalRow(entry.key, payload(event.record));
+        const added = await addLegalRow(entry.key, { ...payload(event.record), ...fixed });
         toast.success(added.message);
         if (onCreated && added.id) onCreated(Number(added.id));
       }

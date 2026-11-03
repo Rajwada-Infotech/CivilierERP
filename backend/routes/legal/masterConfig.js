@@ -223,15 +223,12 @@ const MASTERS = {
   },
   land: {
     title: "Land Property", group: "Land Management", pageKey: "legal-land-master", table: "LegalLand", pk: "LandId",
-    desc: "The central record of a land property: every enquiry, record, party, document and step hangs off its Land ID.",
+    desc: "The central company record of a land property: identifiers, area, boundaries, possession, and all historical records.",
     label: "LandCode + ' - ' + LandName", orderBy: "LandCode",
     unique: [["LandCode"], "This Land ID already exists"],
     noDelete: true,
-    // Steps waiting for a verifier — also what the dashboard's "Pending verification" tile filters on — and the
-    // current recorded owners, so the register can be searched by owner name.
     extras: [
       { name: "CurrentOwners", label: "Current owner(s)", sql: "(SELECT STRING_AGG(ISNULL(o.OwnerName, p.FullName), ', ') FROM dbo.LegalOwnershipRecord o LEFT JOIN dbo.LegalPerson p ON p.PersonId = o.PersonId WHERE o.LandId = t.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL)" },
-      { name: "StepsAwaitingVerification", label: "Awaiting verification", sql: "(SELECT COUNT(*) FROM dbo.LegalWorkflowStepState s WHERE s.LandId = t.LandId AND s.Status = N'Pending Verification')" },
     ],
     // The same Mouza and Dag number twice is almost always the same land entered twice.
     check: async (pool, values, id) => {
@@ -247,8 +244,7 @@ const MASTERS = {
     fields: [
       { name: "LandCode", label: "Land ID", type: "text", max: 30, auto: "LND" },
       { name: "LandName", label: "Land title / name", type: "text", required: true, max: 200 },
-      // New Acquisition goes through the 31-step pipeline; Existing / Backlog is already owned and its history is entered directly.
-      { name: "EntryType", label: "Entry type", type: "select", required: true, options: ["New Acquisition", "Existing / Backlog"], default: "New Acquisition" },
+      { name: "EntryType", label: "Entry type", type: "select", required: true, options: ["Newly Acquired", "Existing / Backlog"], default: "Newly Acquired" },
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "SubDivisionId", label: "Sub-division", type: "ref", ref: "sub-division", filterBy: "DistrictId" },
       { name: "BlockId", label: "Block", type: "ref", ref: "block", filterBy: "DistrictId" },
@@ -265,8 +261,12 @@ const MASTERS = {
       { name: "LandTypeId", label: "Land classification", type: "ref", ref: "land-type" },
       { name: "LocationTypeId", label: "Location type", type: "ref", ref: "location-type" },
       { name: "ProjectId", label: "Project", type: "ref", ref: "project" },
-      { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "Owned", "In Dispute", "On Hold", "Disposed / Transferred", "Dropped"], default: "Identified" },
-      { name: "PossessionStatus", label: "Possession status", type: "select", options: ["In Possession", "Partly in Possession", "Not in Possession", "Disputed", "Unknown"] },
+      { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Owned", "Active", "Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "On Hold", "Disposed / Transferred", "Inactive"], default: "Owned" },
+      { name: "PossessionStatus", label: "Possession status", type: "select", options: ["In Possession", "Partly in Possession", "Not in Possession", "Disputed", "Unknown"], default: "In Possession" },
+      { name: "VerificationStatus", label: "Verification status", type: "select", options: ["Draft", "Verified", "Rejected"], default: "Draft" },
+      { name: "L1Status", label: "L1 approval status", type: "select", options: ["Pending", "Approved", "Returned"], default: "Pending" },
+      { name: "L2Status", label: "L2 approval status", type: "select", options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
+      { name: "AcquisitionType", label: "Acquisition type", type: "select", options: ["Purchase", "Gift", "Inheritance", "Transfer", "Other"], default: "Purchase" },
       // When it was acquired (history) — the date it was entered here is kept separately (Created).
       { name: "AcquisitionDate", label: "Acquisition date (if known)", type: "date" },
       { name: "AcquisitionDateApprox", label: "Acquisition date is approximate", type: "bit", default: false },
@@ -283,6 +283,31 @@ const MASTERS = {
       { name: "Remarks", label: "Internal remarks", type: "textarea", max: 1000 },
       ACTIVE,
     ],
+    afterWrite: async (pool, req, row, before) => {
+      if (!before) {
+        await pool.request().input("Id", row.LandId).query(`
+          UPDATE dbo.LegalLand
+          SET VerificationStatus = N'Draft',
+              L1Status = N'Pending',
+              L2Status = N'Pending',
+              WorkflowStatus = N'Draft (Verification Pending)'
+          WHERE LandId = @Id
+        `);
+      } else {
+        const coreCols = ["LandName", "DistrictId", "MouzaId", "Area", "AreaUnitId", "RsDagNo", "LrDagNo", "RsKhatianNo", "LrKhatianNo", "LocationAddress", "AcquisitionDate", "NorthBoundary", "SouthBoundary", "EastBoundary", "WestBoundary"];
+        const modifiedCore = coreCols.some((k) => String(before[k] ?? "") !== String(row[k] ?? ""));
+        if (modifiedCore) {
+          await pool.request().input("Id", row.LandId).query(`
+            UPDATE dbo.LegalLand
+            SET VerificationStatus = N'Draft',
+                L1Status = N'Pending',
+                L2Status = N'Pending',
+                WorkflowStatus = N'Draft (Re-Verification Required)'
+            WHERE LandId = @Id
+          `);
+        }
+      }
+    },
   },
   "land-photo": landChild("Land Photo", "LegalLandPhoto", "PhotoId", "Photographs of the land property — as many as needed.", {
     label: "r.Caption", orderBy: "TakenOn, PhotoId",
@@ -316,6 +341,8 @@ const MASTERS = {
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true, fill: { JLNo: "JLNo" } },
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      { name: "GpsLatitude", label: "Latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
+      { name: "GpsLongitude", label: "Longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
       { name: "ApproxArea", label: "Approximate area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "ApproxArea" },
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },
