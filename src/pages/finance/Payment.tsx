@@ -1687,7 +1687,14 @@ const Payment: React.FC = () => {
     },
     [companyOptions],
   );
-  const mergedProjectNames = [...new Set(form.mergedInvoices.map((m) => (m.projectName || "").trim()).filter(Boolean))];
+  // Every project of a merge: the invoices being merged now, or - on a saved merged payment being edited, where the invoices are not
+  // re-picked - the projects the list already resolved for it (PMergedProjectNames, joined with ", ").
+  const mergedProjectNames = [...new Set(
+    (form.mergedInvoices.length > 0
+      ? form.mergedInvoices.map((m) => m.projectName || "")
+      : String(form.mergedProjects ?? "").split(", ")
+    ).map((n) => n.trim()).filter(Boolean),
+  )];
   const handleMergeClear = useCallback(() => {
     setForm((prev) => ({ ...prev, mergedInvoices: [] }));
   }, []);

@@ -98,7 +98,8 @@ export default function LandPropertyListPage() {
           </button>
           {filter && (
             <span className="ml-2 text-xs text-muted-foreground">
-              Showing: <b className="text-foreground">{filter.label}</b>
+              Showing: <b className="text-foreground">{filter.label}</b>{" "}
+              <button className="ml-1 underline hover:text-foreground" onClick={() => set("filter", null)}>Clear</button>
             </span>
           )}
         </div>
