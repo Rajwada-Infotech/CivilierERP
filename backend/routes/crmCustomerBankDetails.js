@@ -609,13 +609,6 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     {
       const afterChecked = await checklistCols.snapshotColumns(pool, "CrmCustomerBankDetail", "ApplicationId", aid, checklistCols.BANK_DETAIL_ITEM_COLUMNS);
       await checklistCols.resetForChangedColumns(pool, { applicationId: aid }, checklistCols.BANK_DETAIL_ITEM_COLUMNS, beforeChecked, afterChecked, "bank / KYC edited");
-      if (checklistCols.changedItems(checklistCols.BANK_DETAIL_ITEM_COLUMNS, beforeChecked, afterChecked).includes("BankDepositMode")) {
-        try {
-          const bk = (await pool.request().input("aid", sql.Int, aid)
-            .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset[0];
-          if (bk) await require("../services/crmMoneyReceiptWorkflow").refreshUnsentMoneyReceipt(pool, bk.Id);
-        } catch (e) { console.error("[crm-bank-details] money receipt refresh failed:", e.message); }
-      }
     }
     res.json({ success: true });
   } catch (e) {

@@ -112,3 +112,15 @@ describe("the receipt not yet with Finance follows a corrected token", () => {
     expect(generateMoneyReceiptPdf).not.toHaveBeenCalled();
   });
 });
+
+// The application's re-submit copies a corrected token onto the booking; the
+// receipt is redrawn when the booking is sent again — before the "create if
+// missing" step, which would otherwise find the old receipt and keep it.
+test("sending a booking again redraws its waiting receipt before anything else", () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "../routes/crmBookings.js"), "utf8");
+  const route = src.slice(src.indexOf('"/:id/ready-for-approval"'));
+  const refresh = route.indexOf("await refreshUnsentMoneyReceipt(pool, id)");
+  const create = route.indexOf("await createMoneyReceiptAfterDataReview(pool, id, actor)");
+  expect(refresh).toBeGreaterThan(-1);
+  expect(create).toBeGreaterThan(refresh);
+});

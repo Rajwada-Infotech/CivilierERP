@@ -98,7 +98,7 @@ const {
 // gate) — see the "Data Review checklist" comment block below for why this
 // now lives here instead.
 const { ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem, CHECKLIST_ITEMS } = require("../services/crmApplicationChecklist");
-const { createMoneyReceiptAfterDataReview } = require("../services/crmMoneyReceiptWorkflow");
+const { createMoneyReceiptAfterDataReview, refreshUnsentMoneyReceipt } = require("../services/crmMoneyReceiptWorkflow");
 
 router.use(authMiddleware);
 
@@ -942,6 +942,10 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     // strictly the later of the two gates.
     let mrWarning = null;
     try {
+      // Sent again after a send-back: the receipt still waiting (not yet with
+      // Finance) is redrawn from the booking as it is now — its token, mode
+      // and cheque / transaction details may have been corrected meanwhile.
+      await refreshUnsentMoneyReceipt(pool, id);
       await createMoneyReceiptAfterDataReview(pool, id, actor);
     } catch (mrErr) {
       console.error("[crm-bookings] auto money receipt creation on submit-for-approval failed:", mrErr.message);

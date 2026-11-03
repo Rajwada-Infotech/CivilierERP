@@ -465,19 +465,6 @@ router.post("/", requirePageRight("crm-applications", "create"), async (req, res
 // PUT /:id — update application details. Status is never editable here —
 // it only ever moves through /submit and /cancel below (or the automated
 // AutoBooking transition), so it can't be silently overwritten.
-// A token / payment-mode correction reaches the booking's money receipt that
-// has not gone to Finance yet. Best-effort: never fails the save.
-async function refreshReceiptIfMoneyChanged(pool, applicationId, changed) {
-  if (!changed.some((k) => k === "PaymentPlanAmounts" || k === "BankDepositMode")) return;
-  try {
-    const bk = (await pool.request().input("aid", sql.Int, applicationId)
-      .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1")).recordset[0];
-    if (bk) await require("../services/crmMoneyReceiptWorkflow").refreshUnsentMoneyReceipt(pool, bk.Id);
-  } catch (e) {
-    console.error("[crm-applications] money receipt refresh failed:", e.message);
-  }
-}
-
 router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -824,7 +811,6 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // Data a verifier already ticked, changed by this save: that item goes back to be verified.
     const afterChecked = await checklistCols.snapshotColumns(pool, "CrmApplication", "Id", id, checklistCols.APPLICATION_ITEM_COLUMNS);
     await checklistCols.resetForChangedColumns(pool, { applicationId: id }, checklistCols.APPLICATION_ITEM_COLUMNS, beforeChecked, afterChecked, "application edited");
-    await refreshReceiptIfMoneyChanged(pool, id, checklistCols.changedItems(checklistCols.APPLICATION_ITEM_COLUMNS, beforeChecked, afterChecked));
     if ((await getApplicationPlotIds(pool, id)).sort().join(",") !== plotsBefore) {
       await checklistCols.resetVerifiedItems(pool, { applicationId: id }, ["ProjectUnitRate"], "plots changed");
     }
