@@ -835,6 +835,19 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 
 const { priceBooking, allocateConsideration, rateSqlType, unitPrice } = require("./bookingUnits");
 
+// The one-booking-per-application check in createCrmBookingRecord first runs
+// unlocked, so two submits at once both pass it. Inside the booking's
+// transaction it is re-checked under the application's lock: the second
+// waits for the first and then finds its booking.
+async function assertNoBookingForApplicationLocked(tx, applicationId) {
+  const appLocked = (await tx.request().input("aid", sql.Int, applicationId).query(`
+    SELECT a.Id, (SELECT TOP 1 x.BookingNo FROM dbo.CrmBooking x WHERE x.ApplicationId = a.Id AND x.IsActive = 1) AS BookingNo
+    FROM dbo.CrmApplication a WITH (UPDLOCK, HOLDLOCK) WHERE a.Id = @aid`)).recordset[0];
+  if (appLocked?.BookingNo) {
+    throw new CrmCreationError(`This application already has a booking (${appLocked.BookingNo}) — an application can only have one`, 409);
+  }
+}
+
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
   const rawPlotIds = Array.isArray(b.PlotIds) && b.PlotIds.length > 0 ? b.PlotIds : [];
@@ -1042,15 +1055,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .query(`SELECT Id FROM dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"} WITH (UPDLOCK, ROWLOCK) WHERE ${isPlotBooking ? "PlotId" : "UnitId"} IN (${unitIds.join(",")}) AND Status = N'Active'`);
     if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
 
-    // The one-booking-per-application check above ran unlocked: two submits
-    // at once both pass it. Re-checked here under the application's lock, the
-    // second waits for the first and then finds its booking.
-    const appLocked = (await tx.request().input("aid", sql.Int, parseInt(b.ApplicationId)).query(`
-      SELECT a.Id, (SELECT TOP 1 x.BookingNo FROM dbo.CrmBooking x WHERE x.ApplicationId = a.Id AND x.IsActive = 1) AS BookingNo
-      FROM dbo.CrmApplication a WITH (UPDLOCK, HOLDLOCK) WHERE a.Id = @aid`)).recordset[0];
-    if (appLocked?.BookingNo) {
-      throw new CrmCreationError(`This application already has a booking (${appLocked.BookingNo}) — an application can only have one`, 409);
-    }
+    await assertNoBookingForApplicationLocked(tx, parseInt(b.ApplicationId));
 
     // Re-check villa land ownership inside this same transaction, right
     // before the insert — the first assertVillaBuyer check above ran on the
@@ -1563,7 +1568,7 @@ async function parkingOutsideUnitBlock(pool, { applicationId = null, bookingId =
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  changeBookingUnit, applicationEditsClosedReason, parkingOutsideUnitBlock,
+  changeBookingUnit, applicationEditsClosedReason, parkingOutsideUnitBlock, assertNoBookingForApplicationLocked,
   generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 
