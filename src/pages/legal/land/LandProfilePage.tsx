@@ -532,15 +532,15 @@ export default function LandProfilePage() {
               </DialogContent>
             </Dialog>
 
-            {/* 14 Tabs — responsive wrap */}
-            <div className="flex flex-wrap gap-1.5" role="tablist">
+            {/* 14 tabs: one swipeable row on phones, wrapped on wider screens */}
+            <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible" role="tablist">
               {TABS.map((t) => (
                 <button
                   key={t.key}
                   role="tab"
                   aria-selected={tab === t.key}
                   onClick={() => setTab(t.key)}
-                  className={`border px-2.5 py-1.5 text-xs font-heading font-semibold transition-colors ${
+                  className={`shrink-0 whitespace-nowrap border px-2.5 py-1.5 text-xs font-heading font-semibold transition-colors ${
                     tab === t.key
                       ? "border-foreground bg-foreground text-card"
                       : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"

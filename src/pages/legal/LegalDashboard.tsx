@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, TickCircle, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21, Note1, Chart, MoneySend } from "iconsax-react";
+import { Global, MessageQuestion, Timer1, PauseCircle, ShieldTick, Judge, Map1, Grid5, DocumentText, Building4, Profile2User, Link21, Note1, Chart, MoneySend } from "iconsax-react";
 import { ArrowRight, ChevronRight, CheckCircle2, CircleAlert, ExternalLink, Search, Trash2, AlertTriangle, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -99,12 +99,6 @@ export default function LegalDashboard() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate("/legal/land/properties")}
-                  className="inline-flex items-center gap-1.5 border border-foreground bg-card px-3.5 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10"
-                >
-                  Register Existing Land
-                </button>
-                <button
-                  onClick={() => navigate("/legal/land/properties")}
                   className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-card hover:opacity-85"
                   style={{ background: LEGAL_GRADIENT }}
                 >
@@ -123,22 +117,20 @@ export default function LegalDashboard() {
                   All land properties <ChevronRight size={13} />
                 </button>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
                 {([
                   ["All Properties", land.totalLands, Global, "/legal/land/properties"],
                   ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries"],
-                  ["Newly Acquired", land.totalLands - (land.backlogLands ?? 0), TickCircle, "/legal/land/properties"],
-                  ["Existing / Backlog", land.backlogLands ?? 0, Building4, "/legal/land/properties"],
                   ["Land Sales", land.completed ?? 0, MoneySend, "/legal/land/sales"],
                   ["RS Records", land.totalLands, Note1, "/legal/land/rs-register"],
                   ["LR Records of Rights", land.totalLands, DocumentText, "/legal/land/lr-register"],
-                  ["Land Reports", "8 Reports", Chart, "/legal/land/reports"],
+                  ["Land Reports", 8, Chart, "/legal/land/reports"],
                 ] as const).map(([label, value, Icon, path]) => (
                   <button key={label} onClick={() => navigate(path)} className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3 text-left transition-transform hover:-translate-y-0.5">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-card" style={{ background: LEGAL_GRADIENT }}><Icon size={16} /></span>
                     <span className="min-w-0">
                       <span className="block text-xl font-heading font-bold tabular-nums leading-none text-foreground">{value}</span>
-                      <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground line-clamp-2 sm:truncate">{label}</span>
+                      <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground line-clamp-2">{label}</span>
                     </span>
                   </button>
                 ))}
@@ -190,7 +182,7 @@ export default function LegalDashboard() {
 
             {(!land?.allLands || land.allLands.length === 0) ? (
               <div className="py-10 text-center text-xs text-muted-foreground">
-                No lands recorded yet. Click "Add Land" or "Register Existing Land" to add your first property.
+                No lands recorded yet. Click "Add Land" to add your first property.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -358,7 +350,7 @@ export default function LegalDashboard() {
                 </span>
                 <span className="min-w-0">
                   <span className="block text-2xl font-heading font-bold tabular-nums leading-none text-foreground">{dash(value)}</span>
-                  <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground line-clamp-2 sm:truncate">{label}</span>
+                  <span className="mt-1 block text-[0.6875rem] leading-tight text-muted-foreground line-clamp-2">{label}</span>
                 </span>
               </button>
             ))}
