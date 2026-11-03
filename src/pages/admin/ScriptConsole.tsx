@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, KeyRound, Loader2, Lock, Play, Plus, RefreshCw, Save, Square, Trash2, X } from "lucide-react";
+import { Copy, Download, KeyRound, Loader2, Lock, Play, Plus, RefreshCw, Save, Square, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark, MarkSquare, type MarkTone } from "@/components/sheet/Sheet";
 import { fmtIstDateTime } from "@/lib/istTime";
+import { downloadBlob } from "@/lib/xlsxBook";
+import { CodeEditor } from "@/components/CodeEditor";
 import {
   createVaultKey, deleteScript, getHistoryRun, getRun, getVaultStatus, isVaultLocked, listHistory, listScripts, lockVault, rotateVaultKey,
   saveScript, startRun, stopRun, unlockVault,
@@ -20,11 +22,65 @@ const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-prima
 const INPUT = "border border-foreground/40 focus:border-foreground bg-card text-foreground placeholder:text-muted-foreground/60 outline-none";
 const TAGBOX = "inline-flex items-center gap-1.5 border border-foreground/40 px-2 py-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground";
 
+// The Admin module styles every ".font-mono" as nowrap (index.css), which would run every output line together, so the
+// output panel and the editor set their font and wrapping themselves.
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+const OUTPUT_STYLE = { fontFamily: MONO, whiteSpace: "pre-wrap", overflowWrap: "anywhere" } as const;
+
 const message = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const STATUS_TONE: Record<RunStatus, MarkTone> = { running: "moving", done: "done", failed: "stopped", killed: "stopped", timeout: "stopped", interrupted: "stopped" };
 const STATUS_TEXT: Record<RunStatus, string> = { running: "Running", done: "Finished", failed: "Failed", killed: "Stopped", timeout: "Timed out", interrupted: "Interrupted" };
 
+// ── Entering the key: never offered to the browser's password manager ────────────────────────────────────────────────
+// A type="password" field makes Chrome / Edge / Firefox offer to SAVE what was typed, and a vault key saved in a browser
+// is no longer a key only the super admin holds. So the key goes into a plain text field that is only drawn as dots
+// (-webkit-text-security), with the "do not store or autofill" hints password managers respect. Where the browser cannot
+// draw a text field as dots (older Firefox), it falls back to a password field with autocomplete off.
+const canMaskText = typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("-webkit-text-security", "disc");
+
+function SecretInput({ value, onChange, onEnter, masked, placeholder, className, label }: {
+  value: string; onChange: (v: string) => void; onEnter?: () => void; masked: boolean; placeholder?: string; className?: string; label?: string;
+}) {
+  const asPassword = masked && !canMaskText;
+  return (
+    <input
+      type={asPassword ? "password" : "text"}
+      name="vault-key"
+      aria-label={label ?? "Vault key"}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => e.key === "Enter" && onEnter?.()}
+      autoComplete={asPassword ? "off" : "one-time-code"}
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
+      data-lpignore="true"
+      data-1p-ignore="true"
+      data-bwignore="true"
+      data-form-type="other"
+      className={className}
+      style={masked && !asPassword ? ({ WebkitTextSecurity: "disc" } as React.CSSProperties) : undefined}
+    />
+  );
+}
+
 // ── The key, shown once ──────────────────────────────────────────────────────────────────────────────────────────────
+/** The key as a small text file to keep in a password manager or on a safe drive. */
+function keyFileText(vaultKey: string, now = new Date()) {
+  return [
+    "CivilierERP - Script Console vault key",
+    `Created: ${fmtIstDateTime(now)} (IST)`,
+    "",
+    vaultKey,
+    "",
+    "256-bit key, 13 groups of 4. Type it exactly as shown; case and dashes do not matter.",
+    "The server keeps no copy. Without this key the saved scripts and run history cannot be read.",
+    "Keep this file private: whoever holds it (and a super admin login) can run code on the server.",
+    "",
+  ].join("\r\n");
+}
+
 function KeyReveal({ vaultKey, onDone, doneLabel }: { vaultKey: string; onDone: () => void; doneLabel: string }) {
   const [saved, setSaved] = useState(false);
   return (
@@ -44,6 +100,16 @@ function KeyReveal({ vaultKey, onDone, doneLabel }: { vaultKey: string; onDone: 
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className={`${KEY_LINE} h-9 px-4`} onClick={() => { void navigator.clipboard.writeText(vaultKey); toast.success("Key copied. Paste it somewhere safe, then clear your clipboard."); }}>
           <Copy size={12} /> Copy key
+        </button>
+        <button
+          type="button"
+          className={`${KEY_INK} h-9 px-4`}
+          onClick={() => {
+            downloadBlob(new Blob([keyFileText(vaultKey)], { type: "text/plain;charset=utf-8" }), "civilier-script-console-vault-key.txt");
+            toast.success("Key file downloaded. Keep it somewhere private.");
+          }}
+        >
+          <Download size={12} /> Download key
         </button>
         <span className={LBL}>256-bit · 13 groups of 4</span>
       </div>
@@ -149,9 +215,9 @@ function VaultUnlock({ lockedOutSec, onUnlocked }: { lockedOutSec: number; onUnl
         <label className="grid gap-1.5 text-sm">
           <span className={LBL}>Vault key</span>
           <div className="flex gap-2">
-            <input
-              type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={key} placeholder="XXXX-XXXX-XXXX-…"
-              onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && key && !waitSec && void unlock()}
+            <SecretInput
+              masked={!show} value={key} placeholder="XXXX-XXXX-XXXX-…"
+              onChange={setKey} onEnter={() => key && !waitSec && void unlock()}
               className={`${INPUT} h-10 min-w-0 flex-1 px-3 font-mono text-sm tracking-wider`}
             />
             <button type="button" className={`${KEY_LINE} h-10 px-3`} onClick={() => setShow((s) => !s)}>{show ? "Hide" : "Show"}</button>
@@ -227,10 +293,14 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
   useEffect(() => {
     if (!runId || runStatus !== "running") return;
     let stop = false;
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return; // a slow answer must not be asked for twice: that printed lines two and three times
+      inFlight = true;
       try {
-        const v = await getRun(runId, nextRef.current);
-        if (stop) return;
+        const from = nextRef.current;
+        const v = await getRun(runId, from);
+        if (stop || from !== nextRef.current) return; // another poll got there first
         if (v.chunks.length) setChunks((c) => [...c, ...v.chunks]);
         nextRef.current = v.next;
         setStartedAt(v.startedAt);
@@ -239,7 +309,7 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
           void qc.invalidateQueries({ queryKey: ["script-console", "history"] });
           void qc.invalidateQueries({ queryKey: ["script-console", "status"] });
         }
-      } catch (e) { if (!stop) guard(e); }
+      } catch (e) { if (!stop) guard(e); } finally { inFlight = false; }
     };
     void poll();
     const t = setInterval(poll, 800);
@@ -295,11 +365,7 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
             <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void save(false)}><Save size={12} /> {libId ? "Save" : "Save script"}</button>
             {libId && <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void save(true)}><Plus size={12} /> Save as new</button>}
           </div>
-          <textarea
-            value={script} onChange={(e) => setScript(e.target.value)} spellCheck={false}
-            className="block min-h-[300px] w-full resize-y border-0 bg-card px-4 py-3 font-mono text-xs leading-relaxed text-foreground outline-none"
-            aria-label="Script"
-          />
+          <CodeEditor value={script} onChange={setScript} label="Script" />
           <div className="space-y-2 px-4 py-3" style={{ borderTop: RULE }}>
             <div className="flex items-center justify-between">
               <span className={LBL}>Environment variables (like <span className="normal-case tracking-normal">-e APPLY=1</span>)</span>
@@ -347,7 +413,7 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
               {viewing && <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => setViewing(null)}><X size={10} /> Close</button>}
             </span>
           </div>
-          <pre ref={outRef} className="m-0 max-h-[460px] min-h-[140px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[0.6875rem] leading-relaxed text-foreground">
+          <pre ref={outRef} className="m-0 max-h-[460px] min-h-[140px] overflow-auto px-4 py-3 text-[0.6875rem] leading-relaxed text-foreground" style={OUTPUT_STYLE}>
             {shownChunks.length === 0 ? <span className="text-muted-foreground">{running ? "Waiting for output…" : "Nothing run yet."}</span> : shownChunks.map((c, i) => <span key={i} className={c.s === "e" ? "text-destructive" : undefined}>{c.t}</span>)}
           </pre>
         </div>
@@ -459,7 +525,7 @@ export default function ScriptConsole() {
                       <p className="text-sm">A new key replaces the old one, which stops working. Saved scripts and history are re-encrypted under the new key. Every open vault, on any sign-in, is locked.</p>
                       <label className="grid gap-1.5 text-sm">
                         <span className={LBL}>Current vault key</span>
-                        <input type="password" autoComplete="off" spellCheck={false} value={currentKey} onChange={(e) => setCurrentKey(e.target.value)} className={`${INPUT} h-10 px-3 font-mono text-sm tracking-wider`} />
+                        <SecretInput masked value={currentKey} onChange={setCurrentKey} label="Current vault key" className={`${INPUT} h-10 px-3 font-mono text-sm tracking-wider`} />
                       </label>
                       {rotateError && <p className="text-sm text-destructive">{rotateError}</p>}
                       <button type="button" className={`${KEY_INK} h-10 px-6`} disabled={!currentKey} onClick={() => void rotate()}>Make a new key</button>

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { MessageQuestion } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
+import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
 import { usePageRights } from "@/hooks/usePageRights";
 import { convertEnquiry, setEnquiryStatus } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
@@ -70,6 +71,7 @@ export default function LandEnquiryPage() {
             <span key={l} className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c }} />{l}</span>
           ))}
         </div>
+        <div className="mb-4"><GovtSiteLinks hint="Before converting an enquiry, check the plot on the official site. A link opens in the side panel; if a site stays blank there (some government sites block this), use ↗ to open it in a new tab." /></div>
         <LegalMasterTable
           entry={entry}
           rowClassName={(raw) => STATUS_ROW[String(raw.EnquiryStatus)]}

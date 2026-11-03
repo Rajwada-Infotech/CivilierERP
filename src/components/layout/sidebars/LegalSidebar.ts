@@ -1,4 +1,4 @@
-import { Judge, SearchStatus, DocumentUpload, ClipboardTick, Clock, MessageQuestion, Global, Note1, DocumentText, Chart, MoneySend } from "iconsax-react";
+import { Judge, SearchStatus, DocumentUpload, ClipboardTick, Clock, MessageQuestion, Global, Note1, DocumentText, Chart, MoneySend, Archive } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // In accordance with ERP conventions:
@@ -10,6 +10,8 @@ export const legalNavItems: NavItem[] = [
   // ── Land Management ──────────────────────────────────────────────────────
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
   { label: "Land Properties", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
+  // An already-owned land, entered with its history (no acquisition pipeline).
+  { label: "Register Existing Land", icon: Archive, path: "/legal/land/register-existing", pageKey: "legal-land-master" },
   { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "Land Reports", icon: Chart, path: "/legal/land/reports", pageKey: "legal-land-reports" },
   // Registers of every land's RS / LR records (each row has its Land ID; entered on the land's step 4).

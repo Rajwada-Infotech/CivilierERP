@@ -140,6 +140,7 @@ const LandPropertyListPage = lazy(() => import("./pages/legal/land/LandPropertyL
 const LandPropertyDetailPage = lazy(() => import("./pages/legal/land/LandPropertyDetailPage"));
 const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"));
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
+const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));
 const LandSalesPage = lazy(() => import("./pages/legal/land/LandSalesPage"));
 const LandRecordRegisterPage = lazy(() => import("./pages/legal/land/LandRecordRegisterPage"));
 const MaintenanceDashboard = withCountUp(lazy(() => import("./pages/maintenance/MaintenanceDashboard")));
@@ -1062,6 +1063,8 @@ function AppRoutes() {
       <Route path="/legal/land/properties/:id" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyDetailPage /></ProtectedRoute>} />
       <Route path="/legal/land/reports" element={<ProtectedRoute pageKey="legal-land-reports"><LandReportsPage /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/details" element={<ProtectedRoute pageKey="legal-land-master"><LandDetailsPage /></ProtectedRoute>} />
+      <Route path="/legal/land/properties/:id/profile" element={<ProtectedRoute pageKey="legal-land-master"><LandProfilePage /></ProtectedRoute>} />
+      <Route path="/legal/land/register-existing" element={<ProtectedRoute pageKey="legal-land-master"><LandPropertyListPage key="register-existing" registerExisting /></ProtectedRoute>} />
       <Route path="/legal/land/properties/:id/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
       <Route path="/legal/land/sales" element={<ProtectedRoute pageKey="legal-land-master"><LandSalesPage /></ProtectedRoute>} />
       <Route path="/legal/land/rs-register" element={<ProtectedRoute pageKey="legal-land-master"><LandRecordRegisterPage kind="rs" /></ProtectedRoute>} />

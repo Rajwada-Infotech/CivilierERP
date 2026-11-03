@@ -16,6 +16,11 @@ const MAX_SCRIPT = 300 * 1024;
 const MAX_ENV = 50;
 const KEEP_FINISHED = 20; // finished runs kept in memory for the page to read back
 
+// The server's own log lines are coloured with terminal escape codes; in the page they would show as "[32mINFO[39m".
+// Strips ESC [ ... (colours, cursor moves) and ESC ] ... BEL (window titles).
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g;
+const stripAnsi = (t) => t.replace(ANSI, "");
+
 const runs = new Map(); // id -> run
 let activeId = null;
 
@@ -53,6 +58,8 @@ function trimFinished() {
   for (const r of finished.slice(KEEP_FINISHED)) runs.delete(r.id);
 }
 
+const newRunId = () => crypto.randomBytes(12).toString("hex");
+
 /**
  * Starts a run. `onFinish(run)` is called once when it ends (the route persists it). Throws {status:409} when a run
  * is already going and {status:400} for a bad script or variables.
@@ -74,7 +81,8 @@ function start({ id, script, env, timeoutMs, user, name, onFinish }) {
 
   const push = (s, buf) => {
     if (run.truncated) return;
-    let t = buf.toString("utf8");
+    let t = stripAnsi(buf.toString("utf8"));
+    if (!t) return;
     if (run.size + t.length > MAX_OUTPUT) {
       t = t.slice(0, Math.max(0, MAX_OUTPUT - run.size)) + "\n[output truncated]\n";
       run.truncated = true;
@@ -96,7 +104,7 @@ function start({ id, script, env, timeoutMs, user, name, onFinish }) {
 
   const child = spawn(process.execPath, ["-"], {
     cwd: BACKEND_DIR,
-    env: { ...process.env, ...vars, FORCE_COLOR: "0" },
+    env: { ...process.env, ...vars, FORCE_COLOR: "0", NO_COLOR: "1" },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -117,7 +125,6 @@ function start({ id, script, env, timeoutMs, user, name, onFinish }) {
   return run;
 }
 
-const newRunId = () => crypto.randomBytes(12).toString("hex");
 const get = (id) => runs.get(id) ?? null;
 const running = () => (activeId && runs.get(activeId)?.status === "running" ? runs.get(activeId) : null);
 
@@ -131,4 +138,4 @@ function kill(id, by) {
   return true;
 }
 
-module.exports = { start, newRunId, get, running, kill, view, outputText, parseEnv, MAX_SCRIPT };
+module.exports = { start, newRunId, get, running, kill, view, outputText, parseEnv, stripAnsi, MAX_SCRIPT };
