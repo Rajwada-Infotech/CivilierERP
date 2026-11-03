@@ -153,6 +153,14 @@ function sentBackRowsSql() {
   ].join("\n    UNION ALL\n");
 }
 
+// A list filter: bookings / applications (column) with a booking approval or
+// data review entry in this state. The same rows as everything else here.
+const SENT_BACK_FILTERS = [SENT_BACK, RESUBMITTED];
+function sentBackFilterSql(state, column, idField) {
+  if (!SENT_BACK_FILTERS.includes(state)) return null;
+  return `${column} IN (SELECT r.${idField} FROM (${sentBackRowsSql()}) r WHERE r.Kind IN (N'booking', N'review') AND r.State = '${state}')`;
+}
+
 // Where each row shows (menu path) and opens (link), from its Kind.
 function describeSentBack(row) {
   const m = ENGINE_SENT_BACK[row.Kind] || OWN_SENT_BACK[row.Kind];
@@ -167,6 +175,8 @@ module.exports = {
   RESUBMITTED,
   sentBackRowsSql,
   describeSentBack,
+  SENT_BACK_FILTERS,
+  sentBackFilterSql,
   WELCOME_CALL_DUE_SQL,
   AGREEMENT_NEEDS_ACTION_SQL,
   DEMAND_BOOKING_LIVE_SQL,

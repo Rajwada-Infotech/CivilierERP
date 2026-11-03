@@ -8,7 +8,7 @@ import { translateError } from "@/lib/translateError";
 import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SentBackMark } from "@/components/crm/CrmListToolbar";
+import { SentBackNote, useSentBackStates, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal } from "lucide-react";
@@ -1212,6 +1212,8 @@ const CrmApplication: React.FC = () => {
       } },
   ];
 
+  // Each application's booking sent back / resubmitted — for the row's Correct / Recheck button.
+  const sentBackByApp = useSentBackStates("ApplicationId");
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     // Columns are combined so status and actions fit a laptop screen without
     // scrolling sideways; nothing shown before is dropped.
@@ -1276,8 +1278,6 @@ const CrmApplication: React.FC = () => {
           // The pinned Status column is nowrap; the notes under the mark wrap.
           <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5 whitespace-normal">
             <span className="whitespace-nowrap"><SheetMark text={displayStatus} tone={appTone(displayStatus)} /></span>
-            {/* Sent back for correction / resubmitted for a recheck (booking approval or data review). */}
-            <SentBackMark applicationId={r.Id} />
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
@@ -1309,6 +1309,8 @@ const CrmApplication: React.FC = () => {
                 <Clock size={10} /> Submitted — booking not yet created
               </span>
             )}
+            {/* Sent back for correction / resubmitted for a recheck (its booking's approval or data review). */}
+            <SentBackNote applicationId={r.Id} />
             {activeStage === "InProcess" && r.Stage === "Converted" && (
               <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                 <Clock size={10} /> Booking {r.BookingNo || ""} — {r.BookingStatus === CrmStatus.PENDING
@@ -1338,9 +1340,21 @@ const CrmApplication: React.FC = () => {
           && !a.UnitUnavailableForBooking && a.PreferredUnitId != null;
         const hasMenu = (canResume && !resumeOnRow) || canCreateBooking || a.Stage === "Converted"
           || canCancelApplication(a) || canDeleteApplication(a);
+        // Sent back: the preparer corrects it in the form; resubmitted: the checker looks at the booking again.
+        const sb = sentBackByApp.get(a.Id);
         return (
           <div className="flex flex-col gap-1.5 py-0.5">
             <div className="flex items-center gap-1.5">
+              {sb === "SentBack" && canEditApplications && (
+                <button onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
+                  Correct <ChevronRight size={11} />
+                </button>
+              )}
+              {sb === "Resubmitted" && a.BookingId && (
+                <button onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={`${KEY_LINE} h-7 px-2`}>
+                  Recheck <ChevronRight size={11} />
+                </button>
+              )}
               {resumeOnRow && (
                 <button onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
                   <PlayCircle size={12} /> {loadingApplication ? "Loading..." : "Resume"}
@@ -1470,6 +1484,10 @@ const CrmApplication: React.FC = () => {
                 <SelectContent>
                   <SelectItem value="All">All statuses</SelectItem>
                   {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  {/* Its booking sent back for an update, or resubmitted for a recheck. */}
+                  {(["SentBack", "Resubmitted"] as const).map((s) => (
+                    <SelectItem key={s} value={s}>{SENT_BACK_STATE[s].label} — {SENT_BACK_STATE[s].note}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             )}

@@ -5,7 +5,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SHEET_CSS, Detail, Dimension, Skel, n0, fmtInt, fmtMoney, money, share } from "@/components/sheet/Sheet";
-import { SentBackPanel } from "@/components/crm/CrmListToolbar";
+import { useSentBack, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
+import { crmNavItems } from "@/components/layout/sidebars/CrmSidebar";
 
 // CRM Dashboard, drawn as an architect's sheet.
 //
@@ -202,6 +203,24 @@ const CrmDashboard: React.FC = () => {
   const next30 = n0(metrics.forwardDue30Days);
   const next30Pct = Math.min(100 - paidPct, share(next30, due));
 
+  // Sent back / resubmitted, one row per page (its menu label), newest reason shown.
+  const { data: sentBack } = useSentBack();
+  const sentBackItems = useMemo(() => {
+    const labelOf = new Map<string, string>();
+    for (const it of crmNavItems as any[]) for (const c of [it, ...(it.children || [])]) if (c.path) labelOf.set(c.path, c.label);
+    const out: any[] = [];
+    for (const state of ["SentBack", "Resubmitted"] as const) {
+      const byPath = new Map<string, any[]>();
+      for (const r of (sentBack?.rows || []) as any[]) if (r.State === state) byPath.set(r.path, [...(byPath.get(r.path) || []), r]);
+      for (const [path, rows] of byPath) out.push({
+        key: `${state}-${path}`, path, hot: state === "SentBack", count: rows.length,
+        label: `${labelOf.get(path) || rows[0].area} — ${SENT_BACK_STATE[state].label.toLowerCase()}`,
+        note: `${SENT_BACK_STATE[state].note[0].toUpperCase()}${SENT_BACK_STATE[state].note.slice(1)} · ${rows[0].Reason ? `“${rows[0].Reason}”` : rows[0].RecordNo || rows[0].area}`,
+      });
+    }
+    return out;
+  }, [sentBack]);
+
   const attention = useMemo(() => {
     const items = [
       { key: "overduePayments", label: "Overdue payments", note: "Demand milestones past their due date", path: "/crm/payments", hot: true },
@@ -214,10 +233,10 @@ const CrmDashboard: React.FC = () => {
       { key: "nocsNotIssued", label: "NOCs not issued", note: "Approved, not handed over", path: "/crm/noc", hot: false },
       { key: "cancellationsPending", label: "Cancellations pending", note: "Awaiting management approval", path: "/crm/cancellations", hot: false },
       { key: "handoversThisWeek", label: "Handovers this week", note: "Scheduled in the next 7 days", path: "/crm/handover", hot: false },
-    ].map((i) => ({ ...i, count: n0(alerts[i.key]) }));
+    ].map((i) => ({ ...i, count: n0(alerts[i.key]) })).concat(sentBackItems);
     const open = items.filter((i) => i.count > 0).sort((a, b) => Number(b.hot) - Number(a.hot) || b.count - a.count);
     return { open, clear: items.filter((i) => i.count === 0), max: Math.max(1, ...open.map((i) => i.count)) };
-  }, [alerts]);
+  }, [alerts, sentBackItems]);
 
   const weekMax = Math.max(1, ...week.map((d) => n0(d.Handovers) + n0(d.Registries) + n0(d.MilestonesDue)));
   const collected = fmtMoney(paid);
@@ -263,9 +282,6 @@ const CrmDashboard: React.FC = () => {
             </div>
           </div>
         </div>
-
-        {/* Everything sent back for an update, or resubmitted for a recheck. */}
-        <SentBackPanel />
 
         {/* A: collection */}
         <div className="grid2">
