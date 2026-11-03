@@ -355,10 +355,24 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId } =
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId, reason } =
       req.body;
     try {
       const pool = getPool();
+
+      // Making a user active or inactive is locked behind a written reason (kept in the activity log). An edit that does
+      // not mention the status leaves it as it is - it used to switch the account back on.
+      const current = await pool.request().input("id", sql.Int, id)
+        .query("SELECT ISNULL(discontinue, 0) AS discontinue FROM dbo.users WHERE id = @id");
+      if (!current.recordset.length) return res.status(404).json({ error: "User not found" });
+      const wasInactive = !!current.recordset[0].discontinue;
+      const nowInactive = discontinue === undefined ? wasInactive : !!discontinue;
+      const statusChanges = nowInactive !== wasInactive;
+      const statusReason = String(reason ?? "").trim();
+      if (statusChanges && statusReason.length < 5) {
+        return res.status(400).json({ error: "Give a reason (at least 5 characters) for making this user active or inactive." });
+      }
+      if (statusChanges) res.locals.activityMessage = `${nowInactive ? "Made inactive" : "Made active"}: ${statusReason}`.slice(0, 120);
 
       // If only `discontinue` was sent (toggle active/inactive), skip updating
       // name/email/RoleId so we don't accidentally NULL them out.
@@ -395,7 +409,7 @@ router.put(
                 : 0,
           )
           .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
-          .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
+          .input("discontinue", sql.Bit, nowInactive ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name,
               email=@email,
