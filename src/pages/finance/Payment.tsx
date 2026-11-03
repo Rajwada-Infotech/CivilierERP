@@ -238,7 +238,7 @@ const Payment: React.FC = () => {
   // "Use on-account balance for this payment" checkbox — defaults to true
   // (preserves the existing auto-apply-at-approval behavior); unchecking
   // keeps the party's balance untouched (OASkipAutoApply on save).
-  const [useOnAccountBalance, setUseOnAccountBalance] = useState(true);
+  const [useOnAccountBalance, setUseOnAccountBalance] = useState(false);
   // Context injected from the On A/C Adjustment page
   const [oaAdjustCtx, setOaAdjustCtx] = useState<{
     partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
@@ -1744,7 +1744,7 @@ const Payment: React.FC = () => {
 
   // Fetch On Account balance when invoice changes
   useEffect(() => {
-    setUseOnAccountBalance(true); // reset to default for the newly-selected invoice
+    setUseOnAccountBalance(false); // off by default: the balance is shown, and only adjusted if the user turns it on
     if (!form.expenseRef) { setOaBalance(0); return; }
     getOABalanceByRef(form.expenseRef)
       .then((d) => setOaBalance(d.balance ?? 0))
