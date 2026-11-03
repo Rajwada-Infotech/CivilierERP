@@ -217,7 +217,7 @@ CivilierERP/
 │   └── test/                   # Jest tests
 ├── mobile-*/                   # Expo apps per department
 ├── apk-releases/               # Android release builds
-├── docker-compose.yml · Dockerfile · nginx.conf
+├── docker-compose.yml · nginx.conf   # the frontend build (frontend-build) and the stack
 └── DEPLOYMENT.md · SECURITY.md
 ```
 
