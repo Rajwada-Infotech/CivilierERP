@@ -48,6 +48,8 @@ export interface FixedAssetListItem {
   SourceTagId: number | null;
   FAItemCode: string | null;
   RepairType: string | null;
+  /** Posted depreciation (the list route's join); the book value is cost less this. */
+  Depreciated?: number | null;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {
@@ -147,6 +149,27 @@ export const getDepreciationSummary = (params?: {
   if (params?.toDate) qs.set("toDate", params.toDate);
   return getJson(`/api/fixed-assets/depreciation-summary${qs.toString() ? `?${qs}` : ""}`, "Failed to load depreciation summary");
 };
+
+// ── Reports — Monthly Depreciation History ───────────────────────────────────
+export interface DepreciationHistoryRow {
+  EntryId: number;
+  CalculationDate: string | null;
+  PeriodStart: string | null;
+  FAItemCode: string | null;
+  AssetName: string | null;
+  CompanyName: string | null;
+  Method: string | null;
+  RatePct: number | null;
+  OpeningBookValue: number | null;
+  DepreciationAmount: number;
+  AccumulatedDepreciation: number | null;
+  RemainingBookValue: number | null;
+  VoucherNo: string | null;
+  Source: string | null;
+}
+
+export const getDepreciationHistory = (): Promise<DepreciationHistoryRow[]> =>
+  getJson("/api/fixed-assets/depreciation-history", "Failed to load depreciation history");
 
 async function mutate<T>(url: string, method: string, body: unknown, fallback: string): Promise<T> {
   const res = await fetchWithAuth(url, {
@@ -666,3 +689,26 @@ export const setFollowUpStatus = (id: number, status: FollowUpStatus): Promise<{
 
 export const deleteQualityCheck = (id: number): Promise<{ ok: true }> =>
   mutate(`/api/fixed-asset-quality-check/${id}`, "DELETE", undefined, "Failed to delete quality check");
+
+// ── Dashboard — GET /api/fixed-assets/dashboard (backend/services/fixedAssetDashboard.js), the web dashboard's figures ──
+export interface DashboardBreakdown { name: string; count: number; cost: number; bookValue: number }
+export interface DashboardActivity { at: string; kind: string; ref: string | null; detail: string | null; who: string | null; path: string }
+
+export interface FixedAssetDashboardData {
+  register: { assets: number; cost: number; depreciated: number; bookValue: number; addedThisYear: number; addedThisYearCost: number };
+  byStatus: { status: string; count: number; cost: number }[];
+  byCategory: DashboardBreakdown[];
+  byProject: DashboardBreakdown[];
+  inventory: { untaggedBatches: number; untaggedQty: number; noTemplate: number; codesTagged: number; codesTaggedThisYear: number };
+  imports: { count: number; qty: number; value: number; lastDate: string | null };
+  assignment: { assigned: number; unassigned: number };
+  transfers: { thisYear: number; lastDate: string | null };
+  qualityCheck: { checks: number; followUpsOpen: number; overdue: number; dueThisWeek: number; byStatus: { status: string; count: number }[] };
+  maintenance: { thisYear: number; spentThisYear: number; notPosted: number; notPostedAmount: number };
+  depreciation: { thisYear: number; lastPeriod: string | null; dueLastMonth: number; months: { month: string; amount: number }[] };
+  recent: DashboardActivity[];
+  fyStart: string;
+}
+
+export const getFixedAssetDashboard = (): Promise<FixedAssetDashboardData> =>
+  getJson("/api/fixed-assets/dashboard", "Failed to load the fixed asset figures");
