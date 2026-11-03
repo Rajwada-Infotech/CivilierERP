@@ -10,6 +10,7 @@ import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { formatINR } from "@/utils/formatCurrency";
 import { toast } from "@/components/Toast";
+import { PostingPreviewCard, type GlEntry } from "@/components/PostingPreviewCard";
 import { FormScaffold, FormSection, NumberField, RemarksField, PickerField, DateField } from "@/components/form";
 import { getVendors } from "@/api/mastersApi";
 import {
@@ -81,6 +82,28 @@ export default function MaintenanceFormScreen() {
     return { rate: selectedCode.GstRatePct, gst, total: amt + gst, sac: selectedCode.SacCode };
   }, [amount, selectedCode]);
 
+  // The journal this voucher will post: the server's own plan when an existing record is open on the same asset (it is the
+  // plan that will be posted), otherwise the web form's local mirror of the posting rule.
+  const journal = useMemo<{ entries: GlEntry[]; error?: string } | null>(() => {
+    const taxable = parseFloat(amount);
+    if (!repairType || !vendorId || !Number.isFinite(taxable) || taxable <= 0) return null;
+    const server = detailQ.data;
+    if (editingId && server?.posting && !server.posting.error && server.AssetId === Number(assetId)) {
+      return { entries: server.posting.entries.map((e) => ({ account: e.account, debit: e.debit, credit: e.credit })) };
+    }
+    if (!selectedCode?.SacCode) return { entries: [], error: "SAC Code is not configured for the selected FA Item Code. Set it on the Fixed Asset Depreciation Tag." };
+    if (selectedCode.GstRatePct == null) return { entries: [], error: `Applicable GST rate is not configured for SAC Code "${selectedCode.SacCode}" in the HSN master.` };
+    const gst = Math.round(taxable * selectedCode.GstRatePct) / 100;
+    const vendor = (vendorsQ.data ?? []).find((v) => String(v.id) === vendorId)?.label || "Vendor A/c";
+    return {
+      entries: [
+        { account: repairType === "Direct" ? "Direct Repair Expense A/c" : "Indirect Repair Expense A/c", debit: taxable },
+        { account: "GST Credit Available", debit: gst },
+        { account: vendor, credit: Math.round((taxable + gst) * 100) / 100 },
+      ],
+    };
+  }, [amount, repairType, vendorId, detailQ.data, editingId, assetId, selectedCode, vendorsQ.data]);
+
   const onPickCode = (v: string) => {
     setAssetId(v);
     const a = (codesQ.data ?? []).find((x) => String(x.AssetId) === v);
@@ -149,6 +172,14 @@ export default function MaintenanceFormScreen() {
         )}
         <RemarksField label="Remarks" value={remarks} onChangeText={setRemarks} />
       </FormSection>
+
+      {journal && (
+        <FormSection title="Posting Preview">
+          {journal.error
+            ? <Text style={{ color: colors.destructive, fontSize: 11, fontFamily: fonts.body.regular }}>{journal.error}</Text>
+            : <PostingPreviewCard title="Journal Entry" entries={journal.entries} />}
+        </FormSection>
+      )}
     </FormScaffold>
   );
 }

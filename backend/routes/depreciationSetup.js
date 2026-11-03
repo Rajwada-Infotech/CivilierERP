@@ -6,7 +6,7 @@ router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 
 router.use(authenticateToken);
@@ -15,7 +15,10 @@ router.use(authenticateToken);
 const rateOk = (v) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 && n <= 100; };
 
 // GET / — all records (optionally ?status=Active)
-router.get("/", async (req, res) => {
+// The Fixed Asset form also reads the active rates, so the asset register's own right is enough.
+const DEP_READ_PAGES = ["depreciation-setup", "fixed-asset-record"];
+
+router.get("/", requireAnyPageRight(DEP_READ_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -33,7 +36,7 @@ router.get("/", async (req, res) => {
 });
 
 // GET /active — only Active records (used by Fixed Asset form dropdown)
-router.get("/active", async (req, res) => {
+router.get("/active", requireAnyPageRight(DEP_READ_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
