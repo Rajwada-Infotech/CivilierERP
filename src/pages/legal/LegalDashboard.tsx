@@ -98,7 +98,7 @@ export default function LegalDashboard() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => navigate("/legal/land/register-existing")}
+                  onClick={() => navigate("/legal/land/properties")}
                   className="inline-flex items-center gap-1.5 border border-foreground bg-card px-3.5 py-2.5 text-xs font-heading font-semibold uppercase tracking-[0.1em] text-foreground hover:bg-primary/10"
                 >
                   Register Existing Land
@@ -127,8 +127,8 @@ export default function LegalDashboard() {
                 {([
                   ["All Properties", land.totalLands, Global, "/legal/land/properties"],
                   ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries"],
-                  ["Newly Acquired", land.totalLands - (land.backlogLands ?? 0), TickCircle, "/legal/land/properties?filter=newly-acquired"],
-                  ["Existing / Backlog", land.backlogLands ?? 0, Building4, "/legal/land/properties?filter=backlog"],
+                  ["Newly Acquired", land.totalLands - (land.backlogLands ?? 0), TickCircle, "/legal/land/properties"],
+                  ["Existing / Backlog", land.backlogLands ?? 0, Building4, "/legal/land/properties"],
                   ["Land Sales", land.completed ?? 0, MoneySend, "/legal/land/sales"],
                   ["RS Records", land.totalLands, Note1, "/legal/land/rs-register"],
                   ["LR Records of Rights", land.totalLands, DocumentText, "/legal/land/lr-register"],
@@ -180,7 +180,7 @@ export default function LegalDashboard() {
                   />
                 </div>
                 <button
-                  onClick={() => navigate("/legal/land/register-existing")}
+                  onClick={() => navigate("/legal/land/properties")}
                   className="h-8 inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-semibold hover:bg-muted"
                 >
                   + Add Land

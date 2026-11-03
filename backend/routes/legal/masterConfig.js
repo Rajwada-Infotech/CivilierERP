@@ -341,6 +341,8 @@ const MASTERS = {
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true, fill: { JLNo: "JLNo" } },
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      { name: "GpsLatitude", label: "Latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
+      { name: "GpsLongitude", label: "Longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
       { name: "ApproxArea", label: "Approximate area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "ApproxArea" },
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },

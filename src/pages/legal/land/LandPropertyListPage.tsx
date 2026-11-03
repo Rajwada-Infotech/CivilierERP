@@ -11,18 +11,10 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { deleteLand } from "@/api/legalLandApi";
 
-const BACKLOG = "Existing / Backlog";
+const BACKLOG = "Existing / Backlog"; // every land added here; enquiry-approved land is saved as New Acquisition
 
 // Clean filter rules for the Company Land Register
 const FILTERS: Record<string, { label: string; test: (r: LegalRow) => boolean }> = {
-  "newly-acquired": {
-    label: "Newly Acquired",
-    test: (r) => r.EntryType === "Newly Acquired" || r.EntryType === "New Acquisition",
-  },
-  backlog: {
-    label: "Existing / Backlog",
-    test: (r) => r.EntryType === BACKLOG,
-  },
   owned: {
     label: "Active / Owned",
     test: (r) => r.LandStatus === "Owned" || r.LandStatus === "Active" || r.IsActive !== false,
@@ -34,13 +26,12 @@ const FILTERS: Record<string, { label: string; test: (r: LegalRow) => boolean }>
 };
 
 // The central Company Land Register: every land property with its unique Land ID.
-export default function LandPropertyListPage({ registerExisting = false }: { registerExisting?: boolean }) {
+export default function LandPropertyListPage() {
   const entry = legalMasterByKey("land")!;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const filterKey = params.get("filter") ?? "";
   const filter = FILTERS[filterKey];
-  const registeringBacklog = registerExisting || params.get("entry") === "backlog";
   const canDelete = usePageRights(entry.pageKey).canDelete;
   const queryClient = useQueryClient();
 
@@ -80,33 +71,24 @@ export default function LandPropertyListPage({ registerExisting = false }: { reg
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Legal", registeringBacklog ? "Register Existing Land" : "Land Register"]} />
+      <Breadcrumbs items={["Dashboard", "Legal", "Land Register"]} />
       <LegalShell
-        title={registeringBacklog ? "Register Existing Land" : "Company Land Register"}
-        subtitle={
-          registeringBacklog
-            ? "Record company-owned land acquired in the past, with all historical records and documents."
-            : "Central repository of all company-owned and company-acquired land properties, one Land ID each."
-        }
+        title="Company Land Register"
+        subtitle="Every company land in one place, one Land ID each — newly acquired and existing / backlog."
         icon={Global}
-        action={
-          <button
-            onClick={() => navigate(registeringBacklog ? "/legal/land/properties" : "/legal/land/register-existing")}
-            className="border border-foreground bg-foreground px-3 py-2 text-xs font-heading font-semibold uppercase tracking-[0.08em] text-card hover:opacity-85"
-          >
-            {registeringBacklog ? "Back to Land Register" : "Register Existing Land"}
-          </button>
-        }
       >
+
+        <p className="mb-3 border border-border px-3 py-2 text-xs text-muted-foreground">
+          <b className="text-foreground">Add Land</b> here is for land the company already owns (existing / backlog). Enter what
+          you have; ownership history, documents, legal records, loans, mutations, payments and tax can be added later from the
+          Land Profile. <b className="text-foreground">Buying new land?</b> Start it from{" "}
+          <button className="underline hover:text-foreground" onClick={() => navigate("/legal/land/enquiries")}>Land Enquiries</button>{" "}
+          — it joins this register as Newly Acquired once approved.
+        </p>
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted-foreground">Show in the list below:</span>
           <button className={tabBtn(!filterKey)} onClick={() => set("filter", null)}>
             All Land
-          </button>
-          <button className={tabBtn(filterKey === "newly-acquired")} onClick={() => set("filter", "newly-acquired")}>
-            Newly Acquired
-          </button>
-          <button className={tabBtn(filterKey === "backlog")} onClick={() => set("filter", "backlog")}>
-            Existing / Backlog
           </button>
           <button className={tabBtn(filterKey === "owned")} onClick={() => set("filter", "owned")}>
             Active / Owned
@@ -121,19 +103,12 @@ export default function LandPropertyListPage({ registerExisting = false }: { reg
           )}
         </div>
 
-        {registeringBacklog && (
-          <p className="mb-3 border border-border px-3 py-2 text-xs text-muted-foreground">
-            <b className="text-foreground">Registering existing / backlog land</b> — enter the details you currently have.
-            Unknown or pending information can be added gradually at any time. Once saved, open the Land Profile to maintain
-            ownership history, documents, legal records, loans/mortgages, mutations, payments, and tax receipts.
-          </p>
-        )}
-
         <LegalMasterTable
-          key={registeringBacklog ? "backlog" : "all"}
           entry={entry}
           requestEditId={params.get("edit")}
-          defaults={registeringBacklog ? { EntryType: BACKLOG, LandStatus: "Owned" } : { EntryType: "Newly Acquired" }}
+          defaults={{ LandStatus: "Owned" }}
+          // Land added here is land the company already owns; new purchases come in through Land Enquiries.
+          fixed={{ EntryType: BACKLOG }}
           rowFilter={filter?.test}
           onCreated={(newId) => navigate(`/legal/land/properties/${newId}?tab=overview`)}
           rowActions={(raw) => (

@@ -1469,11 +1469,12 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
       .input("DistrictId", sql.Int, e.DistrictId).input("MouzaId", sql.Int, e.MouzaId)
       .input("Area", sql.Decimal(18, 6), e.ApproxArea).input("AreaUnitId", sql.Int, e.AreaUnitId)
       .input("Address", sql.NVarChar(1000), e.LandLocation).input("EnquiryId", sql.Int, id)
+      .input("Lat", sql.Decimal(10, 7), e.GpsLatitude ?? null).input("Lng", sql.Decimal(10, 7), e.GpsLongitude ?? null)
       .input("UserId", sql.Int, req.user?.userId || null)
       .query(`
-        INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LocationAddress, EnquiryId, LandStatus, IsOnHold, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LocationAddress, GpsLatitude, GpsLongitude, EnquiryId, LandStatus, IsOnHold, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.LandId AS id, INSERTED.LandCode AS code
-        SELECT ${nextCodeSql("LegalLand", "LandCode", "@Prefix")}, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME()`);
+        SELECT ${nextCodeSql("LegalLand", "LandCode", "@Prefix")}, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @Lat, @Lng, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME()`);
     const land = ins.recordset[0];
     await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("UserId", sql.Int, req.user?.userId || null)
       .query(`UPDATE dbo.LegalLandEnquiry SET EnquiryStatus = N'Converted to Land Record', LandId = @LandId, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE EnquiryId = @Id`);

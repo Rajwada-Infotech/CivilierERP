@@ -1,4 +1,4 @@
-import { Judge, Global, Archive, Note1, DocumentText, Chart, MessageQuestion, MoneySend, ClipboardTick } from "iconsax-react";
+import { Judge, Global, Note1, DocumentText, Chart, MessageQuestion, MoneySend, ClipboardTick } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Company Land Record Management System navigation:
@@ -18,7 +18,6 @@ export const legalNavItems: NavItem[] = [
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
   { label: "Land Register", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
   { label: "Pending Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
-  { label: "Register Existing Land", icon: Archive, path: "/legal/land/register-existing", pageKey: "legal-land-master" },
   { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "RS Record Register", icon: Note1, path: "/legal/land/rs-register", pageKey: "legal-land-master" },
   { label: "LR RoR Register", icon: DocumentText, path: "/legal/land/lr-register", pageKey: "legal-land-master" },
