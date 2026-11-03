@@ -398,6 +398,54 @@ export interface TaggingDetail extends TaggingListItem {
   UpdatedAt: string | null;
 }
 
+export interface EligibleAssetItem {
+  ItemId: string;
+  ItemName: string | null;
+  AssetCategory: string | null;
+  AvailableQty: number;
+  TaggedQty: number;
+  UntaggedQty: number;
+}
+
+/** Received fixed-asset stock (GRN / import) with no FA Item Codes yet, and why (its project has no ID template, or ready). */
+export interface PendingBatch {
+  AssetId: number;
+  AssetName: string;
+  Quantity: number;
+  SourceType: "GRN" | "IMPORT";
+  SourceDocNo: string | null;
+  DocDate: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  GodownId: number | null;
+  GodownName: string | null;
+  SourceItemId: string | null;
+  Reason: "NO_TEMPLATE" | "READY";
+}
+
+export const getPendingBatches = (): Promise<PendingBatch[]> =>
+  getJson("/api/fixed-asset-tagging/pending-batches", "Failed to load received stock awaiting tagging");
+
+export const deletePendingBatch = (assetId: number): Promise<{ ok: true }> =>
+  mutate(`/api/fixed-asset-tagging/pending-batches/${assetId}`, "DELETE", undefined, "Failed to remove the received stock");
+
+export const getEligibleAssetItems = (params: {
+  godownId: number; companyId?: number; projectId?: number; finYear?: string;
+}): Promise<EligibleAssetItem[]> => {
+  const qs = new URLSearchParams({ godownId: String(params.godownId) });
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
+  if (params.finYear) qs.set("finYear", params.finYear);
+  return getJson(`/api/fixed-asset-tagging/eligible-items?${qs}`, "Failed to load eligible items");
+};
+
+export const createFixedAssetTagging = (data: {
+  docDate: string; companyId?: number | null; projectId: number; godownId: number; itemId: string; numberOfItems: number; remarks?: string;
+}): Promise<{ tagId: number; docNo: string; codes: string[] }> =>
+  mutate("/api/fixed-asset-tagging", "POST", data, "Failed to generate FA Item Codes");
+
 export const getFixedAssetTaggings = (params?: {
   companyId?: number; projectId?: number; finYear?: string; godownId?: number; fromDate?: string; toDate?: string;
 }): Promise<TaggingListItem[]> => {
