@@ -340,9 +340,9 @@ export const AppSidebar = () => {
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage && !isAdminTier) {
       // Not admin-tier: only the Admin pages ticked for this role / user in Menu Rights.
-      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount), (pk) => canAccessPage(pk as any));
+      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount, role === "super_admin"), (pk) => canAccessPage(pk as any));
     }
-    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
+    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount, role === "super_admin");
 
     let raw: NavItem[] = [];
     switch (activeModule) {
@@ -392,7 +392,7 @@ export const AppSidebar = () => {
         raw = legalNavItems;
         break;
       case "admin":
-        raw = buildAdminNavItems(pendingApprovalCount);
+        raw = buildAdminNavItems(pendingApprovalCount, role === "super_admin");
         break;
       default:
         raw = [];
