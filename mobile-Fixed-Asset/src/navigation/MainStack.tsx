@@ -25,6 +25,7 @@ import QualityCheckDetailScreen from "@/screens/quality/QualityCheckDetailScreen
 import QualityCheckFormScreen from "@/screens/quality/QualityCheckFormScreen";
 import ReportsScreen from "@/screens/reports/ReportsScreen";
 import ReportViewScreen from "@/screens/reports/ReportViewScreen";
+import type { TaggingPrefill } from "@/screens/tagging/taggingPrefill";
 import type { ReportKey } from "@/screens/reports/reportConfig";
 import { TopHeader } from "./TopHeader";
 
@@ -46,7 +47,7 @@ export type MainStackParamList = {
   AssetDetail: { id: number };
   AssetForm: { id?: number } | undefined;
   TaggingDetail: { id: number };
-  TaggingForm: { id: number };
+  TaggingForm: { id?: number; prefill?: TaggingPrefill } | undefined;
   AssignmentDetail: { id: number };
   AssignmentForm: { id?: number } | undefined;
   AssetTransferDetail: { id: number };
