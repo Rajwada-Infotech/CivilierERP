@@ -23,7 +23,8 @@ import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./bookings/DetailParts";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { checklistStep } from "./applications/config";
 
 import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/bookings";
@@ -1121,10 +1122,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               )
             )}
             {interactive && it.CheckStatus === "NeedsRecheck" && (
-              <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
-                className="mt-1 text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
-                I've revised this — resend for recheck
-              </button>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {/* Where the flagged data is edited: the application, at the step that holds it. */}
+                {booking?.ApplicationId && (
+                  <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=${checklistStep(it.ItemKey)}`}
+                    className="text-[0.625rem] px-1.5 py-0.5 bg-foreground text-card border border-foreground hover:opacity-90">
+                    Correct in application ›
+                  </Link>
+                )}
+                <button onClick={() => fireChecklistAction(it.ItemKey, "resubmit")} disabled={checklistBusyKey === it.ItemKey}
+                  className="text-[0.625rem] px-1.5 py-0.5 bg-primary/10 text-primary border border-primary/20 disabled:opacity-40">
+                  I've revised this — resend for recheck
+                </button>
+              </div>
             )}
           </div>
         </div>

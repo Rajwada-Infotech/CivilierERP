@@ -8,7 +8,8 @@ import { translateError } from "@/lib/translateError";
 import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { SentBackNote, useSentBackStates, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
+import { SentBackNote, useSentBack, useSentBackStates, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
+import { CorrectionBanner, checklistStep, useCorrections } from "./applications/config";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal } from "lucide-react";
@@ -315,6 +316,11 @@ const CrmApplication: React.FC = () => {
   );
   const selectedInventory = selectedUnit || selectedPlots[0] || null;
   const hasInventorySelection = form.PreferredUnitIds.length > 0 || form.PreferredPlotIds.length > 0;
+  // The wizard's steps, in order — the tabs and the correction banner's links share them.
+  const wizardStepLabels = [form.PreferredPlotIds.length ? "Project/Plots" : "Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"];
+  // Steps holding something Data Review flagged on this application (a mark on their tab).
+  const { flags: correctionFlags } = useCorrections(applicationId);
+  const flaggedSteps = new Set(correctionFlags.map((f: any) => checklistStep(f.ItemKey)));
   // Deposit bank picker for the Payment Details section (Details step) —
   // scoped to the Project picked back in step 1, same pattern as
   // CrmBooking.tsx's own "Deposited To" field.
@@ -1214,6 +1220,14 @@ const CrmApplication: React.FC = () => {
 
   // Each application's booking sent back / resubmitted — for the row's Correct / Recheck button.
   const sentBackByApp = useSentBackStates("ApplicationId");
+  // Correct opens the form at the first step Data Review flagged (or where it left off).
+  const { data: sentBackData } = useSentBack();
+  const firstCorrectionStep = (appId: number) => {
+    const steps = ((sentBackData?.rows || []) as any[])
+      .filter((r) => r.ApplicationId === appId && r.Kind === "review" && r.State === "SentBack")
+      .map((r) => checklistStep(r.ItemKey));
+    return steps.length ? Math.min(...steps) : undefined;
+  };
   const inProcessColumns: ColumnDef<any, unknown>[] = [
     // Columns are combined so status and actions fit a laptop screen without
     // scrolling sideways; nothing shown before is dropped.
@@ -1346,7 +1360,7 @@ const CrmApplication: React.FC = () => {
           <div className="flex flex-col gap-1.5 py-0.5">
             <div className="flex items-center gap-1.5">
               {sb === "SentBack" && canEditApplications && (
-                <button onClick={() => loadApplicationIntoWizard(a.Id)} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
+                <button onClick={() => loadApplicationIntoWizard(a.Id, firstCorrectionStep(a.Id))} disabled={loadingApplication} className={`${KEY_INK} h-7 px-2`}>
                   Correct <ChevronRight size={11} />
                 </button>
               )}
@@ -1533,7 +1547,7 @@ const CrmApplication: React.FC = () => {
               clickable — steps 2-6 all need applicationId (created in step 1)
               and Bank/KYC intentionally still gates via its own Next/Save. */}
           <div className="flex items-stretch flex-wrap" style={{ border: RULE }}>
-            {[form.PreferredPlotIds.length ? "Project/Plots" : "Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
+            {wizardStepLabels.map((label, i) => {
               const stepNum = i + 1;
               // A plot sale has no parking step.
               if (stepNum === 2 && form.PreferredPlotIds.length) return null;
@@ -1552,11 +1566,16 @@ const CrmApplication: React.FC = () => {
                     style={{ borderRight: RULE_SOFT }}>
                     {step > stepNum ? <CheckCircle2 size={12} /> : <span className="w-4 text-center">{form.PreferredPlotIds.length && stepNum > 2 ? stepNum - 1 : stepNum}</span>}
                     {label}
+                    {/* Data Review flagged something on this step. */}
+                    {flaggedSteps.has(stepNum) && <span className="w-1.5 h-1.5 bg-destructive" title="Flagged in Data Review — correct it here" />}
                   </button>
                 </React.Fragment>
               );
             })}
           </div>
+
+          {/* What Data Review / booking approval sent back, on the step that holds it. */}
+          <CorrectionBanner applicationId={applicationId} step={step} stepLabels={wizardStepLabels} onJump={(n) => setStep(n)} />
 
           {step === 1 && (
             <div className="space-y-4">
