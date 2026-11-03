@@ -366,6 +366,9 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
             {libId && <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void save(true)}><Plus size={12} /> Save as new</button>}
           </div>
           <CodeEditor value={script} onChange={setScript} label="Script" />
+          <p className="px-4 py-2 text-[0.6875rem] text-muted-foreground" style={{ borderTop: "1px solid hsl(var(--border) / 0.55)" }}>
+            Runs as Node.js (JavaScript), like <span className="font-semibold">node -</span>. Shell commands such as docker or sqlcmd are not scripts: run those in the server terminal.
+          </p>
           <div className="space-y-2 px-4 py-3" style={{ borderTop: RULE }}>
             <div className="flex items-center justify-between">
               <span className={LBL}>Environment variables (like <span className="normal-case tracking-normal">-e APPLY=1</span>)</span>
