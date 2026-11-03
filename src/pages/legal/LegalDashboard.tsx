@@ -127,8 +127,8 @@ export default function LegalDashboard() {
                 {([
                   ["All Properties", land.totalLands, Global, "/legal/land/properties"],
                   ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries"],
-                  ["Newly Acquired", land.totalLands - (land.backlogLands ?? 0), TickCircle, "/legal/land/properties"],
-                  ["Existing / Backlog", land.backlogLands ?? 0, Building4, "/legal/land/properties"],
+                  ["Newly Acquired", land.totalLands - (land.backlogLands ?? 0), TickCircle, "/legal/land/properties?filter=newly-acquired"],
+                  ["Existing / Backlog", land.backlogLands ?? 0, Building4, "/legal/land/properties?filter=backlog"],
                   ["Land Sales", land.completed ?? 0, MoneySend, "/legal/land/sales"],
                   ["RS Records", land.totalLands, Note1, "/legal/land/rs-register"],
                   ["LR Records of Rights", land.totalLands, DocumentText, "/legal/land/lr-register"],

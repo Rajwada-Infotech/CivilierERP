@@ -14,7 +14,10 @@ import { deleteLand } from "@/api/legalLandApi";
 const BACKLOG = "Existing / Backlog"; // every land added here; enquiry-approved land is saved as New Acquisition
 
 // Clean filter rules for the Company Land Register
+// "newly-acquired" / "backlog" have no tab: they are opened from the dashboard's Portfolio Overview tiles.
 const FILTERS: Record<string, { label: string; test: (r: LegalRow) => boolean }> = {
+  "newly-acquired": { label: "Newly Acquired", test: (r) => r.EntryType !== BACKLOG },
+  backlog: { label: "Existing / Backlog", test: (r) => r.EntryType === BACKLOG },
   owned: {
     label: "Active / Owned",
     test: (r) => r.LandStatus === "Owned" || r.LandStatus === "Active" || r.IsActive !== false,
@@ -98,7 +101,8 @@ export default function LandPropertyListPage() {
           </button>
           {filter && (
             <span className="ml-2 text-xs text-muted-foreground">
-              Showing: <b className="text-foreground">{filter.label}</b>
+              Showing: <b className="text-foreground">{filter.label}</b>{" "}
+              <button className="ml-1 underline hover:text-foreground" onClick={() => set("filter", null)}>Clear</button>
             </span>
           )}
         </div>

@@ -63,11 +63,11 @@ export default function LandReportsPage() {
           </div>
         )}
         {/* One tab per land: pick a land to see every report for just that land, or All. */}
-        <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-xs text-muted-foreground">Land:</span>
+        <div className="mb-4 flex items-center gap-1.5 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
+          <span className="mr-1 shrink-0 text-xs text-muted-foreground">Land:</span>
           {[{ value: "", label: "All" }, ...(lands ?? []).map((l) => ({ value: l.label.split(" - ")[0], label: l.label }))].map((t) => (
             <button key={t.value || "all"} onClick={() => setLandCode(t.value)} title={t.label}
-              className={`max-w-[260px] truncate border px-2.5 py-1 text-xs font-heading font-semibold transition-colors ${landCode === t.value ? "border-foreground bg-foreground text-card" : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"}`}>
+              className={`max-w-[220px] shrink-0 truncate border px-2.5 py-1 text-xs font-heading font-semibold transition-colors ${landCode === t.value ? "border-foreground bg-foreground text-card" : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"}`}>
               {t.label}
             </button>
           ))}
