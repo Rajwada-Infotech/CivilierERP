@@ -284,6 +284,7 @@ const ALL_ROUTES = [
   { path: "/api/engineering-activity-items", file: "./routes/engineeringActivityItems" },
   { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
   { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
+  { path: "/api/script-console", file: "./routes/scriptConsole" },
   { path: "/api/tasks", file: "./routes/tasks" },
   { path: "/api/widgets", file: "./routes/widgets" },
   { path: "/api/widgets/metrics", file: "./routes/widgetMetrics" },
