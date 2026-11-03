@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, KeyRound, Loader2, Lock, Play, Plus, RefreshCw, Save, Square, Trash2, X } from "lucide-react";
+import { Copy, Download, KeyRound, Loader2, Lock, Play, Plus, RefreshCw, Save, Square, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark, MarkSquare, type MarkTone } from "@/components/sheet/Sheet";
 import { fmtIstDateTime } from "@/lib/istTime";
+import { downloadBlob } from "@/lib/xlsxBook";
 import {
   createVaultKey, deleteScript, getHistoryRun, getRun, getVaultStatus, isVaultLocked, listHistory, listScripts, lockVault, rotateVaultKey,
   saveScript, startRun, stopRun, unlockVault,
@@ -25,6 +26,21 @@ const STATUS_TONE: Record<RunStatus, MarkTone> = { running: "moving", done: "don
 const STATUS_TEXT: Record<RunStatus, string> = { running: "Running", done: "Finished", failed: "Failed", killed: "Stopped", timeout: "Timed out", interrupted: "Interrupted" };
 
 // ── The key, shown once ──────────────────────────────────────────────────────────────────────────────────────────────
+/** The key as a small text file to keep in a password manager or on a safe drive. */
+function keyFileText(vaultKey: string, now = new Date()) {
+  return [
+    "CivilierERP - Script Console vault key",
+    `Created: ${fmtIstDateTime(now)} (IST)`,
+    "",
+    vaultKey,
+    "",
+    "256-bit key, 13 groups of 4. Type it exactly as shown; case and dashes do not matter.",
+    "The server keeps no copy. Without this key the saved scripts and run history cannot be read.",
+    "Keep this file private: whoever holds it (and a super admin login) can run code on the server.",
+    "",
+  ].join("\r\n");
+}
+
 function KeyReveal({ vaultKey, onDone, doneLabel }: { vaultKey: string; onDone: () => void; doneLabel: string }) {
   const [saved, setSaved] = useState(false);
   return (
@@ -44,6 +60,16 @@ function KeyReveal({ vaultKey, onDone, doneLabel }: { vaultKey: string; onDone: 
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className={`${KEY_LINE} h-9 px-4`} onClick={() => { void navigator.clipboard.writeText(vaultKey); toast.success("Key copied. Paste it somewhere safe, then clear your clipboard."); }}>
           <Copy size={12} /> Copy key
+        </button>
+        <button
+          type="button"
+          className={`${KEY_INK} h-9 px-4`}
+          onClick={() => {
+            downloadBlob(new Blob([keyFileText(vaultKey)], { type: "text/plain;charset=utf-8" }), "civilier-script-console-vault-key.txt");
+            toast.success("Key file downloaded. Keep it somewhere private.");
+          }}
+        >
+          <Download size={12} /> Download key
         </button>
         <span className={LBL}>256-bit · 13 groups of 4</span>
       </div>
