@@ -184,7 +184,7 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
             + ISNULL((SELECT SUM(CASE WHEN ISNULL(Status, '') NOT IN ('Bounced', 'Held', 'Void', 'Cancelled', 'Refunded') AND Amount > ISNULL(AppliedAmount,0)
                 THEN Amount - ISNULL(AppliedAmount,0) ELSE 0 END) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS TotalPaid,
-          (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND Status = '${CrmStatus.PENDING}' AND DueDate < CAST(SYSDATETIME() AS DATE)) AS OverdueCount
+          (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND ${MILESTONE_OVERDUE_SQL}) AS OverdueCount
         FROM dbo.CrmBooking b
         LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
         WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}
@@ -263,7 +263,11 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           JOIN dbo.CrmBooking b2 ON b2.Id = oa.BookingId
           WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired','Transferred') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""} ${scopeCond.replace(/b\.ProjectId/g, "b2.ProjectId")}
         ), 0) AS TotalPaid,
-        SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
+        (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+          WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond} AND ${MILESTONE_OVERDUE_SQL}) AS OverdueCount,
+        -- Entered and waiting for Finance: not received yet, not owed either.
+        (SELECT ISNULL(SUM(rp.RPAmount), 0) FROM dbo.ReceivedPayment rp JOIN dbo.CrmBooking b ON b.Id = rp.CrmBookingId
+          WHERE rp.RPStatus = N'Pending' AND ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}) AS WithFinance
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       WHERE ${DEMAND_BOOKING_LIVE_SQL} ${projBookingCond}

@@ -833,7 +833,7 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 // ApplicationId -> BookingId backfill every other Application-stage capture
 // (bank/KYC, documents, parking) already gets a few lines below.
 
-const { priceBooking, allocateConsideration, rateSqlType } = require("./bookingUnits");
+const { priceBooking, allocateConsideration, rateSqlType, unitPrice } = require("./bookingUnits");
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
@@ -1306,8 +1306,223 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
   return `Booking token amount (₹${Number(bookingAmount).toLocaleString("en-IN")}) doesn't match the payment plan's first milestone (₹${Number(firstMilestoneAmount).toLocaleString("en-IN")}) — the milestone amount is what invoicing/payments will actually track.`;
 }
 
+// ── Moving a booking onto a different unit ─────────────────────────────────
+// One implementation, used by the booking's own Change Unit
+// (PUT /api/crm-bookings/:id/change-unit) and by an application corrected
+// before its booking is verified ("Submit Edits", crmApplications.js), so a
+// unit change from either side passes the same rules and re-prices the same way.
+const unitChangeError = (status, message) => Object.assign(new Error(message), { status });
+
+/**
+ * Whether an application may still change its unit / payment plan / rate with
+ * a booking already made from it: yes until that booking's data is verified
+ * and sent for approval. After that the approvers are looking at these
+ * figures; the booking is rejected back to Review to change them.
+ * Returns null when open, else the reason to show.
+ */
+async function applicationEditsClosedReason(pool, bookingId) {
+  const b = (await pool.request().input("id", sql.Int, bookingId).query(
+    "SELECT BookingNo, WorkflowStage, ReadyForApprovalAt, IsFrozen FROM dbo.CrmBooking WHERE Id = @id")).recordset[0];
+  if (!b) return null;
+  if (b.IsFrozen) return `Booking ${b.BookingNo} is frozen — an admin must unfreeze it before its unit, plan or rate change.`;
+  if ((b.WorkflowStage || require("./crmBookingStageService").STAGE_REVIEW) !== require("./crmBookingStageService").STAGE_REVIEW || b.ReadyForApprovalAt != null) {
+    return `Booking ${b.BookingNo} is verified and sent for approval — its unit, plan and rate are locked. Reject it back to Review to change them.`;
+  }
+  return null;
+}
+
+/**
+ * Re-point a booking at another unit, re-priced from the new unit's area at the
+ * booking's rate. Throws { status, message } when a rule refuses it.
+ *
+ * @param {object} o
+ *   newUnitId      the unit to move to
+ *   reason         recorded in the unit change log
+ *   actor          user id
+ *   paymentPlanId  the plan to use; omitted, the new unit's single tagged plan
+ *                  (if exactly one) when nothing is paid yet
+ *   checkOnly      run every check, change nothing
+ */
+async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = null, paymentPlanId, checkOnly = false }) {
+  const { requireActiveBooking, recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered } = require("./crmWorkflowGuards");
+  const { recalculateBookingGst, assertCommercialGstReady, GstSetupError } = require("./crmGst");
+  const id = bookingId;
+  newUnitId = parseInt(newUnitId, 10);
+
+  // Re-pointing a land sale at a built unit would leave its plot lines
+  // attached to a unit booking. Plots are changed by cancelling and
+  // re-booking, never by swapping the line type underneath.
+  if ((await pool.request().input("id", sql.Int, id).query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @id")).recordset.length) {
+    throw unitChangeError(400, "This is a plot sale — its plots can't be swapped for a unit. Cancel the booking and book the new plots instead.");
+  }
+  const activeErr = await requireActiveBooking(pool, id);
+  if (activeErr) throw unitChangeError(400, activeErr);
+
+  const booking = (await pool.request().input("id", sql.Int, id)
+    .query("SELECT UnitId, Status, WorkflowStage, RatePerSqFt, TotalValue, BookingAmount, ApplicationId FROM dbo.CrmBooking WHERE Id = @id AND IsActive = 1")).recordset[0];
+  if (!booking) throw unitChangeError(404, "Booking not found");
+  // Once the Agreement for Sale is signed (or the deed registered) the unit is
+  // named in a legal document — the ERP can't quietly swap it.
+  if (await isSaleDeedRegistered(pool, id)) {
+    throw unitChangeError(400, "The Sale Deed is registered — the unit can't be changed in the ERP. A Deed of Rectification at the Sub-Registrar is required.");
+  }
+  if (await isLegalWorkStarted(pool, id)) {
+    throw unitChangeError(400, "The Agreement for Sale is already signed and names this unit — cancel the agreement before changing the unit.");
+  }
+  // A new unit re-prices the booking — not while approvers are looking at the old price.
+  if (["MarketingHeadApproval", "DirectorApproval"].includes(booking.WorkflowStage)) {
+    throw unitChangeError(400, `This booking is in ${booking.WorkflowStage} — reject it back to Review before changing its unit, so the new price is approved.`);
+  }
+  const oldUnitId = booking.UnitId;
+  if (newUnitId === oldUnitId) throw unitChangeError(400, "New unit is the same as the current unit");
+
+  // Same lookup + availability checks as booking creation.
+  const unitRow = (await pool.request().input("uid", sql.Int, newUnitId).query(`
+    SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitKind, COALESCE(u.UnitType, (SELECT TOP 1 k.Name FROM dbo.CrmConstructedAssetKind k WHERE k.Code = u.UnitKind)) AS UnitType, u.AreaSqFt,
+           u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
+           proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
+    FROM dbo.UnitMaster u
+    LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
+    LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
+    WHERE u.Id = @uid AND u.IsActive = 1`)).recordset[0];
+  if (!unitRow) throw unitChangeError(400, "Selected unit does not exist or is inactive");
+
+  // The same rules a new booking must pass (crmEntityCreation.js).
+  const ctx = (await pool.request().input("id", sql.Int, id).query(`
+    SELECT b.ProjectId, a.CustomerId FROM dbo.CrmBooking b LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @id`)).recordset[0] || {};
+  if (ctx.ProjectId != null && unitRow.ProjectId !== ctx.ProjectId) {
+    throw unitChangeError(400, "A booking stays in its own project — pick a unit from the same project, or cancel and book afresh.");
+  }
+  {
+    const { bookingTypeViolation, loadLandKinds, loadCommercialKinds } = require("./projectType");
+    const why = await bookingTypeViolation(pool, [unitRow], {
+      isPlotBooking: false, landKinds: await loadLandKinds(pool), commercialKinds: await loadCommercialKinds(pool),
+    });
+    if (why) throw unitChangeError(400, why);
+  }
+  try {
+    await require("./villaLand").assertVillaBuyerOwnsLand(pool, [newUnitId], ctx.CustomerId);
+    await assertCommercialGstReady(pool, [newUnitId]);
+  } catch (e) {
+    if (e.status) throw e;
+    if (e instanceof GstSetupError) throw unitChangeError(400, e.message);
+    throw e;
+  }
+  // Priced from the new unit's saleable area — without one the booking would
+  // silently keep the old unit's price.
+  if (!(Number(unitRow.AreaSqFt) > 0)) {
+    throw unitChangeError(400, `${unitRow.UnitName} has no saleable area — set it in Unit Master first, so the booking can be re-priced.`);
+  }
+  const taken = await pool.request().input("uid", sql.Int, newUnitId).input("id", sql.Int, id)
+    .query(`SELECT Id FROM dbo.CrmBooking WHERE UnitId = @uid AND Id <> @id AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected', 'Expired', 'Transferred') AND (Status = 'Approved' OR ConfirmDeadline IS NULL OR ConfirmDeadline >= SYSDATETIME())
+            UNION SELECT BookingId FROM dbo.CrmBookingUnit WHERE UnitId = @uid AND BookingId <> @id AND Status = N'Active'`);
+  if (taken.recordset.length) throw unitChangeError(409, "This unit is already booked");
+  if (checkOnly) return { unitNo: unitRow.UnitName };
+
+  await require("./crmHoldService").guardAndConvertHold(pool, "Unit", newUnitId, booking.ApplicationId);
+
+  const paid = await pool.request().input("bid", sql.Int, id).query(`
+    SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentMilestone
+    WHERE BookingId = @bid AND (AmountPaid > 0 OR Status IN ('${CrmStatus.PAID}', 'Waived'))`);
+  const canRegenerateSchedule = paid.recordset[0]?.Cnt === 0;
+  let newPlanId = null;
+  if (canRegenerateSchedule) {
+    try {
+      // Given a plan, it is checked against the new unit's plans; without one,
+      // only a unit with exactly one tagged plan resolves (no guessing).
+      newPlanId = await resolveApplicationPaymentPlan(pool, { preferredUnitId: unitRow.Id, paymentPlanId: paymentPlanId ?? null });
+    } catch {
+      newPlanId = null;
+    }
+  }
+  // Keep the booking's rate; fall back to the new unit's list rate.
+  const rate = booking.RatePerSqFt != null ? Number(booking.RatePerSqFt)
+    : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
+  const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
+  const total = area && rate ? unitPrice(area, rate) : booking.TotalValue;
+
+  // Unit, price, GST, schedule, change log and audit are one event.
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    await tx.request()
+      .input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
+      .input("pid", sql.Int, unitRow.ProjectId != null ? unitRow.ProjectId : null)
+      .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
+      .input("cid", sql.Int, unitRow.CompanyId != null ? unitRow.CompanyId : null)
+      .input("unit", sql.NVarChar(100), unitRow.UnitName)
+      .input("blk", sql.NVarChar(100), unitRow.BlockName || null)
+      .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
+      .input("area", sql.Decimal(18, 2), area)
+      .input("carpetArea", sql.Decimal(18, 2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+      .input("builtUpArea", sql.Decimal(18, 2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+      .input("superBuiltUpArea", sql.Decimal(18, 2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+      .input("openTerraceArea", sql.Decimal(18, 2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
+      .input("rate", rateSqlType(), rate)
+      .input("tot", sql.Decimal(18, 2), total)
+      .input("ppid", sql.Int, newPlanId)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmBooking SET
+          UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+          CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+          CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
+          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+          TotalValue = @tot,
+          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+          GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id`);
+
+    // The allocation line is what reserves a unit — it moves with the booking,
+    // or the old unit stays locked and the new one unprotected.
+    const moved = await tx.request()
+      .input("id", sql.Int, id).input("old", sql.Int, oldUnitId).input("uid", sql.Int, newUnitId)
+      .input("area", sql.Decimal(18, 2), area).input("rate", rateSqlType(), rate).input("tot", sql.Decimal(18, 2), total)
+      .input("ub", sql.Int, actor)
+      .query(`
+        UPDATE dbo.CrmBookingUnit SET UnitId = @uid, AreaSqFt = @area, RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+               AllocatedValue = @tot, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE BookingId = @id AND Status = N'Active' AND UnitId = @old`);
+    if (!moved.rowsAffected[0]) {
+      await tx.request().input("id", sql.Int, id).input("uid", sql.Int, newUnitId)
+        .input("area", sql.Decimal(18, 2), area).input("rate", rateSqlType(), rate).input("tot", sql.Decimal(18, 2), total).input("ub", sql.Int, actor)
+        .query(`INSERT INTO dbo.CrmBookingUnit (BookingId, UnitId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+                VALUES (@id, @uid, @area, @rate, @tot, N'Active', 1, @ub, SYSDATETIME())`);
+    }
+
+    // A new price can cross a GST band.
+    await recalculateBookingGst(tx, id);
+
+    if (newPlanId != null) {
+      // Only the %-based plan steps are rebuilt — parking / extra-charge steps
+      // belong to their own rows.
+      await tx.request().input("bid", sql.Int, id).query(`
+        DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL`);
+      await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, booking.BookingAmount);
+    } else {
+      // Same plan, new price: the unpaid steps follow it.
+      await recalculateRemainingMilestones(tx, id);
+    }
+
+    await tx.request()
+      .input("bid", sql.Int, id).input("oldUid", sql.Int, oldUnitId != null ? oldUnitId : null).input("newUid", sql.Int, newUnitId)
+      .input("reason", sql.NVarChar(sql.MAX), String(reason || "").trim()).input("cb", sql.Int, actor)
+      .query(`INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
+              VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())`);
+    await require("./crmAudit").logCrmAudit(tx, "Booking", id, actor, [{ field: "UnitId", oldVal: oldUnitId, newVal: newUnitId }]);
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    throw txErr;
+  }
+  return { unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null };
+}
+
+
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
+  changeBookingUnit, applicationEditsClosedReason,
   generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

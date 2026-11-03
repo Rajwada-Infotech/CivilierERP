@@ -6,7 +6,7 @@ import { AlertCircle, AlertTriangle, CheckCircle2, Clock, Hourglass, MessageSqua
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT } from "../customers/config";
-import { fmt, fmtDate, isOverdue, pct } from "./config";
+import { fmt, fmtDate, isOverdue, pct, MONEY_STAGE } from "./config";
 
 const head = "px-4 py-2.5 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5";
 const tag = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em]";
@@ -34,16 +34,18 @@ function Note({ red, icon, title, children }: { red?: boolean; icon: React.React
   );
 }
 
-export function BookingSummary({ booking, summary, onAccountBalance, totalPendingVerification, moneyReceipts }: {
-  booking: any; summary: any; onAccountBalance: number; totalPendingVerification: number; moneyReceipts: any[];
+export function BookingSummary({ booking, summary, money, moneyReceipts }: {
+  booking: any; summary: any; money: any; moneyReceipts: any[];
 }) {
   const grandTotal = Number(booking.GrandTotal ?? booking.TotalValue ?? 0);
   const unitGstAmount = Number(booking.UnitGstAmount || 0);
   const parkingTotal = Number(booking.ParkingTotal || 0);
   const extraTotal = Number(booking.ExtraChargesTotal || 0);
   const hasExtras = unitGstAmount > 0 || parkingTotal > 0 || extraTotal > 0;
-  const collectionPct = pct(summary.totalPaid || 0, summary.totalDue || 0);
-  const pendingPct = summary.totalDue > 0 ? Math.min(100 - collectionPct, Math.round((totalPendingVerification / summary.totalDue) * 100)) : 0;
+  // The server's money by stage (crmPayments.js GET /booking/:id): collected = everything Finance verified.
+  const m = money || { adjusted: 0, held: 0, collected: 0, inVerification: 0, inVerificationCount: 0, toCollect: 0, entries: [] };
+  const collectionPct = pct(m.collected, summary.totalDue || 0);
+  const pendingPct = summary.totalDue > 0 ? Math.min(100 - collectionPct, Math.round((m.inVerification / summary.totalDue) * 100)) : 0;
   const bkgStatus = booking.BookingStatus;
 
   // The token's state, as on the booking's own Payments tab: bounced, with Finance, not yet sent, or not yet
@@ -99,10 +101,13 @@ export function BookingSummary({ booking, summary, onAccountBalance, totalPendin
         <div className="p-4 text-sm">
           <div className={`${LBL} mb-2`}>Collection</div>
           <Line l="Total due" v={fmt(summary.totalDue)} />
-          <Line l="Collected" v={fmt(summary.totalPaid)} />
-          {onAccountBalance > 0 && <Line l={<span className="flex items-center gap-1"><Wallet size={11} /> On-account, unapplied</span>} v={fmt(onAccountBalance)} />}
-          {totalPendingVerification > 0 && <Line l={<span className="flex items-center gap-1"><Clock size={11} /> Pending approval</span>} v={fmt(totalPendingVerification)} />}
-          <Line l="Balance" v={fmt(summary.balance)} strong red={summary.balance > 0} top />
+          <Line l={<span className="flex items-center gap-1"><CheckCircle2 size={11} /> Collected — verified by Finance</span>} v={fmt(m.collected)} strong />
+          {m.collected > 0 && <div className="pl-4 text-xs">
+            <Line l="settled on milestones" v={fmt(m.adjusted)} />
+            <Line l={<span className="flex items-center gap-1"><Wallet size={11} /> held On Account</span>} v={fmt(m.held)} />
+          </div>}
+          <Line l={<span className="flex items-center gap-1"><Hourglass size={11} /> With Finance — entered, not yet verified</span>} v={fmt(m.inVerification)} />
+          <Line l="Still to collect" v={fmt(m.toCollect)} strong red={m.toCollect > 0} top />
           {summary.overdue > 0 && (
             <div className="flex items-baseline justify-between text-xs text-destructive py-1">
               <span className="flex items-center gap-1"><AlertCircle size={11} /> Overdue</span>
@@ -113,7 +118,7 @@ export function BookingSummary({ booking, summary, onAccountBalance, totalPendin
           <div className="mt-3">
             <div className="flex justify-between text-[0.6875rem] text-muted-foreground mb-1 tabular-nums">
               <span>Collection progress</span>
-              <span>{collectionPct}%{pendingPct > 0 ? ` (+${pendingPct}% pending)` : ""}</span>
+              <span>{collectionPct}% verified{pendingPct > 0 ? ` · +${pendingPct}% with Finance` : ""}</span>
             </div>
             <div className="h-2 flex" style={{ border: RULE_SOFT }}>
               <div className="h-full bg-foreground" style={{ width: `${collectionPct}%` }} />
@@ -122,6 +127,33 @@ export function BookingSummary({ booking, summary, onAccountBalance, totalPendin
           </div>
         </div>
       </div>
+      {m.entries.length > 0 && (
+        <div style={{ borderTop: RULE_SOFT }}>
+          <div className={`px-4 pt-3 pb-2 ${LBL} flex items-center gap-1.5`}><Hourglass size={11} /> With Finance — {m.inVerificationCount} entr{m.inVerificationCount === 1 ? "y" : "ies"} waiting to be verified</div>
+          <div className="overflow-x-auto thin-scroll px-4 pb-3">
+            <table className="w-full text-xs min-w-[640px]">
+              <thead><tr className="text-left text-muted-foreground" style={{ borderBottom: RULE_SOFT }}>
+                <th className="py-1.5 pr-3 font-medium">Entry</th><th className="py-1.5 pr-3 font-medium">For</th>
+                <th className="py-1.5 pr-3 font-medium">Received</th><th className="py-1.5 pr-3 font-medium">Mode · ref</th>
+                <th className="py-1.5 pr-3 font-medium">Entered by</th><th className="py-1.5 text-right font-medium">Amount</th>
+              </tr></thead>
+              <tbody>
+                {m.entries.map((e: any) => (
+                  <tr key={e.id} style={{ borderBottom: RULE_SOFT }}>
+                    <td className="py-1.5 pr-3 font-heading tabular-nums">{e.docNo || `#${e.id}`}</td>
+                    <td className="py-1.5 pr-3">{e.milestone || "On Account"}</td>
+                    <td className="py-1.5 pr-3 tabular-nums">{fmtDate(e.date)}</td>
+                    <td className="py-1.5 pr-3">{e.mode || "—"}{e.ref ? <span className="text-muted-foreground tabular-nums"> · {e.ref}</span> : null}</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">{e.enteredBy || "—"}{e.enteredAt ? ` · ${fmtDate(e.enteredAt)}` : ""}</td>
+                    <td className="py-1.5 text-right font-heading font-semibold tabular-nums">{fmt(e.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[0.6875rem] text-muted-foreground">More payments can be entered while these wait. Each counts as collected once Finance verifies it.</p>
+          </div>
+        </div>
+      )}
       {token && <div className="p-4" style={{ borderTop: RULE_SOFT }}>{token}</div>}
     </div>
   );
@@ -130,8 +162,8 @@ export function BookingSummary({ booking, summary, onAccountBalance, totalPendin
 // Deposits that aren't usable money: never counted, never applied.
 const UNAVAILABLE = ["Bounced", "Held", "Void", "Cancelled", "Refunded"];
 
-export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, fundsOnHand, requiredAmount, fullPaymentShortfall, milestones, canManuallyApply, canEdit, onApply }: {
-  onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fundsOnHand: number; requiredAmount: number;
+export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, fundsOnHand, requiredAmount, fullPaymentShortfall, inVerification = 0, milestones, canManuallyApply, canEdit, onApply }: {
+  onAccountData: any; onAccountBalance: number; notFullyPaid: boolean; fundsOnHand: number; requiredAmount: number; inVerification?: number;
   fullPaymentShortfall: number; milestones: any[]; canManuallyApply: boolean; canEdit: boolean; onApply: (payment: any) => void;
 }) {
   const funded = requiredAmount > 0 ? Math.min(100, (fundsOnHand / requiredAmount) * 100) : 0;
@@ -152,7 +184,7 @@ export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, 
             </div>
             <div className="h-1.5" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${funded}%` }} /></div>
             <div className="text-[0.6875rem] text-muted-foreground">
-              {fmt(fullPaymentShortfall)} more in valid payments funds the remaining dues; eligible milestones then settle in order. Milestones already covered by money on hand show "Paid (on-account)" below.
+              {fmt(fullPaymentShortfall)} more in verified payments funds the remaining dues{inVerification > 0 ? ` (${fmt(Math.min(inVerification, fullPaymentShortfall))} of it is already with Finance)` : ""}; eligible milestones then settle in order. Milestones already covered by money on hand show "Verified · on account" below.
             </div>
           </div>
         ) : (
@@ -228,11 +260,13 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
               <tr><td colSpan={9} className={`${td} text-center text-muted-foreground`}>No milestones on this booking.</td></tr>
             ) : milestones.map((m) => {
               const overdue = isOverdue(m);
-              // Money on-account already covers this milestone: it shows "Paid (on-account)" (and no Pay / Waive,
-              // which would read as owed / forgiven).
-              const covered = m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.VirtuallyCovered;
+              // The server's money stage (MONEY_STAGE): verified money On Account covers it (no Pay / Waive, which
+              // would read as owed / forgiven), or an entry for it is with Finance.
+              const stage = MONEY_STAGE[m.MoneyStage as string] || null;
+              const covered = m.MoneyStage === "Verified";
+              const withFinance = m.MoneyStage === "InVerification";
               const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
-              const status = covered ? "Paid (on-account)" : overdue ? "Overdue" : m.Status;
+              const status = stage ? stage.label : overdue ? "Overdue" : m.Status === CrmStatus.PENDING ? "Due" : m.Status;
               const open = m.Status !== CrmStatus.PAID && m.Status !== "Waived";
               const pmt = onAccountBalance > 0 && m.Id === nextMilestone?.Id
                 ? onAccountData?.payments?.find((p: any) => !UNAVAILABLE.includes(p.Status) && Number(p.Amount) - Number(p.AppliedAmount || 0) > 0)
@@ -263,19 +297,20 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   </td>
                   <td className={`${td} text-right`}>
                     <div className="font-heading tabular-nums whitespace-nowrap">{fmt(m.AmountPaid)}</div>
-                    {Number(m.PendingVerificationAmount) > 0 && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap">+{fmt(m.PendingVerificationAmount)} pending</div>}
+                    {Number(m.PendingVerificationAmount) > 0 && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap" title={MONEY_STAGE.InVerification.hint}>+{fmt(m.PendingVerificationAmount)} with Finance</div>}
                     {m.PaidDate && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap">on {fmtDate(m.PaidDate)}</div>}
                   </td>
                   <td className={`${td} text-right whitespace-nowrap`}>
                     {m.Status === "Waived" ? <span className="text-muted-foreground">—</span>
                       : covered ? <span className="inline-flex items-center gap-1 text-xs font-semibold"><Wallet size={12} /> Covered</span>
+                      : withFinance ? <span className="inline-flex items-center gap-1 text-xs font-semibold"><Hourglass size={12} /> Entered</span>
                       : balance > 0 ? <span className="font-heading font-bold tabular-nums text-destructive">{fmt(balance)}</span>
                       : <span className="inline-flex items-center gap-1 text-xs font-semibold"><CheckCircle2 size={12} /> Settled</span>}
                   </td>
-                  <td className={td} title={covered ? "Money is on-account for this milestone; it settles itself once the full booking amount is in" : undefined}>
-                    {status === "Waived"
+                  <td className={td} title={stage?.hint}>
+                    {m.Status === "Waived"
                       ? <span className={`${tag} text-muted-foreground`}>Waived</span>
-                      : <SheetMark text={status} tone={status === "Overdue" ? "stopped" : status === CrmStatus.PAID || covered ? "done" : "waiting"} />}
+                      : <SheetMark text={status} tone={overdue ? "stopped" : stage?.tone ?? "waiting"} />}
                   </td>
                   <td className={`${td} text-xs`}>
                     <div>{m.PaymentMode || "—"}</div>

@@ -35,6 +35,9 @@ export type CrmStatusType = typeof CrmStatus[keyof typeof CrmStatus];
 
 // Booking approval stages (CrmBooking.WorkflowStage) -> what staff read. "Data Review" is
 // the name the booking screen, its checklist and its Verify & Send button use.
+// The booking's first stage: until it leaves Data Review (verified and sent
+// for approval) its application may still change unit, plan and rate.
+export const BOOKING_STAGE_REVIEW = 'Review';
 export const bookingWorkflowStageLabel: Record<string, string> = {
   Review: 'Data Review',
   MarketingHeadApproval: 'Marketing Head Approval',
