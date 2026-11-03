@@ -756,12 +756,27 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
 });
 
 // ── PUT /:id/submit — Draft -> Pending ──────────────────────────────────
+// A refund goes for approval / payout only when no payment for its booking is
+// still with Finance: a verified one adds to the cancellation's refund
+// (crmCancellations.holdCancellationCredit), so paying before that would pay short.
+async function refundWaitsForFinance(pool, refundId) {
+  const r = (await pool.request().input("id", sql.Int, refundId)
+    .query("SELECT BookingId FROM dbo.CrmRefund WHERE Id = @id")).recordset[0];
+  if (!r?.BookingId) return null;
+  const pending = await require("../services/crmOnAccountCoverage").pendingVerificationEntries(pool, r.BookingId);
+  if (!pending.length) return null;
+  const total = pending.reduce((a, e) => a + Number(e.RPAmount || 0), 0);
+  return `${pending.length} payment${pending.length === 1 ? "" : "s"} for this booking (Rs ${total.toLocaleString("en-IN")}: ${pending.map((e) => e.RPDocNo || `#${e.RPPaymentID}`).join(", ")}) ${pending.length === 1 ? "is" : "are"} still with Finance. Once verified ${pending.length === 1 ? "it is" : "they are"} added to this refund — have Finance verify or reject ${pending.length === 1 ? "it" : "them"} first.`;
+}
+
 router.put("/:id/submit", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   let tx;
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
+    const waits = await refundWaitsForFinance(pool, id);
+    if (waits) return res.status(409).json({ error: waits });
     tx = pool.transaction();
     await tx.begin();
     // Read the source ID first, then use the same source-row-first lock order
@@ -812,6 +827,8 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const pool = getPool();
+    const waits = await refundWaitsForFinance(pool, id);
+    if (waits) return res.status(409).json({ error: waits });
     // One Finance step: approving here raises the payout voucher straight into
     // Finance -> Payments, where Finance approves it once. So everything the
     // voucher needs is checked BEFORE the approval is recorded.

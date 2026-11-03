@@ -10,6 +10,7 @@ import {
   AlertTriangle, ChevronRight, FileSignature, IndianRupee, Landmark, Lock, MoreHorizontal, Phone, Plus, RefreshCw, Repeat, Trash2,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SentBackNote, useSentBackStates, SENT_BACK_STATE } from "@/components/crm/CrmListToolbar";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -136,6 +137,8 @@ const CrmBooking: React.FC = () => {
     }
   };
 
+  // Each booking sent back / resubmitted — for the row's Correct / Recheck button.
+  const sentBackByBooking = useSentBackStates("BookingId");
   const columns: ColumnDef<any, unknown>[] = [
     // Columns are combined so the whole row — status and next step included —
     // fits a laptop screen without scrolling sideways.
@@ -213,6 +216,8 @@ const CrmBooking: React.FC = () => {
             <SheetMark text={b.Status} tone={bookingTone(b.Status)} />
             {stageNote && <div className="text-[0.6875rem] text-muted-foreground leading-snug">{stageNote}</div>}
             {b.IsFrozen && <div className="flex items-center gap-1 text-[0.625rem] font-medium text-destructive"><Lock size={10} /> Frozen</div>}
+            {/* Sent back for correction / resubmitted for a recheck. */}
+            <SentBackNote bookingId={b.Id} />
           </div>
         );
       } },
@@ -230,7 +235,16 @@ const CrmBooking: React.FC = () => {
             {/* submitOnly: Approve/Reject happen in the Approval Inbox only. */}
             <ApprovalActions status={b.Status} recordId={b.Id} endpoint={API} submitOnly onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-bookings"] })} />
             {/* The stage itself is shown in Status; only Data Review has a button here. */}
-            {b.Status === CrmStatus.PENDING && (!b.WorkflowStage || b.WorkflowStage === "Review") && !b.ReadyForApprovalAt && (
+            {/* Sent back: correct it; resubmitted: recheck it — in place of the plain checklist button. */}
+            {sentBackByBooking.get(b.Id) === "Reapprove" ? (
+              <button onClick={() => navigate("/admin/approval/inbox")} className={`${KEY_LINE} h-7 px-2`} title="With the approver — approve again, or send back to Data Review">
+                Re-approve <ChevronRight size={11} />
+              </button>
+            ) : sentBackByBooking.get(b.Id) ? (
+              <button onClick={() => openBooking(b.Id)} className={`${sentBackByBooking.get(b.Id) === "SentBack" ? KEY_INK : KEY_LINE} h-7 px-2`}>
+                {sentBackByBooking.get(b.Id) === "SentBack" ? "Correct" : "Recheck"} <ChevronRight size={11} />
+              </button>
+            ) : b.Status === CrmStatus.PENDING && (!b.WorkflowStage || b.WorkflowStage === "Review") && !b.ReadyForApprovalAt && (
               <button onClick={() => openBooking(b.Id)} className={`${KEY_LINE} h-7 px-2`}>Review checklist <ChevronRight size={11} /></button>
             )}
             {step ? (
@@ -350,6 +364,10 @@ const CrmBooking: React.FC = () => {
                   <SelectContent>
                     <SelectItem value="All">All statuses</SelectItem>
                     {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                    {/* Sent back for an update, or resubmitted for a recheck. */}
+                    {(["SentBack", "Resubmitted"] as const).map((s) => (
+                      <SelectItem key={s} value={s}>{SENT_BACK_STATE[s].label} — {SENT_BACK_STATE[s].note}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />

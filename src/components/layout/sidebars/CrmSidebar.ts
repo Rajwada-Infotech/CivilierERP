@@ -118,3 +118,15 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 ];
+
+// A count on each menu item with entries sent back or resubmitted
+// (GET /api/crm/dashboard/sent-back's byPath) — what to update or recheck there.
+export function withSentBackBadges(items: NavItem[], byPath?: Record<string, { SentBack: number; Resubmitted: number }>): NavItem[] {
+  if (!byPath) return items;
+  const n = (path?: string) => (path && byPath[path] ? byPath[path].SentBack + byPath[path].Resubmitted : 0);
+  return items.map((it: any) => ({
+    ...it,
+    badge: n(it.path) || it.badge,
+    children: it.children?.map((c: any) => ({ ...c, badge: n(c.path) || c.badge })),
+  }));
+}
