@@ -208,8 +208,8 @@ router.get("/report", authMiddleware, async (req, res) => {
       SELECT
         np.PPaymentID   AS id,
         np.PPaymentName AS ReasonName,
-        np.PCompany     AS Company,
-        np.PProject     AS Project,
+        COALESCE((SELECT TOP 1 ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'C' AND ent.id = TRY_CAST(np.PCompany AS INT)), np.PCompany) AS Company,
+        COALESCE((SELECT TOP 1 ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.id = TRY_CAST(np.PProject AS INT)), np.PProject) AS Project,
         np.PAmount      AS Amount,
         np.PMode        AS Mode,
         np.PDate        AS Date,
