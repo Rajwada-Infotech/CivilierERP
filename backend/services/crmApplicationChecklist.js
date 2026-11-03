@@ -139,6 +139,26 @@ function assertKnownItem(itemKey, level = 1) {
   return def;
 }
 
+// Data Review items change only while the booking is still in Data Review —
+// checked inside the same UPDATE, so a write that waits behind a send (which
+// holds these rows locked) finds the booking already sent and changes nothing.
+// Level 2+ items are not tied to the booking's stage.
+function inDataReviewSql(level) {
+  if (Number(level) !== 1) return "";
+  const { STAGE_REVIEW } = require("./crmBookingStageService");
+  return ` AND EXISTS (SELECT 1 FROM dbo.CrmBooking b WHERE b.ApplicationId = @aid AND b.IsActive = 1
+             AND ISNULL(b.WorkflowStage, N'${STAGE_REVIEW}') = N'${STAGE_REVIEW}')`;
+}
+
+// Nothing updated: the item does not exist (404), or the booking left Data Review (409).
+async function notUpdated(pool, applicationId, itemKey, level) {
+  const row = (await pool.request().input("aid", sql.Int, applicationId).input("lvl", sql.Int, level).input("key", sql.NVarChar(50), itemKey)
+    .query("SELECT 1 AS x FROM dbo.CrmApplicationVerificationChecklist WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key")).recordset[0];
+  return row
+    ? Object.assign(new Error("This booking has already been sent for approval — its Data Review checklist can no longer change"), { status: 409 })
+    : Object.assign(new Error("Checklist item not found"), { status: 404 });
+}
+
 /** Verifier ticks an item as checked. `remarks` is optional here (a confirming note). */
 async function checkItem(pool, applicationId, itemKey, { actor, remarks, level = 1 } = {}) {
   assertKnownItem(itemKey, level);
@@ -153,9 +173,9 @@ async function checkItem(pool, applicationId, itemKey, { actor, remarks, level =
       SET IsChecked = 1, CheckStatus = 'Checked',
           Remarks = ISNULL(@rem, Remarks), CheckedBy = @by, CheckedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.*
-      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key
+      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key${inDataReviewSql(level)}
     `);
-  if (!result.recordset.length) { const e = new Error("Checklist item not found"); e.status = 404; throw e; }
+  if (!result.recordset.length) throw await notUpdated(pool, applicationId, itemKey, level);
   return result.recordset[0];
 }
 
@@ -178,9 +198,9 @@ async function flagItem(pool, applicationId, itemKey, { actor, remarks, level = 
       SET IsChecked = 0, CheckStatus = 'NeedsRecheck',
           Remarks = @rem, CheckedBy = @by, CheckedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.*
-      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key
+      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key${inDataReviewSql(level)}
     `);
-  if (!result.recordset.length) { const e = new Error("Checklist item not found"); e.status = 404; throw e; }
+  if (!result.recordset.length) throw await notUpdated(pool, applicationId, itemKey, level);
   return result.recordset[0];
 }
 
@@ -218,8 +238,9 @@ async function uncheckItem(pool, applicationId, itemKey, { actor, level = 1 } = 
       SET IsChecked = 0, CheckStatus = 'Pending',
           CheckedBy = @by, CheckedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.*
-      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key
+      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key AND CheckStatus = 'Checked'${inDataReviewSql(level)}
     `);
+  if (!result.recordset.length) throw await notUpdated(pool, applicationId, itemKey, level);
   return result.recordset[0];
 }
 
@@ -246,8 +267,9 @@ async function resubmitItem(pool, applicationId, itemKey, { actor, level = 1 } =
       UPDATE dbo.CrmApplicationVerificationChecklist
       SET CheckStatus = 'Pending', UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.*
-      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key
+      WHERE ApplicationId = @aid AND Level = @lvl AND ItemKey = @key AND CheckStatus = 'NeedsRecheck'${inDataReviewSql(level)}
     `);
+  if (!result.recordset.length) throw await notUpdated(pool, applicationId, itemKey, level);
   return result.recordset[0];
 }
 
@@ -301,7 +323,7 @@ async function resetVerifiedItems(pool, where, itemKeys, what) {
       UPDATE dbo.CrmApplicationVerificationChecklist
       SET CheckStatus = 'Pending', IsChecked = 0, Remarks = @what, UpdatedAt = SYSDATETIME()
       OUTPUT INSERTED.ItemKey
-      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus = 'Checked' AND ItemKey IN (${names.join(", ")})`);
+      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus = 'Checked' AND ItemKey IN (${names.join(", ")})${inDataReviewSql(1)}`);
     return r.recordset.map((x) => x.ItemKey);
   } catch (e) {
     console.error("[crm-checklist] reset of changed items failed:", e.message);
@@ -322,19 +344,26 @@ async function snapshotColumns(pool, table, keyColumn, keyValue, itemColumns) {
   }
 }
 
+const normCol = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v == null || v === "" ? null : String(v));
+
+/** Items whose columns differ between two snapshots of one row. */
+function changedItems(itemColumns, before, after) {
+  if (!before || !after) return [];
+  return Object.entries(itemColumns)
+    .filter(([, cols]) => cols.some((c) => normCol(before[c]) !== normCol(after[c])))
+    .map(([key]) => key);
+}
+
 /** After a save: reset every item whose columns differ between the two snapshots. */
 async function resetForChangedColumns(pool, where, itemColumns, before, after, label) {
-  if (!before || !after) return [];
-  const norm = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : v == null || v === "" ? null : String(v));
-  const changed = Object.entries(itemColumns)
-    .filter(([, cols]) => cols.some((c) => norm(before[c]) !== norm(after[c])))
-    .map(([key]) => key);
+  const changed = changedItems(itemColumns, before, after);
   if (!changed.length) return [];
+  const norm = normCol;
   const fields = [...new Set(Object.entries(itemColumns).filter(([k]) => changed.includes(k)).flatMap(([, cols]) => cols.filter((c) => norm(before[c]) !== norm(after[c]))))];
   return resetVerifiedItems(pool, where, changed, `${label} (${fields.join(", ")})`);
 }
 
 module.exports = {
   CHECKLIST_ITEMS, itemsForLevel, ensureChecklistRows, checkItem, uncheckItem, flagItem, resubmitItem,
-  APPLICATION_ITEM_COLUMNS, BANK_DETAIL_ITEM_COLUMNS, resetVerifiedItems, snapshotColumns, resetForChangedColumns,
+  APPLICATION_ITEM_COLUMNS, BANK_DETAIL_ITEM_COLUMNS, resetVerifiedItems, snapshotColumns, resetForChangedColumns, changedItems,
 };

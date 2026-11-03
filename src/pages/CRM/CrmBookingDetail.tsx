@@ -250,6 +250,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchChecklist(bookingId),
   });
   const checklistItems: any[] = checklistData?.items || [];
+  // One refresh after any step of the chain (send, tick / flag, approve, send
+  // back) — and after a refused one, since a refusal means someone else moved
+  // it: this booking, its checklist, the lists, the inbox and the sent-back
+  // markers all show where it is now. "approval-action" refreshes the menu
+  // badge and sent-back markers everywhere, and brings this page along when
+  // the action happened elsewhere (application wizard, Approval Inbox).
+  const refreshChain = () => {
+    ["crm-booking-detail", "crm-booking-checklist", "crm-booking-money-receipts"].forEach((k) => qc.invalidateQueries({ queryKey: [k, bookingId] }));
+    ["crm-bookings", "approval-inbox"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    window.dispatchEvent(new CustomEvent("approval-action"));
+  };
+  useEffect(() => {
+    const onAction = () => ["crm-booking-detail", "crm-booking-checklist"].forEach((k) => qc.invalidateQueries({ queryKey: [k, bookingId] }));
+    window.addEventListener("approval-action", onAction);
+    return () => window.removeEventListener("approval-action", onAction);
+  }, [qc, bookingId]);
   const checklistAllChecked = !!checklistData?.allChecked;
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [checklistFlaggingKey, setChecklistFlaggingKey] = useState<string | null>(null);
@@ -832,14 +848,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Approval failed");
       toast.success(resData.confirmed ? "Booking confirmed" : `Approved - moved to ${resData.label || "next stage"}`);
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
-      // The menu's Approval Inbox badge re-counts at once.
-      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setStageActioning(null);
     }
   };
@@ -861,14 +873,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       toast.success(`Sent back to ${resData.label || "previous stage"}`);
       setRejectOpen(false);
       setRejectRemark("");
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
-      // The menu's Approval Inbox badge re-counts at once.
-      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setStageActioning(null);
     }
   };
@@ -891,6 +899,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setChecklistBusyKey(null);
     }
   };
@@ -913,12 +922,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (resData.mrWarning) {
         toast.warning(`Money Receipt could not be auto-created — use the payment form to submit it manually. (${resData.mrWarning})`, { duration: 8000 });
       }
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setBookingRequesting(false);
     }
   };
