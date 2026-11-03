@@ -203,6 +203,17 @@ describe("running", () => {
     expect((await api("post", "/run").send({ script: "   " })).status).toBe(400);
   });
 
+  test("terminal colour codes in the output are removed, so the page never shows [32mINFO[39m", async () => {
+    const runner = require("../services/scriptRunner");
+    expect(runner.stripAnsi("\u001b[32mINFO\u001b[39m ok \u001b[90m{\"a\":1}\u001b[39m")).toBe("INFO ok {\"a\":1}");
+    await unlock();
+    const res = await api("post", "/run").send({ script: "console.log('\\u001b[32mINFO\\u001b[39m coloured line');" });
+    const done = await finish(res.body.id);
+    const text = done.chunks.map((c) => c.t).join("");
+    expect(text).toContain("INFO coloured line");
+    expect(text).not.toMatch(/\u001b|\[32m/);
+  });
+
   test("one run at a time, and a running script can be stopped", async () => {
     await unlock();
     const first = await api("post", "/run").send({ script: "setInterval(() => {}, 1000);" });

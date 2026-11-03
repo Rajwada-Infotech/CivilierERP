@@ -3,13 +3,14 @@
 // renders. Every report is keyed / grouped by FA Item Code.
 import {
   getDepreciationSummary,
+  getDepreciationHistory,
   getFixedAssets,
   getMaintenanceList,
   getAssetTransfers,
 } from "@/api/fixedAssetApi";
 import { formatINR } from "@/utils/formatCurrency";
 
-export type ReportKey = "depreciation" | "owner" | "maintenance" | "transfer";
+export type ReportKey = "depreciation" | "depreciationHistory" | "owner" | "maintenance" | "transfer";
 
 export interface ReportRow {
   id: string;
@@ -47,6 +48,31 @@ export const REPORTS: Record<ReportKey, ReportConfig> = {
           { label: "Total Depreciation", value: formatINR(r.TotalDepreciation, { decimals: 2 }) },
           { label: "Book Value", value: formatINR(r.BookValue, { decimals: 2 }) },
           { label: "Period", value: `${month(r.FirstPeriod)} – ${month(r.LastPeriod)}` },
+        ],
+      }));
+    },
+  },
+
+  depreciationHistory: {
+    title: "Monthly Depreciation History",
+    load: async () => {
+      const rows = await getDepreciationHistory();
+      return rows.map((r) => ({
+        id: String(r.EntryId),
+        code: dash(r.FAItemCode),
+        name: dash(r.AssetName),
+        badge: r.Source || undefined,
+        amount: formatINR(r.DepreciationAmount, { decimals: 2 }),
+        lines: [
+          { label: "Calculation Date", value: day(r.CalculationDate) },
+          { label: "Period", value: month(r.PeriodStart) },
+          { label: "Company", value: dash(r.CompanyName) },
+          { label: "Method / Rate", value: `${dash(r.Method)} · ${r.RatePct != null ? `${r.RatePct}%` : "—"}` },
+          { label: "Opening Book Value", value: formatINR(r.OpeningBookValue ?? 0, { decimals: 2 }) },
+          { label: "Depreciation", value: formatINR(r.DepreciationAmount, { decimals: 2 }) },
+          { label: "Accumulated Depreciation", value: formatINR(r.AccumulatedDepreciation ?? 0, { decimals: 2 }) },
+          { label: "Remaining Book Value", value: formatINR(r.RemainingBookValue ?? 0, { decimals: 2 }) },
+          { label: "Voucher", value: dash(r.VoucherNo) },
         ],
       }));
     },

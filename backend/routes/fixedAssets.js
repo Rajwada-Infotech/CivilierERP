@@ -6,8 +6,8 @@ router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
-const { projectPredicate } = require("../services/projectScope");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
+const { projectPredicate, assertProjectAllowed } = require("../services/projectScope");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { runDepreciationForPeriod, previewDepreciationForPeriod, backfillDepreciationForAsset, AUTO_USER } = require("../services/fixedAssetAutoDepreciation");
@@ -79,7 +79,13 @@ async function generateAssetCode(pool, category) {
 const POSTED_DEPRECIATION_JOIN = `LEFT JOIN (SELECT e.AssetId, SUM(e.DepreciationAmount) AS Depreciated FROM dbo.FixedAssetDepreciationEntry e
                  WHERE ISNULL(e.Status, '') <> 'Reversed' GROUP BY e.AssetId) dep ON dep.AssetId = fa.AssetId`;
 
-router.get("/", async (req, res) => {
+// The asset list and a single asset also feed the other Fixed Asset pages' pickers, so any of the module's pages will do.
+const FA_READ_PAGES = [
+  "fixed-asset-record", "fixed-asset-tagging", "fixed-asset-assignment", "asset-transfer",
+  "fixed-asset-quality-check", "fixed-asset-maintenance", "fixed-asset-depreciation-generate", "fixed-asset-dashboard",
+];
+
+router.get("/", requireAnyPageRight(FA_READ_PAGES, "view"), async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
@@ -280,7 +286,7 @@ router.post("/depreciation/run", requirePageRight("fixed-asset-record", "edit"),
 
 // ── GET /:id — single ─────────────────────────────────────────────────────────
 // ── GET /dashboard — the Fixed Asset dashboard: figures from every page of the module, kept to the user's projects ─
-router.get("/dashboard", async (req, res) => {
+router.get("/dashboard", requirePageRight("fixed-asset-dashboard", "view"), async (req, res) => {
   try {
     const { buildFixedAssetDashboard } = require("../services/fixedAssetDashboard");
     res.json(await buildFixedAssetDashboard(getPool(), req.projectScope ?? null));
@@ -290,7 +296,7 @@ router.get("/dashboard", async (req, res) => {
   }
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireAnyPageRight(FA_READ_PAGES, "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -317,6 +323,7 @@ router.get("/:id", async (req, res) => {
     // never a Fixed Asset — treat it as not-found here exactly like the
     // list above hides it, so it can't be viewed/edited by guessing an id.
     if (!row || !row.AssetCode) return res.status(404).json({ error: "Not found" });
+    if (!assertProjectAllowed(req, res, row.ProjectId)) return;
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -13,10 +13,42 @@ import { getFixedAssets, type FixedAssetListItem } from "@/api/fixedAssetApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import { Fab } from "@/components/Fab";
+import { ExportButton } from "@/components/ExportButton";
+import type { ExportColumn } from "@/utils/exportFile";
 import { StatusPill } from "@/components/StatusPill";
 
 const ACCENT = "#eab308";
 const STATUS_FILTERS = ["All", "Active", "Pending", "Sold", "Scrapped", "Under Maintenance"] as const;
+
+const day = (v: string | null) => (v ? v.slice(0, 10) : "");
+// The same columns as the web register's export.
+const EXPORT_COLUMNS: ExportColumn<FixedAssetListItem>[] = [
+  { header: "Doc No", value: (r) => r.DocNo },
+  { header: "Doc Date", value: (r) => day(r.DocDate) },
+  { header: "Fin Year", value: (r) => r.FinYear },
+  { header: "Asset Code", value: (r) => r.AssetCode },
+  { header: "FA Item Code", value: (r) => r.FAItemCode },
+  { header: "Asset Name", value: (r) => r.AssetName },
+  { header: "Category", value: (r) => r.AssetCategory },
+  { header: "Brand", value: (r) => r.Brand },
+  { header: "Model", value: (r) => r.Model },
+  { header: "Serial No", value: (r) => r.SerialNumber },
+  { header: "Company", value: (r) => r.CompanyName },
+  { header: "Project", value: (r) => r.ProjectName },
+  { header: "Godown", value: (r) => r.GodownName },
+  { header: "Location", value: (r) => r.Location },
+  { header: "Department", value: (r) => r.Department },
+  { header: "Custodian", value: (r) => r.Custodian },
+  { header: "Supplier", value: (r) => r.SupplierName },
+  { header: "Purchase Date", value: (r) => day(r.PurchaseDate) },
+  { header: "Activation Date", value: (r) => day(r.ActivationDate) },
+  { header: "Quantity", value: (r) => Number(r.Quantity) || 0 },
+  { header: "Purchase Cost", value: (r) => Number(r.PurchaseCost) || 0 },
+  { header: "Depreciation Rate %", value: (r) => (r.DepreciationRate == null ? "" : Number(r.DepreciationRate)) },
+  { header: "Depreciation Posted", value: (r) => Number(r.Depreciated) || 0 },
+  { header: "Book Value", value: (r) => Math.max(0, (Number(r.PurchaseCost) || 0) - (Number(r.Depreciated) || 0)) },
+  { header: "Asset Status", value: (r) => r.AssetStatus },
+];
 
 export default function AssetRegisterScreen() {
   const [search, setSearch] = useState("");
@@ -95,6 +127,12 @@ export default function AssetRegisterScreen() {
           <Kpi label="Pending" value={String(kpis.pending)} />
           <Kpi label="Book Value" value={formatINR(kpis.totalBook)} />
         </View>
+
+        {rights.canExport && (
+          <View style={{ alignItems: "flex-end", marginBottom: 8 }}>
+            <ExportButton title="Fixed Asset Register" filename="fixed-asset-register" rows={rows} columns={EXPORT_COLUMNS} />
+          </View>
+        )}
 
         <View
           className="flex-row items-center gap-2"
