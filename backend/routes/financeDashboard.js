@@ -125,7 +125,7 @@ router.get("/", cache("finance-dashboard", 60, { dropOnAnyWrite: true }), async 
           PDate,
           PBankName,
           PDocType,
-          PProject,
+          COALESCE((SELECT TOP 1 ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.id = TRY_CAST(PProject AS INT)), PProject) AS PProject,
           PCreatedAt
         FROM dbo.NewPayment
         ORDER BY PCreatedAt DESC

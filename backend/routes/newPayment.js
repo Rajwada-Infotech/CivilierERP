@@ -26,6 +26,7 @@ const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
+const { normalizePaymentDimensions } = require("../services/paymentDimensions");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -326,8 +327,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           OR np.PBankName LIKE @search
           OR ${RESOLVED_SUPPLIER_SQL} LIKE @search)`);
     }
-    if (companyId) conditions.push(`np.PCompany = @companyId`);
-    if (project) conditions.push(`np.PProject LIKE @project`);
+    // The company / project filter sends a name or an id, and a payment holds either: match both.
+    if (companyId) conditions.push(`(np.PCompany = @companyId OR np.PCompany IN (SELECT CAST(ent.id AS VARCHAR(20)) FROM dbo.enterprise ent WHERE ent.business_type = 'C' AND (ent.name = @companyId OR CAST(ent.id AS VARCHAR(20)) = @companyId)) OR np.PCompany IN (SELECT ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'C' AND CAST(ent.id AS VARCHAR(20)) = @companyId))`);
+    if (project) conditions.push(`(np.PProject LIKE @project OR np.PProject IN (SELECT CAST(ent.id AS VARCHAR(20)) FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.name LIKE @project))`);
     // Filters by the FinYear the payment's own PDate falls into (PFinYearId
     // — resolved at save time, see resolveFinYearId), matching the same
     // dbo.FinYear.FId the Reports page's FY dropdown sends. NOT DocYear,
@@ -455,10 +457,20 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         -- Journal Voucher this payment settles (JVLineId, migration 417) —
         -- so the list's Expense Ref column can show a JV chip the same way
         -- it shows an invoice/GRN chip, instead of a bare "—".
-        (
-          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
-          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
-          WHERE jvl.LineID = np.JVLineId
+        COALESCE(
+          (
+            SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+            JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+            WHERE jvl.LineID = np.JVLineId
+          ),
+          -- a payment settling several JV lines (migration 620) lists them all
+          (
+            SELECT STRING_AGG(jv2.JVNo, ', ') WITHIN GROUP (ORDER BY jv2.JVNo)
+            FROM dbo.PaymentJvLineLink pjl
+            JOIN dbo.JournalVoucherLines jvl2 ON jvl2.LineID = pjl.JVLineId
+            JOIN dbo.JournalVoucher jv2 ON jv2.JVID = jvl2.JVID
+            WHERE pjl.PPaymentID = np.PPaymentID
+          )
         )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
@@ -968,6 +980,8 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     }
 
     try {
+      // The form sends the company's and project's names; the ledger posting and the reports read ids.
+      ({ PCompany, PProject } = await normalizePaymentDimensions(pool, { PCompany, PProject }));
       await assertProjectVisibleToCompany(pool, PProject, PCompany);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
@@ -1347,7 +1361,9 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
     }
 
-    await assertProjectVisibleToCompany(pool, PProject, PCompany);
+    // Names from the form become enterprise ids, as on create (the ledger posting and the reports read ids).
+    const dims = await normalizePaymentDimensions(pool, { PCompany, PProject });
+    await assertProjectVisibleToCompany(pool, dims.PProject, dims.PCompany);
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1427,8 +1443,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PFinYearId", sql.Int, pFinYearIdUpdate)
       .input("PBankID", sql.Int, normalizeBankId(PBankID))
       .input("PBankName", sql.VarChar, PBankName || (PMode === "Cash" ? "Cash-in-Hand A/c" : null))
-      .input("PProject", sql.VarChar, PProject || "")
-      .input("PCompany", sql.VarChar, PCompany || "")
+      .input("PProject", sql.VarChar, dims.PProject || "")
+      .input("PCompany", sql.VarChar, dims.PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
       .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
       .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
@@ -2873,6 +2889,8 @@ router.get("/:id/posting", async (req, res) => {
     `);
     if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
     const pmt = pmtRes.recordset[0];
+    // The form saves names; ids are what the ledger and the cash-in-hand lookup need.
+    const ownDims = await normalizePaymentDimensions(pool, { PCompany: pmt.PCompany, PProject: pmt.PProject });
 
     // Determine payment type: "on-account" if no invoice ref, else "direct"
     const isOnAccount = !pmt.PExpenseRef;
@@ -2936,7 +2954,7 @@ router.get("/:id/posting", async (req, res) => {
       ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
       : null;
     if (!bankAccount && pmt.PMode === "Cash") {
-      const cashHeadId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || null).catch(() => null);
+      const cashHeadId = await getCashInHandBankId(pool, parseInt(ownDims.PCompany, 10) || null).catch(() => null);
       if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
@@ -3052,6 +3070,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
     `);
     if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
     const pmt = pmtRes.recordset[0];
+    // The form saves names; ids are what the ledger and the cash-in-hand lookup need.
+    const ownDims = await normalizePaymentDimensions(pool, { PCompany: pmt.PCompany, PProject: pmt.PProject });
     const mergedLinks = await getLinks(pool, sql, pmtId);
 
     // Already posted?
@@ -3105,7 +3125,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
       // ExpenseBooking-joined CompanyId above (NULL for a JV/PPartyId
       // payment with no linked invoice) — a cash payment's own company is
       // whose physical cash-in-hand actually shrinks.
-      bankId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
+      bankId = await getCashInHandBankId(pool, parseInt(ownDims.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
     }
 
     if (!supplierId && allocations.length === 0) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });
@@ -3172,8 +3192,8 @@ router.post("/:id/post-to-gl", async (req, res) => {
       // The company / project of the invoice when there is one; otherwise the ones the payment itself was made under (a
       // payment with no invoice - a partner payment, bank charges - used to be posted with no company or project, so it
       // dropped out of every company-wise Trial Balance).
-      companyId: pmt.CompanyId ?? (Number.isFinite(parseInt(pmt.PCompany, 10)) ? parseInt(pmt.PCompany, 10) : null),
-      projectId: pmt.ProjectId ?? (Number.isFinite(parseInt(pmt.PProject, 10)) ? parseInt(pmt.PProject, 10) : null),
+      companyId: pmt.CompanyId ?? (Number.isFinite(parseInt(ownDims.PCompany, 10)) ? parseInt(ownDims.PCompany, 10) : null),
+      projectId: pmt.ProjectId ?? (Number.isFinite(parseInt(ownDims.PProject, 10)) ? parseInt(ownDims.PProject, 10) : null),
       createdBy: userEmail,
       legs,
     });
