@@ -361,6 +361,7 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
     if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await applyAddExtraChargeToApplication(tx, applicationId, req.body, actorId(req));
     await tx.commit();
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId }, ["ParkingExtraCharges"], "extra charge added");
     res.status(201).json({ success: true, ...result });
   } catch (e) {
     try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
@@ -505,6 +506,7 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
       await tx.begin();
       const result = await applyEditExtraCharge(tx, id, b, actorId(req));
       await tx.commit();
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmExtraCharge", id }, ["ParkingExtraCharges"], "extra charge edited");
       res.json({ success: true, ...result });
     } catch (txErr) {
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
@@ -566,6 +568,7 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], 
       await tx.begin();
       const result = await applyReleaseExtraCharge(tx, id);
       await tx.commit();
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmExtraCharge", id }, ["ParkingExtraCharges"], "extra charge removed");
       res.json({ success: true, ...result });
     } catch (txErr) {
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }

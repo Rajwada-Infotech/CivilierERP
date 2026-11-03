@@ -235,6 +235,7 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
     }
 
     const result = await applyEditCoApplicant(pool, id, b, actorId(req));
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmCoApplicant", id }, ["ApplicantKyc"], "co-applicant edited");
     res.json(result);
   } catch (e) {
     console.error("[crm-co-applicant] PUT error:", e.message);
@@ -286,6 +287,7 @@ router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-application
       }
     }
     const result = await applyRemoveCoApplicant(pool, id);
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { table: "CrmCoApplicant", id }, ["ApplicantKyc"], "co-applicant removed");
     res.json(result);
   } catch (e) {
     console.error("[crm-co-applicant] DELETE error:", e.message);
@@ -378,6 +380,7 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
     if (pickedCustomerId) await pool.request().input("id", sql.Int, result.recordset[0].Id).input("c", sql.Int, pickedCustomerId)
       .query("UPDATE dbo.CrmCoApplicant SET CustomerId = @c WHERE Id = @id");
     await linkCoApplicantToCustomer(pool, result.recordset[0].Id, actorId(req));
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId }, ["ApplicantKyc"], "co-applicant added");
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     console.error("[crm-co-applicant] POST /application error:", e.message);

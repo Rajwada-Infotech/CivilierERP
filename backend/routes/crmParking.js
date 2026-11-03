@@ -842,6 +842,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
         { field: "ParkingHold", oldVal: null, newVal: `${ParkingType} ${slotNo} held until ${hold.holdUntil}` },
       ]);
 
+      await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId: parseInt(b.ApplicationId) }, ["ParkingExtraCharges"], `parking ${ParkingType} ${slotNo} added`);
       return res.status(201).json({
         success: true, hold: true, id: hold.id, holdUntil: hold.holdUntil,
         SlotNo: slotNo, TotalAmount: totalAmount,
@@ -920,6 +921,7 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
       }
     }
     await releaseHold(pool, holdId, actorId(req));
+    await require("../services/crmApplicationChecklist").resetVerifiedItems(pool, { applicationId: row.recordset[0].ApplicationId }, ["ParkingExtraCharges"], "parking removed");
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-parking] DELETE /hold error:", e.message);
