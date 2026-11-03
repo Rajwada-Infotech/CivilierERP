@@ -570,7 +570,7 @@ router.get("/", requirePageRight("cheque-cancellation", "view"), async (req, res
       SELECT
         cc.CCId, cc.ChequeLotId, cc.ChequeLotNumber, cc.ChequeNo, cc.PaymentId,
         cc.BankId, cc.BankName, cc.AccountNumber, cc.Reason, cc.CancelledBy, cc.CancelledAt,
-        np.DocNo, np.PPaymentName, np.PAmount, np.PDate, np.PProject, np.PCompany,
+        np.DocNo, np.PPaymentName, np.PAmount, np.PDate, COALESCE((SELECT TOP 1 ent.name FROM dbo.enterprise ent WHERE ent.business_type = 'P' AND ent.id = TRY_CAST(np.PProject AS INT)), np.PProject) AS PProject, np.PCompany,
         ISNULL(ec.name, np.PCompany) AS PCompanyName
       FROM dbo.CancelledCheque cc
       LEFT JOIN dbo.NewPayment np ON np.PPaymentID = cc.PaymentId

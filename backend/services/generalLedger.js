@@ -11,6 +11,7 @@
 
 const { sql } = require("../db");
 const { autoCreateFixedAssetsFromGRN } = require("./fixedAssetAutoAlloc");
+const { normalizePaymentDimensions } = require("./paymentDimensions");
 
 // ── System GL account names (seeded by migration 125) ───────────────────────
 const GL_ACCOUNTS = {
@@ -877,8 +878,11 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (amount <= 0)
     return { posted: false, reason: `Payment ${paymentId} amount is ${amount} (<= 0)` };
 
-  const companyId = parseInt(payment.PCompany, 10);
-  const projectId = parseInt(payment.PProject, 10);
+  // A payment saved from the form holds the company's and project's NAME; the ledger needs their ids (parseInt of a name is NaN,
+  // which posted the entries with no company and no project).
+  const dims = await normalizePaymentDimensions(pool, { PCompany: payment.PCompany, PProject: payment.PProject });
+  const companyId = parseInt(dims.PCompany, 10);
+  const projectId = parseInt(dims.PProject, 10);
   const docNo = payment.DocNo || `PMT-${paymentId}`;
 
   // Loan disbursement (Customer Loan's original "Company to Customer"
