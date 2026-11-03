@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { connectSocket } from "@/lib/socket";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
@@ -16,7 +17,14 @@ export interface SaNotification {
   createdAt: string;
 }
 
+// A notification always lands in the bell, on every page. It pops up as a toast only where people act on it: inside the
+// CRM module and on the Admin Approval Inbox - not on whatever page (Finance, Material ...) happens to be open.
+export const showsNotificationToast = (pathname: string) => /^\/crm(\/|$)/.test(pathname) || pathname.startsWith("/admin/approval/inbox");
+
 export function useSaNotifications() {
+  const { pathname } = useLocation();
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
   const [notifications, setNotifications] = useState<SaNotification[]>([]);
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
@@ -40,7 +48,11 @@ export function useSaNotifications() {
     if (!socket) return;
 
     function onSaNotification(notif: SaNotification) {
-      toast.info(notif.title, { description: notif.body ?? undefined });
+      // The top bar mounts the bell twice (desktop and phone layouts), so this runs twice per notification: one id,
+      // one toast.
+      if (showsNotificationToast(pathRef.current)) {
+        toast.info(notif.title, { id: `sa-notification-${notif.id}`, description: notif.body ?? undefined });
+      }
       setNotifications((prev) => [notif, ...prev]);
     }
 

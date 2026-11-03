@@ -963,6 +963,7 @@
 [data-module="crm"]              { --mod-from: #1990e6; --mod-via: #3c8bec; --mod-to: #5f8df2; --mod-shadow: rgba(25,144,230,.28); }
 [data-module="maintenance"]      { --mod-from: #88a512; --mod-via: #8fcc14; --mod-to: #8ced1d; --mod-shadow: rgba(136,165,18,.28); }
 [data-module="hr-payroll"]       { --mod-from: #ca19e6; --mod-via: #ec3cec; --mod-to: #f25fde; --mod-shadow: rgba(202,25,230,.28); }
+[data-module="legal"]            { --mod-from: #7c4a2e; --mod-via: #a06a3f; --mod-to: #c48e5c; --mod-shadow: rgba(124,74,46,.28); }
 [data-module="records"]          { --mod-from: #e61919; --mod-via: #ec533c; --mod-to: #f2865f; --mod-shadow: rgba(230,25,25,.28); }
 [data-module="admin"]            { --mod-from: #1957e6; --mod-via: #3c59ec; --mod-to: #5f64f2; --mod-shadow: rgba(25,87,230,.28); }
 
@@ -1029,10 +1030,13 @@
   overflow-wrap: normal;
   word-break: keep-all;
 }
+/* A table nested in a cell (the Trial Balance entries under an account) has cells of its own that carry these classes:
+   those cells stay table cells — as inline-blocks they dropped out of their columns (debit and credit ended up side by
+   side under "Debit", the narration under "Credit"). So the two layout rules below skip td / th / tr. */
 /* …but never wider than their cell: an over-long code / reference / pill is
    cut with "…" (the hover tooltip shows it in full) instead of spilling
    over the neighbouring column. */
-:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"], time):not(:empty) {
+:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"], time):not(td, th, tr):not(:empty) {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1040,7 +1044,7 @@
 }
 /* Inline-block for spans and pills only: a plain div / p is its own line (a number over its date), and inline
    it ran into the line above. */
-:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"]):not(:is(.flex, .inline-flex, .grid)):not(:empty):not(:has(> .h-full)):not(:is(div, p):not(.rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"])) {
+:is(main, [role="dialog"]) table td :is(.font-mono, .tabular-nums, .rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"]):not(td, th, tr):not(:is(.flex, .inline-flex, .grid)):not(:empty):not(:has(> .h-full)):not(:is(div, p):not(.rounded-full, .rounded, .rounded-md, .rounded-lg, [class*="badge"])) {
   display: inline-block;
 }
 /* Flex pills (icon + text): let the text part shrink and truncate too. */
@@ -1381,6 +1385,18 @@
 }
 .crm-dialog[class*="dlg-sticky"] :is([data-dlg-head], [data-dlg-foot]) {
   background: hsl(var(--card));
+}
+/* Phones: a dialog takes the whole screen less a small margin, whatever height cap the page gave it, so its
+   content is never cut short; wide content (tables, item grids) scrolls sideways inside it instead of being
+   clipped. The bottom bar steps aside while a dialog is open (MobileNav). */
+@media (max-width: 639px) {
+  .dlg-sticky {
+    width: calc(100% - 1rem) !important;
+    max-width: calc(100% - 1rem) !important;
+    max-height: calc(100dvh - 1rem) !important;
+  }
+  .dlg-sticky table { min-width: max-content; }
+  .dlg-sticky :has(> table) { overflow-x: auto; }
 }
 /* The × lives in a zero-height sticky strip at the top of the scroll box. */
 .dlg-close-anchor {
@@ -2631,4 +2647,18 @@ select[aria-hidden="true"] {
 [data-theme="bw"] .app-sidebar .hover\:bg-primary\/10:hover,
 [data-theme="bw"] .app-sidebar [class*="hover:bg-"]:hover {
     background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Legal — land enquiry rows tinted by status (LandEnquiryPage). Plain classes so they always ship. */
+.legal-enq-review    { background-color: rgba(14,165,233,.07);  box-shadow: inset 3px 0 0 #0ea5e9; }
+.legal-enq-interest  { background-color: rgba(16,185,129,.08);  box-shadow: inset 3px 0 0 #10b981; }
+.legal-enq-hold      { background-color: rgba(245,158,11,.10);  box-shadow: inset 3px 0 0 #f59e0b; }
+.legal-enq-rejected  { background-color: rgba(244,63,94,.08);   box-shadow: inset 3px 0 0 #f43f5e; color: hsl(var(--muted-foreground)); }
+.legal-enq-converted { background-color: rgba(124,74,46,.07);   box-shadow: inset 3px 0 0 #7c4a2e; }
+
+/* Legal — "Download PDF" on a land's full details prints only that sheet. */
+@media print {
+  body.legal-printing * { visibility: hidden; }
+  body.legal-printing .legal-print, body.legal-printing .legal-print * { visibility: visible; }
+  body.legal-printing .legal-print { position: absolute; inset: 0 auto auto 0; width: 100%; background: #fff; color: #111; }
 }

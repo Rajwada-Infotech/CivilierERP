@@ -52,7 +52,7 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
   };
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-background/80 backdrop-blur-sm p-0 sm:p-4">
+    <BodyPortal><div className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-background/80 backdrop-blur-sm p-0 sm:p-4">
       <motion.div
         initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}

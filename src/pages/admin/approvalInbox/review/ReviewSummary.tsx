@@ -58,6 +58,7 @@ export function ReviewSummary({ r }: { r: ApprovalReviewState }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
           <FormField label={usesRungDetail ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
           {!hidePartyField && <FormField label="Party" value={party} />}
+          {item.CompanyName && <FormField label="Company" value={item.CompanyName} />}
           {item.ProjectName && <FormField label="Project" value={item.ProjectName} />}
           <FormField label="Created By" value={item.CreatedBy || "—"} />
           {usesRungDetail ? (

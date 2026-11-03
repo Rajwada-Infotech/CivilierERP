@@ -1,5 +1,7 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM node:22-alpine AS builder
+# Node 24, as CI builds with: eslint's @humanfs packages need >=24 (a Node 22 install printed EBADENGINE warnings).
+# Only this stage changes; it just builds the static site that nginx serves below.
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 

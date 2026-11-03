@@ -20,7 +20,11 @@ import { SheetShell, SheetMark, statusTone, Dimension } from "@/components/sheet
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { toast } from "sonner";
-import { formatINR } from "@/utils/formatCurrency";
+import { formatINR as formatINRWhole } from "@/utils/formatCurrency";
+
+// Entries are recorded to the paisa, so this page shows them that way everywhere (it rounded ₹29.50 to ₹30). Same as the
+// Payment and Journal Voucher pages.
+const formatINR = (value: unknown, options?: { decimals?: number }) => formatINRWhole(value, { decimals: 2, ...options });
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import {
@@ -61,6 +65,7 @@ import {
   CornerDownRight,
 } from "lucide-react";
 import { DateInput } from "@/components/ui/date-input";
+import { fmtIstDateTime, parseServerUtc } from "@/lib/istTime";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -69,12 +74,15 @@ function fmt(d: string | null | undefined): string {
   try { return format(parseISO(d), "dd MMM yyyy"); } catch { return d; }
 }
 
+// When an entry was ticked clear. The server stores UTC and sends it with no zone marker, so it is read as UTC and shown
+// in India time whatever the device's own timezone is (parseISO read it as the device's local time).
 function fmtDT(d: string | null | undefined): { date: string; time: string } {
   if (!d) return { date: "—", time: "" };
-  try {
-    const parsed = parseISO(d);
-    return { date: format(parsed, "dd MMM yyyy"), time: format(parsed, "hh:mm a") };
-  } catch { return { date: d, time: "" }; }
+  if (!parseServerUtc(d)) return { date: d, time: "" };
+  return {
+    date: fmtIstDateTime(d, { day: "2-digit", month: "short", year: "numeric" }),
+    time: fmtIstDateTime(d, { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase(),
+  };
 }
 
 function isCleared(e: BrsEntry): boolean {
@@ -182,7 +190,7 @@ function BounceModal({ entry, onClose, onConfirm, saving }: BounceModalProps) {
   });
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         {/* Header */}
@@ -310,7 +318,8 @@ function ClearModal({ entry, onClose, onConfirm, saving }: ClearModalProps) {
   const [bankClearingDate, setBankClearingDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+    // At the dialogs' layer (z-60), under pop-overs (z-70): at z-9999 the date picker's calendar opened behind the modal.
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="sheet-frame relative w-full max-w-md p-6 space-y-5" style={{ margin: 0 }} onKeyDown={preventEnterSubmit}>
         <div className="flex items-start gap-3">

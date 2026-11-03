@@ -2098,7 +2098,7 @@ export default function ReceivedPaymentPage() {
       {/* ── View Receipt Modal ───────────────────────────────────────────────── */}
       {viewingPayment && (
         <BodyPortal><div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm bw-modal-topmost"
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm bw-modal-topmost"
           onClick={() => setViewingPayment(null)}
         >
           <div

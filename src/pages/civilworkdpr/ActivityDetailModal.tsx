@@ -83,6 +83,7 @@ import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
 import { DateInput } from "@/components/ui/date-input";
+import { fmtIstDateTime, fmtIstIso } from "@/lib/istTime";
 
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "comments" | "history";
 
@@ -113,13 +114,7 @@ const CARRIED_FORWARD_NOTE = "Carried forward from previous After";
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtIstDateTime(iso);
 }
 
 // Best-effort — geolocation is a nice-to-have on a photo, never a blocker
@@ -978,7 +973,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
                 <p className="text-foreground/90 whitespace-pre-wrap break-words">{e.remarks}</p>
                 <p className="text-muted-foreground/80 truncate">
                   {e.loggedBy || "—"} ·{" "}
-                  {new Date(e.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  {fmtIstDateTime(e.loggedAt, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>
             ))}
@@ -1147,7 +1142,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
                           : "Updated"}
                     </span>
                     <span className="text-muted-foreground shrink-0">
-                      {new Date(entry.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      {fmtIstDateTime(entry.loggedAt, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     </span>
                   </div>
                   {entry.remarks && (
@@ -1242,7 +1237,7 @@ const fmtLongDate = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 };
-const fmtClock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+const fmtClock = (iso: string) => fmtIstDateTime(iso, { hour: "2-digit", minute: "2-digit" });
 
 function DailyLogPhotoGroup({
   label,
@@ -1322,7 +1317,7 @@ function DailyLogTab({ rungId }: { rungId: number }) {
   const updatesByDay = useMemo(() => {
     const m = new Map<string, ProgressLogEntry[]>();
     [...progressLog].reverse().forEach((e) => {
-      const k = dayKey(e.loggedAt);
+      const k = fmtIstIso(e.loggedAt).slice(0, 10); // the IST day it happened on, not the UTC one
       m.set(k, [...(m.get(k) ?? []), e]);
     });
     return m;

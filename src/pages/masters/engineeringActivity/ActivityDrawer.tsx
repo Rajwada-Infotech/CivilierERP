@@ -70,7 +70,7 @@ export const ActivityDrawer: React.FC<{ record: DbActivity; groupName?: string; 
   return (
     <>
       <BodyPortal>
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <div className="fixed inset-0 z-[70] flex justify-end">
           <div className="absolute inset-0 bg-black/30" onClick={onClose} />
           <div className="relative w-full max-w-sm bg-card flex flex-col animate-in slide-in-from-right duration-200" style={{ borderLeft: RULE }}>
             <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: RULE }}>

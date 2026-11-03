@@ -55,15 +55,19 @@ const SystemMaintenance = () => {
   const [endsAtInput, setEndsAtInput] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [startIn, setStartIn] = useState(2);
+  // "unavailable" = the plain 404 page (cloud bill unpaid): holds everyone at once, no countdown or end time.
+  const [variant, setVariant] = useState<"maintenance" | "unavailable">("maintenance");
+  const is404 = variant === "unavailable";
 
   // Start the form from what is live, so changing the end time is a small edit.
   useEffect(() => {
     if (state?.active) {
+      setVariant(state.variant === "unavailable" ? "unavailable" : "maintenance");
       setTitle(state.title ?? "");
       setMessage(state.message ?? "");
       setEndsAtInput(state.endsAt ? toIstInputValue(new Date(state.endsAt)) : "");
     }
-  }, [state?.active, state?.title, state?.message, state?.endsAt]);
+  }, [state?.active, state?.variant, state?.title, state?.message, state?.endsAt]);
 
   const endsAt = fromIstInputValue(endsAtInput);
   const endError =
@@ -71,13 +75,22 @@ const SystemMaintenance = () => {
 
   const apply = useMutation({
     mutationFn: (active: boolean) =>
-      setMaintenanceMode({ active, title, message, endsAt: active && endsAt ? endsAt.toISOString() : null, startInMinutes: startIn }),
+      setMaintenanceMode({
+        active,
+        variant,
+        title,
+        message,
+        endsAt: active && !is404 && endsAt ? endsAt.toISOString() : null,
+        startInMinutes: is404 ? 0 : startIn,
+      }),
     onSuccess: (next) => {
       qc.setQueryData(["system-maintenance"], next);
       toast.success(
         !next.active
-          ? "Maintenance is over. Everyone can sign in again."
-          : next.enforced
+          ? "Switched off. Everyone can sign in again."
+          : next.variant === "unavailable"
+            ? "404 page is on. Everyone except super admins sees a 404 page."
+            : next.enforced
             ? "Maintenance is on. Everyone except super admins is held on the Maintenance page."
             : "Maintenance announced. Everyone sees a countdown and is held when it reaches zero.",
       );
@@ -97,7 +110,7 @@ const SystemMaintenance = () => {
       <SheetShell
         eyebrow="CivilierERP · Admin"
         title="System maintenance"
-        subtitle="Hold everyone except super admins on a Maintenance page while you work, and tell them when it will be over."
+        subtitle="Hold everyone except super admins on a Maintenance page while you work, or on a plain 404 page, and let them back in when you switch it off."
       >
         {isLoading || !state ? (
           <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
@@ -114,14 +127,16 @@ const SystemMaintenance = () => {
                   {!state.active ? (
                     <SheetMark text="System is live" tone="done" />
                   ) : state.enforced ? (
-                    <SheetMark text="Maintenance is on" tone="stopped" />
+                    <SheetMark text={state.variant === "unavailable" ? "404 page is on" : "Maintenance is on"} tone="stopped" />
                   ) : (
                     <SheetMark text="Maintenance announced — not started yet" tone="waiting" />
                   )}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {state.active
-                    ? !state.enforced && state.startsAt
+                    ? state.variant === "unavailable"
+                      ? `Everyone except super admins sees a 404 page${state.updatedBy ? ` · switched on by ${state.updatedBy}` : ""}`
+                      : !state.enforced && state.startsAt
                       ? `Everyone is held from ${formatIst(state.startsAt)}${state.endsAt ? ` · expected back ${formatIst(state.endsAt)}` : ""}`
                       : state.endsAt
                       ? `Expected back ${formatIst(state.endsAt)}${state.updatedBy ? ` · started by ${state.updatedBy}` : ""}`
@@ -137,7 +152,7 @@ const SystemMaintenance = () => {
                   className={`${KEY} h-9 px-4 bg-foreground text-card border border-foreground`}
                 >
                   {apply.isPending ? <Loader2 size={15} className="animate-spin" /> : <Power size={15} />}
-                  End maintenance now
+                  {state.variant === "unavailable" ? "Switch off 404 page" : "End maintenance now"}
                 </button>
               )}
             </div>
@@ -145,13 +160,30 @@ const SystemMaintenance = () => {
             <div className="grid gap-4 bg-card p-4" style={{ border: RULE }}>
               <p className={`${HEAD} pb-3 -mx-4 px-4`} style={{ borderBottom: RULE }}>{state.active ? "Change what people see" : "What people will see"}</p>
 
+              <div className="grid gap-1.5 text-sm">
+                <span className={LBL}>Page shown</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" aria-pressed={!is404} onClick={() => setVariant("maintenance")} className={chip(!is404)}>
+                    Maintenance page
+                  </button>
+                  <button type="button" aria-pressed={is404} onClick={() => setVariant("unavailable")} className={chip(is404)}>
+                    404 page (cloud payment)
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {is404
+                    ? "Everyone except super admins sees a plain 404 page straight away - no countdown and no end time. Use it while the cloud bill is unpaid."
+                    : "Everyone except super admins sees the Maintenance page with your message and, if you set one, a countdown."}
+                </p>
+              </div>
+
               <label className="grid gap-1.5 text-sm">
                 <span className={LBL}>Heading</span>
                 <input
                   className={inp}
                   value={title}
                   maxLength={120}
-                  placeholder="We're upgrading CivilierERP"
+                  placeholder={is404 ? "Page not found" : "We're upgrading CivilierERP"}
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </label>
@@ -163,11 +195,12 @@ const SystemMaintenance = () => {
                   className={inp}
                   value={message}
                   maxLength={500}
-                  placeholder="The system is offline for a short while so we can make it better. Everything you saved is safe."
+                  placeholder={is404 ? "The page you are looking for is not available right now." : "The system is offline for a short while so we can make it better. Everything you saved is safe."}
                   onChange={(e) => setMessage(e.target.value)}
                 />
               </label>
 
+              {!is404 && (
               <div className="grid gap-1.5 text-sm">
                 <label htmlFor="maintenance-ends" className={LBL}>
                   Expected back <span className="normal-case tracking-normal font-normal">(India time, optional)</span>
@@ -199,8 +232,9 @@ const SystemMaintenance = () => {
                   </p>
                 )}
               </div>
+              )}
 
-              {!state.active && (
+              {!state.active && !is404 && (
                 <div className="grid gap-1.5 text-sm">
                   <span className={LBL}>Hold everyone</span>
                   <div className="flex flex-wrap items-center gap-2">
@@ -232,7 +266,7 @@ const SystemMaintenance = () => {
                   className={`${KEY} h-9 px-5 border ${state.active ? "bg-foreground text-card border-foreground" : "bg-destructive text-destructive-foreground border-destructive"}`}
                 >
                   {apply.isPending ? <Loader2 size={15} className="animate-spin" /> : <Construction size={15} />}
-                  {state.active ? "Update message and end time" : "Start maintenance"}
+                  {state.active ? (is404 ? "Update 404 page" : "Update message and end time") : is404 ? "Show 404 page to everyone" : "Start maintenance"}
                 </button>
               </div>
             </div>
@@ -245,19 +279,21 @@ const SystemMaintenance = () => {
           <AlertDialogHeader>
             <div className="pb-3" style={{ borderBottom: RULE }}>
               <p className={LBL}>System maintenance</p>
-              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">Start maintenance</AlertDialogTitle>
+              <AlertDialogTitle className="font-heading text-lg font-bold tracking-tight mt-1">{is404 ? "Show 404 page" : "Start maintenance"}</AlertDialogTitle>
             </div>
             <AlertDialogDescription>
-              {startIn === 0
-                ? "Every user and role except super admin will be held on the Maintenance page straight away, on the web and in the mobile apps. Anything they have not saved is lost."
-                : `Every user and role except super admin sees a countdown now and is held on the Maintenance page in ${startIn} minutes, on the web and in the mobile apps.`}
-              {endsAt ? ` They will be told to expect the system back ${formatIst(endsAt.toISOString())}.` : " No end time is set."}
+              {is404
+                ? "Every user and role except super admin will see a 404 page straight away, on the web and in the mobile apps, and cannot sign in. Anything they have not saved is lost. Only you switch it off again."
+                : startIn === 0
+                  ? "Every user and role except super admin will be held on the Maintenance page straight away, on the web and in the mobile apps. Anything they have not saved is lost."
+                  : `Every user and role except super admin sees a countdown now and is held on the Maintenance page in ${startIn} minutes, on the web and in the mobile apps.`}
+              {!is404 && (endsAt ? ` They will be told to expect the system back ${formatIst(endsAt.toISOString())}.` : " No end time is set.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="pt-3" style={{ borderTop: RULE }}>
             <AlertDialogCancel className={`${KEY} h-9 px-4 rounded-none border border-foreground text-foreground bg-card hover:bg-primary/10`}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => apply.mutate(true)} className={`${KEY} h-9 px-5 rounded-none !bg-destructive !text-destructive-foreground border border-destructive hover:!bg-destructive/90`}>
-              Start maintenance
+              {is404 ? "Show 404 page" : "Start maintenance"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

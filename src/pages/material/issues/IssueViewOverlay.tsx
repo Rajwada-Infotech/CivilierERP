@@ -30,10 +30,10 @@ export function IssueViewOverlay({ m }: { m: IssuesState }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4"
+      className="fixed inset-0 z-[70] flex items-stretch sm:items-center justify-center bg-black/60 p-0 sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div className="sheet-frame bg-card w-full max-w-4xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true">
+      <div className="sheet-frame bg-card w-full max-w-4xl h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-y-auto" style={{ margin: 0 }} role="dialog" aria-modal="true">
 
         {/* Header */}
         <div className="sticky top-0 bg-card z-10" style={{ borderBottom: RULE }}>

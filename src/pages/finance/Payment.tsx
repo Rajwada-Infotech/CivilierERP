@@ -29,7 +29,11 @@ import { getCompanyById } from "@/api/enterpriseApi";
 import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
-import { formatINR } from "@/utils/formatCurrency";
+import { formatINR as formatINRWhole } from "@/utils/formatCurrency";
+
+// A payment is recorded to the paisa (₹29.50), so this page shows it that way everywhere — the list used to round it to
+// ₹30 while the posting view showed ₹29.50. Same fix as the Journal Voucher page.
+const formatINR = (value: unknown, options?: { decimals?: number }) => formatINRWhole(value, { decimals: 2, ...options });
 import { printStatusLabel } from "@/utils/printStatus";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -4845,7 +4849,7 @@ const Payment: React.FC = () => {
       {/* Payment detail view modal */}
       {viewingRec && (
         <BodyPortal><div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => {
             setViewingRec(null);
             setViewingChain(null);
@@ -5592,7 +5596,9 @@ const Payment: React.FC = () => {
                           const tdsAmt = isPayment ? (entry.tdsAmount ?? 0) : 0;
                           const rows = isPayment
                             ? [
-                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const, amount: entry.amount },
+                                ...((entry.accounts?.expenseHeads?.length ?? 0) > 0
+                                  ? entry.accounts!.expenseHeads!.map((h: { label: string; code?: string | null; amount: number }) => ({ label: h.label, code: h.code ?? undefined, side: "debit" as const, amount: h.amount }))
+                                  : [{ label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const, amount: entry.amount }]),
                                 { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const, amount: entry.amount - tdsAmt },
                                 ...(tdsAmt > 0
                                   ? [{ label: entry.accounts?.tdsPayable?.label ?? "TDS Payable A/c", code: entry.accounts?.tdsPayable?.code, side: "credit" as const, amount: tdsAmt }]
@@ -5799,7 +5805,7 @@ const Payment: React.FC = () => {
 
       {/* Delete confirm */}
       {deleteId && (
-        <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="sheet-frame w-full max-w-sm p-6 space-y-4" style={{ margin: 0 }}>
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-lg bg-destructive/10 shrink-0">

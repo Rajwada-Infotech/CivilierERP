@@ -13,6 +13,7 @@ import {
   civilWorkDprSetupItems,
   salesAutomationSetupItems,
   crmSetupItems,
+  legalSetupItems,
   adminSetupItems,
 } from "./setupMenus";
 import { Grip } from "lucide-react";
@@ -59,6 +60,7 @@ import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
+import { legalNavItems } from "./sidebars/LegalSidebar";
 import type {
   NavItem as DesktopNavItem,
   SubItem as DesktopSubItem,
@@ -177,6 +179,8 @@ export const MobileNav: React.FC = () => {
       return { items: salesSetupItems, label: "Sales", available: true };
     if (activeModule === "hr-payroll")
       return { items: hrPayrollSetupItems, label: "HR and Payroll", available: true };
+    if (activeModule === "legal")
+      return { items: legalSetupItems, label: "Legal", available: true };
     if (activeModule === "sales-automation")
       return {
         items: salesAutomationSetupItems,
@@ -271,6 +275,8 @@ export const MobileNav: React.FC = () => {
         return adaptItems(crmNavItems as DesktopNavItem[]);
       case "loan":
         return adaptItems(loanNavItems as DesktopNavItem[]);
+      case "legal":
+        return adaptItems(legalNavItems as DesktopNavItem[]);
       default:
         return [];
     }
@@ -342,12 +348,13 @@ export const MobileNav: React.FC = () => {
 
   const visibleSetupItems = setupConfig.items.filter((it) => !it.pageKey || canAccessPage(it.pageKey));
 
-  // Open the group that holds the current page, so the menu opens where you are.
+  // Open the group that holds the current page, so the menu opens where you are. The module's Setup pages are
+  // listed open every time — they are few, and hiding them behind a tap made them easy to miss.
   useEffect(() => {
     if (sheet !== "menu") return;
     const g = navItems.find((it) => it.children?.some((c) => c.path === location.pathname));
     setExpandedGroup(g ? g.label : null);
-    setShowSetup(visibleSetupItems.some((it) => it.path === location.pathname));
+    setShowSetup(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheet]);
 
@@ -861,6 +868,12 @@ const MOBILE_NAV_CSS = `
 .mn-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--mn-paper); border-top: 1.5px solid var(--mn-ink); }
 .mn-bar .mn-bar-row { display: grid; height: 64px; }
+/* While a pop-up is open (a dialog, or a page's own full-screen overlay) the bar steps aside, so it never covers
+   the bottom of the pop-up's content. The menu's own sheet is a dialog too, and keeps the bar. */
+body:has([role="dialog"]:not(.mn-sheet)) .mn-bar,
+body:has([role="alertdialog"]) .mn-bar,
+body:has(div.fixed.inset-0[class*="bg-black/"]:not([style*="opacity: 0"])) .mn-bar,
+body:has(div.fixed.inset-0[class*="bg-background/"]:not([style*="opacity: 0"])) .mn-bar { display: none; }
 .mn-bar .mn-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: var(--mn-graphite); transition: transform .12s; }
 .mn-bar .mn-tab:active { transform: scale(0.95); }
 .mn-bar .mn-tab + .mn-tab { border-left: 1px solid var(--mn-rule-soft); }

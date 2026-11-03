@@ -120,6 +120,7 @@ export const MODULE_SHORTCUTS: ModuleShortcut[] = [
   { code: "KeyR", keyLabel: "R", module: "records", label: "Records" },
   { code: "KeyM", keyLabel: "M", module: "maintenance", label: "Maintenance" },
   { code: "KeyH", keyLabel: "H", module: "hr-payroll", label: "HR & Payroll" },
+  { code: "KeyL", keyLabel: "L", module: "legal", label: "Legal" },
   { code: "KeyA", keyLabel: "A", module: "admin", label: "Admin" },
 ];
 

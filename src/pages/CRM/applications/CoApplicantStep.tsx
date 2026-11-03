@@ -12,6 +12,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { CO_APPLICANT_API, fetchCustomers, inputCls, labelCls, KEY_INK } from "./config";
 import { isValidPhone, PHONE_HINT } from "@/lib/phone";
+import { readCrmDraft, writeCrmDraft, clearCrmDraft } from "@/lib/crmDraftStore";
 
 // ── Step 4: Co-Applicant(s) ─────────────────────────────────────────────────────
 // Captured directly against the Application (dbo.CrmCoApplicant, ApplicationId
@@ -56,26 +57,21 @@ export const CoApplicantStep: React.FC<{
   // the applicant's (e.g. re-opening a previously saved entry).
   const [sameAsApplicant, setSameAsApplicant] = useState(false);
 
-  // A co-applicant being typed but not yet saved is kept in this browser and
-  // reopened next time (cleared by Save or Cancel).
+  // A co-applicant being typed but not yet saved is kept for this tab (in memory, never in browser storage: it holds PAN,
+  // Aadhaar, date of birth ...) and reopened if the step is left and come back to (cleared by Save or Cancel).
   const draftKey = `crm-coapp-draft:${applicationId}`;
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(draftKey);
-      if (!raw) return;
-      const d = JSON.parse(raw);
-      setDraft({ ...emptyCoApplicant(), ...d.draft });
-      setEditingId(d.editingId);
-      setSameAsApplicant(!!d.sameAsApplicant);
-      toast.info("Unsaved co-applicant entry restored");
-    } catch { /* storage unavailable */ }
+    const d = readCrmDraft<{ editingId: number | "new" | null; draft: any; sameAsApplicant: boolean }>(draftKey);
+    if (!d) return;
+    setDraft({ ...emptyCoApplicant(), ...d.draft });
+    setEditingId(d.editingId);
+    setSameAsApplicant(!!d.sameAsApplicant);
+    toast.info("Unsaved co-applicant entry restored");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey]);
   useEffect(() => {
     if (editingId === null) return;
-    const t = setTimeout(() => {
-      try { localStorage.setItem(draftKey, JSON.stringify({ editingId, draft, sameAsApplicant })); } catch { /* storage unavailable */ }
-    }, 500);
+    const t = setTimeout(() => writeCrmDraft(draftKey, { editingId, draft, sameAsApplicant }), 500);
     return () => clearTimeout(t);
   }, [draftKey, editingId, draft, sameAsApplicant]);
 
@@ -99,7 +95,7 @@ export const CoApplicantStep: React.FC<{
       (co.Pincode || "").trim() === (applicantPincode || "").trim()
     );
   };
-  const cancelEdit = () => { try { localStorage.removeItem(draftKey); } catch { /* storage unavailable */ } setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
+  const cancelEdit = () => { clearCrmDraft(draftKey); setEditingId(null); setDraft(emptyCoApplicant()); setSameAsApplicant(false); };
   // An existing customer can be picked as a co-applicant: their details are
   // filled in and they are linked, never duplicated (the server also refuses
   // the main applicant or someone already on this application).

@@ -139,6 +139,15 @@ export const MODULES: ModuleDef[] = [
     bg: "rgba(202,25,230,0.20)",
     ringRgb: "202,25,230",
   },
+  {
+    id: "legal",
+    icon: ModuleIcons.legal,
+    label: "Legal",
+    desc: "Land records & deed registration",
+    color: "#7c4a2e",
+    bg: "rgba(124,74,46,0.20)",
+    ringRgb: "124,74,46",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records",

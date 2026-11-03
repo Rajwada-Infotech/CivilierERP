@@ -11,6 +11,7 @@ export const MAINTENANCE_EVENT = "maintenance:enforced";
 
 interface MaintenanceBody {
   code?: string;
+  variant?: "maintenance" | "unavailable";
   title?: string | null;
   message?: string | null;
   startedAt?: string | null;
@@ -38,6 +39,7 @@ export async function sendToMaintenancePage(response: Response): Promise<boolean
       const state: MaintenanceState = {
         active: true,
         enforced: true,
+        variant: body.variant === "unavailable" ? "unavailable" : "maintenance",
         title: body.title ?? null,
         message: body.message ?? null,
         startedAt: body.startedAt ?? null,

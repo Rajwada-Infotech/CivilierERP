@@ -61,7 +61,7 @@ function DisableDialog({
   };
 
   return (
-    <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <BodyPortal><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-card p-6 w-full max-w-sm mx-4" style={{ border: "1.5px solid hsl(var(--foreground))", boxShadow: "6px 6px 0 hsl(var(--foreground) / 0.14)" }}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">

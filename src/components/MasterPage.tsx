@@ -203,6 +203,13 @@ interface MasterPageProps {
    */
   onPrint?: (row: RecordWithId) => void;
   rowActions?: (row: RecordWithId, data: RecordWithId[]) => React.ReactNode;
+  /** Clicking a row (outside its buttons, links and inputs) calls this, e.g. to show the row's details. */
+  onRowClick?: (row: RecordWithId) => void;
+  /** Extra classes for a row, e.g. a tint by status. */
+  rowClassName?: (row: RecordWithId) => string | undefined;
+  /** Rows with an Active / Inactive `status` get Active · Inactive · All tabs above the table, showing Active
+   *  first, so inactive records never sit among the live ones unnoticed. */
+  statusTabs?: boolean;
   /** Permission flags — when omitted everything is visible (default-open) */
   canCreate?: boolean;
   canEdit?: boolean;
@@ -227,6 +234,12 @@ interface MasterPageProps {
   isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
   /** Form field grid columns at the md breakpoint. Defaults to 2. */
   gridCols?: 2 | 3;
+  /**
+   * Lay out by the space this page actually has rather than the screen size: the form fits as many columns as
+   * its width allows and the table toolbar wraps under the title when narrow. For pages that share the screen
+   * with side panels (Legal). Off by default, so other pages are unchanged.
+   */
+  fluid?: boolean;
   /**
    * When true, the Add form starts collapsed behind a "+ New Entry" button
    * instead of always being expanded -- useful for forms with many fields
@@ -276,14 +289,18 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   viewConfig,
   onPrint,
   rowActions,
+  onRowClick,
+  rowClassName,
   canCreate = true,
   canEdit = true,
   canDelete = true,
   canExport = true,
   gridCols = 2,
+  fluid = false,
   isRowLocked,
   isDeleteLocked,
   collapsibleAddForm = false,
+  statusTabs = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -335,6 +352,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const currentSection = tabbed ? (sectionGroups.find((g) => g.key === activeSection) ?? sectionGroups[0]) : null;
   const currentSectionIdx = currentSection ? sectionGroups.indexOf(currentSection) : -1;
   const [search, setSearch] = useState("");
+  const [statusView, setStatusView] = useState<"active" | "inactive" | "all">("active");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -620,7 +638,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const canSave = fields.every((f) => !f.required || isFieldFilled(f, form[f.name]));
 
+  const hasStatus = statusTabs && data.some((row) => typeof row.status === "boolean");
+  const statusCount = {
+    active: data.filter((row) => row.status === true).length,
+    inactive: data.filter((row) => row.status === false).length,
+    all: data.length,
+  };
   const filtered = data.filter((row) => {
+    if (hasStatus && statusView !== "all" && row.status !== (statusView === "active")) return false;
     if (!search) return true;
     return Object.values(row).some((v) =>
       String(v).toLowerCase().includes(search.toLowerCase()),
@@ -753,7 +778,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               })}
             </div>
           )}
-          <div className={`grid ${tabbed ? "grid-cols-2 mp-tabbed" : "grid-cols-1"} gap-x-3 sm:gap-x-4 gap-y-3.5 ${gridCols === 3 ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2"}`}>
+          <div
+            className={fluid && !tabbed ? "grid gap-x-3 sm:gap-x-4 gap-y-3.5" : `grid ${tabbed ? "grid-cols-2 mp-tabbed" : "grid-cols-1"} gap-x-3 sm:gap-x-4 gap-y-3.5 ${gridCols === 3 ? "md:grid-cols-2 xl:grid-cols-3" : "md:grid-cols-2"}`}
+            style={fluid && !tabbed ? { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${gridCols === 3 ? "15rem" : "18rem"}), 1fr))` } : undefined}
+          >
             {fields.map((field) => {
               if (tabbed && currentSection && (field.type === "section" || sectionOf[field.name] !== currentSection.key)) return null;
               const isFullWidth =
@@ -761,7 +789,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               return (
                 <div
                   key={field.name}
-                  className={isFullWidth ? (gridCols === 3 ? `${tabbed ? "col-span-2 " : ""}md:col-span-2 xl:col-span-3` : `${tabbed ? "col-span-2 " : ""}md:col-span-2`) : "min-w-0"}
+                  className={isFullWidth ? (fluid && !tabbed ? "col-span-full" : gridCols === 3 ? `${tabbed ? "col-span-2 " : ""}md:col-span-2 xl:col-span-3` : `${tabbed ? "col-span-2 " : ""}md:col-span-2`) : "min-w-0"}
                 >
                   {field.type !== "toggle" && field.type !== "section" && field.label && (
                     <label className={sx("block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5", "block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5")}>
@@ -998,17 +1026,19 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
         {/* Footer — actions */}
         <div
-          className={sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3")}
+          className={fluid
+            ? sx("flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden", "flex flex-wrap items-center justify-between gap-2 px-4 py-3")
+            : sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3")}
           style={sheet ? { borderTop: RULE } : undefined}
         >
-          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
+          <p className={fluid ? "w-full text-[0.6875rem] text-muted-foreground sm:w-auto sm:min-w-[10rem] sm:flex-1" : "text-[0.6875rem] text-muted-foreground hidden sm:block"}>
             {canSave
               ? sheet ? <SheetMark text="Ready to save" tone="done" /> : <span className="text-emerald-500 font-medium">Ready to save</span>
               : fields.some((f) => f.required)
                 ? "Fill in the required fields to save"
                 : ""}
           </p>
-          <div className="flex items-center gap-2 sm:ml-auto">
+          <div className={fluid ? "flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto" : "flex items-center gap-2 sm:ml-auto"}>
             <button
               onClick={handleReset}
               disabled={!isDirty && editingId === null}
@@ -1036,16 +1066,35 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       {!hideTable && (
         <div className={sx("rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible", "bg-card overflow-visible")} style={sheet ? { border: RULE } : undefined}>
           <div
-            className={sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 overflow-visible")}
+            className={fluid
+              ? sx("flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible", "flex flex-wrap items-center justify-between gap-2 px-4 py-3 overflow-visible")
+              : sx("flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible", "flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 overflow-visible")}
             style={sheet ? { borderBottom: RULE } : undefined}
           >
             {sheet ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <p className="flex items-baseline gap-2.5">
                 <span className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">{title} records</span>
                 <span className="font-heading text-[0.6875rem] tabular-nums text-muted-foreground">{filtered.length}</span>
               </p>
+              {hasStatus && (
+                <div className="inline-flex border border-foreground" role="tablist" aria-label="Show records">
+                  {(["active", "inactive", "all"] as const).map((v, i) => (
+                    <button
+                      key={v}
+                      role="tab"
+                      aria-selected={statusView === v}
+                      onClick={() => setStatusView(v)}
+                      className={`${i ? "border-l border-foreground " : ""}px-2.5 py-1 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors ${statusView === v ? "bg-foreground text-card" : "text-muted-foreground hover:bg-primary/10 hover:text-foreground"}`}
+                    >
+                      {v === "active" ? "Active" : v === "inactive" ? "Inactive" : "All"} <span className="tabular-nums">{statusCount[v]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              </div>
             ) : (
-            <div>
+            <div className={fluid ? "min-w-[9rem]" : undefined}>
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 {title} Records
               </h3>
@@ -1054,7 +1103,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               </p>
             </div>
             )}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className={fluid ? "flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:min-w-[15rem] sm:flex-1" : "flex items-center gap-2 w-full sm:w-auto"}>
               {exportConfig && canExport && (
                 <ExportMenu
                   data={sorted as Record<string, unknown>[]}
@@ -1065,7 +1114,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   disabled={filtered.length === 0}
                 />
               )}
-              <div className="relative flex-1 sm:flex-none">
+              <div className={fluid ? "relative min-w-0 flex-1 sm:max-w-[14rem]" : "relative flex-1 sm:flex-none"}>
                 <Search
                   size={13}
                   className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -1125,7 +1174,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     >
                       {search
                         ? "No records match your search."
-                        : "No records yet. Add one above."}
+                        : hasStatus && data.length > 0
+                          ? `No ${statusView} records. ${statusView === "active" ? "Inactive" : "Active"} ones are under "${statusView === "active" ? "Inactive" : "Active"}".`
+                          : "No records yet. Add one above."}
                     </td>
                   </tr>
                 ) : (
@@ -1147,7 +1198,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     return (
                     <tr
                       key={row._id}
-                      className={sheet ? "" : `hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
+                      className={`${sheet ? "" : `hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}${onRowClick ? " cursor-pointer" : ""}${rowClassName ? ` ${rowClassName(row) ?? ""}` : ""}`}
+                      onClick={onRowClick ? (e) => { if (!(e.target as HTMLElement).closest("button, a, input, select, textarea, label")) onRowClick(row); } : undefined}
                       style={sheet && editingId === row._id ? { boxShadow: "inset 3px 0 0 hsl(var(--primary))" } : undefined}
                     >
                       {columns.map((col) => (
