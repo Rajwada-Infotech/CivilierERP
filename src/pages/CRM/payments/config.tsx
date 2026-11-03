@@ -35,7 +35,7 @@ export const todayStr = () => localDay();
  */
 export const MONEY_STAGE: Record<string, { label: string; tone: "done" | "waiting"; hint: string }> = {
   Adjusted: { label: "Paid", tone: "done", hint: "Settled on this milestone" },
-  Verified: { label: "Verified · on account", tone: "done", hint: "Finance verified the money; it is held On Account and settles on the milestones once the full booking amount is in" },
+  Verified: { label: "Verified", tone: "done", hint: "Finance verified the money; it is held On Account and settles on the milestones once the full booking amount is in" },
   InVerification: { label: "With Finance", tone: "waiting", hint: "Payment entered — waiting for Finance to verify it" },
 };
 

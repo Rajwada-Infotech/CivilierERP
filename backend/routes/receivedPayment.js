@@ -1013,7 +1013,11 @@ router.put("/:id/approve", allowApprover, async (req, res) => {
       // impossible to ever approve a payment past Milestone 1.
       // Entries still waiting for verification count, so Finance can verify
       // a booking's payments in any order (crmOnAccountCoverage.js).
-      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
+      // A cancelled booking's payment goes to its refund (crmPayments.js
+      // holdIfBookingCancelled), so the old schedule's order doesn't apply.
+      const bookingCancelled = targetRow && (await tx.request().input("bid", sql.Int, targetRow.BookingId)
+        .query("SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status = 'Cancelled'")).recordset.length > 0;
+      if (targetRow && !bookingCancelled && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
         const predecessor = await tx.request()
           .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
             SELECT TOP 1 p.MilestoneName
@@ -1138,16 +1142,18 @@ router.put("/:id/reject", allowApprover, async (req, res) => {
   const pool = getPool();
 
   const tx = new sql.Transaction(pool);
+  let rejected = null;
   try {
     await tx.begin();
     const cur = await tx.request().input("id", sql.Int, pid).query(`
-      SELECT RPStatus FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
+      SELECT RPStatus, RPDocNo, RPAmount, RPCreatedBy, CrmBookingId FROM dbo.ReceivedPayment WITH (UPDLOCK, HOLDLOCK)
       WHERE RPPaymentID=@id
     `);
     if (!cur.recordset.length) {
       await tx.rollback();
       return res.status(404).json({ error: "Received payment not found" });
     }
+    rejected = cur.recordset[0];
     const status = cur.recordset[0].RPStatus;
     // A receipt already posted to the ledger must not be silently rejected —
     // that would strand the GL entry. Only Pending can be rejected.
@@ -1191,6 +1197,21 @@ router.put("/:id/reject", allowApprover, async (req, res) => {
     if (mr) await generateMoneyReceiptPdf(pool, mr.Id);
   } catch (mrErr) {
     console.error("[received-payment] Money Receipt PDF regeneration on reject failed:", mrErr.message);
+  }
+
+  // A CRM payment returned by Finance: tell whoever entered it, so it doesn't
+  // just drop out of the booking's "With Finance" list unnoticed.
+  if (rejected?.CrmBookingId) {
+    try {
+      const who = (await pool.request().input("c", sql.NVarChar(150), String(rejected.RPCreatedBy || "")).query(
+        "SELECT TOP 1 u.id FROM dbo.Users u WHERE u.email = @c OR u.name = @c OR CAST(u.id AS NVARCHAR(20)) = @c")).recordset[0];
+      const bk = (await pool.request().input("b", sql.Int, rejected.CrmBookingId).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @b")).recordset[0];
+      await require("../services/notify").emitNotification(pool, who?.id, "crm_payment_returned", "Payment returned by Finance",
+        `${rejected.RPDocNo || "A payment"} of Rs ${Number(rejected.RPAmount || 0).toLocaleString("en-IN")} on ${bk?.BookingNo || "a booking"} was returned${note ? `: ${String(note).slice(0, 200)}` : ""}. Enter it again once corrected.`,
+        rejected.CrmBookingId, "crm_payment");
+    } catch (nErr) {
+      console.error("[received-payment] return notification failed:", nErr.message);
+    }
   }
 
   res.json({ success: true });

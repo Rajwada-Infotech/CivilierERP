@@ -1,10 +1,14 @@
 // Shared by CRM Applications and its wizard steps: the APIs, the empty forms, the list and master-data fetches,
 // status colours and the form styles.
 import { CrmStatus } from "@/constants/crmStatuses";
-import React from "react";
+import React, { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { translateError } from "@/lib/translateError";
 import { statusTone } from "@/components/sheet/Sheet";
-import { CheckCircle2, Clock, XCircle } from "lucide-react";
+import { useSentBackFor, sinceLabel } from "@/components/crm/CrmListToolbar";
+import { CheckCircle2, Clock, CornerUpLeft, RotateCcw, XCircle } from "lucide-react";
 
 export const API = "/api/crm/applications";
 export const CUSTOMER_API = "/api/crm/customers";
@@ -188,3 +192,119 @@ export const inputCls = "w-full h-9 text-sm border border-foreground/40 focus:bo
 export const labelCls = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground block mb-1.5";
 
 export { RULE, RULE_SOFT, LBL, KEY_INK, KEY_LINE, KEY_RED } from "../customers/config";
+
+
+// ── Correcting what Data Review flagged ────────────────────────────────────
+// Which wizard step holds the data each Data Review checklist item checks
+// (crmApplicationChecklist.js CHECKLIST_ITEMS), read from what each step
+// saves. Step 2 (Parking) opens as Extra Charges on a plot sale — the wizard
+// already maps that.
+export const CHECKLIST_ITEM_STEP: Record<string, number> = {
+  ProjectUnitRate: 1, PaymentPlanAmounts: 1, BrokerDetails: 1, SourceAssignment: 1,
+  ParkingExtraCharges: 2,
+  ApplicantKyc: 4,
+  Documents: 6,
+  BankDepositMode: 7,
+};
+export const checklistStep = (itemKey: string | null | undefined) => (itemKey && CHECKLIST_ITEM_STEP[itemKey]) || 1;
+
+/** The application's open flags (Data Review items sent back to it). */
+export function useCorrections(applicationId: number | null | undefined) {
+  const sb = useSentBackFor({ applicationId });
+  const rows = sb?.rows || [];
+  return {
+    flags: rows.filter((r: any) => r.Kind === "review" && r.State === "SentBack"),
+    bounce: rows.find((r: any) => r.Kind === "booking" && r.State === "SentBack") || null,
+    resent: rows.filter((r: any) => r.State === "Resubmitted"),
+  };
+}
+
+/**
+ * Shown on the wizard while the application has something sent back: what
+ * was flagged on THIS step (reason, who, when) with the existing "send for
+ * recheck" action beside it, and the flags on other steps as links to them.
+ */
+export function CorrectionBanner({ applicationId, step, stepLabels, onJump }: {
+  applicationId: number | null; step: number; stepLabels: string[]; onJump: (step: number) => void;
+}) {
+  const qc = useQueryClient();
+  const { flags, bounce, resent } = useCorrections(applicationId);
+  const [busy, setBusy] = useState<string | null>(null);
+  if (applicationId == null || (!flags.length && !bounce && !resent.length)) return null;
+
+  const here = flags.filter((f) => checklistStep(f.ItemKey) === step);
+  const elsewhere = flags.filter((f) => checklistStep(f.ItemKey) !== step);
+  const resend = async (f: any) => {
+    setBusy(f.ItemKey);
+    try {
+      // The booking's own resubmit action — the same one its Data Review checklist uses.
+      const r = await fetchWithAuth(`/api/crm/bookings/${f.BookingId}/checklist/${f.ItemKey}/resubmit`, { method: "PUT" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Could not send it for recheck");
+      toast.success(`${f.Item} sent back to the verifier for a recheck`);
+      qc.invalidateQueries({ queryKey: ["crm-sent-back"] });
+      window.dispatchEvent(new Event("approval-action"));
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (!flags.length && !bounce) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 text-xs border border-foreground/30">
+        <RotateCcw size={12} /> {resent.length} correction{resent.length === 1 ? "" : "s"} sent for recheck — waiting for the verifier.
+      </div>
+    );
+  }
+  return (
+    <div className="bg-card text-sm border border-destructive/50" style={{ borderLeft: "3px solid hsl(var(--destructive))" }}>
+      <div className="px-4 pt-3 pb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="inline-flex items-center gap-1.5 font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-destructive">
+          <CornerUpLeft size={12} /> Sent back for correction
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {flags.length ? `${flags.length} item${flags.length === 1 ? "" : "s"} flagged in Data Review` : "Booking approval"}
+          {" — fix it here, then send it for recheck."}
+        </span>
+      </div>
+
+      {bounce && (
+        <div className="px-4 pb-2 text-xs">
+          <span className="font-semibold">Booking approval</span> · “{bounce.Reason || "no reason given"}”
+          <span className="text-muted-foreground"> — {bounce.ByName || "—"}, {sinceLabel(bounce.At)}. Correct the application, then Submit Edits.</span>
+        </div>
+      )}
+
+      {here.length > 0 && (
+        <div className="border-t border-destructive/20">
+          {here.map((f) => (
+            <div key={f.ItemKey} className="px-4 py-2.5 flex flex-wrap items-start justify-between gap-3 border-b border-destructive/10 last:border-0">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium leading-snug">{f.Item}</div>
+                <div className="text-xs mt-0.5">“{f.Reason || "no reason given"}” <span className="text-muted-foreground">— {f.ByName || "—"}, {sinceLabel(f.At)}</span></div>
+              </div>
+              <button type="button" onClick={() => resend(f)} disabled={busy === f.ItemKey}
+                className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground hover:text-card transition-colors disabled:opacity-40">
+                <CheckCircle2 size={11} /> {busy === f.ItemKey ? "Sending…" : "Corrected — send for recheck"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {elsewhere.length > 0 && (
+        <div className="px-4 py-2 border-t border-destructive/20 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground">{here.length ? "Also flagged:" : "Flagged on:"}</span>
+          {elsewhere.map((f) => (
+            <button key={f.ItemKey} type="button" onClick={() => onJump(checklistStep(f.ItemKey))}
+              className="inline-flex items-center gap-1 px-2 h-6 border border-destructive/40 text-destructive hover:bg-destructive/5">
+              {stepLabels[checklistStep(f.ItemKey) - 1] || `Step ${checklistStep(f.ItemKey)}`} — {f.Item.split(/[(,]/)[0].trim()} ›
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -4,11 +4,42 @@ const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageRight } = require("../middleware/requirePageRight");
 const { WELCOME_CALL_DUE_SQL, AGREEMENT_NEEDS_ACTION_SQL, DEMAND_BOOKING_LIVE_SQL, MILESTONE_OVERDUE_SQL } = require("../services/crmAttentionConditions");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
+
+// GET /sent-back — every CRM entry sent back for an update, or corrected and
+// sent in again for a recheck, read from what each flow already records
+// (crmAttentionConditions.sentBackRowsSql). Read-only; scoped to the user's
+// projects. ?path=/crm/... narrows to one page's entries.
+router.get("/sent-back", requireAnyPageRight(["crm-dashboard", "crm-bookings", "crm-applications", "crm-payments"], "view"), async (req, res) => {
+  try {
+    const { sentBackRowsSql, describeSentBack, SENT_BACK, RESUBMITTED } = require("../services/crmAttentionConditions");
+    const scope = req.projectScope ? require("../services/projectScope").projectPredicate(req.projectScope, "r.ProjectId", "AND") : "";
+    const rows = (await getPool().request().query(`
+      SELECT r.* FROM (${sentBackRowsSql()}) r WHERE 1 = 1 ${scope} ORDER BY r.At DESC`)).recordset
+      .map((r) => ({ ...r, ...describeSentBack(r) }))
+      .filter((r) => r.path && (!req.query.path || r.path === req.query.path || r.also === req.query.path));
+    const byPath = {};
+    for (const r of rows) {
+      for (const p of [r.path, r.also].filter(Boolean)) {
+        byPath[p] = byPath[p] || { [SENT_BACK]: 0, [RESUBMITTED]: 0 };
+        byPath[p][r.State] += 1;
+      }
+    }
+    res.json({
+      rows, byPath,
+      sentBack: rows.filter((r) => r.State === SENT_BACK).length,
+      resubmitted: rows.filter((r) => r.State === RESUBMITTED).length,
+      count: rows.length,
+    });
+  } catch (e) {
+    console.error("[crm-dashboard] GET /sent-back error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // GET / — CRM Command Centre dashboard.
 // Accepts optional ?projectId=N to scope all KPIs to a single project.

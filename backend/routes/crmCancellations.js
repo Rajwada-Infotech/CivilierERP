@@ -696,34 +696,22 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await advanceApplicationStatus(tx, lockedBooking.ApplicationId, CrmStatus.CANCELLED, "BookingCancelled",
         "Application cancelled — its booking was cancelled", actorId(req), { force: true });
 
-      // Reject any money receipts still in Pending verification — without this a
-      // bank teller could later verify and credit the payment to a dead booking,
-      // overstating the refund liability and creating a floating unreconciled balance.
+      // Money receipts not yet sent to Finance close with the booking. One that
+      // IS with Finance (ReceivedPaymentId set) takes its status from Finance's
+      // decision, so it is left alone here.
       await tx.request().input("bid", sql.Int, bookingId).query(`
         UPDATE dbo.CrmMoneyReceipt
         SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
-        WHERE BookingId = @bid AND Status = 'Pending'
+        WHERE BookingId = @bid AND Status = 'Pending' AND ReceivedPaymentId IS NULL
       `);
 
-      // Reject any Pending ReceivedPayment rows in Finance's queue — without
-      // this a Finance approver can process and post a payment against a
-      // cancelled booking (updates milestone AmountPaid, triggers GL, Sales
-      // Deed, brokerage auto-create — all against a dead record).
-      // NOTE: dbo.ReceivedPayment uses the RP-prefixed column convention
-      // (RPUpdatedAt/RPUpdatedBy/RPRejectedAt) — a bare `UpdatedAt` here once
-      // threw "Invalid column name 'UpdatedAt'", which rolled back this entire
-      // cascade and left the cancellation stuck at Status='Approved' with a
-      // still-live booking. Keep the column names exact.
-      await tx.request()
-        .input("bid", sql.Int, bookingId)
-        .input("rb", sql.Int, actorId(req))
-        .query(`
-        UPDATE dbo.ReceivedPayment
-        SET RPStatus = 'Rejected', RPRejectedBy = @rb, RPRejectedAt = SYSDATETIME(),
-            RPRejectionNote = 'Auto-rejected — booking cancelled',
-            RPUpdatedBy = @rb, RPUpdatedAt = SYSDATETIME()
-        WHERE CrmBookingId = @bid AND RPStatus = 'Pending'
-      `);
+      // Payments still with Finance are NOT rejected. The buyer may really have
+      // paid (a deposited cheque, a credited UPI / NEFT); rejecting them dropped
+      // that money from the books and from the refund. Finance verifies them
+      // against the bank as usual; a verified one goes into this cancellation's
+      // held credit and refund (holdCancellationCredit, via crmPayments.js),
+      // never onto the dead booking's milestones. A refund cannot go for
+      // approval while any of them is still with Finance (crmRefunds.js).
 
       await releaseAllParkingForBooking(tx, bookingId);
 
@@ -798,7 +786,6 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       // receipts; the hold is a pure CRM tracking record. The ledgers move
       // only when the held credit is later refunded or applied to a re-booking.
       const heldTotal = Number(paidAtCancellation) || 0;
-      let heldRowId = null;
       if (heldTotal > 0) {
         // Fold the booking's still-open on-account rows into the hold so they
         // aren't double-counted (their money is now represented by the Held row).
@@ -814,62 +801,8 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
         for (const r of rolled.recordset) {
           await require("../services/crmLedger").syncCrmOnAccountLedger(tx, r.Id, req.user?.email || req.user?.name || "system", "Rolled into held credit on booking cancellation");
         }
-        const heldIns = await tx.request()
-          .input("no", sql.NVarChar(30), cancellationNo ? `${cancellationNo}-HOLD` : null)
-          .input("bid", sql.Int, bookingId)
-          .input("amt", sql.Decimal(18, 2), heldTotal)
-          .input("cid", sql.Int, id)
-          .input("cb", sql.Int, actorId(req))
-          .query(`
-            INSERT INTO dbo.CrmOnAccountPayment
-              (ReceiptNo, BookingId, Amount, AppliedAmount, Status, ReceivedDate, PaymentMode,
-               Notes, HeldFromBookingId, HeldSourceType, HeldSourceRefId, HeldAt, CreatedBy, CreatedAt)
-            OUTPUT INSERTED.Id
-            VALUES
-              (@no, @bid, @amt, 0, 'Held', CAST(SYSDATETIME() AS DATE), 'HeldCredit',
-               'Held credit from cancelled booking — refund or apply to a re-booking from the Refunds page.',
-               @bid, 'Cancellation', @cid, SYSDATETIME(), @cb, SYSDATETIME())
-          `);
-        heldRowId = heldIns.recordset[0].Id;
-      }
-
-      // ── Auto-create the linked draft CrmRefund ───────────────────────────
-      // RERA Section 18: 45 days from cancellation approval. The deduction %
-      // resolved at request time is carried onto the refund; it only bites if
-      // the customer takes a refund (a re-booking waives it entirely).
-      if (heldRowId && ctx.CustomerId && refundNo) {
-        const pct = Number(deductionPct) || 0;
-        const damt = Math.round(heldTotal * pct / 100 * 100) / 100;
-        const net = Math.max(0, heldTotal - damt);
-        await tx.request()
-          .input("rno", sql.NVarChar(30), refundNo)
-          .input("cust", sql.Int, ctx.CustomerId)
-          .input("comp", sql.Int, ctx.CompanyId ?? null)
-          .input("proj", sql.Int, ctx.ProjectId ?? null)
-          .input("bid", sql.Int, bookingId)
-          .input("held", sql.Int, heldRowId)
-          .input("cid", sql.Int, id)
-          .input("gross", sql.Decimal(18, 2), heldTotal)
-          .input("pct", sql.Decimal(5, 2), pct)
-          .input("damt", sql.Decimal(18, 2), damt)
-          .input("net", sql.Decimal(18, 2), net)
-          .input("cbank", sql.NVarChar(200), ctx.BankName || null)
-          .input("cacc", sql.NVarChar(50), ctx.AccountNo || null)
-          .input("cifsc", sql.NVarChar(20), ctx.IfscCode || null)
-          .input("due", sql.Date, new Date(Date.now() + 45 * 86400000))
-          .input("rb", sql.Int, actorId(req))
-          .query(`
-            INSERT INTO dbo.CrmRefund
-              (RefundNo, CustomerId, CompanyId, ProjectId, BookingId, SourceType,
-               SourceOnAccountId, SourceCancellationId, GrossAmount, DeductionPercent,
-               DeductionAmount, NetAmount, CustomerBankName, CustomerAccountNo, CustomerIfscCode,
-               Status, RefundDueDate, RequestedBy, RequestedAt, CreatedBy, CreatedAt)
-            VALUES
-              (@rno, @cust, @comp, @proj, @bid, 'CancellationHeldCredit',
-               @held, @cid, @gross, @pct,
-               @damt, @net, @cbank, @cacc, @cifsc,
-               'Draft', @due, @rb, SYSDATETIME(), @rb, SYSDATETIME())
-          `);
+        // The Held credit and its draft refund (RERA s.18: due in 45 days).
+        await holdCancellationCredit(tx, { cancellationId: id, bookingId, amount: heldTotal, actorUserId: actorId(req), refundNo, deductionPct });
       }
 
       await tx.commit();
@@ -946,4 +879,100 @@ router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (
 });
 
 
+// ── Held credit + draft refund for a cancellation ──────────────────────────
+// The one place a cancelled booking's money is set aside for the buyer: ONE
+// Held on-account credit keyed to the cancellation (no GL — the receipts
+// already carry the liability) and its draft CrmRefund (RERA s.18: due in 45
+// days, the cancellation's deduction % applied). Used when the cancellation
+// is approved, and again when Finance verifies a payment that was still with
+// it at cancellation (addToCancellation: the cancellation's paid / refund
+// figures grow by it too). A refund already past Draft is never re-priced: the
+// late money gets its own draft refund instead.
+async function holdCancellationCredit(tx, { cancellationId, bookingId, amount, actorUserId, refundNo = null, deductionPct = null, addToCancellation = false }) {
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (!(amt > 0)) return null;
+  const c = (await tx.request().input("cid", sql.Int, cancellationId)
+    .query("SELECT CancellationNo, DeductionPercent FROM dbo.CrmCancellation WITH (UPDLOCK) WHERE Id = @cid")).recordset[0];
+  if (!c) throw Object.assign(new Error("Cancellation not found"), { status: 404 });
+  const pct = Number(deductionPct ?? c.DeductionPercent) || 0;
+
+  const held = (await tx.request().input("cid", sql.Int, cancellationId).query(`
+    SELECT TOP 1 Id FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK)
+    WHERE HeldSourceType = 'Cancellation' AND HeldSourceRefId = @cid AND Status = 'Held' ORDER BY Id`)).recordset[0];
+  let heldId = held?.Id ?? null;
+  if (heldId) {
+    await tx.request().input("id", sql.Int, heldId).input("amt", sql.Decimal(18, 2), amt)
+      .query("UPDATE dbo.CrmOnAccountPayment SET Amount = Amount + @amt WHERE Id = @id");
+  } else {
+    heldId = (await tx.request()
+      .input("no", sql.NVarChar(30), c.CancellationNo ? `${c.CancellationNo}-HOLD` : null)
+      .input("bid", sql.Int, bookingId).input("amt", sql.Decimal(18, 2), amt)
+      .input("cid", sql.Int, cancellationId).input("cb", sql.Int, actorUserId ?? null)
+      .query(`
+        INSERT INTO dbo.CrmOnAccountPayment
+          (ReceiptNo, BookingId, Amount, AppliedAmount, Status, ReceivedDate, PaymentMode,
+           Notes, HeldFromBookingId, HeldSourceType, HeldSourceRefId, HeldAt, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES
+          (@no, @bid, @amt, 0, 'Held', CAST(SYSDATETIME() AS DATE), 'HeldCredit',
+           'Held credit from cancelled booking — refund or apply to a re-booking from the Refunds page.',
+           @bid, 'Cancellation', @cid, SYSDATETIME(), @cb, SYSDATETIME())`)).recordset[0].Id;
+  }
+
+  const split = (gross) => {
+    const damt = Math.round(gross * pct / 100 * 100) / 100;
+    return { damt, net: Math.max(0, Math.round((gross - damt) * 100) / 100) };
+  };
+  const draft = (await tx.request().input("cid", sql.Int, cancellationId).query(`
+    SELECT TOP 1 Id, GrossAmount FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK)
+    WHERE SourceCancellationId = @cid AND Status = 'Draft' ORDER BY Id DESC`)).recordset[0];
+  if (draft) {
+    const gross = Math.round((Number(draft.GrossAmount || 0) + amt) * 100) / 100;
+    const { damt, net } = split(gross);
+    await tx.request().input("id", sql.Int, draft.Id).input("g", sql.Decimal(18, 2), gross)
+      .input("d", sql.Decimal(18, 2), damt).input("n", sql.Decimal(18, 2), net)
+      .query("UPDATE dbo.CrmRefund SET GrossAmount = @g, DeductionAmount = @d, NetAmount = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+  } else {
+    const ctx = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.CompanyId, b.ProjectId, a.CustomerId,
+             (SELECT TOP 1 BankName  FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid ORDER BY Id DESC) AS BankName,
+             (SELECT TOP 1 AccountNo FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid ORDER BY Id DESC) AS AccountNo,
+             (SELECT TOP 1 IfscCode  FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid ORDER BY Id DESC) AS IfscCode
+      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @bid`)).recordset[0] || {};
+    if (ctx.CustomerId != null) {
+      const rno = refundNo || await getNextDocNumber(getPool(), "CRFD", "CRFD");
+      const { damt, net } = split(amt);
+      await tx.request()
+        .input("rno", sql.NVarChar(30), rno).input("cust", sql.Int, ctx.CustomerId)
+        .input("comp", sql.Int, ctx.CompanyId ?? null).input("proj", sql.Int, ctx.ProjectId ?? null)
+        .input("bid", sql.Int, bookingId).input("held", sql.Int, heldId).input("cid", sql.Int, cancellationId)
+        .input("gross", sql.Decimal(18, 2), amt).input("pct", sql.Decimal(5, 2), pct)
+        .input("damt", sql.Decimal(18, 2), damt).input("net", sql.Decimal(18, 2), net)
+        .input("cbank", sql.NVarChar(200), ctx.BankName || null).input("cacc", sql.NVarChar(50), ctx.AccountNo || null)
+        .input("cifsc", sql.NVarChar(20), ctx.IfscCode || null)
+        .input("due", sql.Date, new Date(Date.now() + 45 * 86400000)).input("rb", sql.Int, actorUserId ?? null)
+        .query(`
+          INSERT INTO dbo.CrmRefund
+            (RefundNo, CustomerId, CompanyId, ProjectId, BookingId, SourceType,
+             SourceOnAccountId, SourceCancellationId, GrossAmount, DeductionPercent,
+             DeductionAmount, NetAmount, CustomerBankName, CustomerAccountNo, CustomerIfscCode,
+             Status, RefundDueDate, RequestedBy, RequestedAt, CreatedBy, CreatedAt)
+          VALUES
+            (@rno, @cust, @comp, @proj, @bid, 'CancellationHeldCredit',
+             @held, @cid, @gross, @pct,
+             @damt, @net, @cbank, @cacc, @cifsc,
+             'Draft', @due, @rb, SYSDATETIME(), @rb, SYSDATETIME())`);
+    }
+  }
+
+  if (addToCancellation) {
+    await tx.request().input("cid", sql.Int, cancellationId).input("amt", sql.Decimal(18, 2), amt).query(`
+      UPDATE dbo.CrmCancellation
+      SET AmountPaidTillDate = ISNULL(AmountPaidTillDate, 0) + @amt, RefundAmount = ISNULL(RefundAmount, 0) + @amt, UpdatedAt = SYSDATETIME()
+      WHERE Id = @cid`);
+  }
+  return heldId;
+}
+
 module.exports = router;
+module.exports.holdCancellationCredit = holdCancellationCredit;

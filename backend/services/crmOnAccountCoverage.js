@@ -92,8 +92,19 @@ const PENDING_VERIFICATION_SQL = `
 async function pendingVerificationEntries(pool, bookingId) {
   return (await pool.request().input("bid", sql.Int, bookingId).query(`${PENDING_VERIFICATION_SQL} ORDER BY rp.RPCreatedAt, rp.RPPaymentID`)).recordset;
 }
+// Entries Finance returned (rejected), newest first — shown so a returned
+// payment never just vanishes from "With Finance".
+async function returnedEntries(pool, bookingId) {
+  return (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT rp.RPPaymentID, rp.RPDocNo, rp.RPAmount, rp.RPMode, rp.RPDocDate, rp.RPTransactionID,
+           rp.RPCreatedBy, rp.RPRejectedBy, rp.RPRejectedAt, rp.RPRejectionNote, m.MilestoneName
+    FROM dbo.ReceivedPayment rp
+    LEFT JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
+    WHERE rp.CrmBookingId = @bid AND rp.RPStatus = N'Rejected'
+    ORDER BY rp.RPRejectedAt DESC, rp.RPPaymentID DESC`)).recordset;
+}
 async function pendingVerificationTotal(pool, bookingId) {
   return Math.round((await pendingVerificationEntries(pool, bookingId)).reduce((a, r) => a + Number(r.RPAmount || 0), 0) * 100) / 100;
 }
 
-module.exports = { getBookingOnAccountCoverage, pendingVerificationEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };
+module.exports = { getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

@@ -1,4 +1,5 @@
 import React from "react";
+import { SentBackPanel } from "@/components/crm/CrmListToolbar";
 
 // The "drawing sheet" look shared by the Home screen and the CRM dashboard: one bordered sheet on a faint grid, a title
 // block, lettered details, dimension lines and hatching. Colours and fonts come from the app theme.
@@ -195,7 +196,11 @@ export const SheetShell: React.FC<{ eyebrow: string; title: string; subtitle?: s
         </div>
         {action && <div style={{ flexShrink: 0, maxWidth: "100%" }}>{action}</div>}
       </div>
-      <div className="cell" style={{ display: "flex", flexDirection: "column", gap: 20 }}>{children}</div>
+      <div className="cell" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* On a CRM page: that page's entries sent back / resubmitted (renders nothing elsewhere). */}
+        <SentBackPanel />
+        {children}
+      </div>
     </div>
   </>
 );
