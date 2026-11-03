@@ -118,6 +118,8 @@ async function getStageState(pool, bookingId, viewer = null) {
     RejectedFromStage: row.RejectedFromStage,
     RejectedBy: row.RejectedBy,
     RejectedAt: row.RejectedAt,
+    // Where a send-back from here may go (default first) — SEND_BACK_TARGETS.
+    SendBackTo: SEND_BACK_TARGETS[row.WorkflowStage] || [],
     MarketingHeadApprovedAt: row.MarketingHeadApprovedAt,
     MarketingHeadApprovedBy: row.MarketingHeadApprovedBy,
     DirectorApprovedAt: row.DirectorApprovedAt,
@@ -465,6 +467,12 @@ const SEND_BACK_TARGETS = {
   [STAGE_DIRECTOR]: [STAGE_MARKETING, STAGE_REVIEW],
 };
 
+// The same targets as a SQL column (comma-separated, default first) for list queries.
+function sendBackTargetsSql(stageColumn) {
+  const whens = Object.entries(SEND_BACK_TARGETS).map(([from, to]) => `WHEN N'${from}' THEN N'${to.join(",")}'`).join(" ");
+  return `CASE ${stageColumn} ${whens} END`;
+}
+
 async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, userId, remark, { toStage = null } = {}) {
   if (stage === STAGE_CONFIRMED) {
     const e = new Error("This booking is already confirmed — it can't be sent back; cancel or amend it instead");
@@ -608,6 +616,7 @@ module.exports = {
   WORKFLOW_STAGES,
   STAGE_LABELS,
   SEND_BACK_TARGETS,
+  sendBackTargetsSql,
   stageLabel,
   getStageState,
   submitForApproval,

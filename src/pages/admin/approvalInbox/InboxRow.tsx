@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { bookingSendBackChoices } from "@/constants/crmStatuses";
 import { Button } from "@/components/ui/button";
 import { confirmEngineerAssignment } from "@/api/dependencyActivityAssignmentApi";
 import { ClipboardCheck, ArrowUpRight, Inbox, CheckCircle2, XCircle, ArrowLeftRight, Warehouse, Building2, Eye, X, Loader2 } from "lucide-react";
@@ -117,6 +118,8 @@ export const InboxRow: React.FC<{
           // lets this viewer act (approvalInbox.js) — rows they can't act on
           // took the "waiting" branch above.
           canAct={item._canAct !== false}
+          // A booking at an approval stage: where its send-back may go (server rule, default first).
+          sendBackChoices={item.SendBackTo ? bookingSendBackChoices(item.SendBackTo) : undefined}
           // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
           // until every Level-1/Level-2 checklist item is ticked — a one-click
           // Approve here can never succeed on its own, it can only ever

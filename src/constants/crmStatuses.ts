@@ -38,7 +38,6 @@ export type CrmStatusType = typeof CrmStatus[keyof typeof CrmStatus];
 // The booking's first stage: until it leaves Data Review (verified and sent
 // for approval) its application may still change unit, plan and rate.
 export const BOOKING_STAGE_REVIEW = 'Review';
-export const BOOKING_STAGE_DIRECTOR = 'DirectorApproval';
 export const bookingWorkflowStageLabel: Record<string, string> = {
   Review: 'Data Review',
   MarketingHeadApproval: 'Marketing Head Approval',
@@ -86,6 +85,19 @@ export function bookingSendBackChain(history: any[] | null | undefined) {
     });
   }
   return chain;
+}
+
+/**
+ * The send-back choices the server allows from a stage (stageState.SendBackTo
+ * or an inbox row's SendBackTo — default first), worded for the person
+ * sending it. Whichever is chosen, every approval after it is cleared: the
+ * booking passes each later level again.
+ */
+export function bookingSendBackChoices(targets: string[] | string | null | undefined) {
+  const list = (Array.isArray(targets) ? targets : String(targets || "").split(",")).filter(Boolean);
+  return list.map((to) => to === BOOKING_STAGE_REVIEW
+    ? { value: to, label: "To Data Review", note: "the application needs correcting — it is then verified and approved at every level again" }
+    : { value: to, label: `To the ${stageWho(to)}`, note: "to approve again, or send it further back" });
 }
 
 // A booking in one of these has ended — no stage, checklist or approval applies to it any more.

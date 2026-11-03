@@ -1,4 +1,5 @@
-import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, BOOKING_STAGE_REVIEW, BOOKING_STAGE_DIRECTOR } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices } from "@/constants/crmStatuses";
+import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
@@ -825,7 +826,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [bookingRequesting, setBookingRequesting] = useState(false);
   const [stageActioning, setStageActioning] = useState<"approve" | "reject" | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
-  // Director only: back to the Marketing Head (default) or straight to Data Review.
+  // Where the send-back goes, when the stage allows more than one (stageState.SendBackTo).
   const [rejectTo, setRejectTo] = useState<string | null>(null);
   const [rejectRemark, setRejectRemark] = useState("");
   const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
@@ -3080,19 +3081,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         <DialogHeader>
           <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
         </DialogHeader>
-        {currentStage === BOOKING_STAGE_DIRECTOR && (
-          <div className="space-y-1.5 text-sm">
-            {[
-              { to: null, label: "To the Marketing Head", note: "to approve again, or send on to Data Review" },
-              { to: BOOKING_STAGE_REVIEW, label: "To Data Review", note: "the application needs correcting — it is then verified and approved by the Marketing Head and you again" },
-            ].map((o) => (
-              <label key={String(o.to)} className="flex items-start gap-2 cursor-pointer">
-                <input type="radio" name="reject-to" className="mt-1" checked={rejectTo === o.to} onChange={() => setRejectTo(o.to)} />
-                <span><span className="font-medium">{o.label}</span> <span className="text-muted-foreground text-xs">— {o.note}</span></span>
-              </label>
-            ))}
-          </div>
-        )}
+        <SendBackChoices choices={bookingSendBackChoices(stageState?.SendBackTo)} value={rejectTo} onChange={setRejectTo} />
         <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
           placeholder="What needs to be corrected? (required)"
           className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
