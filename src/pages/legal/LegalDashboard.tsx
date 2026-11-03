@@ -93,9 +93,10 @@ export default function LegalDashboard() {
                   All land properties <ChevronRight size={13} />
                 </button>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-9 gap-3">
                 {([
                   ["Land properties", land.totalLands, Global, "/legal/land/properties"],
+                  ["Existing / backlog land", land.backlogLands ?? 0, Building4, "/legal/land/properties?filter=backlog"],
                   ["Active enquiries", land.activeEnquiries, MessageQuestion, "/legal/land/enquiries"],
                   ["In progress", land.inProgress, Timer1, "/legal/land/properties?filter=in-progress"],
                   ["Pending verification", land.pendingVerification, ShieldTick, "/legal/land/properties?filter=pending-verification"],
@@ -116,7 +117,7 @@ export default function LegalDashboard() {
               {land.recent.length > 0 && (
                 <div className="mt-4 divide-y divide-border/60">
                   {land.recent.map((l) => (
-                    <button key={l.LandId} onClick={() => navigate(`/legal/land/properties/${l.LandId}`)} className="flex w-full items-center gap-3 py-2 text-left text-sm hover:bg-muted/40 rounded-md px-1.5">
+                    <button key={l.LandId} onClick={() => navigate(`/legal/land/properties/${l.LandId}/profile`)} className="flex w-full items-center gap-3 py-2 text-left text-sm hover:bg-muted/40 rounded-md px-1.5">
                       <span className="font-mono text-xs text-muted-foreground w-28 shrink-0">{l.LandCode}</span>
                       <span className="min-w-0 flex-1 truncate text-foreground">{l.LandName}{l.MouzaName ? <span className="text-muted-foreground"> · {l.MouzaName} (J.L. {l.JLNo ?? "-"})</span> : null}</span>
                       <span className={`hidden sm:inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[0.6875rem] ${l.IsOnHold ? "border-amber-500/40 bg-amber-500/10 text-amber-600" : "border-border text-muted-foreground"}`}>

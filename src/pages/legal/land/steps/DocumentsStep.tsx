@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Plus, Upload } from "lucide-react";
 import { usePageRights } from "@/hooks/usePageRights";
-import { uploadLegalFile, getLegalLookup } from "@/api/legalMastersApi";
+import { uploadLegalFile, getLegalLookup, getLegalRows } from "@/api/legalMastersApi";
 import {
   getLandDocuments, getDocumentVersions, addLandDocument, addDocumentVersion, reviewDocumentVersion, markDocumentNA, undoDocumentNA,
   type LandDocument, type RequiredDocument, type ReviewStatus,
@@ -77,7 +77,11 @@ const AddDocument: React.FC<{
   landId: number; sections: string[]; preset?: RequiredDocument | null; onDone: () => void; onCancel: () => void;
 }> = ({ landId, sections, preset, onDone, onCancel }) => {
   const { data: types } = useQuery({ queryKey: ["legal-lookup", "document-type"], queryFn: () => getLegalLookup("document-type") });
-  const [f, setF] = useState({ docTypeId: preset ? String(preset.docTypeId) : "", relatedSection: "Property", title: preset?.docTypeName ?? "", documentNo: "", documentDate: "", issuingAuthority: "", remarks: "" });
+  const [f, setF] = useState({ docTypeId: preset ? String(preset.docTypeId) : "", relatedSection: "Property", title: preset?.docTypeName ?? "", documentNo: "", documentDate: "", issuingAuthority: "", remarks: "",
+    registrationDate: "", relatedOwner: "", relatedLegalRecordId: "", relatedMortgageId: "", description: "" });
+  // This land's own legal records and loans, so a document can be filed against one of them.
+  const { data: legalRecords } = useQuery({ queryKey: ["legal-master", "land-legal-record", landId], queryFn: () => getLegalRows("land-legal-record", landId) });
+  const { data: loans } = useQuery({ queryKey: ["legal-master", "mortgage", landId], queryFn: () => getLegalRows("mortgage", landId) });
   const [file, setFile] = useState<{ id: number; fileName: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const up = useUpload();
@@ -85,7 +89,11 @@ const AddDocument: React.FC<{
     if (!file) return toast.error("Upload the file");
     setSaving(true);
     try {
-      toast.success((await addLandDocument(landId, { ...f, docTypeId: Number(f.docTypeId), fileId: file.id })).message);
+      toast.success((await addLandDocument(landId, {
+        ...f, docTypeId: Number(f.docTypeId), fileId: file.id,
+        relatedLegalRecordId: f.relatedLegalRecordId ? Number(f.relatedLegalRecordId) : null,
+        relatedMortgageId: f.relatedMortgageId ? Number(f.relatedMortgageId) : null,
+      })).message);
       onDone();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not add the document");
@@ -112,6 +120,21 @@ const AddDocument: React.FC<{
         <label className="text-xs text-muted-foreground">Document number<input className={`${input} mt-1`} value={f.documentNo} onChange={set("documentNo")} /></label>
         <label className="text-xs text-muted-foreground">Document date<input type="date" className={`${input} mt-1`} value={f.documentDate} onChange={set("documentDate")} /></label>
         <label className="text-xs text-muted-foreground">Issuing authority<input className={`${input} mt-1`} value={f.issuingAuthority} onChange={set("issuingAuthority")} /></label>
+        <label className="text-xs text-muted-foreground">Registration date<input type="date" className={`${input} mt-1`} value={f.registrationDate} onChange={set("registrationDate")} /></label>
+        <label className="text-xs text-muted-foreground">Related owner<input className={`${input} mt-1`} value={f.relatedOwner} onChange={set("relatedOwner")} /></label>
+        <label className="text-xs text-muted-foreground">Related legal record
+          <select className={`${input} mt-1`} value={f.relatedLegalRecordId} onChange={set("relatedLegalRecordId")}>
+            <option value="">None</option>
+            {(legalRecords ?? []).map((r) => <option key={String(r.LegalRecordId)} value={String(r.LegalRecordId)}>{String(r.RecordType)}{r.CaseNumber ? ` ${String(r.CaseNumber)}` : ""}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-muted-foreground">Related loan / mortgage
+          <select className={`${input} mt-1`} value={f.relatedMortgageId} onChange={set("relatedMortgageId")}>
+            <option value="">None</option>
+            {(loans ?? []).map((r) => <option key={String(r.MortgageId)} value={String(r.MortgageId)}>{String(r.LenderName)}{r.LoanAccountRef ? ` · ${String(r.LoanAccountRef)}` : ""}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-muted-foreground sm:col-span-2">Description<input className={`${input} mt-1`} value={f.description} onChange={set("description")} /></label>
         <label className="text-xs text-muted-foreground sm:col-span-2">Remarks<input className={`${input} mt-1`} value={f.remarks} onChange={set("remarks")} /></label>
         <div className="text-xs text-muted-foreground">File *
           <button type="button" className={`${input} mt-1 flex items-center gap-1.5 text-left`} disabled={up.busy} onClick={async () => { const r = await up.pick(); if (r) setFile(r); }}>
@@ -241,7 +264,7 @@ export const DocumentsStep: React.FC<{ landId: number; onSaved: () => void }> = 
                         <div className="font-medium text-foreground">{d.Title}</div>
                         <div className="text-xs text-muted-foreground">{d.DocumentCode}{d.DocumentNo ? ` · No. ${d.DocumentNo}` : ""}{d.DocumentDate ? ` · ${fmt(d.DocumentDate)}` : ""}</div>
                       </td>
-                      <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{d.RelatedSection}</div></td>
+                      <td className="py-2 pr-3">{d.DocTypeName}<div className="text-xs text-muted-foreground">{d.RelatedSection}{d.RelatedOwner ? ` · ${d.RelatedOwner}` : ""}{d.RelatedLegalRecord ? ` · ${d.RelatedLegalRecord}` : ""}{d.RelatedMortgage ? ` · ${d.RelatedMortgage}` : ""}</div></td>
                       <td className="py-2 pr-3"><div className="flex items-center gap-1.5"><span className="font-mono text-xs text-muted-foreground">v{d.CurrentVersionNo}</span><LegalFileLink id={d.FileId} name={d.FileName} /></div></td>
                       <td className="py-2 pr-3 whitespace-nowrap text-xs text-muted-foreground">{fmt(d.UploadedAt)}<div>{d.UploadedByName ?? ""}</div></td>
                       <td className="py-2 pr-3"><Chip s={d.ReviewStatus} />{d.ReviewRemarks && <div className="mt-1 max-w-[220px] text-xs text-muted-foreground">{d.ReviewRemarks}</div>}</td>

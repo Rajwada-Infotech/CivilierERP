@@ -135,7 +135,8 @@ function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, d
       ),
     };
   }
-  if (defaults[f.name] !== undefined && f.type === "ref") {
+  // A page's own starting value (the land's Mouza for its RS records, "Existing / Backlog" for backlog land).
+  if (defaults[f.name] !== undefined) {
     return { ...toFieldDef({ ...f }, lookups, {}), defaultValue: defaults[f.name] };
   }
   switch (f.type) {
@@ -229,9 +230,11 @@ interface TableProps {
   rowClassName?: (raw: LegalRow) => string | undefined;
   /** Show only the rows this returns true for (a dashboard tile's filter). */
   rowFilter?: (raw: LegalRow) => boolean;
+  /** Called with the new row's id after an add (e.g. to open the new land's page). */
+  onCreated?: (id: number) => void;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
@@ -330,7 +333,11 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
-      if (event.action === "add") toast.success((await addLegalRow(entry.key, payload(event.record))).message);
+      if (event.action === "add") {
+        const added = await addLegalRow(entry.key, payload(event.record));
+        toast.success(added.message);
+        if (onCreated && added.id) onCreated(Number(added.id));
+      }
       if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), payload(event.record))).message);
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
