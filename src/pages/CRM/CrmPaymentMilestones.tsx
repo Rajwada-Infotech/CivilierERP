@@ -89,7 +89,8 @@ const CrmPaymentMilestones: React.FC = () => {
     !notFullyPaid && nextOutstandingMilestone && nextMilestoneBalance > 0 &&
     nextOutstandingMilestone.DemandStatus !== CrmStatus.PENDING
   );
-  const totalPendingVerification = milestones.reduce((s: number, m: any) => s + Number(m.PendingVerificationAmount || 0), 0);
+  // The booking's money by stage, from the server (verified / with Finance / still to collect).
+  const money = milestoneData?.money || null;
 
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
@@ -280,11 +281,12 @@ const CrmPaymentMilestones: React.FC = () => {
     </div>
   );
 
-  const figures = booking ? [
+  const figures = booking && money ? [
     { label: "Total due", value: fmt(summary.totalDue), note: `${milestones.length} milestone${milestones.length === 1 ? "" : "s"}` },
-    { label: "Collected", value: fmt(summary.totalPaid), note: totalPendingVerification > 0 ? `${fmt(totalPendingVerification)} pending approval` : "Approved by Finance" },
-    { label: "Balance", value: fmt(summary.balance), note: onAccountBalance > 0 ? `${fmt(onAccountBalance)} on-account` : "Still to collect", red: summary.balance > 0 },
-    { label: "Overdue", value: String(summary.overdue || 0), note: "Milestones past due", red: (summary.overdue || 0) > 0 },
+    { label: "Collected", value: fmt(money.collected), note: money.held > 0 ? `Verified by Finance · ${fmt(money.held)} held On Account` : "Verified by Finance" },
+    { label: "With Finance", value: fmt(money.inVerification), note: money.inVerificationCount ? `${money.inVerificationCount} entr${money.inVerificationCount === 1 ? "y" : "ies"} waiting to be verified` : "Nothing waiting" },
+    { label: "Still to collect", value: fmt(money.toCollect), note: "Not yet entered", red: money.toCollect > 0 },
+    { label: "Overdue", value: String(summary.overdue || 0), note: "Past due, nothing entered", red: (summary.overdue || 0) > 0 },
   ] : [];
 
   return (
@@ -358,7 +360,7 @@ const CrmPaymentMilestones: React.FC = () => {
             <>
               {figures.length > 0 && (
                 <div className="bg-card" style={{ border: RULE }}>
-                  <div className="statrow four" style={{ padding: "16px 16px 18px" }}>
+                  <div className="statrow five" style={{ padding: "16px 16px 18px" }}>
                     {figures.map((x) => (
                       <div key={x.label}>
                         <span className="label">{x.label}</span>
@@ -369,10 +371,11 @@ const CrmPaymentMilestones: React.FC = () => {
                   </div>
                 </div>
               )}
-              {booking && <BookingSummary booking={booking} summary={summary} onAccountBalance={onAccountBalance} totalPendingVerification={totalPendingVerification} moneyReceipts={moneyReceipts as any[]} />}
+              {booking && <BookingSummary booking={booking} summary={summary} money={money} moneyReceipts={moneyReceipts as any[]} />}
               {onAccountData && onAccountData.payments?.length > 0 && (
                 <OnAccountPanel onAccountData={onAccountData} onAccountBalance={onAccountBalance} notFullyPaid={notFullyPaid}
                   fundsOnHand={bookingFundsOnHand} requiredAmount={bookingRequiredAmount} fullPaymentShortfall={fullPaymentShortfall}
+                  inVerification={money?.inVerification || 0}
                   milestones={milestones} canManuallyApply={canManuallyApplyOnAccount}
                   canEdit={rights.canEdit} onApply={(p) => openApplyDialog(p, null)} />
               )}

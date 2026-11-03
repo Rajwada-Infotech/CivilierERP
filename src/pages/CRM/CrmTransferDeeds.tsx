@@ -9,6 +9,7 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { KEY_LINE, RULE, RULE_SOFT } from "./customers/config";
 import { TransferDeedDetail } from "./CrmTransferDeed";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 // Transfer Deeds — the legal chain of every resale (deed of assignment) and
 // buy-back (cancellation deed), one page laid out like Sale Deed: the deeds on
 // the left, the chosen deed on the right with its stage stepper and its tabs
@@ -29,7 +30,8 @@ const CrmTransferDeeds: React.FC = () => {
   const [sp, setSp] = useSearchParams();
   const selected = sp.get("id") ? Number(sp.get("id")) : null;
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  // In the address, so a refresh or a shared link keeps it.
+  const [filter, setFilter] = useUrlParam<Filter>("filter", "all", ["all", "open", "registered", "cancelled"]);
   const { data = [], isLoading, isError, error, isFetching, refetch } = useQuery<any[]>({
     queryKey: ["crm-transfer-deeds"],
     queryFn: async () => {

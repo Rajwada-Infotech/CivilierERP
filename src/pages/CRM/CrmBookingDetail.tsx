@@ -9,21 +9,23 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { downloadAuthFile } from "@/components/crm/AuthFilePreview";
 import { useAuth } from "@/contexts/AuthContext";
-import { Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
+import { MoreHorizontal, Building2, IndianRupee, Paperclip, FileText, Upload, Download, Eye, Trash2, Wallet, Car, ShieldAlert, Check, CreditCard, ClipboardCheck, ArrowLeft, ArrowRight, KeyRound, ShieldCheck, AlertTriangle, RefreshCw, Mail, User, CalendarCheck, Lock, Clock, Hourglass, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
+import { BookingStatement } from "@/components/crm/BookingStatement";
 import { PropertyCard } from "@/components/crm/PropertyCard";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AutoInput, DateInput } from "@/components/ui/date-input";
 import { ApplicantNames } from "@/components/crm/ApplicantNames";
-import { BodyPortal } from "@/components/ui/body-portal";
 import { ExtraWorkGstPreview, PdfPreviewDialog, ParkingVcSection } from "./bookings/DetailParts";
 import { KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, bookingTone } from "./bookings/config";
 import { SheetMark } from "@/components/sheet/Sheet";
 import { useNavigate } from "react-router-dom";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/bookings";
 const PAY_API = "/api/crm/payments";
 const AMEND_API = "/api/crm/booking-amendments";
@@ -39,6 +41,21 @@ const EMPTY_BANK = {
 
 const TABS = ["Booking", "Parking & Extra Charges", "Payment Plan", "Bank Details", "Customer Portal", "Attachments", "Payment & Invoice"] as const;
 type Tab = typeof TABS[number];
+
+// Where each Data Review checklist item is verified — the tab holding the data
+// it checks. Drives the tick boxes on each tab, the tab marks, and "what's left".
+const CHECKLIST_TAB: Record<string, Tab> = {
+  ProjectUnitRate: "Booking",
+  BrokerDetails: "Booking",
+  SourceAssignment: "Booking",
+  ParkingExtraCharges: "Parking & Extra Charges",
+  PaymentPlanAmounts: "Payment Plan",
+  ApplicantKyc: "Bank Details",
+  Documents: "Attachments",
+  BankDepositMode: "Payment & Invoice",
+};
+// Plain words for a checklist item's state.
+const CHECK_STATE_LABEL: Record<string, string> = { Pending: "To verify", Checked: "Verified", NeedsRecheck: "Flagged — fix needed" };
 
 const fmt = (n: number | null | undefined) =>
   n != null ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
@@ -124,7 +141,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const canVerify = useCanApprove("crm-booking-verification") && canEdit;
   const navigate = useNavigate();
   const canRaiseDemand = canDoAction("crm-payments", "edit");
-  const [tab, setTab] = useState<Tab>("Booking");
+  // In the address (?bookingTab=, beside the page's ?view=), so a refresh or a shared link reopens the same tab;
+  // dropped again when the popup closes.
+  const [tab, setTab] = useUrlParam<Tab>("bookingTab", "Booking", TABS);
+  useEffect(() => () => setTab(""), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewInvoice, setPreviewInvoice] = useState<any | null>(null);
@@ -357,6 +377,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     enabled: tab === "Parking & Extra Charges",
     staleTime: 15_000,
   });
+  // The Parking & Extra Charges tick box exists only while there is parking or
+  // an extra charge to verify, so adding/removing one refreshes the checklist.
+  const parkingExtrasCount = (parking as any[]).length + (extras as any[]).length;
+  useEffect(() => { if (tab === "Parking & Extra Charges") refetchChecklist(); }, [parkingExtrasCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Verification checklist — only the Parking & ExtraCharges sections are
   // shown on this tab; the full checklist lives on the Welcome Call page.
   const { data: parkingChecklist, refetch: refetchParkingChecklist } = useQuery({
@@ -749,19 +774,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // columns — they ARE the Data Review checklist's own ProjectUnitRate /
   // PaymentPlanAmounts items being Checked. One source of truth for both
   // the top progress strip below and the booking-approval gate.
-  const unitConfirmed = checklistItems.find((it: any) => it.ItemKey === "ProjectUnitRate")?.CheckStatus === "Checked";
-  const planConfirmed = checklistItems.find((it: any) => it.ItemKey === "PaymentPlanAmounts")?.CheckStatus === "Checked";
   const mandatoryReady = checklistAllChecked;
+  // Per tab: how many Data Review items it holds, how many are verified/flagged.
+  const tabChecks = (t: Tab) => {
+    const items = checklistItems.filter((it: any) => CHECKLIST_TAB[it.ItemKey] === t);
+    return {
+      total: items.length,
+      checked: items.filter((it: any) => it.CheckStatus === "Checked").length,
+      flagged: items.filter((it: any) => it.CheckStatus === "NeedsRecheck").length,
+    };
+  };
+  const tabName = (t: Tab) => isPlotSale && t === "Parking & Extra Charges" ? "Extra Charges" : isPlotSale && t === "Payment Plan" ? "Payment Schedule" : t;
+  const checkedCount = checklistItems.filter((it: any) => it.CheckStatus === "Checked").length;
+  // Tabs still holding unverified items, in tab order; flagged ones first.
+  const tabsLeft = TABS.filter((t) => { const c = tabChecks(t); return c.total > c.checked; })
+    .sort((a, b) => (tabChecks(b).flagged > 0 ? 1 : 0) - (tabChecks(a).flagged > 0 ? 1 : 0));
   // Which specific gating step to point staff at, in the order they must be
   // completed — replaces the old generic "complete the checklist" message
   // with the actual step name and where to go do it, since the gates live
   // on 3 different tabs (Booking, Payment Plan, Payment & Invoice).
-  const pendingStepMessage = !unitConfirmed
-    ? { tab: "Booking" as Tab, text: "Step 1 (Unit & Value) is pending — check \"Project, Unit and Rate/SqFt are correct\" on the Booking tab." }
-    : !planConfirmed
-    ? { tab: "Payment Plan" as Tab, text: "Step 2 (Payment Plan) is pending — check the Payment Plan item on the Payment Plan tab." }
-    : !checklistAllChecked
-    ? { tab: "Booking" as Tab, text: "The Data Review checklist still has unchecked items." }
+  const itemsLeft = checklistItems.length - checkedCount;
+  const pendingStepMessage = itemsLeft > 0 && tabsLeft.length
+    ? { tab: tabsLeft[0], text: `${itemsLeft} item${itemsLeft === 1 ? "" : "s"} left to verify — ${tabsLeft.map(tabName).join(", ")}. Go to ${tabName(tabsLeft[0])} →` }
     : null;
 
   const goStep = (dir: 1 | -1) => {
@@ -778,6 +812,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
   // nothing to verify, submit or approve, and nothing is overdue on it.
   const closed = isBookingClosed(booking?.Status);
+  // The Welcome Call's own parking / extra-charge checks belong to the Welcome
+  // Call, after Data Review — never shown beside the Data Review tick box.
+  const welcomeCallChecks = currentStage !== "Review";
   // Who may act at this stage is decided on the server from Approval Setup
   // (the booking workflow's levels: roles and named people).
   const canActOnStage = booking?.Status === CrmStatus.PENDING && !!stageState?.CanActOnStage;
@@ -792,6 +829,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+      // The menu's Approval Inbox badge re-counts at once.
+      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -819,6 +858,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-bookings"] });
       qc.invalidateQueries({ queryKey: ["approval-inbox"] });
+      // The menu's Approval Inbox badge re-counts at once.
+      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -1005,13 +1046,27 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // (columns + routes) is gone; this checkbox is now the single, real
   // action for both what it visibly checks and what the readiness gate
   // (checkBookingApprovalReadiness / submitForApproval) actually reads.
+  const renderTabChecklist = (t: Tab) => {
+    const keys = Object.keys(CHECKLIST_TAB).filter((k) => CHECKLIST_TAB[k] === t);
+    const rows = keys.map(renderChecklistItem).filter(Boolean);
+    return rows.length ? <div className="space-y-2">{rows}</div> : null;
+  };
   const renderChecklistItem = (itemKey: string) => {
     const it = checklistItems.find((c: any) => c.ItemKey === itemKey);
-    if (!it) return null;
-    const interactive = currentStage === "Review" && !closed;
+    // One verify box per tab at a time: Data Review boxes only while the
+    // booking is in Data Review; after that the tab shows the Welcome Call
+    // checks instead (see welcomeCallChecks).
+    if (!it || currentStage !== "Review" || closed) return null;
+    const interactive = true;
 
     return (
-      <div className=" border border-border/70 px-3 py-2 bg-muted/10">
+      <div key={it.ItemKey} className={`border px-3 py-2.5 ${
+        it.CheckStatus === "Checked" ? "border-foreground/30 bg-card"
+        : it.CheckStatus === "NeedsRecheck" ? "border-destructive/50 bg-destructive/5" : "border-primary/40 bg-primary/5"
+      }`}>
+        <p className="font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1.5 flex items-center gap-1">
+          <ClipboardCheck size={11} /> Data Review — {canVerify ? "tick when correct, flag if something is wrong" : "a data verifier ticks this"}
+        </p>
         <div className="flex items-start gap-2">
           <button
             type="button"
@@ -1026,13 +1081,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           </button>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium">{it.ItemLabel}</span>
+              <button type="button" disabled={!canVerify || checklistBusyKey === it.ItemKey}
+                onClick={() => fireChecklistAction(it.ItemKey, it.CheckStatus === "Checked" ? "uncheck" : "check")}
+                className="text-xs font-medium text-left enabled:cursor-pointer disabled:cursor-default">{it.ItemLabel}</button>
               <span className={`text-[0.625rem] px-1.5 py-0.5 border font-medium shrink-0 ${
                 it.CheckStatus === "Checked" ? "text-foreground bg-card border-foreground/30"
                 : it.CheckStatus === "NeedsRecheck" ? "text-destructive bg-destructive/5 border-destructive/40"
                 : "text-muted-foreground bg-muted/50 border-border"
               }`}>
-                {it.CheckStatus}
+                {CHECK_STATE_LABEL[it.CheckStatus] || it.CheckStatus}
               </span>
             </div>
             {it.Remarks && (
@@ -1093,32 +1150,43 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   Deed Registered — cancellation not applicable
                 </span>
               )}
-              {/* Offered only to those who may raise a cancellation (the server checks the same right). */}
+              {/* Offered only to those who may raise a cancellation (the server checks the same right).
+                  Kept in a menu: a red button beside the title read as the page's main action. */}
               {booking && booking.Status !== 'Cancelled' && booking.DeedStatus !== 'Registered' && (canDoAction("crm-cancellations", "create") || canEdit) && (
-                <button onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className={`${KEY_LINE} h-9 px-3 shrink-0 !text-destructive !border-destructive`}>
-                  <AlertTriangle size={13} /> Request cancellation
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className={`${KEY_LINE} h-9 w-9 shrink-0`} title="More actions" aria-label="More actions"><MoreHorizontal size={15} /></button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56 rounded-none">
+                    <DropdownMenuItem onClick={() => { onClose(); navigate(`/crm/cancellations?bookingId=${bookingId}`); }} className="gap-2 text-destructive focus:text-destructive">
+                      <AlertTriangle size={14} /> Request cancellation
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
             </div>
         </DialogHeader>
 
-        {isLoading || !booking ? (
+        {isLoading ? (
           <div className="py-16 text-center text-muted-foreground text-sm">Loading...</div>
+        ) : !booking ? (
+          // fetchDetail returns null for a missing / deleted booking or one outside the user's projects.
+          <div className="py-16 text-center text-sm text-muted-foreground">This booking could not be found — it may have been deleted, or it belongs to a project you can't open.</div>
         ) : (
           <div className="min-w-0">
-            <div className="bg-card px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ border: RULE }}>
-              <div className="min-w-0">
-                <div className={LBL}>Current stage</div>
-                <div className={`text-sm font-semibold ${closed ? "text-destructive" : ""}`}>
-                  {closed ? `${booking.Status} — no further steps` : bookingWorkflowStageLabel[currentStage] || currentStage}
-                </div>
-                {booking.StageRemarks && (
-                  <div className="mt-1 px-2 py-1.5 text-xs text-foreground" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
-                    <span className="font-semibold">Correction remarks: </span>{booking.StageRemarks}
-                  </div>
-                )}
+            {/* The current stage is on the Journey bar's "Now" line below; only
+                what needs reading first is called out here. */}
+            {closed && (
+              <div className="px-3 py-2 text-sm font-semibold text-destructive" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+                {booking.Status} — no further steps
               </div>
-            </div>
+            )}
+            {booking.StageRemarks && (
+              <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
+                <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
+                <div><span className="font-semibold">Sent back for correction ({bookingWorkflowStageLabel[currentStage] || currentStage}): </span>{booking.StageRemarks}</div>
+              </div>
+            )}
 
             {booking.IsFrozen && (
               <div className="flex items-start gap-2 border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs">
@@ -1155,28 +1223,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
             <PropertyCard bookingId={booking.Id} />
 
             {/* ── Booking Lifecycle Stepper ── */}
-            <BookingLifecycleBar bookingId={booking.Id} />
+            <BookingLifecycleBar bookingId={booking.Id} stage={`${currentStage}:${booking.Status}`} />
 
-            {rejectOpen && (
-              <BodyPortal><div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60" onClick={() => !stageActioning && setRejectOpen(false)}>
-                <div className="bg-background border border-border p-5 w-full max-w-md space-y-3" onClick={(e) => e.stopPropagation()}>
-                  <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</h3>
-                  <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)}
-                    placeholder="Required remarks"
-                    className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
-                      className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
-                      Cancel
-                    </button>
-                    <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
-                      className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
-                      {stageActioning === "reject" ? "Sending..." : "Send Back"}
-                    </button>
-                  </div>
-                </div>
-              </div></BodyPortal>
-            )}
 
             {/* 2-step required flow (Unit & Value, Payment Plan — both are
                 Data Review checklist items) plus a 3rd, INFORMATIONAL-ONLY
@@ -1199,28 +1247,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 : "text-muted-foreground bg-muted/40";
               return (
                 <div className="flex items-center gap-1.5 px-1 py-2 text-xs overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {[
-                    { label: isPlotSale ? "1. Plots & Value" : "1. Unit & Value", done: unitConfirmed, t: "Booking" as Tab },
-                    { label: isPlotSale ? "2. Payment Schedule" : "2. Payment Plan", done: planConfirmed, t: "Payment Plan" as Tab },
-                  ].map((s, i) => (
-                    <React.Fragment key={s.label}>
-                      <button onClick={() => setTab(s.t)}
-                        className={`flex items-center gap-1 px-2 py-1 font-medium shrink-0 ${
-                          s.done ? "text-foreground bg-card" : tab === s.t ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted/40"
-                        }`}>
-                        {s.done && <Check size={11} />} {s.label}
-                      </button>
-                      <ArrowRight size={11} className="text-muted-foreground shrink-0" />
-                    </React.Fragment>
-                  ))}
                   <button onClick={() => setTab("Payment & Invoice")}
                     title="Not required to book — informational only"
                     className={`flex items-center gap-1 px-2 py-1 font-medium shrink-0 ${mrChipClass}`}>
-                    {latestReceipt?.Status === CrmStatus.APPROVED && <Check size={11} />} 3. Money Receipt: {mrStatus}
+                    {latestReceipt?.Status === CrmStatus.APPROVED && <Check size={11} />} Money Receipt: {mrStatus}
                   </button>
-                  <span className="ml-4 shrink-0 whitespace-nowrap text-muted-foreground">
-                    {mandatoryReady ? "Both required steps complete — ready to submit" : "Complete both required steps to submit"}
-                  </span>
+                  <span className="shrink-0 whitespace-nowrap text-muted-foreground">(for information — not needed to send for approval)</span>
                 </div>
               );
             })()}
@@ -1231,11 +1263,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                 renderChecklistItem calls below), not dumped here as one
                 block. */}
             {currentStage === "Review" && !closed && checklistItems.length > 0 && (
-              <div className="flex items-center justify-between border border-border px-3 py-2 text-xs">
-                <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-foreground" /> Data Review Checklist</span>
-                <span className="text-muted-foreground">
-                  {checklistItems.filter((it: any) => it.CheckStatus === "Checked").length}/{checklistItems.length} verified — tick each item on its own tab below
-                </span>
+              <div className="border border-border px-3 py-2.5 text-xs space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium flex items-center gap-1.5"><ClipboardCheck size={13} className="text-foreground" /> Data Review — {checkedCount} of {checklistItems.length} verified</span>
+                  {pendingStepMessage ? (
+                    <button onClick={() => setTab(pendingStepMessage.tab)} className="text-primary hover:underline text-left">{pendingStepMessage.text}</button>
+                  ) : (
+                    <span className="font-medium flex items-center gap-1"><Check size={12} /> All verified — ready for Verify &amp; Send for Approval</span>
+                  )}
+                </div>
+                <div className="h-1 bg-muted overflow-hidden" role="progressbar" aria-valuenow={checkedCount} aria-valuemax={checklistItems.length}>
+                  <div className="h-full bg-foreground transition-all" style={{ width: `${checklistItems.length ? (checkedCount / checklistItems.length) * 100 : 0}%` }} />
+                </div>
               </div>
             )}
 
@@ -1249,7 +1288,16 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   className={`px-3.5 h-10 font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] transition-colors whitespace-nowrap ${
                     tab === t ? "bg-foreground text-card" : "text-muted-foreground hover:text-foreground hover:bg-primary/10"
                   }`} style={{ borderRight: RULE_SOFT }}>
-                  {isPlotSale && t === "Parking & Extra Charges" ? "Extra Charges" : isPlotSale && t === "Payment Plan" ? "Payment Schedule" : t}
+                  <span className="flex items-center gap-1.5">
+                    {tabName(t)}
+                    {currentStage === "Review" && !closed && (() => {
+                      const c = tabChecks(t);
+                      if (!c.total) return null;
+                      if (c.flagged) return <span title={`${c.flagged} flagged`} className="px-1 text-destructive border border-destructive/50 bg-destructive/10">!</span>;
+                      if (c.checked === c.total) return <span title="All verified"><Check size={11} /></span>;
+                      return <span title={`${c.total - c.checked} to verify`} className="px-1 border border-current/40 tabular-nums">{c.total - c.checked}</span>;
+                    })()}
+                  </span>
                 </button>
               ))}
             </div>
@@ -1476,9 +1524,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     a single action. See renderChecklistItem's own comment
                     for why there's no longer a separate Confirm button
                     here. */}
-                {renderChecklistItem("ProjectUnitRate")}
-                {renderChecklistItem("BrokerDetails")}
-                {renderChecklistItem("SourceAssignment")}
+                {renderTabChecklist("Booking")}
               </div>
             )}
 
@@ -1731,12 +1777,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     checklist item, a single action. See
                     renderChecklistItem's own comment for why there's no
                     longer a separate Confirm button here. */}
-                {renderChecklistItem("PaymentPlanAmounts")}
+                {renderTabChecklist("Payment Plan")}
               </div>
             )}
 
             {tab === "Payment & Invoice" && (
               <div className="space-y-3 pt-2">
+                {/* Read-only: refreshed whenever a payment, receipt or on-account change lands. */}
+                <BookingStatement bookingId={booking.Id}
+                  refreshKey={`${milestoneList.map((m: any) => m.AmountPaid).join(",")}|${(moneyReceipts as any[]).map((r: any) => r.Status).join(",")}|${bookingOnAccountBalance}`} />
                 <div className=" border border-border p-4 space-y-2">
                   <h3 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground flex items-center gap-1.5"><CreditCard size={15} className="text-foreground" /> Booking Amount</h3>
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
@@ -1997,7 +2046,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {renderChecklistItem("BankDepositMode")}
+                {renderTabChecklist("Payment & Invoice")}
               </div>
             )}
 
@@ -2307,7 +2356,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     </div>
                   )}
                   {(parking as any[]).length > 0 && (
-                    <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    welcomeCallChecks && (
+                      <ParkingVcSection vc={parkingChecklist} sectionKey="Parking" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    )
                   )}
                 </div>
                 )}
@@ -2402,17 +2453,19 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           {chargesSaving ? "Adding..." : "Add"}
                         </button>
                       </div>
-                      {/* Live GST preview — 18% is fixed from the HSN Master
-                          "Extra Charges" row; there's no rate to pick anymore. */}
+                      {/* GST preview at the rate the server gives this booking. */}
                       {extraForm.Amount && Number(extraForm.Amount) > 0 && (
-                        <ExtraWorkGstPreview amount={Number(extraForm.Amount)} />
+                        <ExtraWorkGstPreview amount={Number(extraForm.Amount)} bookingId={bookingId} />
                       )}
                     </>
                   )}
                   {(extras as any[]).length > 0 && (
-                    <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    welcomeCallChecks && (
+                      <ParkingVcSection vc={parkingChecklist} sectionKey="ExtraCharges" bookingId={bookingId} onChanged={refetchParkingChecklist} />
+                    )
                   )}
                 </div>
+                {renderTabChecklist("Parking & Extra Charges")}
               </div>
             )}
 
@@ -2481,7 +2534,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </>
                 )}
 
-                {renderChecklistItem("ApplicantKyc")}
+                {renderTabChecklist("Bank Details")}
               </div>
             )}
 
@@ -2682,7 +2735,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   </div>
                 )}
 
-                {renderChecklistItem("Documents")}
+                {renderTabChecklist("Attachments")}
               </div>
             )}
 
@@ -2963,6 +3016,28 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       </div>,
       document.body,
     )}
+    {/* Send back: a real dialog on top of the booking dialog (a body-level
+        overlay sat outside it, where the booking dialog blocks typing and clicks). */}
+    <Dialog open={rejectOpen} onOpenChange={(o) => { if (!o && !stageActioning) setRejectOpen(false); }}>
+      <DialogContent hideCloseButton elevated className="max-w-md rounded-none" style={{ border: RULE }}>
+        <DialogHeader>
+          <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
+        </DialogHeader>
+        <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
+          placeholder="What needs to be corrected? (required)"
+          className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setRejectOpen(false)} disabled={stageActioning !== null}
+            className="px-3 py-1.5 text-sm border border-border text-muted-foreground hover:bg-muted disabled:opacity-40">
+            Cancel
+          </button>
+          <button onClick={handleStageReject} disabled={stageActioning !== null || !rejectRemark.trim()}
+            className="px-3 py-1.5 text-sm bg-destructive text-white font-medium hover:bg-destructive/80 disabled:opacity-40">
+            {stageActioning === "reject" ? "Sending..." : "Send Back"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
     <Dialog open={!!reasonDialog} onOpenChange={(o) => { if (!o) { setReasonDialog(null); setReasonText(""); } }}>
       <DialogContent hideCloseButton className="max-w-md rounded-none" style={{ border: RULE }}>
         <DialogHeader>

@@ -177,18 +177,22 @@ async function getBookingCommercial(pool, bookingId) {
   return r.recordset.every((x) => x.IsCommercial === true || x.IsCommercial === 1);
 }
 
-/** Same answer for a single unit (quotes / forms before a booking exists). */
-async function getUnitCommercial(pool, unitId) {
+/** Same answer for a set of units — a quote before a booking exists. */
+async function getUnitsCommercial(pool, unitIds) {
   const hasCol = await pool.request().query("SELECT COL_LENGTH('dbo.CrmConstructedAssetKind', 'IsCommercial') AS c");
   if (hasCol.recordset?.[0]?.c == null) return null; // pre-526: usage unknown -> usage-agnostic GST rules
-  if (unitId == null) return null;
-  const r = await pool.request().input("uid", sql.Int, unitId).query(`
+  const ids = (unitIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return null;
+  const r = await pool.request().query(`
     SELECT ISNULL(k.IsCommercial, 0) AS IsCommercial
     FROM dbo.UnitMaster u LEFT JOIN dbo.CrmConstructedAssetKind k ON k.Code = u.UnitKind
-    WHERE u.Id = @uid`);
+    WHERE u.Id IN (${ids.join(",")})`);
   if (!r.recordset.length) return null;
-  return r.recordset[0].IsCommercial === true || r.recordset[0].IsCommercial === 1;
+  return r.recordset.every((x) => x.IsCommercial === true || x.IsCommercial === 1);
 }
+
+/** Same answer for a single unit (quotes / forms before a booking exists). */
+const getUnitCommercial = (pool, unitId) => getUnitsCommercial(pool, unitId == null ? [] : [unitId]);
 
 async function loadLandKinds(pool) {
   const r = await pool.request().query(
@@ -420,6 +424,7 @@ module.exports = {
   loadCommercialKinds,
   getBookingCommercial,
   getUnitCommercial,
+  getUnitsCommercial,
   UNIT_KIND,
   INCOME_ACCOUNT,
   getEffectiveType,

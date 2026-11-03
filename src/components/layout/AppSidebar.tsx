@@ -206,8 +206,12 @@ const MODULE_HEADER: Record<
   },
 };
 
-// ── Approval count poller ─────────────────────────────────────────────────────
-function useApprovalCount() {
+// ── Sidebar count poller ──────────────────────────────────────────────────────
+// Polls a `{ count }` endpoint every 60 s (backing off on failure, paused while
+// the tab is hidden) and re-polls at once when a page fires `refreshEvent`
+// (after an approve or reject), so a badge drops without waiting for the next
+// tick. `url` null = not polled (the module is not open).
+function usePolledCount(url: string | null, refreshEvent: string) {
   const [count, setCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const failRef = useRef(0);
@@ -215,119 +219,44 @@ function useApprovalCount() {
   // after the component (e.g. on logout) has already unmounted.
   const mountedRef = useRef(true);
 
-  // Declared once per hook instance and only ever called from this effect's
-  // own setTimeout chain — not passed as a prop/dependency elsewhere — so it
-  // doesn't need useCallback. Refs (timerRef/failRef/mountedRef) are stable
-  // across renders, so the stale-closure risk that exhaustive-deps would
-  // normally flag doesn't apply here.
-  const poll = () => {
-    if (!mountedRef.current) return;
-    if (document.visibilityState === "hidden") {
-      timerRef.current = setTimeout(poll, 60_000);
-      return;
-    }
-    const token = sessionStorage.getItem("token");
-    window
-      .fetch("/api/approval-inbox/count", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((r) => (r.ok ? r.json().catch(() => ({})) : Promise.reject()))
-      .then((d) => {
-        if (!mountedRef.current) return;
-        failRef.current = 0;
-        setCount(d.count ?? 0);
-        timerRef.current = setTimeout(poll, 60_000);
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        failRef.current += 1;
-        timerRef.current = setTimeout(
-          poll,
-          Math.min(5 * 60_000, 60_000 * failRef.current),
-        );
-      });
-  };
-
-  // Immediately re-poll when any page fires the "approval-action" custom
-  // event (after an approve or reject). Without this the badge can take up
-  // to 60 s to drop even though the approval already happened.
-  const onApprovalAction = () => {
-    if (!mountedRef.current) return;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    poll();
-  };
-
   useEffect(() => {
+    if (!url) { setCount(0); return; }
     mountedRef.current = true;
+    const poll = () => {
+      if (!mountedRef.current) return;
+      if (document.visibilityState === "hidden") {
+        timerRef.current = setTimeout(poll, 60_000);
+        return;
+      }
+      const token = sessionStorage.getItem("token");
+      window
+        .fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        .then((r) => (r.ok ? r.json().catch(() => ({})) : Promise.reject()))
+        .then((d) => {
+          if (!mountedRef.current) return;
+          failRef.current = 0;
+          setCount(d.count ?? 0);
+          timerRef.current = setTimeout(poll, 60_000);
+        })
+        .catch(() => {
+          if (!mountedRef.current) return;
+          failRef.current += 1;
+          timerRef.current = setTimeout(poll, Math.min(5 * 60_000, 60_000 * failRef.current));
+        });
+    };
+    const onRefresh = () => {
+      if (!mountedRef.current) return;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      poll();
+    };
     poll();
-    window.addEventListener("approval-action", onApprovalAction);
+    window.addEventListener(refreshEvent, onRefresh);
     return () => {
       mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
-      window.removeEventListener("approval-action", onApprovalAction);
+      window.removeEventListener(refreshEvent, onRefresh);
     };
-  }, []);
-
-  return count;
-}
-
-// ── Civil Work DPR approval count poller ─────────────────────────────────────
-// Same shape as useApprovalCount above, just scoped to the separate
-// per-assignment approval workflow (dependencyActivityAssignmentApi.ts's
-// getPendingApprovalCount) instead of the module-wide Approval Inbox.
-function useCivilWorkDprApprovalCount() {
-  const [count, setCount] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const failRef = useRef(0);
-  const mountedRef = useRef(true);
-
-  const poll = () => {
-    if (!mountedRef.current) return;
-    if (document.visibilityState === "hidden") {
-      timerRef.current = setTimeout(poll, 60_000);
-      return;
-    }
-    const token = sessionStorage.getItem("token");
-    window
-      .fetch("/api/dependency-activity-assignment/approvals/pending-count", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      .then((r) => (r.ok ? r.json().catch(() => ({})) : Promise.reject()))
-      .then((d) => {
-        if (!mountedRef.current) return;
-        failRef.current = 0;
-        setCount(d.count ?? 0);
-        timerRef.current = setTimeout(poll, 60_000);
-      })
-      .catch(() => {
-        if (!mountedRef.current) return;
-        failRef.current += 1;
-        timerRef.current = setTimeout(
-          poll,
-          Math.min(5 * 60_000, 60_000 * failRef.current),
-        );
-      });
-  };
-
-  // Immediately re-poll after this session's own Approval tab records an
-  // approval, same reasoning as onApprovalAction above — otherwise the
-  // badge can lag up to 60s behind an action just taken.
-  const onCivilWorkDprApprovalAction = () => {
-    if (!mountedRef.current) return;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    poll();
-  };
-
-  useEffect(() => {
-    mountedRef.current = true;
-    poll();
-    window.addEventListener("civilworkdpr-approval-action", onCivilWorkDprApprovalAction);
-    return () => {
-      mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
-      window.removeEventListener("civilworkdpr-approval-action", onCivilWorkDprApprovalAction);
-    };
-  }, []);
+  }, [url, refreshEvent]);
 
   return count;
 }
@@ -340,8 +269,10 @@ export const AppSidebar = () => {
   const { badgeCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
   useAppVersion();
-  const pendingApprovalCount = useApprovalCount();
-  const civilWorkDprApprovalCount = useCivilWorkDprApprovalCount();
+  // Module-wide Approval Inbox.
+  const pendingApprovalCount = usePolledCount("/api/approval-inbox/count", "approval-action");
+  // Civil Work DPR's own per-assignment approvals (dependencyActivityAssignmentApi.ts).
+  const civilWorkDprApprovalCount = usePolledCount("/api/dependency-activity-assignment/approvals/pending-count", "civilworkdpr-approval-action");
 
   const { canAccessPage } = useAuth();
 
@@ -409,9 +340,9 @@ export const AppSidebar = () => {
     if (isUserProfilePage) return userNavItems;
     if (isAdminPage && !isAdminTier) {
       // Not admin-tier: only the Admin pages ticked for this role / user in Menu Rights.
-      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount), (pk) => canAccessPage(pk as any));
+      return filterAdminNavItems(buildAdminNavItems(pendingApprovalCount, role === "super_admin"), (pk) => canAccessPage(pk as any));
     }
-    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
+    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount, role === "super_admin");
 
     let raw: NavItem[] = [];
     switch (activeModule) {
@@ -461,7 +392,7 @@ export const AppSidebar = () => {
         raw = legalNavItems;
         break;
       case "admin":
-        raw = buildAdminNavItems(pendingApprovalCount);
+        raw = buildAdminNavItems(pendingApprovalCount, role === "super_admin");
         break;
       default:
         raw = [];

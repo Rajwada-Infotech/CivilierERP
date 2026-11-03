@@ -7,6 +7,7 @@ import { Link } from "react-router-dom";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ChevronDown, ChevronRight, Pencil, Plus, X } from "lucide-react";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
@@ -28,12 +29,13 @@ const CrmProjectAutoSetup: React.FC = () => {
   const ask = useSheetAsk();
   const qc = useQueryClient();
   const rights = usePageRights("crm-auto-project-setup");
-  // Parking is a separate component with its own project and state (no route change), so nothing on one tab
-  // refetches or re-renders the other.
-  const [activeTab, setActiveTab] = useState<"setup" | "parking">("setup");
+  // Parking is a separate component with its own state and fetches, so nothing on one tab refetches or
+  // re-renders the other. The tab, company and project live in the address (?tab=parking&company=&project=),
+  // shared by both tabs: a refresh or a shared link opens the same place.
+  const [activeTab, setActiveTab] = useUrlParam<"setup" | "parking">("tab", "setup");
   // Strict Company -> Project gate, as on every Company -> Project master.
-  const [companyId, setCompanyId] = useState("");
-  const [projectId, setProjectId] = useState("");
+  const [companyId, setCompanyId] = useUrlParam("company");
+  const [projectId, setProjectId] = useUrlParam("project");
   const [blockCount, setBlockCount] = useState("2");
   const [namingScheme, setNamingScheme] = useState<NamingScheme>("Alphabetical");
   const [blockNames, setBlockNames] = useState<string[]>(generateNames(2, "Alphabetical"));

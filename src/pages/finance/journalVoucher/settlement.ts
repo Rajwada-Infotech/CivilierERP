@@ -10,7 +10,8 @@ export type SettlementMode =
   | "UPI"
   | "RTGS"
   | "IMPS"
-  | "Card";
+  | "Card"
+  | "Bank Charges";
 
 export const SETTLEMENT_MODES: SettlementMode[] = [
   "Cash",
@@ -21,6 +22,7 @@ export const SETTLEMENT_MODES: SettlementMode[] = [
   "RTGS",
   "IMPS",
   "Card",
+  "Bank Charges",
 ];
 
 export const DIGITAL_REF_LABEL: Record<string, string> = {
@@ -52,8 +54,10 @@ export const emptySettlement = (): SettlementValue => ({
 
 export const isChequeMode = (m: string) => m === "Cheque" || m === "Post-Dated Cheque";
 export const isDigitalMode = (m: string) => ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(m);
+/** Bank Charges: the bank debited its own charges — a bank account, no reference. */
+export const isBankChargesMode = (m: string) => m === "Bank Charges";
 /** Anything but Cash and "no mode" moves through a bank account. */
-export const needsBank = (m: string) => isChequeMode(m) || isDigitalMode(m);
+export const needsBank = (m: string) => isChequeMode(m) || isDigitalMode(m) || isBankChargesMode(m);
 
 /** True once anything beyond the empty state has been picked (for draft "dirty" checks). */
 export const hasSettlement = (v: SettlementValue) => !!v.mode;
@@ -67,6 +71,7 @@ export function settlementError(v: SettlementValue): string | null {
     if (!v.chequeNo) return "Select a cheque number.";
     if (!v.chequeDate) return "Enter the cheque date.";
   }
+  if (isBankChargesMode(v.mode) && !v.bankId) return "Select the bank account that charged it.";
   return null;
 }
 

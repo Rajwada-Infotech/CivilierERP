@@ -24,6 +24,9 @@ export interface InboxItem {
   // material-issue-return, debit-note. NULL for everything else (payments,
   // CRM modules, ...), which have no single project to show.
   ProjectName: string | null;
+  // The company the document belongs to. Every document type shows the same person / company / project / amount; what is
+  // special to a type (a godown route, a voucher summary ...) comes after. Filled by the backend's common layer.
+  CompanyName?: string | null;
   Amount: number | null;
   CreatedBy: string | null;
   ApprovedBy: string | null;
@@ -278,13 +281,6 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/cancellations",
     label: "CRM Cancellations",
   },
-  "crm-money-receipts": {
-    icon: Receipt,
-    color: "text-teal-600 bg-teal-600/10",
-    navPath: "/crm/money-receipts",
-    apiEndpoint: "/api/crm/money-receipts",
-    label: "CRM Money Receipts",
-  },
   "crm-noc": {
     icon: ClipboardCheck,
     color: "text-teal-500 bg-teal-500/10",
@@ -480,7 +476,6 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
   "crm-sales-deed-director": "sales",
   "crm-brokerage": "sales",
   "crm-cancellations": "sales",
-  "crm-money-receipts": "sales",
   "crm-noc": "sales",
   "crm-booking-amendment": "sales",
   "crm-refunds": "sales",
@@ -659,7 +654,6 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "journal-voucher":      "border-amber-600",
   "inter-company-transfer":"border-fuchsia-600",
   "fund-transfer":        "border-violet-600",
-  "crm-money-receipts":   "border-teal-600",
   contracts:              "border-purple-500",
   "crm-bookings":         "border-orange-500",
   "crm-agreements":       "border-indigo-500",

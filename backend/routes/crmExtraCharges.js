@@ -370,6 +370,19 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 });
 
 // GET /:bookingId — list extra charges for a booking
+// GET /:bookingId/gst-rate — the rate an extra charge on this booking is taxed
+// at (crmGst.extraWorkRateForBooking), for the add form's preview.
+router.get("/:bookingId/gst-rate", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const bookingId = parseId(req.params.bookingId);
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
+    res.json({ rate: await require("../services/crmGst").extraWorkRateForBooking(getPool(), bookingId) });
+  } catch (e) {
+    console.error("[crm-extra-charges] GET gst-rate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();

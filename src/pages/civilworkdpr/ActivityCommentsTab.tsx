@@ -4,6 +4,7 @@ import { ApiError, fetchWithAuth } from "@/lib/fetchWithAuth";
 import { connectSocket } from "@/lib/socket";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { fmtIstDateTime, fmtIstIso } from "@/lib/istTime";
 
 // Live discussion for one activity. Sends go over REST (validated, saved,
 // idempotent); the server then fans each saved message out over socket.io to
@@ -35,18 +36,15 @@ const isForbidden = (err: unknown) => err instanceof ApiError && err.status === 
 const newClientId = () =>
   (globalThis.crypto?.randomUUID?.() ?? `c${Date.now()}${Math.random().toString(36).slice(2, 10)}`).slice(0, 50);
 
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+const fmtTime = (iso: string) => fmtIstDateTime(iso, { hour: "2-digit", minute: "2-digit" });
 
+// Days are India days (the server stores UTC), so "Today" flips at midnight IST wherever the viewer's device is set.
+const istDay = (d: string | Date) => fmtIstIso(d).slice(0, 10);
 const dayLabel = (iso: string) => {
-  const d = new Date(iso);
-  const today = new Date();
-  const y = new Date();
-  y.setDate(today.getDate() - 1);
-  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-  if (same(d, today)) return "Today";
-  if (same(d, y)) return "Yesterday";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  const k = istDay(iso);
+  if (k === istDay(new Date())) return "Today";
+  if (k === istDay(new Date(Date.now() - 24 * 60 * 60 * 1000))) return "Yesterday";
+  return fmtIstDateTime(iso, { day: "2-digit", month: "short", year: "numeric" });
 };
 
 // Insert/replace by server id or clientId, keeping chronological order.

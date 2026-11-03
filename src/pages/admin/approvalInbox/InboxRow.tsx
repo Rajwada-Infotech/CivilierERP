@@ -135,8 +135,6 @@ export const InboxRow: React.FC<{
           reviewInstead={
             needsBankReview(item) && cfg?.navPath
               ? { label: "Review — set bank", onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
-              : item.Module === "fund-transfer"
-              ? { label: "Confirm manual transfer", onClick: () => setReviewOpen(true) }
               : REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
               ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
               : undefined
@@ -251,11 +249,11 @@ export const InboxRow: React.FC<{
           <span className="shrink-0">{fmtDate(item.RecordDate)}</span>
         </div>
 
-        {/* Row 2b: project (only when this module resolves to one) */}
-        {item.ProjectName && (
+        {/* Row 2b: project and company (only when this document has them) */}
+        {(item.ProjectName || item.CompanyName) && (
           <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground -mt-1.5">
             <Building2 size={10} className="shrink-0" />
-            <span className="truncate">{item.ProjectName}</span>
+            <span className="truncate">{[item.ProjectName, item.CompanyName].filter(Boolean).join(" · ")}</span>
           </div>
         )}
 
@@ -389,11 +387,18 @@ export const InboxRow: React.FC<{
 
         {/* Col 4 — Project */}
         <div className="ai-c-project min-w-0">
-          <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Project</span>
-          {item.ProjectName ? (
-            <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
-              <Building2 size={10} className="shrink-0 text-muted-foreground" />
-              <span className="truncate">{item.ProjectName}</span>
+          <span className="ai-label block font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-0.5">Project / Company</span>
+          {item.ProjectName || item.CompanyName ? (
+            <span className="flex flex-col gap-0.5 min-w-0">
+              {item.ProjectName && (
+                <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
+                  <Building2 size={10} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">{item.ProjectName}</span>
+                </span>
+              )}
+              {item.CompanyName && (
+                <span className="truncate text-[0.625rem] text-muted-foreground" title={item.CompanyName}>{item.CompanyName}</span>
+              )}
             </span>
           ) : (
             <span className="text-[0.625rem] text-muted-foreground/50 italic">—</span>

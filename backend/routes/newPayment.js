@@ -2940,7 +2940,11 @@ router.get("/:id/posting", async (req, res) => {
       if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
+    // Paid straight to expense ledger(s) (Direct Expense Payment): those ledgers are the debit side, shown by name.
+    const previewAllocations = await require("../services/expenseHeadAllocation").getAllocations(pool, sql, "NewPayment", pmt.PPaymentID);
+
     const accounts = {
+      expenseHeads: previewAllocations.map((a) => ({ id: a.lHeadId, label: a.lHeadName, code: a.lHeadCode ?? null, amount: a.amount })),
       // Plain party name when one resolved — matches how a Journal
       // Voucher's own posting display names its ledgers (e.g. "Pinaki
       // Chandra", not "Supplier/Creditor Payable — Pinaki Chandra"), and
@@ -3026,7 +3030,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.PProject, np.JVLineId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              -- A merged payment (migration 501) has no single PExpenseRef to
              -- join ExpenseBooking through — fall back to its first merged
@@ -3165,8 +3169,11 @@ router.post("/:id/post-to-gl", async (req, res) => {
       voucherDate: pmt.PDate,
       sourceType: "PaymentPosting",
       sourceId: pmtId,
-      companyId: pmt.CompanyId ?? null,
-      projectId: pmt.ProjectId ?? null,
+      // The company / project of the invoice when there is one; otherwise the ones the payment itself was made under (a
+      // payment with no invoice - a partner payment, bank charges - used to be posted with no company or project, so it
+      // dropped out of every company-wise Trial Balance).
+      companyId: pmt.CompanyId ?? (Number.isFinite(parseInt(pmt.PCompany, 10)) ? parseInt(pmt.PCompany, 10) : null),
+      projectId: pmt.ProjectId ?? (Number.isFinite(parseInt(pmt.PProject, 10)) ? parseInt(pmt.PProject, 10) : null),
       createdBy: userEmail,
       legs,
     });

@@ -104,7 +104,10 @@ GO
 -- line for history, flagged Cancelled.
 INSERT INTO dbo.CrmBookingUnit (BookingId, UnitId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary, CreatedAt)
 SELECT b.Id, b.UnitId, b.AreaSqFt, b.RatePerSqFt,
-       COALESCE(b.GrandTotal, b.TotalValue),
+       -- The unit price only. This read COALESCE(GrandTotal, TotalValue), which
+       -- put parking / GST / extras into the unit's line (prod BKG-2026-00002 and
+       -- -00005, repaired 2026-11-02 with scripts/crmMoneyCheck.js).
+       b.TotalValue,
        CASE WHEN b.Status IN (N'Cancelled', N'Rejected') OR ISNULL(b.IsActive, 1) = 0
             THEN N'Cancelled' ELSE N'Active' END,
        1, SYSDATETIME()

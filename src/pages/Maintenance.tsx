@@ -4,6 +4,7 @@ import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { getMaintenanceStatus, type MaintenanceState } from "@/api/maintenanceModeApi";
 import { MAINTENANCE_STORAGE_KEY, readStoredMaintenance } from "@/lib/maintenanceRedirect";
 import { formatCountdown, formatIst, maintenanceProgress } from "@/lib/maintenanceTime";
+import ServiceUnavailable404 from "@/pages/ServiceUnavailable404";
 
 const POLL_MS = 10_000;
 const DEFAULT_TITLE = "We're upgrading CivilierERP";
@@ -93,6 +94,11 @@ const Maintenance = ({ overlay }: { overlay?: OverlayProps }) => {
   const remaining = endsAtMs === null ? null : endsAtMs - now;
   const overrun = remaining !== null && remaining <= 0;
   const progress = state ? maintenanceProgress(state.startedAt, state.endsAt, now) : null;
+
+  // Switched to the "404 page" (cloud bill unpaid): same hold, same polling, but nothing to read into.
+  if (state?.variant === "unavailable") {
+    return <ServiceUnavailable404 title={state.title} message={state.message} overlay={overlay} />;
+  }
 
   // Plain divs on purpose: the app's themes restyle <header>, <main> and <section> elements globally (frosted
   // glass, greyscale), which turned this screen's top bar white.

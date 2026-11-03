@@ -18,6 +18,7 @@ import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { INP, KEY_INK, KEY_LINE, LBL, RULE, RULE_SOFT, TEXTAREA } from "./customers/config";
 
+import { useUrlParam } from "@/hooks/useUrlParam";
 const API = "/api/crm/payments";
 
 type DemandStatus = "Pending" | "Demanded" | "Paid";
@@ -194,7 +195,8 @@ const CrmDemands: React.FC = () => {
   // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => setSearch(v));
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
-  const [activeTab, setActiveTab] = useState<TabKey>("overdue");
+  // In the address, so a refresh or a shared link keeps it.
+  const [activeTab, setActiveTab] = useUrlParam<TabKey>("tab", "overdue", TABS.map((t) => t.key));
   const [density, setDensity] = useState<"grouped" | "compact">("grouped");
   const [raiseRow, setRaiseRow] = useState<DemandRow | null>(null);
   const [raiseNotes, setRaiseNotes] = useState("");

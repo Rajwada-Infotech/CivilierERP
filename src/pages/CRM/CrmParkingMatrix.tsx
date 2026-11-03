@@ -8,6 +8,8 @@ import { Car } from "lucide-react";
 import { getSocket } from "@/lib/socket";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
+import { useRememberedProject } from "@/hooks/useRememberedProject";
+import { useUrlParam } from "@/hooks/useUrlParam";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
@@ -208,8 +210,10 @@ export function ParkingMatrixPage() {
   const navigate = useNavigate();
   const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
-  const [projectId, setProjectId] = useState("");
-  const [blockId, setBlockId] = useState("");
+  const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["parking-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
+  // Opens on the project last viewed here (or the only one).
+  const [projectId, setProjectId] = useRememberedProject("parking-matrix", projects);
+  const [blockId, setBlockId] = useUrlParam("block");
   const [choiceSlot, setChoiceSlot] = useState<MatrixSlot | null>(null);
   const [sellSlot, setSellSlot] = useState<MatrixSlot | null>(null);
   const [holdSlot, setHoldSlot] = useState<MatrixSlot | null>(null);
@@ -226,8 +230,6 @@ export function ParkingMatrixPage() {
     return () => { sock.off("matrix:update", onUpdate); };
   }, [projectId, qc]);
 
-  const { data: projects = [], isLoading: loadingProjects } = useQuery({ queryKey: ["parking-matrix-projects"], queryFn: () => fetchOptions<Option>(`${API}/projects`) });
-  useEffect(() => { if (!projectId && projects.length === 1) setProjectId(String(projects[0].Id)); }, [projects, projectId]);
   const { data: blocks = [] } = useQuery({
     queryKey: ["parking-matrix-blocks", projectId],
     queryFn: () => fetchOptions<Option>(`${API}/blocks?projectId=${projectId}`),

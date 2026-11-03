@@ -2,7 +2,7 @@ import { Chart2, Profile2User, Shield, TickCircle, ShieldTick, Message2, Buildin
 import { NavItem } from "./SidebarPrimitives";
 import { ADMIN_PATH_PAGE_KEYS } from "@/contexts/module.utils";
 
-export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
+export const buildAdminNavItems = (pendingCount: number, superAdmin = false): NavItem[] => [
   // ── 1. Dashboard ───────────────────────────────────────────────────────────
   { label: "Control Center", icon: Chart2, path: "/admin/dashboard", isDashboard: true },
 
@@ -83,6 +83,8 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   { label: "Signature", icon: DocumentText, path: "/admin/signature" },
   { label: "APK Manager", icon: Mobile, path: "/admin/apk-manager" },
   { label: "System Maintenance", icon: Setting2, path: "/admin/system-maintenance" },
+  // Runs code on the server: only a super admin sees it (the page and every API call check the role again).
+  ...(superAdmin ? [{ label: "Script Console", icon: ShieldTick, path: "/admin/script-console" }] : []),
 ];
 
 /**

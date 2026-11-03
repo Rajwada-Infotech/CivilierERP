@@ -32,7 +32,7 @@ const {
   updateMoneyReceipt,
   resubmitMoneyReceipt,
   bounceMoneyReceipt,
-  approveMoneyReceipt,
+  sendMoneyReceiptToFinance,
 } = require("../services/crmMoneyReceiptWorkflow");
 const { applyPagination } = require("../services/crmListPagination");
 
@@ -334,39 +334,25 @@ router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async 
   }
 });
 
-router.put("/:id/approve", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
-  try {
-    if (!(await requireMoneyReceiptApprover(req, res))) return;
-    const pool = getPool();
-    const id = parseId(req.params.id);
-    if (id === null) return res.status(400).json({ error: "Invalid id" });
-    const result = await approveMoneyReceipt(pool, id, actorId(req), actorEmail(req));
-    res.json(result);
-  } catch (e) {
-    handleError(res, e, "PUT /:id/approve");
-  }
-});
-
 // ── Admin backfill ───────────────────────────────────────────────────────────
 
 const SWEEP_CONCURRENCY = 5;
 
-// POST /sweep-pending — admin backfill for already-confirmed bookings whose
-// MRs are stuck in Pending with ReceivedPaymentId = NULL (created before the
-// on-confirm auto-sweep was wired up). Safe to run multiple times —
-// approveMoneyReceipt guards against double-processing with its own Status
-// and ReceivedPaymentId checks.
+// POST /sweep-pending — retry for fully approved bookings whose receipt is
+// still Pending with ReceivedPaymentId = NULL (the hand-off on Director
+// approval failed, or the booking predates it). Only repeats that automatic
+// hand-off, so it needs the page's edit right, not an approver. Safe to run
+// multiple times — sendMoneyReceiptToFinance guards against double-processing
+// with its own Status and ReceivedPaymentId checks.
 //
 // Change from before: processes up to SWEEP_CONCURRENCY receipts in
-// parallel instead of strictly one at a time. Each approveMoneyReceipt call
+// parallel instead of strictly one at a time. Each sendMoneyReceiptToFinance call
 // takes its own row-level transaction lock on a *different* MoneyReceipt
 // row, so concurrent execution across rows is safe; this just stops a
 // large backlog from being gated by round-trip latency one row at a time.
 router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    // Same check as approve (req.user has role, never roleName - this always refused).
-    if (!(await requireMoneyReceiptApprover(req, res))) return;
     // Only the projects the user may work in — the sweep approved receipts across every project.
     const scopeSql = req.projectScope
       ? ` AND ${require("../services/projectScope").projectPredicate(req.projectScope, "b.ProjectId", "").trim()}`
@@ -381,7 +367,7 @@ router.post("/sweep-pending", requirePageRight("crm-money-receipts", "edit"), as
 
     const outcomes = await withConcurrency(stuckMrs.recordset, SWEEP_CONCURRENCY, async (row) => {
       try {
-        await approveMoneyReceipt(pool, row.Id, actorId(req), actorEmail(req));
+        await sendMoneyReceiptToFinance(pool, row.Id, actorId(req), actorEmail(req));
         return { ok: true };
       } catch (e) {
         return { ok: false, id: row.Id, error: e.message };

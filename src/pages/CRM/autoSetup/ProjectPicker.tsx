@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { INP, LBL, RULE, fetchDropdown, projectsOfCompany } from "./config";
 
-/** A ruled company → project pick, used by the setup and parking tabs (each keeps its own choice). */
+/** A ruled company → project pick, used by the setup and parking tabs (the choice lives in the address, shared by both). */
 export const ProjectPicker: React.FC<{ companyId: string; projectId: string; onCompany: (v: string) => void; onProject: (v: string) => void }> =
   ({ companyId, projectId, onCompany, onProject }) => {
     const { data: dropdown, isError, error } = useQuery({ queryKey: ["crm-business-dropdown"], queryFn: fetchDropdown, staleTime: 5 * 60_000 });

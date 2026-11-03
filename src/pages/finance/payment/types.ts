@@ -279,6 +279,8 @@ export const PAYMENT_MODES = [
   "RTGS",
   "IMPS",
   "Card",
+  // Charges the bank debited itself: a bank account, no cheque or reference.
+  "Bank Charges",
 ] as const;
 
 export type PaymentMode = (typeof PAYMENT_MODES)[number];

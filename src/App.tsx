@@ -382,6 +382,7 @@ const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const ApkManagerPage = lazy(() => import("./pages/admin/ApkManager"));
 const SystemMaintenancePage = lazy(() => import("./pages/admin/SystemMaintenance"));
+const ScriptConsolePage = lazy(() => import("./pages/admin/ScriptConsole"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
 const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
@@ -2342,6 +2343,14 @@ function AppRoutes() {
         element={
           <SuperAdminRoute>
             <SystemMaintenancePage />
+          </SuperAdminRoute>
+        }
+      />
+      <Route
+        path="/admin/script-console"
+        element={
+          <SuperAdminRoute>
+            <ScriptConsolePage />
           </SuperAdminRoute>
         }
       />

@@ -10,6 +10,7 @@ const { bumpCacheVersion, redisZIncrBy } = require("../redis");
 // Housekeeping writes that are not anyone's work, and POSTs that only look things up (previews, checks, sums).
 const SKIP = [
   /^\/api\/user-activity/,
+  /^\/api\/script-console/, // keeps its own encrypted record (dbo.ScriptRunLog); scripts and keys must not land in this log
   /^\/api\/home\/usage/,
   /^\/api\/users\/(login|logout|refresh)/,
   /^\/api\/doc-search/,

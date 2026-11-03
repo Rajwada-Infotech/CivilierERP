@@ -5,6 +5,7 @@ router.use(apiRateLimit);
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
 const { projectPredicate, ebResolvedProjectSql, paymentProjectSql } = require("../services/projectScope");
+const { enrichInboxRows } = require("../services/inboxEnrichment");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
@@ -161,7 +162,7 @@ async function whoMayAct(item, viewerRole, viewerUserId, workflowCache) {
 
   const map = MODULE_MAP[item.Module];
 
-  // Gates outside the level engine (received-payment, crm-money-receipts,
+  // Gates outside the level engine (received-payment,
   // crm-booking-amendment...) are single-step: level 1 in Approval Setup.
   if (!map) {
     const ok = await isApproverFor(item.Module, viewerUserId, role);
@@ -355,6 +356,21 @@ const withProjectName = (base, expr) =>
     `${expr} AS ProjectName,`,
   );
 
+// A payment row's person and project, read from the payment itself (the row is queried unaliased, so NewPayment.* qualifies):
+// the party it pays, else its invoice's supplier, a merged invoice's, its contract's party, else the expense ledgers it is
+// paid straight to. Its company is filled by the common layer (services/inboxEnrichment.js).
+const PAYMENT_PAYEE_SQL = `COALESCE(
+  (SELECT TOP 1 ISNULL(ph.DisplayName, ph.LHeadName) FROM dbo.AccountHeadMaster ph WHERE ph.LHeadId = NewPayment.PPartyId),
+  (SELECT TOP 1 pe1.EName FROM dbo.ExpenseBooking pe1 WHERE pe1.EDocNo = NewPayment.PExpenseRef),
+  (SELECT TOP 1 pe2.EName FROM dbo.PaymentExpenseBookingLink pel JOIN dbo.ExpenseBooking pe2 ON pe2.Eid = pel.ExpenseBookingId
+    WHERE pel.PPaymentID = NewPayment.PPaymentID ORDER BY pel.LinkId),
+  (SELECT TOP 1 ISNULL(pc.DisplayName, pc.LHeadName) FROM dbo.Contract ct JOIN dbo.AccountHeadMaster pc ON pc.LHeadId = ct.ContactPartyId
+    WHERE ct.ContractId = NewPayment.ContractId),
+  STUFF((SELECT N', ' + ah.LHeadName FROM dbo.ExpenseHeadAllocation ea JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = ea.LHeadId
+    WHERE ea.SourceType = N'NewPayment' AND ea.SourceId = NewPayment.PPaymentID ORDER BY ea.AllocationId
+    FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N''))`;
+const PAYMENT_PROJECT_LABEL_SQL = `(SELECT TOP 1 pj.name FROM dbo.enterprise pj WHERE pj.id = ${paymentProjectSql("NewPayment")})`;
+
 // Received Payment variant: a CRM payment (CrmBookingId set) is entered in
 // CRM WITHOUT a deposit bank — Accounts fills the bank on the Received
 // Payment page first. Until then it can't be approved (receivedPayment.js
@@ -452,9 +468,9 @@ function buildInboxQueries(module, projectScope = null) {
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
-          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(${PAYMENT_PAYEE_SQL} AS NVARCHAR(255)) AS SupplierName,
           PAmount                              AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, PAYMENT_PROJECT_LABEL_SQL)}
           CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -482,9 +498,9 @@ function buildInboxQueries(module, projectScope = null) {
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
-          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          CAST(${PAYMENT_PAYEE_SQL} AS NVARCHAR(255)) AS SupplierName,
           PAmount                              AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, PAYMENT_PROJECT_LABEL_SQL)}
           CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -1247,35 +1263,6 @@ function buildInboxQueries(module, projectScope = null) {
       `);
     }
 
-    if (!module || module === "crm-money-receipts") {
-      queries.push(`
-        SELECT
-          'crm-money-receipts'                  AS Module,
-          'CRM Money Receipt'                   AS ModuleLabel,
-          CAST(mr.Id AS NVARCHAR)               AS RecordId,
-          mr.ReceiptNo                          AS Reference,
-          mr.ReceivedDate                       AS RecordDate,
-          mr.Status,
-          CAST(NULL AS NVARCHAR)                AS ContractorName,
-          a.ApplicantName                       AS SupplierName,
-          mr.Amount                             AS Amount,
-          ${NULL_EXTRA}
-          CAST(ISNULL(u_cr.name, CAST(mr.CreatedBy AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
-          ISNULL(CAST(u_appr.name AS NVARCHAR(255)), '') AS ApprovedBy,
-          ISNULL(CAST(mr.ApprovedAt AS NVARCHAR), '')    AS ApprovedAt,
-          ISNULL(CAST(u_bnc.name AS NVARCHAR(255)), '')  AS RejectedBy,
-          ISNULL(CAST(mr.BouncedReason AS NVARCHAR(MAX)), '') AS RejectionNote,
-          ISNULL(mr.UpdatedAt, mr.CreatedAt)    AS LastModified
-        FROM dbo.CrmMoneyReceipt mr
-        JOIN dbo.CrmBooking b     ON b.Id = mr.BookingId
-        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-        LEFT JOIN dbo.Users u_cr   ON u_cr.id   = mr.CreatedBy
-        LEFT JOIN dbo.Users u_appr ON u_appr.id = mr.ApprovedBy
-        LEFT JOIN dbo.Users u_bnc  ON u_bnc.id  = mr.BouncedBy
-        WHERE mr.Status = 'Pending' AND mr.ReceivedPaymentId IS NULL${pp("b.ProjectId")}
-      `);
-    }
-
     if (!module || module === "crm-noc") {
       queries.push(`
         SELECT
@@ -1599,7 +1586,8 @@ router.get("/", async (req, res) => {
 
     const rows = await runInboxQueries(pool, queries);
 
-    res.json(await filterVisibleToViewer(rows, req));
+    // Every row gets the common person / company / project, then keeps what is special to its own document type.
+    res.json(await enrichInboxRows(pool, await filterVisibleToViewer(rows, req)));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({

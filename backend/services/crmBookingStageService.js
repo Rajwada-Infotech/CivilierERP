@@ -167,9 +167,9 @@ async function requireActiveStage(pool, bookingId, stage) {
   return row;
 }
 
-// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Two gates:
-// all 7 data-review checklist items (KYC, Project/Unit/Rate, Payment Plan,
-// Bank/Deposit, Broker, Source, Documents) must be Checked, and the checklist must be complete. ProjectUnitRate and
+// Staff "Submit for Approval" — Review -> MarketingHeadApproval. Every
+// data-review checklist item (CHECKLIST_ITEMS in crmApplicationChecklist.js)
+// must be Checked. ProjectUnitRate and
 // PaymentPlanAmounts being Checked already IS "Unit/Rate/Value confirmed"
 // and "Payment Plan confirmed" — the old separate
 // UnitReviewConfirmed/PlanReviewConfirmed columns asserted the exact same
@@ -383,15 +383,15 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
     // When the approver tried to approve the MR before the Director approved the booking,
     // it threw and the MR stayed Pending with ReceivedPaymentId = NULL — Finance never
     // got a row to approve, so milestone AmountPaid was never updated. Now that the
-    // booking is Confirmed, sweep those MRs through approveMoneyReceipt so the
+    // booking is Confirmed, sweep those MRs through sendMoneyReceiptToFinance so the
     // ReceivedPayment row lands in Finance's queue automatically.
     try {
-      const { approveMoneyReceipt, createMoneyReceiptAfterDataReview } = require("./crmMoneyReceiptWorkflow");
+      const { sendMoneyReceiptToFinance, createMoneyReceiptAfterDataReview } = require("./crmMoneyReceiptWorkflow");
       const pendingMrs = await pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT Id FROM dbo.CrmMoneyReceipt WHERE BookingId = @bid AND Status = 'Pending' AND ReceivedPaymentId IS NULL");
       for (const mr of pendingMrs.recordset) {
         try {
-          await approveMoneyReceipt(pool, mr.Id, userId, userEmail);
+          await sendMoneyReceiptToFinance(pool, mr.Id, userId, userEmail);
         } catch (mrErr) {
           console.error("[crmBookingStageService] auto-approve pending MR", mr.Id, "on confirm failed:", mrErr.message);
         }
