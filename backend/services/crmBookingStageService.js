@@ -208,6 +208,23 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Re-checked under the booking's lock: a double click (or two verifiers)
+    // must send it only once — the second finds it already sent — and an item
+    // flagged in the same moment must still stop it.
+    const locked = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT WorkflowStage, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
+    if (!locked || !locked.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(locked.Status)) {
+      throw Object.assign(new Error("This booking is no longer active"), { status: 400 });
+    }
+    if (locked.WorkflowStage !== STAGE_REVIEW) {
+      throw Object.assign(new Error(`Booking has already been sent — it is at '${stageLabel(locked.WorkflowStage)}'`), { status: 409 });
+    }
+    const open = (await tx.request().input("aid", sql.Int, row.ApplicationId).query(`
+      SELECT COUNT(*) AS N FROM dbo.CrmApplicationVerificationChecklist WITH (UPDLOCK, HOLDLOCK)
+      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus <> 'Checked'`)).recordset[0].N;
+    if (open > 0) {
+      throw Object.assign(new Error(`Complete the data review checklist first — ${open} item(s) still not checked`), { status: 400 });
+    }
     await tx.request().input("bid", sql.Int, bookingId)
       .query(`
         UPDATE dbo.CrmBooking SET
@@ -307,6 +324,15 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Still live? A delete (or cancellation) can commit between this
+    // request's first read and the approval above — then the approval must
+    // not stand: the throw runs the compensation below (Status back,
+    // approval row removed).
+    const live = (await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT IsActive, Status FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid`)).recordset[0];
+    if (!live || !live.IsActive || ["Cancelled", "Rejected", "Expired", "Transferred"].includes(live.Status)) {
+      throw Object.assign(new Error("This booking was deleted or cancelled while it was being approved — nothing was approved"), { status: 409 });
+    }
     await tx.request()
       .input("bid", sql.Int, bookingId)
       .input("stg", sql.NVarChar(40), nextStage)

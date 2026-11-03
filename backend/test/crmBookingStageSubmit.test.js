@@ -32,6 +32,10 @@ describe("crmBookingStageService.submitForApproval", () => {
       ApplicationId: 100,
     },
     totalValue = 5000000,
+    // What the booking / checklist look like under the send's lock (by then a
+    // double click may have sent it, or an item may have been flagged).
+    lockedStage = "Review",
+    openUnderLock = 0,
   } = {}) {
     const mockTx = {
       begin: jest.fn().mockResolvedValue(undefined),
@@ -40,7 +44,11 @@ describe("crmBookingStageService.submitForApproval", () => {
       request: () => {
         const req = {
           input: () => req,
-          query: jest.fn().mockResolvedValue({ recordset: [] }),
+          query: jest.fn().mockImplementation(async (q) => {
+            if (q.includes("WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid")) return { recordset: [{ WorkflowStage: lockedStage, Status: "Pending", IsActive: true }] };
+            if (q.includes("CrmApplicationVerificationChecklist WITH (UPDLOCK, HOLDLOCK)")) return { recordset: [{ N: openUnderLock }] };
+            return { recordset: [] };
+          }),
         };
         return req;
       },
@@ -95,6 +103,21 @@ describe("crmBookingStageService.submitForApproval", () => {
 
     await expect(submitForApproval(mockPool, 10, "staff@example.com", "staff", 42))
       .rejects.toThrow(/Complete the data review checklist first/);
+  });
+
+  it("a second send (double click) finds it already sent and changes nothing", async () => {
+    const { mockPool, mockTx } = createMockPool({ lockedStage: "MarketingHeadApproval" });
+    ensureChecklistRows.mockResolvedValue([{ ItemKey: "ApplicantKyc", CheckStatus: "Checked" }]);
+    await expect(submitForApproval(mockPool, 10, "staff@example.com", "staff", 42)).rejects.toThrow(/already been sent/);
+    expect(mockTx.rollback).toHaveBeenCalled();
+    expect(mockTx.commit).not.toHaveBeenCalled();
+  });
+
+  it("an item flagged while it was being sent still stops it", async () => {
+    const { mockPool, mockTx } = createMockPool({ openUnderLock: 1 });
+    ensureChecklistRows.mockResolvedValue([{ ItemKey: "ApplicantKyc", CheckStatus: "Checked" }]);
+    await expect(submitForApproval(mockPool, 10, "staff@example.com", "staff", 42)).rejects.toThrow(/1 item\(s\) still not checked/);
+    expect(mockTx.commit).not.toHaveBeenCalled();
   });
 
   it("blocks submission if total value is 0", async () => {

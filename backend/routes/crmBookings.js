@@ -878,6 +878,29 @@ async function checkBookingApprovalReadiness(pool, id) {
 // but nothing reads or writes them anymore.
 
 
+// Who Approval Setup names for one step of a workflow (its roles and named
+// people), each once — the people told when a booking reaches that step.
+async function usersForApprovalStep(pool, module, stepIndex) {
+  const step = (await getWorkflow(module))?.LevelDefs?.[stepIndex];
+  const ids = new Set((step?.userIds || []).map(Number).filter(Boolean));
+  const roles = (step?.roles || []).map((r) => String(r).toLowerCase());
+  if (roles.length) {
+    const req0 = pool.request();
+    const names = roles.map((r, i) => { req0.input(`r${i}`, sql.NVarChar(100), r); return `@r${i}`; });
+    (await req0.query(`SELECT u.id FROM dbo.Users u JOIN dbo.Role r ON r.RId = u.RoleId
+      WHERE LOWER(r.RName) IN (${names.join(", ")}) AND u.discontinue = 0`)).recordset.forEach((u) => ids.add(u.id));
+  }
+  return ids;
+}
+
+// Tells whoever a booking now waits on — never the person who just acted.
+async function notifyBookingTurn(pool, bookingId, userIds, actor, type, title, body) {
+  for (const uid of userIds) {
+    if (!uid || uid === actor) continue;
+    await emitNotification(pool, uid, type, title, body, bookingId, "crm_booking");
+  }
+}
+
 // PUT /:id/ready-for-approval — staff-facing "Book" action. Re-runs the
 // exact same readiness gate PUT /:id/approve enforces, so a booking can
 // never be marked "ready" and then be surprised by a rejection for the same
@@ -943,22 +966,9 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
     `);
     // In parallel: whoever Approval Setup names for the booking's first approval step
     // (its roles or named people) is told too — each person once.
-    const notify = new Set(admins.recordset.map((a) => a.id));
-    const firstStep = (await getWorkflow("crm-bookings"))?.LevelDefs?.[0];
-    const stepRoles = (firstStep?.roles || []).map((r) => String(r).toLowerCase());
-    (firstStep?.userIds || []).map(Number).filter(Boolean).forEach((uid) => notify.add(uid));
-    if (stepRoles.length) {
-      const req0 = pool.request();
-      const names = stepRoles.map((r, i) => { req0.input(`r${i}`, sql.NVarChar(100), r); return `@r${i}`; });
-      (await req0.query(`SELECT u.id FROM dbo.Users u JOIN dbo.Role r ON r.RId = u.RoleId
-        WHERE LOWER(r.RName) IN (${names.join(", ")}) AND u.discontinue = 0`)).recordset.forEach((u) => notify.add(u.id));
-    }
-    for (const a of [...notify].map((id) => ({ id }))) {
-      await emitNotification(pool, a.id, "crm_booking_ready_for_approval",
-        "Booking Ready for Approval",
-        `Booking ${bookingNo} has cleared its checklist and is ready for approval.`,
-        id, "crm_booking");
-    }
+    const notify = new Set([...admins.recordset.map((a) => a.id), ...(await usersForApprovalStep(pool, "crm-bookings", 0))]);
+    await notifyBookingTurn(pool, id, notify, null, "crm_booking_ready_for_approval",
+      "Booking Ready for Approval", `Booking ${bookingNo} has cleared its checklist and is ready for approval.`);
 
     res.json({ success: true, ...stageResult, mrWarning });
   } catch (e) {
@@ -1192,6 +1202,13 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
       // SMS/WhatsApp/Email at all.
       // Not awaited: real providers can take seconds, and approval shouldn't wait on them.
       triggerBookingConfirmed(pool, id).catch(() => {});
+    } else {
+      // Approved at Marketing Head: the Director's turn — tell them.
+      try {
+        const bk = (await pool0.request().input("id", sql.Int, id).query("SELECT BookingNo FROM dbo.CrmBooking WHERE Id = @id")).recordset[0];
+        await notifyBookingTurn(pool0, id, await usersForApprovalStep(pool0, "crm-bookings", 1), actorId(req), "crm_booking_ready_for_approval",
+          "Booking waiting for Director approval", `Booking ${bk?.BookingNo || ""} is approved by the Marketing Head and waits for your approval.`);
+      } catch (nErr) { console.error("[crm-bookings] director notification failed:", nErr.message); }
     }
 
     res.json({ success: true, status: result.confirmed ? "Approved" : "Pending", ...result });
@@ -1212,6 +1229,23 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     if (await assertNotFrozen(pool, id, res)) return;
     const stageRow = await getStageState(pool, id);
     const result = await rejectStageRequest(pool, id, stageRow?.WorkflowStage, userEmail, req.user?.role, actorId(req), req.body?.note || req.body?.remarks);
+    // Sent back: tell whoever it now waits on, with the reason.
+    try {
+      const bk = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT b.BookingNo, b.AssignedTo, a.CreatedBy AS AppCreatedBy
+        FROM dbo.CrmBooking b LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId WHERE b.Id = @id`)).recordset[0] || {};
+      const remark = String(req.body?.note || req.body?.remarks || "").trim();
+      const from = stageLabel(stageRow?.WorkflowStage);
+      const toReview = result.stage === "Review";
+      const who = toReview
+        // Back to Data Review: the preparer corrects it, the verifier re-checks.
+        ? new Set([bk.AssignedTo, bk.AppCreatedBy, ...(await usersForApprovalStep(pool, "crm-booking-verification", 0))].filter(Boolean))
+        // Back to Marketing Head: theirs to approve again or send further back.
+        : await usersForApprovalStep(pool, "crm-bookings", 0);
+      await notifyBookingTurn(pool, id, who, actorId(req), "crm_booking_sent_back",
+        `Booking sent back — ${from}`,
+        `Booking ${bk.BookingNo || ""} was sent back from ${from}: "${remark.slice(0, 200)}". ${toReview ? "Correct the application, then verify and send it again." : "Approve again, or send it back to Data Review."}`);
+    } catch (nErr) { console.error("[crm-bookings] send-back notification failed:", nErr.message); }
     res.json({ success: true, status: CrmStatus.PENDING, ...result });
   } catch (e) {
     console.error("[crm-bookings] reject error:", e.message);
