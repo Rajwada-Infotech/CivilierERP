@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SHEET_CSS, Detail, Dimension, Skel, n0, fmtInt, fmtMoney, money, share } from "@/components/sheet/Sheet";
+import { SentBackPanel } from "@/components/crm/CrmListToolbar";
 
 // CRM Dashboard, drawn as an architect's sheet.
 //
@@ -262,6 +263,9 @@ const CrmDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Everything sent back for an update, or resubmitted for a recheck. */}
+        <SentBackPanel />
 
         {/* A: collection */}
         <div className="grid2">

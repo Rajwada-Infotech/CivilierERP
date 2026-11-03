@@ -10,6 +10,7 @@ import {
   AlertTriangle, ChevronRight, FileSignature, IndianRupee, Landmark, Lock, MoreHorizontal, Phone, Plus, RefreshCw, Repeat, Trash2,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SentBackMark } from "@/components/crm/CrmListToolbar";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -213,6 +214,8 @@ const CrmBooking: React.FC = () => {
             <SheetMark text={b.Status} tone={bookingTone(b.Status)} />
             {stageNote && <div className="text-[0.6875rem] text-muted-foreground leading-snug">{stageNote}</div>}
             {b.IsFrozen && <div className="flex items-center gap-1 text-[0.625rem] font-medium text-destructive"><Lock size={10} /> Frozen</div>}
+            {/* Sent back for correction / resubmitted for a recheck. */}
+            <SentBackMark bookingId={b.Id} />
           </div>
         );
       } },

@@ -8,6 +8,7 @@ import { translateError } from "@/lib/translateError";
 import { SheetShell, SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { SentBackMark } from "@/components/crm/CrmListToolbar";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { Plus, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard, ExternalLink, ChevronLeft, Trash2, FileText, User, Phone, FileBadge, MapPin, IndianRupee, Users2, Briefcase, PlayCircle, Ban, Lock, Wallet, AlertTriangle, MoreHorizontal } from "lucide-react";
@@ -1275,6 +1276,8 @@ const CrmApplication: React.FC = () => {
           // The pinned Status column is nowrap; the notes under the mark wrap.
           <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5 whitespace-normal">
             <span className="whitespace-nowrap"><SheetMark text={displayStatus} tone={appTone(displayStatus)} /></span>
+            {/* Sent back for correction / resubmitted for a recheck (booking approval or data review). */}
+            <SentBackMark applicationId={r.Id} />
             {/* For NotConverted applications that had a booking which was later
                 cancelled/rejected — show the dead booking number so staff know
                 this isn't the same as an application that was simply rejected
