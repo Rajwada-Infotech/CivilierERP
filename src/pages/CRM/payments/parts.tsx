@@ -34,6 +34,39 @@ function Note({ red, icon, title, children }: { red?: boolean; icon: React.React
   );
 }
 
+/** Payment entries on a booking — those with Finance, or those Finance returned — in one ruled table. */
+function EntryList({ title, icon, rows, who, whoLabel, footer, red }: {
+  title: string; icon: React.ReactNode; rows: any[]; who: (e: any) => string; whoLabel: string; footer: string; red?: boolean;
+}) {
+  return (
+    <div style={{ borderTop: RULE_SOFT }}>
+      <div className={`px-4 pt-3 pb-2 ${LBL} flex items-center gap-1.5 ${red ? "text-destructive" : ""}`}>{icon} {title}</div>
+      <div className="overflow-x-auto thin-scroll px-4 pb-3">
+        <table className="w-full text-xs min-w-[640px]">
+          <thead><tr className="text-left text-muted-foreground" style={{ borderBottom: RULE_SOFT }}>
+            <th className="py-1.5 pr-3 font-medium">Entry</th><th className="py-1.5 pr-3 font-medium">For</th>
+            <th className="py-1.5 pr-3 font-medium">Received</th><th className="py-1.5 pr-3 font-medium">Mode · ref</th>
+            <th className="py-1.5 pr-3 font-medium">{whoLabel}</th><th className="py-1.5 text-right font-medium">Amount</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((e: any) => (
+              <tr key={e.id} style={{ borderBottom: RULE_SOFT }}>
+                <td className="py-1.5 pr-3 font-heading tabular-nums">{e.docNo || `#${e.id}`}</td>
+                <td className="py-1.5 pr-3">{e.milestone || "On Account"}</td>
+                <td className="py-1.5 pr-3 tabular-nums">{fmtDate(e.date)}</td>
+                <td className="py-1.5 pr-3">{e.mode || "—"}{e.ref ? <span className="text-muted-foreground tabular-nums"> · {e.ref}</span> : null}</td>
+                <td className="py-1.5 pr-3 text-muted-foreground">{who(e)}</td>
+                <td className={`py-1.5 text-right font-heading font-semibold tabular-nums ${red ? "line-through text-muted-foreground" : ""}`}>{fmt(e.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-[0.6875rem] text-muted-foreground">{footer}</p>
+      </div>
+    </div>
+  );
+}
+
 export function BookingSummary({ booking, summary, money, moneyReceipts }: {
   booking: any; summary: any; money: any; moneyReceipts: any[];
 }) {
@@ -43,7 +76,7 @@ export function BookingSummary({ booking, summary, money, moneyReceipts }: {
   const extraTotal = Number(booking.ExtraChargesTotal || 0);
   const hasExtras = unitGstAmount > 0 || parkingTotal > 0 || extraTotal > 0;
   // The server's money by stage (crmPayments.js GET /booking/:id): collected = everything Finance verified.
-  const m = money || { adjusted: 0, held: 0, collected: 0, inVerification: 0, inVerificationCount: 0, toCollect: 0, entries: [] };
+  const m = money || { adjusted: 0, held: 0, collected: 0, inVerification: 0, inVerificationCount: 0, toCollect: 0, entries: [], returned: [] };
   const collectionPct = pct(m.collected, summary.totalDue || 0);
   const pendingPct = summary.totalDue > 0 ? Math.min(100 - collectionPct, Math.round((m.inVerification / summary.totalDue) * 100)) : 0;
   const bkgStatus = booking.BookingStatus;
@@ -128,31 +161,16 @@ export function BookingSummary({ booking, summary, money, moneyReceipts }: {
         </div>
       </div>
       {m.entries.length > 0 && (
-        <div style={{ borderTop: RULE_SOFT }}>
-          <div className={`px-4 pt-3 pb-2 ${LBL} flex items-center gap-1.5`}><Hourglass size={11} /> With Finance — {m.inVerificationCount} entr{m.inVerificationCount === 1 ? "y" : "ies"} waiting to be verified</div>
-          <div className="overflow-x-auto thin-scroll px-4 pb-3">
-            <table className="w-full text-xs min-w-[640px]">
-              <thead><tr className="text-left text-muted-foreground" style={{ borderBottom: RULE_SOFT }}>
-                <th className="py-1.5 pr-3 font-medium">Entry</th><th className="py-1.5 pr-3 font-medium">For</th>
-                <th className="py-1.5 pr-3 font-medium">Received</th><th className="py-1.5 pr-3 font-medium">Mode · ref</th>
-                <th className="py-1.5 pr-3 font-medium">Entered by</th><th className="py-1.5 text-right font-medium">Amount</th>
-              </tr></thead>
-              <tbody>
-                {m.entries.map((e: any) => (
-                  <tr key={e.id} style={{ borderBottom: RULE_SOFT }}>
-                    <td className="py-1.5 pr-3 font-heading tabular-nums">{e.docNo || `#${e.id}`}</td>
-                    <td className="py-1.5 pr-3">{e.milestone || "On Account"}</td>
-                    <td className="py-1.5 pr-3 tabular-nums">{fmtDate(e.date)}</td>
-                    <td className="py-1.5 pr-3">{e.mode || "—"}{e.ref ? <span className="text-muted-foreground tabular-nums"> · {e.ref}</span> : null}</td>
-                    <td className="py-1.5 pr-3 text-muted-foreground">{e.enteredBy || "—"}{e.enteredAt ? ` · ${fmtDate(e.enteredAt)}` : ""}</td>
-                    <td className="py-1.5 text-right font-heading font-semibold tabular-nums">{fmt(e.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="mt-2 text-[0.6875rem] text-muted-foreground">More payments can be entered while these wait. Each counts as collected once Finance verifies it.</p>
-          </div>
-        </div>
+        <EntryList icon={<Hourglass size={11} />} rows={m.entries}
+          title={`With Finance — ${m.inVerificationCount} entr${m.inVerificationCount === 1 ? "y" : "ies"} waiting to be verified`}
+          who={(e) => `${e.enteredBy || "—"}${e.enteredAt ? ` · ${fmtDate(e.enteredAt)}` : ""}`} whoLabel="Entered by"
+          footer="More payments can be entered while these wait. Each counts as collected once Finance verifies it." />
+      )}
+      {(m.returned || []).length > 0 && (
+        <EntryList red icon={<AlertTriangle size={11} />} rows={m.returned}
+          title={`Returned by Finance — ${m.returned.length} entr${m.returned.length === 1 ? "y" : "ies"}, not counted`}
+          who={(e) => `${e.returnedBy || "—"}${e.returnedAt ? ` · ${fmtDate(e.returnedAt)}` : ""}${e.reason ? ` — ${e.reason}` : ""}`} whoLabel="Returned by · why"
+          footer="Enter a returned payment again once it is corrected; the returned entry stays here for the record." />
       )}
       {token && <div className="p-4" style={{ borderTop: RULE_SOFT }}>{token}</div>}
     </div>
@@ -184,7 +202,7 @@ export function OnAccountPanel({ onAccountData, onAccountBalance, notFullyPaid, 
             </div>
             <div className="h-1.5" style={{ border: RULE_SOFT }}><div className="h-full bg-foreground" style={{ width: `${funded}%` }} /></div>
             <div className="text-[0.6875rem] text-muted-foreground">
-              {fmt(fullPaymentShortfall)} more in verified payments funds the remaining dues{inVerification > 0 ? ` (${fmt(Math.min(inVerification, fullPaymentShortfall))} of it is already with Finance)` : ""}; eligible milestones then settle in order. Milestones already covered by money on hand show "Verified · on account" below.
+              {fmt(fullPaymentShortfall)} more in verified payments funds the remaining dues{inVerification > 0 ? ` (${fmt(Math.min(inVerification, fullPaymentShortfall))} of it is already with Finance)` : ""}; eligible milestones then settle in order. Milestones already covered by money on hand show "Verified" below.
             </div>
           </div>
         ) : (
@@ -297,7 +315,11 @@ export function MilestoneTable({ milestones, canEdit, onAccountData, onAccountBa
                   </td>
                   <td className={`${td} text-right`}>
                     <div className="font-heading tabular-nums whitespace-nowrap">{fmt(m.AmountPaid)}</div>
-                    {Number(m.PendingVerificationAmount) > 0 && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap" title={MONEY_STAGE.InVerification.hint}>+{fmt(m.PendingVerificationAmount)} with Finance</div>}
+                    {Number(m.PendingVerificationAmount) > 0 && (covered
+                      // Covered by verified money already held On Account (money covers milestones in order), while
+                      // this milestone's own entry still waits — so it says both, plainly.
+                      ? <div className="mt-1 ml-auto max-w-[7.5rem] text-[0.6875rem] leading-tight text-muted-foreground tabular-nums whitespace-normal" title="Verified money already on account covers this milestone; this entry adds to the booking's money once Finance verifies it">its entry {fmt(m.PendingVerificationAmount)} still with Finance</div>
+                      : <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap" title={MONEY_STAGE.InVerification.hint}>+{fmt(m.PendingVerificationAmount)} with Finance</div>)}
                     {m.PaidDate && <div className="mt-1 text-[0.6875rem] text-muted-foreground tabular-nums whitespace-nowrap">on {fmtDate(m.PaidDate)}</div>}
                   </td>
                   <td className={`${td} text-right whitespace-nowrap`}>

@@ -506,7 +506,10 @@ function buildInboxQueries(module, projectScope = null) {
           RPDocDate                                       AS RecordDate,
           ISNULL(RPStatus, 'Draft')                       AS Status,
           CAST(NULL AS NVARCHAR)                           AS ContractorName,
-          ISNULL(RPCustomerName, RPReceivedFrom)           AS SupplierName,
+          -- A CRM payment names its booking and what it's for (a milestone, or On Account).
+          ISNULL(RPCustomerName, RPReceivedFrom)
+            + ISNULL(' · ' + (SELECT cb.BookingNo FROM dbo.CrmBooking cb WHERE cb.Id = CrmBookingId)
+              + ISNULL(' · ' + (SELECT cm.MilestoneName FROM dbo.CrmPaymentMilestone cm WHERE cm.Id = CrmMilestoneId), ' · On Account'), '') AS SupplierName,
           RPAmount                                        AS Amount,
           ${NULL_EXTRA_RECEIVED_PAYMENT}
           CAST(RPCreatedBy AS NVARCHAR(255))              AS CreatedBy,

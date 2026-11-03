@@ -15,7 +15,7 @@ const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
-const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage, pendingVerificationEntries } = require("../services/crmOnAccountCoverage");
+const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
 const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
@@ -885,7 +885,8 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
       RPTransactionID: data.TransactionRef || null,
       RPCheckNumber: data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null,
       RPChequeDate: data.ChequeDate || null,
-      RPRemarks: data.Notes || `CRM — ${targetRow.BookingNo} / ${targetRow.MilestoneName}`,
+      // The booking / milestone always leads, so Finance sees what it's for; a typed note follows it.
+      RPRemarks: [`CRM — ${targetRow.BookingNo} / ${targetRow.MilestoneName}`, data.Notes].filter(Boolean).join(" — "),
       RPDepositBankId: null, // set by Accounts before approval (see above)
       RPDepositBankName: null,
       CrmMilestoneId: milestoneId,
@@ -1258,6 +1259,11 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
       entries: pending.map((r) => ({
         id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
         ref: r.RPTransactionID, milestone: r.MilestoneName || null, enteredBy: r.RPCreatedBy, enteredAt: r.RPCreatedAt,
+      })),
+      returned: (await returnedEntries(pool, bid)).map((r) => ({
+        id: r.RPPaymentID, docNo: r.RPDocNo, amount: Number(r.RPAmount), mode: r.RPMode, date: r.RPDocDate,
+        ref: r.RPTransactionID, milestone: r.MilestoneName || null, enteredBy: r.RPCreatedBy,
+        returnedBy: r.RPRejectedBy, returnedAt: r.RPRejectedAt, reason: r.RPRejectionNote,
       })),
     };
 
@@ -1709,7 +1715,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         RPAmount: amount,
         RPBankName: bankNameForMode(b.PaymentMode, b.BankName),
         RPTransactionID: b.TransactionRef || null,
-        RPRemarks: b.Notes || `CRM on-account deposit — ${booking.BookingNo}`,
+        RPRemarks: [`CRM on-account deposit — ${booking.BookingNo}`, b.Notes].filter(Boolean).join(" — "),
         // No deposit bank from CRM — Accounts sets it on the Received
         // Payment before approval (receivedPayment.js PATCH /:id/deposit-bank).
         RPDepositBankId: null,

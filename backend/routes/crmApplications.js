@@ -797,7 +797,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       }
     }
 
-    res.json({ success: true });
+    // A new unit in another block than the parking already picked: say so.
+    const parkingWarning = unitIsChanging && newUnitId
+      ? await require("../services/crmEntityCreation").parkingOutsideUnitBlock(pool, { applicationId: id, unitId: newUnitId })
+      : null;
+    res.json({ success: true, parkingWarning });
   } catch (e) {
     console.error("[crm-applications] PUT error:", e.message);
     res.status(500).json({ error: e.message });

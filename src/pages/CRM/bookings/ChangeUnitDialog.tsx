@@ -38,6 +38,7 @@ export function ChangeUnitDialog({ booking, onClose }: { booking: any; onClose: 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not change the unit.");
       toast.success(`Unit changed to ${data.unitNo}`);
+      if (data.parkingWarning) toast.warning(data.parkingWarning, { duration: 12000 });
       ["crm-bookings", "unit-master"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       onClose();
     } catch (e: any) {

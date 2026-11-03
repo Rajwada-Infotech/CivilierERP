@@ -1516,13 +1516,44 @@ async function changeBookingUnit(pool, bookingId, { newUnitId, reason, actor = n
     try { await tx.rollback(); } catch { /* already rolled back */ }
     throw txErr;
   }
-  return { unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null };
+  return {
+    unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null,
+    parkingWarning: await parkingOutsideUnitBlock(pool, { bookingId: id, applicationId: booking.ApplicationId, unitId: newUnitId }),
+  };
 }
 
 
+/**
+ * Parking picked for an application (holds) or its booking (allotments) that
+ * sits in a different block from the unit — after the unit is changed, so the
+ * user is told to re-check the parking instead of finding it later. Returns a
+ * sentence to show, or null.
+ */
+async function parkingOutsideUnitBlock(pool, { applicationId = null, bookingId = null, unitId }) {
+  if (!unitId) return null;
+  const rows = (await pool.request().input("aid", sql.Int, applicationId).input("bid", sql.Int, bookingId).input("uid", sql.Int, unitId).query(`
+    SELECT DISTINCT s.SlotNo, sb.BlockName AS SlotBlock, ub.BlockName AS UnitBlock
+    FROM (
+      SELECT h.EntityId AS SlotId FROM dbo.CrmInventoryHold h
+      WHERE h.EntityType = 'Parking' AND h.Status = 'Active' AND @aid IS NOT NULL AND h.ApplicationId = @aid
+      UNION
+      SELECT pa.ParkingSlotId FROM dbo.CrmParkingAllotment pa
+      WHERE pa.IsActive = 1 AND pa.ParkingSlotId IS NOT NULL
+        AND ((@aid IS NOT NULL AND pa.ApplicationId = @aid) OR (@bid IS NOT NULL AND pa.BookingId = @bid))
+    ) x
+    JOIN dbo.ParkingSlot s ON s.Id = x.SlotId
+    JOIN dbo.UnitMaster u ON u.Id = @uid
+    LEFT JOIN dbo.BlockMaster sb ON sb.Id = s.BlockId
+    LEFT JOIN dbo.BlockMaster ub ON ub.Id = u.BlockId
+    WHERE s.BlockId IS NOT NULL AND u.BlockId IS NOT NULL AND s.BlockId <> u.BlockId`)).recordset;
+  if (!rows.length) return null;
+  const slots = rows.map((r) => `${r.SlotNo} (Block ${r.SlotBlock})`).join(", ");
+  return `Parking ${slots} is in another block than the new unit (Block ${rows[0].UnitBlock}) — check the parking and change it if needed.`;
+}
+
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  changeBookingUnit, applicationEditsClosedReason,
+  changeBookingUnit, applicationEditsClosedReason, parkingOutsideUnitBlock,
   generateMilestonesForBooking, planSchedule, landSaleSchedule, reallocateBookingLines, rebuildLandSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

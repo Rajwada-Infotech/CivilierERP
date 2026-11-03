@@ -893,6 +893,8 @@ const CrmApplication: React.FC = () => {
         if (!res.ok) throw new Error(data.error || "Failed to save changes");
         setUnitLocked(true);
         toast.success("Project/Unit selection updated");
+        // Parking already picked in another block than the new unit — the next step is Parking, to check it.
+        if (data.parkingWarning) toast.warning(data.parkingWarning, { duration: 12000 });
         if (form.PreferredUnitIds[0]) qc.invalidateQueries({ queryKey: ["unit-master"] });
         if (form.PreferredPlotIds.length) qc.invalidateQueries({ queryKey: ["plot-master"] });
         advanceStep(2);
