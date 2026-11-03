@@ -104,7 +104,7 @@ const APP_SELECT = `
     -- never asks staff to retype what's already on the Customer record.
     cust.CustomerNo, cust.PanNo, cust.Address AS CustomerAddress, cust.City AS CustomerCity,
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
-    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.WorkflowStage AS BookingWorkflowStage, bk.UnitNo AS BookingUnitNo,
+    bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.WorkflowStage AS BookingWorkflowStage, bk.ReadyForApprovalAt AS BookingReadyForApprovalAt, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
     (SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = bk.Id ORDER BY CreatedAt DESC) AS DeedStatus,
     -- Stage drives the Converted/In Process/Not Converted split every
@@ -163,7 +163,7 @@ const APP_SELECT = `
   LEFT JOIN dbo.UnitMaster um   ON um.Id  = a.PreferredUnitId
   LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
   OUTER APPLY (
-    SELECT TOP 1 Id, BookingNo, Status, WorkflowStage, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
+    SELECT TOP 1 Id, BookingNo, Status, WorkflowStage, ReadyForApprovalAt, UnitNo, ProjectName, TotalValue, GrandTotal, BookingDate
     FROM dbo.CrmBooking
     WHERE ApplicationId = a.Id
     ORDER BY CASE WHEN IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL} THEN 0 ELSE 1 END, CreatedAt DESC
@@ -479,7 +479,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Id, PreferredUnitId, Status, ProjectId, DepositBankId, CustomerId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+      .query("SELECT Id, PreferredUnitId, Status, ProjectId, CompanyId, PaymentPlanId, DepositBankId, CustomerId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
     // A villa built on plots can only be picked by the plot's current owner.
     if (Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0) {
@@ -517,16 +517,45 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
         error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
       });
     }
-    // A Pending application that has a live booking (Stage=Converted) must also
-    // be blocked from unit/plan changes — the booking is the live legal record.
+    // With a booking already made from it, the application may still change
+    // its unit / plan / project until that booking is verified and sent for
+    // approval — "Submit Edits" then carries the change into the booking
+    // (unit through the same changeBookingUnit the booking's Change Unit uses).
+    // Only a real change counts: the form re-sends unchanged values on every
+    // save, which must not be refused for an edit to something else.
     if (changingUnitSelection) {
-      const bkCheck = await pool.request()
-        .input("AppId", sql.Int, id)
-        .query(`SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND Status NOT IN ${DEAD_BOOKING_SQL}`);
-      if (bkCheck.recordset.length > 0) {
-        return res.status(400).json({
-          error: "Cannot change unit/payment plan — this application has an active booking. Manage changes through the Booking module instead.",
-        });
+      const bk = (await pool.request().input("AppId", sql.Int, id)
+        .query(`SELECT TOP 1 Id, UnitId FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND IsActive = 1 AND Status NOT IN ${DEAD_BOOKING_SQL}`)).recordset[0];
+      if (bk) {
+        const cur = existing.recordset[0];
+        const differs = (v, was) => v !== undefined && Number(v || 0) !== Number(was || 0);
+        const curPlots = await getApplicationPlotIds(pool, id);
+        const plotsDiffer = b.PreferredPlotIds !== undefined
+          && [...preferredPlotIds].sort().join(",") !== [...curPlots].sort().join(",");
+        const unitDiffers = !preferredPlotIds.length && differs(b.PreferredUnitId, bk.UnitId);
+        const changed = unitDiffers || plotsDiffer || differs(b.PaymentPlanId, cur.PaymentPlanId)
+          || differs(b.ProjectId, cur.ProjectId) || differs(b.CompanyId, cur.CompanyId);
+        if (changed) {
+          const { applicationEditsClosedReason, changeBookingUnit } = require("../services/crmEntityCreation");
+          const closed = await applicationEditsClosedReason(pool, bk.Id);
+          if (closed) return res.status(400).json({ error: closed });
+          if (plotsDiffer) {
+            return res.status(400).json({ error: "A booking's plots can't be swapped — cancel the booking and book the new plots instead." });
+          }
+          if (differs(b.ProjectId, cur.ProjectId) || differs(b.CompanyId, cur.CompanyId)) {
+            return res.status(400).json({ error: "A booking stays in its own project — pick a unit from the same project, or cancel and book afresh." });
+          }
+          // The new unit must pass every check the booking will run on Submit
+          // Edits — refused now, not after the application has moved.
+          if (unitDiffers) {
+            try {
+              await changeBookingUnit(pool, bk.Id, { newUnitId: b.PreferredUnitId, checkOnly: true });
+            } catch (e) {
+              if (e.status) return res.status(e.status).json({ error: e.message });
+              throw e;
+            }
+          }
+        }
       }
     }
 
@@ -883,6 +912,30 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       `);
       const a = app.recordset[0];
 
+      // A unit corrected on the application (allowed until the booking is
+      // verified — see PUT /:id) moves the booking first, through the same
+      // changeBookingUnit the booking's own Change Unit uses. The rate / plan
+      // sync below then works on the booking's new unit.
+      if (a?.PreferredUnitId != null) {
+        const cur = (await pool.request().input("bid", sql.Int, booking.id).query(`
+          SELECT b.UnitId, (SELECT TOP 1 1 FROM dbo.CrmBookingPlot p WHERE p.BookingId = b.Id) AS IsPlotSale, ap.ApplicationNo
+          FROM dbo.CrmBooking b JOIN dbo.CrmApplication ap ON ap.Id = b.ApplicationId WHERE b.Id = @bid`)).recordset[0];
+        if (cur && !cur.IsPlotSale && Number(cur.UnitId) !== Number(a.PreferredUnitId)) {
+          const { applicationEditsClosedReason, changeBookingUnit } = require("../services/crmEntityCreation");
+          const closed = await applicationEditsClosedReason(pool, booking.id);
+          if (closed) return res.status(400).json({ error: closed });
+          try {
+            await changeBookingUnit(pool, booking.id, {
+              newUnitId: a.PreferredUnitId, paymentPlanId: a.PaymentPlanId, actor,
+              reason: `Unit corrected on application ${cur.ApplicationNo} before the booking was verified`,
+            });
+          } catch (e) {
+            if (e.status) return res.status(e.status).json({ error: e.message });
+            throw e;
+          }
+        }
+      }
+
       // SYNC edits from Application to the existing Booking, resync Milestone
       // #1 to the (possibly changed) BookingAmount, and relink any orphaned
       // documents — all three in one transaction. Previously these were three
@@ -918,7 +971,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
           const newRateForValidation = a.RatePerSqFt != null ? Number(a.RatePerSqFt) : null;
           const prospectiveTotal = newRateForValidation != null
             && Number(before?.RatePerSqFt) !== newRateForValidation && Number(before?.AreaSqFt) > 0
-            ? Math.round(Number(before.AreaSqFt) * newRateForValidation * 100) / 100
+            ? unitPrice(before.AreaSqFt, newRateForValidation)
             : Number(before?.TotalValue || 0);
           const effectiveBookingAmount = planBookingAmount != null
             ? Number(planBookingAmount)

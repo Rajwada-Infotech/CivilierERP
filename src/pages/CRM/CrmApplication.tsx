@@ -1,4 +1,4 @@
-import { CrmStatus, bookingWorkflowStageLabel } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, BOOKING_STAGE_REVIEW, isBookingClosed } from "@/constants/crmStatuses";
 import { fmtIstIso } from "@/lib/istTime";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -77,6 +77,10 @@ const CrmApplication: React.FC = () => {
   // canEditUnitSelection below. Kept separate from `form` since it's never
   // itself an editable field.
   const [wizardAppStatus, setWizardAppStatus] = useState<string | null>(null);
+  // Why the unit / plan can't change any more although the application could
+  // (its booking is verified, or it's a plot sale whose plots can't swap) —
+  // null while they can. Same rule the server applies (crmEntityCreation.applicationEditsClosedReason).
+  const [bookingLockReason, setBookingLockReason] = useState<string | null>(null);
   // Company/Project/Block/Floor/Unit/Payment Plan start locked (read-only)
   // once an already-saved application is resumed — "Edit" unlocks them for
   // the (normal, expected) case of adjusting the pick before approval. Once
@@ -427,7 +431,7 @@ const CrmApplication: React.FC = () => {
   const canChooseSaleKind = projectHasPlots && projectHasUnits;
   const isPlottedProject = saleKind === "plot";
 
-  const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING || wizardAppStatus === CrmStatus.REJECTED;
+  const canEditUnitSelection = !bookingLockReason && (wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING || wizardAppStatus === CrmStatus.REJECTED);
 
   // Mirrors APPLICATION_TRANSITIONS in crmApplicationWorkflow.js: Cancel is a
   // business action any editor can take pre-approval — accidental filing or a
@@ -630,6 +634,7 @@ const CrmApplication: React.FC = () => {
     setApplicationNo(null);
     // A brand-new application starts with no status of its own.
     setWizardAppStatus(null);
+    setBookingLockReason(null);
     setUnitLocked(false);
     setHasBooking(false);
     setPaymentLocked(false);
@@ -789,6 +794,10 @@ const CrmApplication: React.FC = () => {
       };
       setForm(loadedForm);
       setWizardAppStatus(app.Status || null);
+      setBookingLockReason(!app.BookingId || isBookingClosed(app.BookingStatus) ? null
+        : (app.BookingWorkflowStage && app.BookingWorkflowStage !== BOOKING_STAGE_REVIEW) || app.BookingReadyForApprovalAt
+          ? `Booking ${app.BookingNo} is verified — reject it back to Data Review to change the unit or plan`
+          : app.PreferredPlotIdsCsv ? `Booking ${app.BookingNo} is made — plots change by cancelling and re-booking` : null);
 
       const hasProject = app.CompanyId != null && app.ProjectId != null && (app.PreferredUnitId != null || !!app.PreferredPlotIdsCsv);
       // A plot sale has no Parking step (step 2), so it never resumes there.
@@ -1592,7 +1601,7 @@ const CrmApplication: React.FC = () => {
                         )
                       ) : (
                         <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-                          <Lock size={11} /> Locked ({wizardAppStatus})
+                          <Lock size={11} /> {bookingLockReason || `Locked (${wizardAppStatus})`}
                         </span>
                       )
                     )}
@@ -2062,7 +2071,7 @@ const CrmApplication: React.FC = () => {
                       )
                     ) : (
                       <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-                        <Lock size={11} /> Locked ({wizardAppStatus})
+                        <Lock size={11} /> {bookingLockReason || `Locked (${wizardAppStatus})`}
                       </span>
                     )
                   )}
