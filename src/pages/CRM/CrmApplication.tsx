@@ -37,6 +37,7 @@ import { ExtraWorkSelectionStep } from "./applications/ExtraWorkSelectionStep";
 import { AttachmentsStep } from "./applications/AttachmentsStep";
 
 import { useUrlParam } from "@/hooks/useUrlParam";
+import { readCrmDraft, writeCrmDraft, clearCrmDraft } from "@/lib/crmDraftStore";
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -640,19 +641,17 @@ const CrmApplication: React.FC = () => {
     setPaymentLocked(false);
   };
 
-  // ── Wizard autosave ── Everything typed is kept in this browser as it is
-  // typed (per application, or "new" before step 1 creates the record), whether
-  // or not Next/Submit was pressed, and offered back when the wizard reopens.
-  // A successful Submit clears it.
+  // ── Wizard autosave ── Everything typed is kept as it is typed (per application, or "new" before step 1 creates the
+  // record), whether or not Next/Submit was pressed, and offered back when the wizard reopens in this tab. It lives in
+  // memory only (lib/crmDraftStore.ts): it holds PAN, Aadhaar, date of birth ..., which browser storage would keep in
+  // clear text. A successful Submit clears it.
   const draftKey = (id: number | null) => `crm-app-draft:${id ?? "new"}`;
-  const readDraft = (id: number | null): { form: typeof EMPTY_FORM; step: number; savedAt: number } | null => {
-    try { const raw = localStorage.getItem(draftKey(id)); return raw ? JSON.parse(raw) : null; } catch { return null; }
-  };
-  const clearDraft = (id: number | null) => { try { localStorage.removeItem(draftKey(id)); } catch { /* storage unavailable */ } };
+  const readDraft = (id: number | null): { form: typeof EMPTY_FORM; step: number; savedAt: number } | null => readCrmDraft(draftKey(id));
+  const clearDraft = (id: number | null) => clearCrmDraft(draftKey(id));
   useEffect(() => {
     if (!dialogOpen) return;
     const t = setTimeout(() => {
-      try { localStorage.setItem(draftKey(applicationId), JSON.stringify({ form, step, savedAt: Date.now() })); } catch { /* storage unavailable */ }
+      writeCrmDraft(draftKey(applicationId), { form, step, savedAt: Date.now() });
     }, 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
