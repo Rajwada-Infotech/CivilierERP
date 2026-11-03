@@ -52,11 +52,12 @@ export default function LandReportsPage() {
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", "Reports"]} />
       <LegalShell title="Land Reports" subtitle="Registers and status reports across every land property" icon={DocumentText}>
         {stats && (
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {([
-              ["Land properties", stats.totalLands], ["Active enquiries", stats.activeEnquiries], ["In progress", stats.inProgress],
-              ["Pending verification", stats.pendingVerification], ["On hold", stats.onHold], ["Pending registration", stats.pendingRegistration],
-              ["Mutation pending", stats.mutationPending], ["Completed", stats.completed],
+              ["Total Land Properties", stats.totalLands],
+              ["Existing / Backlog Records", stats.backlogLands ?? 0],
+              ["Properties On Hold", stats.onHold ?? 0],
+              ["Disposed / Transferred", stats.completed ?? 0],
             ] as const).map(([l, v]) => (
               <div key={l} className={`${card} p-3`}>
                 <div className="text-xl font-heading font-bold tabular-nums text-foreground">{v ?? 0}</div>

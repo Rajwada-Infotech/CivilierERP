@@ -8,17 +8,11 @@ import {
   Clock,
   XCircle,
   AlertTriangle,
-  ShieldCheck,
-  FileCheck,
-  Globe,
-  ExternalLink,
-  Lock,
-  Check,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
-import { LegalPortalPane } from "@/components/legal/LegalPortalPane";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   getLegalDeedDetails,
@@ -34,16 +28,24 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
+// ── 5-stage workflow status bar ──────────────────────────────────────────────
+type Stage = "Draft Entry" | "Data Verified" | "L1 Approved" | "L2 Approved" | "Active";
+const STAGES: Stage[] = ["Draft Entry", "Data Verified", "L1 Approved", "L2 Approved", "Active"];
+
+function resolveStage(overallStatus: string, l1Status: string, l2Status: string): Stage {
+  if (l2Status === "Approved") return "L2 Approved";
+  if (l1Status === "Approved") return "L1 Approved";
+  if (["L1 Pending", "L1 Returned"].includes(overallStatus)) return "Data Verified";
+  if (["Dossier Created", "Awaiting Registered Deed", "L2 Pending", "L2 Returned"].includes(overallStatus)) return "Data Verified";
+  return "Draft Entry";
+}
+
 export default function LegalDeedDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const rights = usePageRights("legal-deed-registrations");
   const approvalRights = usePageRights("legal-approvals");
-
-  // Portal Sidecar Preview
-  const [portalOpen, setPortalOpen] = useState(false);
-  const [portalExpanded, setPortalExpanded] = useState(false);
 
   // Document action modal
   const [selectedDoc, setSelectedDoc] = useState<LegalDocumentItem | null>(null);
@@ -146,14 +148,10 @@ export default function LegalDeedDetailPage() {
   const canActL1 = deed.OverallStatus === "L1 Pending" && approvalRights.canApprove;
   const canActL2 = deed.OverallStatus === "L2 Pending" && approvalRights.canApprove;
 
-  // ── Appendix B Completion Gate Evaluation ──
-  const finalRegDoc = documents.find((d) => d.DocTypeName.toLowerCase().includes("registered deed") || d.DocCategory === "Registration");
-  const isFinalDeedAccepted = finalRegDoc ? finalRegDoc.VerificationStatus === "Accepted" : false;
+  // ── 5-stage status bar ──
+  const currentStage = resolveStage(deed.OverallStatus, deed.L1Status, deed.L2Status);
+  const currentStageIdx = STAGES.indexOf(currentStage);
   const pendingMandatory = documents.filter((d) => d.IsMandatory && d.VerificationStatus !== "Accepted" && !d.IsWaived).length;
-  const isL1Approved = deed.L1Status === "Approved";
-  const isL2Approved = deed.L2Status === "Approved";
-  const isAllDocsPassed = pendingMandatory === 0;
-  const isGatePassed = isL1Approved && isL2Approved && isAllDocsPassed && isFinalDeedAccepted;
 
   return (
     <>
@@ -161,39 +159,16 @@ export default function LegalDeedDetailPage() {
         items={[
           { label: "Dashboard", path: "/home" },
           { label: "Legal", path: "/legal" },
-          { label: "Deed Registrations", path: "/legal/deeds" },
+          { label: "Land Deed Entries", path: "/legal/deeds" },
           { label: deed.DeedFileNo },
         ]}
       />
       <LegalShell
         title={`${deed.DeedFileNo} — ${deed.DeedTypeName}`}
-        subtitle={`Registration Office: ${deed.OfficeName} · Overall Status: ${deed.OverallStatus}`}
+        subtitle={`${deed.OfficeName} · ${deed.OverallStatus}`}
         icon={FileText}
-        action={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPortalOpen(!portalOpen)}
-              className="gap-1.5 text-xs font-semibold border-primary/30 text-primary hover:bg-primary/5"
-            >
-              <Globe size={14} />
-              {portalOpen ? "Hide Portal Workspace" : "Open IGR Portal Sidecar"}
-            </Button>
-          </div>
-        }
       >
-        <div className="flex flex-col lg:flex-row items-start gap-6 w-full">
-          {/* Main Content Pane */}
-          <div
-            className={`space-y-6 transition-all duration-200 ${
-              portalOpen
-                ? portalExpanded
-                  ? "hidden"
-                  : "w-full lg:w-1/2 xl:w-7/12"
-                : "w-full"
-            }`}
-          >
+        <div className="w-full space-y-6">
             {/* Top Bar Navigation & Actions */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/60 pb-4">
               <Button variant="outline" size="sm" onClick={() => navigate("/legal/deeds")} className="gap-2">
@@ -269,121 +244,76 @@ export default function LegalDeedDetailPage() {
               </div>
             </div>
 
-            {/* Workflow Status Banner */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="rounded-xl border border-border/80 bg-card p-4">
-                <span className="text-[0.6875rem] font-heading uppercase text-muted-foreground">Overall Lifecycle</span>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">{deed.OverallStatus}</span>
-                </div>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-card p-4">
-                <span className="text-[0.6875rem] font-heading uppercase text-muted-foreground">L1 Legal Review</span>
-                <div className="mt-1 flex items-center gap-2">
-                  <span
-                    className={`text-sm font-semibold ${
-                      deed.L1Status === "Approved" ? "text-emerald-600" : deed.L1Status === "Returned" ? "text-amber-600" : "text-muted-foreground"
-                    }`}
-                  >
-                    {deed.L1Status}
-                  </span>
-                  {deed.L1ReviewerName && <span className="text-xs text-muted-foreground">by {deed.L1ReviewerName}</span>}
-                </div>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-card p-4">
-                <span className="text-[0.6875rem] font-heading uppercase text-muted-foreground">L2 Executive Approval</span>
-                <div className="mt-1 flex items-center gap-2">
-                  <span
-                    className={`text-sm font-semibold ${
-                      deed.L2Status === "Approved" ? "text-emerald-600" : deed.L2Status === "Returned" ? "text-amber-600" : "text-muted-foreground"
-                    }`}
-                  >
-                    {deed.L2Status}
-                  </span>
-                  {deed.L2ApproverName && <span className="text-xs text-muted-foreground">by {deed.L2ApproverName}</span>}
-                </div>
-              </div>
-              <div className="rounded-xl border border-border/80 bg-card p-4">
-                <span className="text-[0.6875rem] font-heading uppercase text-muted-foreground">Document Checklist</span>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="text-sm font-semibold text-foreground">
-                    {documents.filter((d) => d.VerificationStatus === "Accepted" || d.IsWaived).length} / {documents.length} verified
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Appendix B Completion Gate Summary Card */}
-            <div className={`rounded-xl border p-4 transition-colors ${
-              isGatePassed ? "border-emerald-500/40 bg-emerald-500/5" : "border-border/80 bg-muted/20"
-            }`}>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck size={18} className={isGatePassed ? "text-emerald-600" : "text-primary"} />
-                  <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wide">
-                    Appendix B: Completion Gate Verification
-                  </span>
-                </div>
-                <span className={`text-[0.625rem] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                  isGatePassed ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"
-                }`}>
-                  {isGatePassed ? "All Gates Passed — Ready for Closure" : "Action Required Prior to Closure"}
+            {/* ── 5-Stage Workflow Status Bar ─────────────────────────────────── */}
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wider text-foreground">
+                  Deed Workflow Progress
+                </h3>
+                <span className="text-[0.6875rem] text-muted-foreground">
+                  {documents.filter((d) => d.VerificationStatus === "Accepted" || d.IsWaived).length}/{documents.length} docs verified
+                  {pendingMandatory > 0 && <span className="ml-2 text-amber-600 font-semibold">· {pendingMandatory} mandatory pending</span>}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-xs">
-                <div className="flex items-center gap-2">
-                  {isL1Approved ? (
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                  ) : (
-                    <Clock size={15} className="text-amber-500 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-semibold block text-foreground">L1 Legal Approved</span>
-                    <span className="text-[0.6875rem] text-muted-foreground">{deed.L1Status}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isL2Approved ? (
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                  ) : (
-                    <Clock size={15} className="text-amber-500 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-semibold block text-foreground">L2 Executive Approved</span>
-                    <span className="text-[0.6875rem] text-muted-foreground">{deed.L2Status}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isAllDocsPassed ? (
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle size={15} className="text-amber-500 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-semibold block text-foreground">Mandatory Documents</span>
-                    <span className="text-[0.6875rem] text-muted-foreground">
-                      {pendingMandatory === 0 ? "All verified" : `${pendingMandatory} pending`}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {isFinalDeedAccepted ? (
-                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-                  ) : (
-                    <XCircle size={15} className="text-amber-500 shrink-0" />
-                  )}
-                  <div>
-                    <span className="font-semibold block text-foreground">Final Registered Deed</span>
-                    <span className="text-[0.6875rem] text-muted-foreground">
-                      {isFinalDeedAccepted ? "Accepted & Uploaded" : "Awaiting Final Copy"}
-                    </span>
-                  </div>
-                </div>
+              {/* Stage rail */}
+              <div className="relative flex items-center">
+                {STAGES.map((stage, idx) => {
+                  const done = idx < currentStageIdx;
+                  const active = idx === currentStageIdx;
+                  return (
+                    <React.Fragment key={stage}>
+                      {idx > 0 && (
+                        <div className={`h-0.5 flex-1 transition-colors ${done ? "bg-emerald-500" : "bg-border"}`} />
+                      )}
+                      <div className="flex flex-col items-center shrink-0">
+                        <div
+                          className={`flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${
+                            done
+                              ? "border-emerald-500 bg-emerald-500 text-white"
+                              : active
+                              ? "border-foreground bg-foreground text-card"
+                              : "border-border bg-background text-muted-foreground"
+                          }`}
+                        >
+                          {done ? <CheckCircle2 size={14} /> : idx + 1}
+                        </div>
+                        <span
+                          className={`mt-1.5 text-center text-[0.6rem] font-heading font-semibold uppercase tracking-[0.08em] whitespace-nowrap ${
+                            done ? "text-emerald-600" : active ? "text-foreground" : "text-muted-foreground"
+                          }`}
+                        >
+                          {stage}
+                        </span>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
               </div>
+
+              {/* L1 / L2 detail row */}
+              {(deed.L1Status !== "Pending" || deed.L2Status !== "Pending") && (
+                <div className="mt-4 flex flex-wrap gap-3 border-t border-border/60 pt-3 text-xs">
+                  <span className={`inline-flex items-center gap-1.5 ${deed.L1Status === "Approved" ? "text-emerald-600" : deed.L1Status === "Returned" ? "text-amber-600" : "text-muted-foreground"}`}>
+                    {deed.L1Status === "Approved" ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                    <span className="font-semibold">L1:</span> {deed.L1Status}
+                    {deed.L1ReviewerName && <span className="text-muted-foreground"> · {deed.L1ReviewerName}</span>}
+                  </span>
+                  <span className={`inline-flex items-center gap-1.5 ${deed.L2Status === "Approved" ? "text-emerald-600" : deed.L2Status === "Returned" ? "text-amber-600" : "text-muted-foreground"}`}>
+                    {deed.L2Status === "Approved" ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                    <span className="font-semibold">L2:</span> {deed.L2Status}
+                    {deed.L2ApproverName && <span className="text-muted-foreground"> · {deed.L2ApproverName}</span>}
+                  </span>
+                  {deed.L2Status === "Approved" && (
+                    <button
+                      onClick={() => navigate("/legal/active-land")}
+                      className="ml-auto inline-flex items-center gap-1 text-emerald-600 hover:underline font-semibold"
+                    >
+                      View in Active Land Register <ChevronRight size={12} />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Deed Metadata Grid with Distinct RS & LR Fields */}
@@ -560,24 +490,6 @@ export default function LegalDeedDetailPage() {
               </div>
             </div>
           </div>
-
-          {/* Right Column: Portal Workspace */}
-          {portalOpen && (
-            <div
-              className={`transition-all duration-200 sticky top-4 ${
-                portalExpanded ? "w-full" : "w-full lg:w-1/2 xl:w-5/12"
-              }`}
-            >
-              <LegalPortalPane
-                url="https://igr.wb.gov.in/"
-                officeName={deed.OfficeName}
-                onClose={() => setPortalOpen(false)}
-                isExpanded={portalExpanded}
-                onToggleExpand={() => setPortalExpanded(!portalExpanded)}
-              />
-            </div>
-          )}
-        </div>
 
         {/* Modal: Document Verification */}
         <Dialog open={!!selectedDoc} onOpenChange={() => setSelectedDoc(null)}>
