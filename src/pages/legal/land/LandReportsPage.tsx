@@ -3,6 +3,7 @@ import { useElementWidth } from "@/components/legal/useElementWidth";
 import { useQuery } from "@tanstack/react-query";
 import { DocumentText } from "iconsax-react";
 import { Download, Printer } from "lucide-react";
+import { printLegalSheet } from "@/lib/legalPrint";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LegalShell } from "@/components/legal/LegalShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -40,12 +41,7 @@ export default function LandReportsPage() {
       .filter((r) => !landCode || !hasLandCol || String(r["Land ID"]) === landCode)
       .filter((r) => !t || Object.values(r).some((v) => cell(v).toLowerCase().includes(t)));
   }, [data, q, landCode, hasLandCol]);
-  const print = () => {
-    document.body.classList.add("legal-printing");
-    const done = () => { document.body.classList.remove("legal-printing"); window.removeEventListener("afterprint", done); };
-    window.addEventListener("afterprint", done);
-    window.print();
-  };
+  const print = () => printLegalSheet();
 
   return (
     <>

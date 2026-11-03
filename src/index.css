@@ -2656,9 +2656,27 @@ select[aria-hidden="true"] {
 .legal-enq-rejected  { background-color: rgba(244,63,94,.08);   box-shadow: inset 3px 0 0 #f43f5e; color: hsl(var(--muted-foreground)); }
 .legal-enq-converted { background-color: rgba(124,74,46,.07);   box-shadow: inset 3px 0 0 #7c4a2e; }
 
-/* Legal — "Download PDF" on a land's full details prints only that sheet. */
+/* Legal — "Download PDF" prints only the copied sheet (printLegalSheet): A4, plain white, full width. */
+.legal-print-host { display: none; }
 @media print {
-  body.legal-printing * { visibility: hidden; }
-  body.legal-printing .legal-print, body.legal-printing .legal-print * { visibility: visible; }
-  body.legal-printing .legal-print { position: absolute; inset: 0 auto auto 0; width: 100%; background: #fff; color: #111; }
+  @page { size: A4; margin: 14mm 12mm; }
+  body.legal-printing { background: #fff !important; }
+  body.legal-printing > *:not(.legal-print-host) { display: none !important; }
+  body.legal-printing .legal-print-host { display: block; }
+  body.legal-printing .legal-print-host .legal-print {
+    width: 100%; max-width: none; margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none;
+    background: #fff !important; color: #111; font-size: 10pt; backdrop-filter: none;
+  }
+  body.legal-printing .legal-print-host * { color: #111 !important; background: transparent !important; box-shadow: none !important; }
+  body.legal-printing .legal-print-host .text-muted-foreground, body.legal-printing .legal-print-host th, body.legal-printing .legal-print-host dt { color: #555 !important; }
+  body.legal-printing .legal-print-host h3 { color: #7c4a2e !important; }
+  body.legal-printing .legal-print-host dl { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  body.legal-printing .legal-print-host table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+  body.legal-printing .legal-print-host th { border-bottom: 1px solid #999; }
+  body.legal-printing .legal-print-host td { border-top: 1px solid #ddd !important; }
+  body.legal-printing .legal-print-host .overflow-x-auto { overflow: visible !important; }
+  body.legal-printing .legal-print-host tr, body.legal-printing .legal-print-host dl > div { break-inside: avoid; }
+  body.legal-printing .legal-print-host section { break-inside: auto; border-top: 1px solid #bbb; }
+  body.legal-printing .legal-print-host h3 { break-after: avoid; }
 }
+
