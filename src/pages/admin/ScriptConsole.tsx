@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark, MarkSquare, type MarkTone } from "@/components/sheet/Sheet";
 import { fmtIstDateTime } from "@/lib/istTime";
 import { downloadBlob } from "@/lib/xlsxBook";
+import { CodeEditor } from "@/components/CodeEditor";
 import {
   createVaultKey, deleteScript, getHistoryRun, getRun, getVaultStatus, isVaultLocked, listHistory, listScripts, lockVault, rotateVaultKey,
   saveScript, startRun, stopRun, unlockVault,
@@ -25,7 +26,6 @@ const TAGBOX = "inline-flex items-center gap-1.5 border border-foreground/40 px-
 // output panel and the editor set their font and wrapping themselves.
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 const OUTPUT_STYLE = { fontFamily: MONO, whiteSpace: "pre-wrap", overflowWrap: "anywhere" } as const;
-const EDITOR_STYLE = { fontFamily: MONO, whiteSpace: "pre", tabSize: 2 } as const;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong.");
 const STATUS_TONE: Record<RunStatus, MarkTone> = { running: "moving", done: "done", failed: "stopped", killed: "stopped", timeout: "stopped", interrupted: "stopped" };
@@ -365,12 +365,7 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
             <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void save(false)}><Save size={12} /> {libId ? "Save" : "Save script"}</button>
             {libId && <button type="button" className={`${KEY_LINE} h-8 px-3`} onClick={() => void save(true)}><Plus size={12} /> Save as new</button>}
           </div>
-          <textarea
-            value={script} onChange={(e) => setScript(e.target.value)} spellCheck={false}
-            className="block min-h-[300px] w-full resize-y border-0 bg-card px-4 py-3 text-xs leading-relaxed text-foreground outline-none"
-            style={EDITOR_STYLE}
-            aria-label="Script"
-          />
+          <CodeEditor value={script} onChange={setScript} label="Script" />
           <div className="space-y-2 px-4 py-3" style={{ borderTop: RULE }}>
             <div className="flex items-center justify-between">
               <span className={LBL}>Environment variables (like <span className="normal-case tracking-normal">-e APPLY=1</span>)</span>
