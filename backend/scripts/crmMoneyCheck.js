@@ -64,6 +64,9 @@ const CHECKS = {
 };
 // What a re-add can repair; the rest is reported only.
 const REPAIRABLE = ["parking", "extra", "schedule", "grand"];
+// Lines re-split from the booking's own unit price (reallocateBookingLines) —
+// price, GST, parking and the schedule are not touched.
+const LINE_REPAIRABLE = ["lines"];
 
 const money = (n) => (n == null ? "-" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 }));
 
@@ -115,6 +118,34 @@ const money = (n) => (n == null ? "-" : Number(n).toLocaleString("en-IN", { maxi
     }
   }
   if (out.length) console.table(out);
+
+  const lineIds = [...new Set(LINE_REPAIRABLE.flatMap((k) => found[k].map((r) => r.Id)))];
+  console.log(`
+${lineIds.length} booking(s) whose unit / plot lines to re-split from the unit price (${MODE}).`);
+  const { reallocateBookingLines } = require(path.join(root, "services/crmEntityCreation"));
+  const linesSum = async (db, id) => (await db.request().input("id", sql.Int, id).query(`
+    SELECT ISNULL(SUM(AllocatedValue),0) S FROM (
+      SELECT AllocatedValue FROM dbo.CrmBookingUnit WHERE BookingId = @id AND Status = N'Active'
+      UNION ALL SELECT AllocatedValue FROM dbo.CrmBookingPlot WHERE BookingId = @id AND Status = N'Active') x`)).recordset[0].S;
+  const lineOut = [];
+  for (const id of lineIds) {
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    try {
+      const b = (await tx.request().input("id", sql.Int, id).query("SELECT BookingNo, TotalValue, GrandTotal FROM dbo.CrmBooking WHERE Id = @id")).recordset[0];
+      const before = await linesSum(tx, id);
+      await reallocateBookingLines(tx, id, Number(b.TotalValue));
+      const after = await linesSum(tx, id);
+      const g = (await tx.request().input("id", sql.Int, id).query("SELECT GrandTotal FROM dbo.CrmBooking WHERE Id = @id")).recordset[0].GrandTotal;
+      lineOut.push({ Booking: b.BookingNo, "Unit price": money(b.TotalValue), Lines: `${money(before)} -> ${money(after)}`,
+        "Grand Total (unchanged)": `${money(b.GrandTotal)} -> ${money(g)}` });
+      if (MODE === "apply") await tx.commit(); else await tx.rollback();
+    } catch (e) {
+      try { await tx.rollback(); } catch { /* already rolled back */ }
+      lineOut.push({ Booking: id, Error: e.message });
+    }
+  }
+  if (lineOut.length) console.table(lineOut);
   console.log(MODE === "apply" ? "\nApplied. Run again without flags to re-verify." : "\nDry run — nothing was saved. Run with --apply to save.");
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -170,12 +170,13 @@ export const SHEET_FRAME_CSS =
 [role="menu"] [class*="rounded-"], [role="listbox"] [class*="rounded-"], [role="menuitem"], [role="option"] { border-radius: 0 !important; }
 .sheet-frame .statrow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sheet-frame .statrow.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sheet-frame .statrow.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .sheet-frame .statrow > div { padding: 0 18px; min-width: 0; }
 .sheet-frame .statrow > div + div { border-left: 1px solid var(--rule); }
 .sheet-frame .statrow > div:first-child { padding-left: 0; }
 @media (max-width: 640px) {
   .sheet-frame .statrow { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-  .sheet-frame .statrow.four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sheet-frame .statrow.four, .sheet-frame .statrow.five { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sheet-frame .statrow > div { padding: 0; }
   .sheet-frame .statrow > div + div { border-left: 0; }
 }

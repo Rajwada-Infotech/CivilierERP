@@ -194,7 +194,9 @@ const CrmDashboard: React.FC = () => {
 
   const due = n0(payments.TotalDue);
   const paid = n0(payments.TotalPaid);
-  const outstanding = Math.max(0, due - paid);
+  // Entered but not yet verified by Finance — neither received nor owed.
+  const withFinance = n0(payments.WithFinance);
+  const outstanding = Math.max(0, due - paid - withFinance);
   const paidPct = share(paid, due);
   const next30 = n0(metrics.forwardDue30Days);
   const next30Pct = Math.min(100 - paidPct, share(next30, due));
@@ -272,7 +274,8 @@ const CrmDashboard: React.FC = () => {
                     <span style={{ fontSize: "0.34em", fontWeight: 500, marginLeft: 6, letterSpacing: 0 }}>{collected.unit}</span>
                   </span>
                   <span style={{ paddingBottom: 8, fontSize: 14, color: "var(--ink-2)" }}>
-                    received of <b style={{ color: "var(--ink)" }}>{money(due)}</b> demanded
+                    received (verified by Finance) of <b style={{ color: "var(--ink)" }}>{money(due)}</b> demanded
+                    {withFinance > 0 && <> · <b style={{ color: "var(--ink)" }}>{money(withFinance)}</b> entered, with Finance</>}
                   </span>
                 </div>
 
