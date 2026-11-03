@@ -11,6 +11,7 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
 const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
+const { usersHaveStatusReason } = require("../services/usersStatusReason");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
@@ -267,10 +268,11 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
+      const withReason = await usersHaveStatusReason(pool);
       const result = await pool.request().query(`
         SELECT u.id, u.name, u.email, u.RoleId,
                r.RName AS roleName,
-               u.created_datetime, u.discontinue,
+               u.created_datetime, u.discontinue,${withReason ? " u.StatusReason, u.StatusChangedAt, u.StatusChangedBy," : ""}
                ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
                -- lists get the small thumbnail when there is one (migration 575)
                COALESCE(u.avatar_thumb, u.avatar_url) AS avatar_url,
@@ -419,6 +421,15 @@ router.put(
               DepartmentId=@DepartmentId
           WHERE id=@id
         `);
+      }
+
+      // Remember why, by whom and when the status last changed (the Users list shows it under the status).
+      if (statusChanges && (await usersHaveStatusReason(pool))) {
+        await pool.request()
+          .input("id", sql.Int, id)
+          .input("reason", sql.NVarChar(120), statusReason.slice(0, 120))
+          .input("by", sql.NVarChar(200), String(req.user?.name || req.user?.email || "").slice(0, 200) || null)
+          .query("UPDATE dbo.users SET StatusReason = @reason, StatusChangedAt = SYSDATETIME(), StatusChangedBy = @by WHERE id = @id");
       }
 
       // Discontinuing a user must stop their existing tokens immediately,

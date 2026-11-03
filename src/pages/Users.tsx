@@ -22,6 +22,7 @@ import { BodyPortal } from "@/components/ui/body-portal";
 import { makeAvatarThumb } from "@/lib/avatarThumb";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserStatusDialog } from "@/components/UserStatusDialog";
+import { fmtIstDateTime } from "@/lib/istTime";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -33,6 +34,10 @@ interface User {
   RoleId: number;
   created_datetime: string;
   discontinue: boolean;
+  /** why, by whom and when the status was last switched (migration 621) */
+  StatusReason?: string | null;
+  StatusChangedAt?: string | null;
+  StatusChangedBy?: string | null;
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
@@ -262,11 +267,20 @@ function buildUserColumns(
     {
       accessorKey: "discontinue",
       header: "Status",
-      size: 110,
-      cell: ({ getValue }) => {
+      size: 190,
+      cell: ({ row, getValue }) => {
         const inactive = getValue() as boolean;
+        const u = row.original;
         return (
-          !inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>
+          <div className="leading-tight">
+            {!inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+            {u.StatusReason && (
+              <p className="mt-1 max-w-[220px] whitespace-normal text-[0.6875rem] text-muted-foreground" title={u.StatusReason}>
+                {u.StatusReason}
+                <span className="block text-[0.625rem] opacity-80">{[u.StatusChangedBy, u.StatusChangedAt ? fmtIstDateTime(u.StatusChangedAt) : ""].filter(Boolean).join(" · ")}</span>
+              </p>
+            )}
+          </div>
         );
       },
     },
