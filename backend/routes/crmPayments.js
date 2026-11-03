@@ -923,6 +923,46 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
 // (applyCrmOnAccountPaymentApproval). The predecessor-milestone check is
 // re-run here (not just at submission) since two payments can be approved
 // out of submission order.
+// A payment Finance verifies after its booking was cancelled (it was still
+// with Finance then): the money is real, so it is recorded and posted as any
+// receipt, then rolled into the cancellation's held credit and refund — never
+// onto the dead booking's milestones. Returns true when it did that.
+async function holdIfBookingCancelled(pool, bookingId, onAccountId, actorUserId, actorEmail) {
+  const cxl = (await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT TOP 1 c.Id FROM dbo.CrmCancellation c JOIN dbo.CrmBooking b ON b.Id = c.BookingId
+    WHERE c.BookingId = @bid AND c.Status = '${CrmStatus.APPROVED}' AND b.Status = '${CrmStatus.CANCELLED}' ORDER BY c.Id DESC`)).recordset[0];
+  if (!cxl) return false;
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const rolled = await tx.request().input("id", sql.Int, onAccountId).query(`
+      UPDATE dbo.CrmOnAccountPayment
+      SET AppliedAmount = Amount, Status = 'Applied',
+          Notes = ISNULL(Notes,'') + char(10) + 'Verified after the booking was cancelled - rolled into its held credit / refund.'
+      OUTPUT INSERTED.Amount
+      WHERE Id = @id AND ISNULL(Status, 'Unapplied') = 'Unapplied' AND ISNULL(AppliedAmount, 0) = 0`);
+    // Already rolled on an earlier attempt: nothing more to do (idempotent).
+    if (rolled.recordset.length) {
+      await require("../services/crmLedger").syncCrmOnAccountLedger(tx, onAccountId, actorEmail || "system", "Rolled into held credit - booking cancelled");
+      await require("./crmCancellations").holdCancellationCredit(tx, {
+        cancellationId: cxl.Id, bookingId, amount: Number(rolled.recordset[0].Amount), actorUserId, addToCancellation: true,
+      });
+    }
+    await tx.commit();
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* already rolled back */ }
+    throw e;
+  }
+  return true;
+}
+
+// A cancelled booking's later-verified payment goes to its refund, so it does
+// not wait on the old schedule's milestone order.
+async function isBookingCancelled(pool, bookingId) {
+  return !!(await pool.request().input("bid", sql.Int, bookingId)
+    .query(`SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status = '${CrmStatus.CANCELLED}'`)).recordset.length;
+}
+
 async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmail) {
   const target = await pool.request().input("id", sql.Int, rp.CrmMilestoneId).query(`
     SELECT m.Id, m.BookingId, m.MilestoneNo, m.MilestoneName, m.AmountDue, b.BookingNo
@@ -937,7 +977,8 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
   // either, for the same reason.
   // Money already entered and waiting for Finance counts: payments are entered
   // one after another, and verified in any order (crmOnAccountCoverage.js).
-  if (!(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
+  if (!(await isBookingCancelled(pool, targetRow.BookingId))
+      && !(await areEarlierMilestonesCoveredByOnAccount(pool, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
     const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
       .query(`
         SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
@@ -989,11 +1030,13 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
     await recordGLPosting("crm-on-account-payment", onAccountId, { failed: true, reason: glErr.message }, actorEmail);
   }
 
-  // Stays in On Account unless this deposit was the one that tipped the
-  // booking's total over its full GrandTotal — in that case every eligible
-  // milestone is auto-adjusted right now, in order (see
-  // autoApplyOnAccountIfFullyFunded above).
-  await autoApplyOnAccountIfFullyFunded(pool, targetRow.BookingId, actorUserId, actorEmail);
+  // Booking cancelled meanwhile: the money goes to its refund, not the schedule.
+  // Otherwise it stays in On Account unless this deposit was the one that
+  // tipped the booking's total over its full GrandTotal — then every eligible
+  // milestone is auto-adjusted right now, in order (autoApplyOnAccountIfFullyFunded).
+  if (!(await holdIfBookingCancelled(pool, targetRow.BookingId, onAccountId, actorUserId, actorEmail))) {
+    await autoApplyOnAccountIfFullyFunded(pool, targetRow.BookingId, actorUserId, actorEmail);
+  }
 
   // Every approved CRM payment gets its own Money Receipt — not just the
   // Booking Amount's first one. Idempotent (see ensureMoneyReceiptForApproved
@@ -1063,10 +1106,12 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
     glOutcome = {};
   }
 
-  // Stays in On Account unless this deposit was the one that tipped the
-  // booking's total over its full GrandTotal (see
-  // autoApplyOnAccountIfFullyFunded above).
-  await autoApplyOnAccountIfFullyFunded(pool, rp.CrmBookingId, actorUserId, actorEmail);
+  // Booking cancelled meanwhile: the money goes to its refund. Otherwise it
+  // stays in On Account unless this deposit tipped the booking's total over
+  // its full GrandTotal (autoApplyOnAccountIfFullyFunded).
+  if (!(await holdIfBookingCancelled(pool, rp.CrmBookingId, onAccountId, actorUserId, actorEmail))) {
+    await autoApplyOnAccountIfFullyFunded(pool, rp.CrmBookingId, actorUserId, actorEmail);
+  }
 
   // Same "every approved CRM payment gets its own Money Receipt" rule as
   // applyCrmMilestonePaymentApproval — an on-account deposit is real money

@@ -1013,7 +1013,11 @@ router.put("/:id/approve", allowApprover, async (req, res) => {
       // impossible to ever approve a payment past Milestone 1.
       // Entries still waiting for verification count, so Finance can verify
       // a booking's payments in any order (crmOnAccountCoverage.js).
-      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
+      // A cancelled booking's payment goes to its refund (crmPayments.js
+      // holdIfBookingCancelled), so the old schedule's order doesn't apply.
+      const bookingCancelled = targetRow && (await tx.request().input("bid", sql.Int, targetRow.BookingId)
+        .query("SELECT 1 AS x FROM dbo.CrmBooking WHERE Id = @bid AND Status = 'Cancelled'")).recordset.length > 0;
+      if (targetRow && !bookingCancelled && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo, { withPendingVerification: true }))) {
         const predecessor = await tx.request()
           .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
             SELECT TOP 1 p.MilestoneName
