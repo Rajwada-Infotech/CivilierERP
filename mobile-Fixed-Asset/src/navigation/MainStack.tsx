@@ -46,7 +46,7 @@ export type MainStackParamList = {
   AssetDetail: { id: number };
   AssetForm: { id?: number } | undefined;
   TaggingDetail: { id: number };
-  TaggingForm: { id?: number } | undefined;
+  TaggingForm: { id: number };
   AssignmentDetail: { id: number };
   AssignmentForm: { id?: number } | undefined;
   AssetTransferDetail: { id: number };

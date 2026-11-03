@@ -375,15 +375,6 @@ export interface TaggingDetail extends TaggingListItem {
   UpdatedAt: string | null;
 }
 
-export interface EligibleAssetItem {
-  ItemId: string;
-  ItemName: string | null;
-  AssetCategory: string | null;
-  AvailableQty: number;
-  TaggedQty: number;
-  UntaggedQty: number;
-}
-
 export const getFixedAssetTaggings = (params?: {
   companyId?: number; projectId?: number; finYear?: string; godownId?: number; fromDate?: string; toDate?: string;
 }): Promise<TaggingListItem[]> => {
@@ -432,21 +423,6 @@ export const getTaggedFAItemCodes = (params?: {
   if (params?.itemName) qs.set("itemName", params.itemName);
   return getJson(`/api/fixed-asset-tagging/tagged-codes${qs.toString() ? `?${qs}` : ""}`, "Failed to load FA Item Codes");
 };
-
-export const getEligibleAssetItems = (params: {
-  godownId: number; companyId?: number; projectId?: number; finYear?: string;
-}): Promise<EligibleAssetItem[]> => {
-  const qs = new URLSearchParams({ godownId: String(params.godownId) });
-  if (params.companyId) qs.set("companyId", String(params.companyId));
-  if (params.projectId) qs.set("projectId", String(params.projectId));
-  if (params.finYear) qs.set("finYear", params.finYear);
-  return getJson(`/api/fixed-asset-tagging/eligible-items?${qs}`, "Failed to load eligible items");
-};
-
-export const createFixedAssetTagging = (data: {
-  docDate: string; companyId?: number | null; projectId: number; godownId: number; itemId: string; numberOfItems: number; remarks?: string;
-}): Promise<{ tagId: number; docNo: string; codes: string[] }> =>
-  mutate("/api/fixed-asset-tagging", "POST", data, "Failed to generate FA Item Codes");
 
 export const updateFixedAssetTagging = (id: number, data: { docDate?: string; remarks?: string }): Promise<{ ok: true }> =>
   mutate(`/api/fixed-asset-tagging/${id}`, "PUT", data, "Failed to update tagging entry");
