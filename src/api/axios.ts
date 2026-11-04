@@ -1,7 +1,7 @@
 import axios from "axios";
 import { getToken } from "../utils/tokenStorage";
 import { activityHeaders } from "@/lib/fetchWithAuth";
-import { refreshAfterWrite, wantsFresh } from "@/lib/queryClient";
+import { freshHeader, refreshAfterWrite } from "@/lib/queryClient";
 
 // Use relative /api path — the Vite dev proxy forwards to localhost:5000
 // and production nginx rewrites /api → backend. Never rely on VITE_API_URL.
@@ -17,7 +17,7 @@ api.interceptors.request.use((config) => {
   }
   Object.assign(config.headers, activityHeaders());
   const method = (config.method || "get").toLowerCase();
-  if ((method === "get" || method === "head") && wantsFresh()) config.headers["X-Fresh"] = "1";
+  if (method === "get" || method === "head") Object.assign(config.headers, freshHeader());
   return config;
 });
 

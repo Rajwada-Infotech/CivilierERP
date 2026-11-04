@@ -153,13 +153,25 @@ async function computeDynamicTtl(fallback = 300) {
  * Adds req.timing stages when req.timing is present:
  *   cache.version_check  cache.lookup  cache.lock  cache.write
  */
+const FRESH_AFTER_SAVE_MS = 3000;
+function wantsFreshRead(req, dropOnAnyWrite) {
+  const v = req.headers["x-fresh"];
+  if (!v) return false;
+  if (!dropOnAnyWrite) return true;
+  const ms = Number(v);
+  return !Number.isFinite(ms) || ms < FRESH_AFTER_SAVE_MS; // an older tab's "1" still means "skip"
+}
+
 function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnAnyWrite = false } = {}) {
   return async (req, res, next) => {
     try {
       // Fast-exit: Redis is down, skip all cache logic. Also skipped when the browser asks for fresh data:
-      // it does for a minute after the person saves something (lib/queryClient.ts), so a list that save
-      // touched shows it even if the route that wrote it did not refresh this list's cache.
-      if (circuitIsOpen() || req.headers["x-fresh"]) {
+      // it does for a minute after the person saves something (lib/queryClient.ts; X-Fresh = ms since that
+      // save), so a list that save touched shows it even if the route that wrote it did not refresh this
+      // list's cache. A cache that clears on every save (dropOnAnyWrite) is already fresh by then; it skips
+      // itself only in the first moments after the save, while that clearing may still be on its way — else
+      // whoever saves often (progress updates all day) never used it.
+      if (circuitIsOpen() || wantsFreshRead(req, dropOnAnyWrite)) {
         res.setHeader("X-Cache", "BYPASS");
         return next();
       }
@@ -309,4 +321,4 @@ function cache(namespace, ttl = 300, { shared = false, fixedTtl = false, dropOnA
   };
 }
 
-module.exports = { cache, localVersionCache, ANY_WRITE_NAMESPACE };
+module.exports = { cache, localVersionCache, ANY_WRITE_NAMESPACE, wantsFreshRead };
