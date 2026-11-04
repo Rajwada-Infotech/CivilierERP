@@ -106,6 +106,9 @@ export function usePurchaseOrder() {
   // ── PO doc types (for the plain Document Type & Number select) ───────────
   const [poDocTypes, setPoDocTypes] = useState<DocType[]>([]);
   const [poDocTypesLoading, setPoDocTypesLoading] = useState(true);
+  // An existing PO is on screen (opened from the list or a Linked Documents link). The default number below is for a new PO and
+  // arrives after the fetches; without this it landed on a PO opened straight from a link and showed the next DPO number as its own.
+  const openedExistingRef = useRef(false);
 
   useEffect(() => {
     setPoDocTypesLoading(true);
@@ -127,7 +130,9 @@ export function usePurchaseOrder() {
           fetchNextDocNumber(
             preferred.TypeOfDocId,
             selectedFinYear || undefined,
-          ).then((docNo) => applyPoDocNumber(preferred.TypeOfDocId, docNo));
+          ).then((docNo) => {
+            if (!openedExistingRef.current) applyPoDocNumber(preferred.TypeOfDocId, docNo);
+          });
         }
       })
       .finally(() => setPoDocTypesLoading(false));
@@ -2043,6 +2048,7 @@ export function usePurchaseOrder() {
 
   // ── Navigation ────────────────────────────────────────────────────────────
   const goToList = () => {
+    openedExistingRef.current = false;
     setViewMode("list");
     setEditingId(null);
     setForm(EMPTY_FORM());
@@ -2081,6 +2087,7 @@ export function usePurchaseOrder() {
   };
 
   const goToEdit = async (item: POListItem) => {
+    openedExistingRef.current = true;
     // Always fetch the full PO — list rows don't include POItems or DocTypeId
     let raw: any =
       dbItems.find((d) => String(d.PurchaseOrderID) === item._id) ?? {};
