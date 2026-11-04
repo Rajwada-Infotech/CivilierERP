@@ -1,7 +1,7 @@
 ﻿import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
 import { STABILISING_MESSAGE, isGatewayFailure } from "./gatewayFetch";
-import { refreshAfterWrite, wantsFresh } from "./queryClient";
+import { freshHeader, refreshAfterWrite } from "./queryClient";
 
 // Exported so callers can distinguish auth/permission errors from network errors.
 export class ApiError extends Error {
@@ -109,7 +109,7 @@ export async function fetchWithAuth(
         ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...activityHeaders(),
-        ...(isRead && wantsFresh() ? { "X-Fresh": "1" } : {}),
+        ...(isRead ? freshHeader() : {}),
         ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
       },
     });

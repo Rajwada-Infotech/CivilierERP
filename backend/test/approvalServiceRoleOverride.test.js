@@ -51,6 +51,10 @@ jest.mock("../db", () => {
           }
           return { recordset: insertedApproval ? [{ found: 1 }] : [] };
         }
+        // This cycle's approvals, all levels at once (approvalService.cycleApprovals).
+        if (/SELECT Level, UserId, Role FROM dbo\.ApprovalAuditLog/i.test(text)) {
+          return { recordset: auditLogs.filter((a) => a.ActionStatus === "Approved") };
+        }
         if (/SELECT DISTINCT UserId/i.test(text)) {
           const lvl = inputs.Level;
           const matching = auditLogs.filter(
@@ -98,10 +102,11 @@ jest.mock("../services/generalLedger", () => ({
   postJournalVoucherApproval: jest.fn(async () => ({ posted: true })),
 }));
 
-const { transition } = require("../services/approvalService");
+const { transition, invalidateWorkflowCache } = require("../services/approvalService");
 const dbMock = require("../db");
 
 beforeEach(() => {
+  invalidateWorkflowCache(); // each test sets up its own workflow
   dbMock.__setRecordStatus("Pending");
   dbMock.__resetApproval();
   dbMock.__setWorkflow(null);

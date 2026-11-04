@@ -74,6 +74,8 @@ router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
 
 // POST /api/approval-workflows
 router.post("/", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  // Whatever this does to a workflow, approval checks read it fresh from now on.
+  res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   const {
     name,
     type = "sequential",
@@ -131,6 +133,8 @@ router.post("/", authMiddleware, allowRoles("admin", "super_admin", "dba"), asyn
 
 // PUT /api/approval-workflows/:id
 router.put("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  // Whatever this does to a workflow, approval checks read it fresh from now on.
+  res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   const {
     name,
     type = "sequential",
@@ -174,6 +178,8 @@ router.put("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), as
 
 // PATCH /api/approval-workflows/:id/toggle
 router.patch("/:id/toggle", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  // Whatever this does to a workflow, approval checks read it fresh from now on.
+  res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   try {
     const pool = getPool();
     await pool
@@ -196,6 +202,8 @@ router.patch("/:id/toggle", authMiddleware, allowRoles("admin", "super_admin", "
 
 // DELETE /api/approval-workflows/:id
 router.delete("/:id", authMiddleware, allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  // Whatever this does to a workflow, approval checks read it fresh from now on.
+  res.on("finish", () => require("../services/approvalService").invalidateWorkflowCache());
   try {
     const pool = getPool();
     await pool
