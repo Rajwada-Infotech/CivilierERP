@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -233,11 +234,11 @@ const CrmDemands: React.FC = () => {
         }
         const g = map.get(r.BookingId)!;
         g.milestones.push(r);
-        g.tabDue += Number(r.AmountDue || 0);
-        g.tabPaid += Number(r.AmountPaid || 0);
+        g.tabDue = round2(g.tabDue + Number(r.AmountDue || 0));
+        g.tabPaid = round2(g.tabPaid + Number(r.AmountPaid || 0));
       }
       const groups = Array.from(map.values());
-      result[key] = { groups, amount: groups.reduce((s, g) => s + Math.max(0, g.tabDue - g.tabPaid), 0), count: buckets[key].length };
+      result[key] = { groups, amount: sumMoney(groups, (g) => Math.max(0, round2(g.tabDue - g.tabPaid))), count: buckets[key].length };
     }
     return result;
   }, [rows]);

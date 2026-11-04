@@ -1,4 +1,5 @@
 import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices } from "@/constants/crmStatuses";
+import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
@@ -776,15 +777,15 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   // page doesn't invite a duplicate Booking Amount payment.
   const bookingOnAccountBalance = Number(onAccountData?.availableBalance || 0);
   const bookingAmountOnAccountCover = firstMilestone && firstMilestone.Status !== "Waived"
-    ? Math.min(bookingOnAccountBalance, Math.max(0, bookingAmountDue - bookingAmountPaid))
+    ? Math.min(bookingOnAccountBalance, Math.max(0, round2(bookingAmountDue - bookingAmountPaid)))
     : 0;
   const bookingAmountBalance = firstMilestone?.Status === "Waived"
     ? 0
-    : Math.max(0, bookingAmountDue - bookingAmountPaid - bookingAmountOnAccountCover);
-  const totalCleared = milestoneList.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+    : Math.max(0, round2(bookingAmountDue - bookingAmountPaid - bookingAmountOnAccountCover));
+  const totalCleared = sumMoney(milestoneList, (m: any) => m.AmountPaid);
   const grandTotal = Number(booking?.GrandTotal ?? 0) > 0
     ? Number(booking?.GrandTotal)
-    : Number(booking?.TotalValue || 0) + Number(booking?.UnitGstAmount || 0) + Number(booking?.ParkingTotal || 0) + Number(booking?.ExtraChargesTotal || 0);
+    : sumMoney([booking?.TotalValue, booking?.UnitGstAmount, booking?.ParkingTotal, booking?.ExtraChargesTotal]);
   // A waived Booking Amount is settled without cash; otherwise virtual
   // coverage reflects milestone-paid plus valid available on-account funds.
   const bookingAmountCoveredInFull = !!firstMilestone && (firstMilestone.Status === "Waived"

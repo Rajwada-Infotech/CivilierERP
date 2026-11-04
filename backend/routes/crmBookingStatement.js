@@ -1,4 +1,5 @@
 const express = require("express");
+const { round2, sumMoney } = require("../services/bookingUnits");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -107,11 +108,11 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 
     const live = milestones.recordset.filter((m) => !waived(m));
     const demandedOpen = live.filter(raised)
-      .reduce((n, m) => n + Math.max(0, Number(m.AmountDue) - Number(m.AmountPaid)), 0);
+      .reduce((n, m) => round2(n + Math.max(0, round2(Number(m.AmountDue) - Number(m.AmountPaid)))), 0);
     const upcoming = live.filter((m) => !raised(m)).map((m) => ({
       text: m.MilestoneName, dueDate: day(m.DueDate), amount: Number(m.AmountDue), paid: Number(m.AmountPaid),
     }));
-    const awaiting = receipts.recordset.reduce((n, r) => n + Number(r.Amount), 0);
+    const awaiting = sumMoney(receipts.recordset, (r) => r.Amount);
 
     res.json({
       BookingId: id,

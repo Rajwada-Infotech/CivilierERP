@@ -1,6 +1,7 @@
 // CRM Bookings: every booking with what it is waiting on next. Bookings mostly create themselves when an Application
 // is approved; New Booking is the manual fallback. The booking itself opens in CrmBookingDetail (?view=<id>).
 import { useSheetAsk } from "@/components/sheet/SheetAsk";
+import { round2, sumMoney } from "@/lib/crmPriceQuote";
 import { CrmStatus } from "@/constants/crmStatuses";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -173,11 +174,11 @@ const CrmBooking: React.FC = () => {
       cell: (i) => {
         const b = i.row.original;
         const storedGrand = Number(b.GrandTotal ?? 0);
-        const grand = storedGrand > 0 ? storedGrand : (Number(b.TotalValue || 0) + Number(b.UnitGstAmount || 0) + Number(b.ParkingTotal || 0) + Number(b.ExtraChargesTotal || 0));
+        const grand = storedGrand > 0 ? storedGrand : sumMoney([b.TotalValue, b.UnitGstAmount, b.ParkingTotal, b.ExtraChargesTotal]);
         const cleared = Number(b.TotalCleared ?? 0);
         // ApprovedOnAccount (CrmOnAccountPayment) alone is "held, not yet applied": adding CrmMoneyReceipt double-counted it.
         const onAcc = Number(b.ApprovedOnAccount ?? 0);
-        const outstanding = Math.max(0, grand - cleared - onAcc);
+        const outstanding = Math.max(0, round2(grand - cleared - onAcc));
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;
         return (

@@ -184,7 +184,9 @@ describe("Supplier Master: default password + auto-generated login", () => {
 
     expect(insertedUsersRow).not.toBeNull();
     await expect(bcrypt.compare("123456", insertedUsersRow.password)).resolves.toBe(true);
-  }, 15000);
+    // No time limit of its own: this first test also pays for loading the whole server (createApp, ~9 s on a
+    // quiet machine). A 15 s limit failed it whenever the machine was busy; the suite-wide 30 s applies.
+  });
 
   test("POST / rejects a supplier password shorter than 6 characters when one is given", async () => {
     const { createApp } = require("../server");

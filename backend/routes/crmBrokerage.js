@@ -1,4 +1,5 @@
 const express = require("express");
+const { round2, sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
@@ -414,7 +415,7 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
     // picked up ExtraChargesTotal when that one was fixed (booking 41),
     // so a broker's tier/commission silently depended on which of the two
     // paths created their record.
-    const dealValue = Number(bkRow.TotalValue || 0) + Number(bkRow.ParkingTotal || 0) + Number(bkRow.ExtraChargesTotal || 0);
+    const dealValue = sumMoney([bkRow.TotalValue, bkRow.ParkingTotal, bkRow.ExtraChargesTotal]);
 
     try {
       assertSanePercentRate(rateType, rateValue, dealValue);
@@ -521,7 +522,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
     const rateType = b.RateType === "Amount" ? "Amount" : (b.RateType === "Percentage" ? "Percentage" : row.RateType);
     const rateValue = b.RateValue != null && b.RateValue !== "" ? Number(b.RateValue) : Number(row.RateValue);
     if (!Number.isFinite(rateValue) || rateValue <= 0) return res.status(400).json({ error: "RateValue must be greater than 0" });
-    const baseAmount = Number(row.TotalValue || 0) + Number(row.ParkingTotal || 0);
+    const baseAmount = sumMoney([row.TotalValue, row.ParkingTotal]);
     try {
       assertSanePercentRate(rateType, rateValue, baseAmount);
     } catch (e) {
