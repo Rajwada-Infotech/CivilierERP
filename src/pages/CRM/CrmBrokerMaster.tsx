@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import React, { useState, useMemo, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -467,7 +468,7 @@ const CrmBrokerMaster: React.FC = () => {
                   ["Contact person", viewRecord.LHeadContactPerson, false],
                   ["Phone", viewRecord.LHeadPhone, true],
                   ["Email", viewRecord.LHeadEmail, false],
-                  ["PAN", viewRecord.LHeadPan, true],
+                  ["PAN", panDisplay(viewRecord.LHeadPan), true],
                   ["RERA number", viewRecord.LHeadRera, true],
                   ["Payment terms", viewRecord.LHeadPaymentTerms, false],
                   ["TDS", viewRecord.isTdsApplicable ? "Yes (Sec. 194H)" : "No", false],

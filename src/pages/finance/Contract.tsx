@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -878,7 +879,7 @@ export default function Contract() {
                       )}
                       {selectedContactDetail.pan && (
                         <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <span className="opacity-50 text-[0.625rem] font-bold">PAN</span> {selectedContactDetail.pan}
+                          <span className="opacity-50 text-[0.625rem] font-bold">PAN</span> {panDisplay(selectedContactDetail.pan)}
                         </div>
                       )}
                     </div>

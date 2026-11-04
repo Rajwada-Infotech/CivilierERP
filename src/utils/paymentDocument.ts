@@ -5,6 +5,7 @@
 // A receipt has no item list, so the ruled table carries the amount breakdown
 // (what was paid, or each expense head), with the tax / TDS working in the
 // summary and the mode / reference details in the notes.
+import { panDisplay } from "@/lib/panDisplay";
 import {
   printLetterhead,
   downloadLetterheadPdf,
@@ -109,7 +110,7 @@ export function buildPaymentLetterhead(rec: any, companyDetail: any, chain: any)
               supplier.name || rec.paidTo || "—",
               supplier.address || "",
               [supplier.phone, supplier.email].filter(Boolean).join("  ·  "),
-              [supplier.gst ? `GSTIN: ${supplier.gst}` : "", supplier.pan ? `PAN: ${supplier.pan}` : ""]
+              [supplier.gst ? `GSTIN: ${supplier.gst}` : "", supplier.pan ? `PAN: ${panDisplay(supplier.pan)}` : ""]
                 .filter(Boolean)
                 .join("  ·  "),
             ]

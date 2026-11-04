@@ -11,6 +11,7 @@
  *   LHeadStatus, LBelongsTo (FK → AccountGroup.AGId), GroupName
  */
 
+import { panDisplay } from "@/lib/panDisplay";
 import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -530,7 +531,7 @@ const CustomerMaster: React.FC = () => {
         <tr><td>Phone</td><td>${c.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${c.LHeadEmail || "—"}</td></tr>
         <tr><td>GSTIN (GST Identification Number)</td><td>${c.LGST || "—"}</td></tr>
-        <tr><td>PAN (Permanent Account Number)</td><td>${c.LHeadPan || "—"}</td></tr>
+        <tr><td>PAN (Permanent Account Number)</td><td>${panDisplay(c.LHeadPan) || "—"}</td></tr>
         <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
         <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
@@ -1064,7 +1065,7 @@ const CustomerMaster: React.FC = () => {
                 },
                 {
                   label: "PAN (Permanent Account Number)",
-                  value: viewRecord.LHeadPan || "—",
+                  value: panDisplay(viewRecord.LHeadPan) || "—",
                   mono: true,
                 },
                 { label: "GST Type", value: viewRecord.LGSTType || "—" },
