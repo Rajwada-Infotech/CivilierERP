@@ -470,6 +470,8 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += paid; }
         if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
       }
+      // Running totals, to the paisa.
+      for (const k of ["pendingAmount", "demandedAmount", "paidAmount", "overdueAmount"]) summary[k] = round2(summary[k]);
       return summary;
     }
 
