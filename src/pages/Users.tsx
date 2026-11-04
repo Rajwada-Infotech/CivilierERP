@@ -223,6 +223,7 @@ function buildUserColumns(
       accessorKey: "DepartmentName",
       header: "Department",
       size: 140,
+      meta: { className: "hidden xl:table-cell" },
       cell: ({ row }) => (
         <span className="text-sm text-foreground">
           {row.original.DepartmentName ?? "—"}
@@ -233,6 +234,7 @@ function buildUserColumns(
       accessorKey: "can_accept_tickets",
       header: "Ticket Access",
       size: 140,
+      meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => {
         const user = row.original;
         const canAccept =
@@ -272,9 +274,11 @@ function buildUserColumns(
       cell: ({ row, getValue }) => {
         const inactive = getValue() as boolean;
         const u = row.original;
+        const heldUntil = deactivateHeldUntil(u);
         return (
           <div className="leading-tight">
             {!inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+            {heldUntil && <p className="mt-1 text-[0.6875rem] font-medium text-foreground whitespace-nowrap">Held to {fmtHeldUntil(heldUntil)}</p>}
             {u.StatusReason && (
               <p className="mt-1 max-w-[220px] whitespace-normal text-[0.6875rem] text-muted-foreground" title={u.StatusReason}>
                 {u.StatusReason}
@@ -301,9 +305,9 @@ function buildUserColumns(
               onClick={() => onStatus(user)}
               disabled={!!heldUntil}
               title={heldUntil ? `Activated less than 90 days ago. Can be made inactive from ${fmtHeldUntil(heldUntil)}.` : undefined}
-              className={`${KEY} h-7 px-2.5 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
+              className={`${KEY} h-7 w-[5.75rem] shrink-0 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
             >
-              {heldUntil ? `Held to ${fmtHeldUntil(heldUntil)}` : !user.discontinue ? "Deactivate" : "Activate"}
+              {heldUntil ? "Held" : !user.discontinue ? "Deactivate" : "Activate"}
             </button>
             {deleteConfirmId === user.id ? (
               <div className="flex items-center gap-1 ml-1">
