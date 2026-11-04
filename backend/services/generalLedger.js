@@ -250,7 +250,7 @@ async function hasCompanyFundTransferPosting(pool, ftId, companyId) {
 /**
  * Post a balanced voucher. `legs` is an array of
  *   { lHeadId, debit?, credit?, narration? }
- * Throws if total debit !== total credit (to the cent) — a balance error here
+ * Throws unless total debit === total credit to the paisa, on the rounded legs it stores — a balance error here
  * means the calling code's accounting logic is wrong, not a retryable issue.
  */
 async function postVoucher(pool, {
@@ -274,11 +274,15 @@ async function postVoucher(pool, {
     throw new Error("postVoucher requires at least 2 legs");
   }
 
-  const totalDebit  = Math.round(legs.reduce((s, l) => s + (l.debit  || 0), 0) * 100) / 100;
-  const totalCredit = Math.round(legs.reduce((s, l) => s + (l.credit || 0), 0) * 100) / 100;
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+  // Checked on exactly what is stored — each leg to the paisa — and to the paisa, in whole paise. It used to
+  // total the unrounded legs, allow a 1-paisa difference, and round each leg only when saving it, so a voucher
+  // could pass the check and still be stored a paisa out of balance (one such GRN voucher is on production).
+  const paise = (n) => Math.round(round2(n || 0) * 100);
+  const debitPaise = legs.reduce((s, l) => s + paise(l.debit), 0);
+  const creditPaise = legs.reduce((s, l) => s + paise(l.credit), 0);
+  if (debitPaise !== creditPaise) {
     throw new Error(
-      `Voucher ${voucherNo} does not balance: debit ${totalDebit} !== credit ${totalCredit}`,
+      `Voucher ${voucherNo} does not balance: debit ${debitPaise / 100} !== credit ${creditPaise / 100}`,
     );
   }
 
@@ -289,8 +293,8 @@ async function postVoucher(pool, {
   try {
     for (const leg of legs) {
       if (!leg.lHeadId) throw new Error(`Voucher ${voucherNo} has a leg with no lHeadId`);
-      const debit = Math.round((leg.debit || 0) * 100) / 100;
-      const credit = Math.round((leg.credit || 0) * 100) / 100;
+      const debit = round2(leg.debit || 0);
+      const credit = round2(leg.credit || 0);
       if (debit === 0 && credit === 0) continue;
 
       await tx

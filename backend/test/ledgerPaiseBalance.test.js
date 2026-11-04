@@ -57,3 +57,24 @@ test("heads that already add up exactly post exactly as entered", async () => {
   expect(mockInserted.find((l) => l.head === 12).debit).toBe(580.2);
   expect(totals()).toEqual({ dr: 1180.4, cr: 1180.4 });
 });
+
+// postVoucher: a voucher is stored only if its rounded legs balance to the paisa.
+const { postVoucher } = require("../services/generalLedger");
+describe("postVoucher balances to the paisa", () => {
+  const post = (legs) => postVoucher(getPool(), { voucherNo: "T-1", voucherDate: "2026-11-04", sourceType: "Test", sourceId: 1, legs });
+
+  test("a voucher off by one paisa is refused (it used to post)", async () => {
+    await expect(post([{ lHeadId: 1, debit: 100 }, { lHeadId: 2, credit: 99.99 }])).rejects.toThrow(/does not balance/);
+    expect(mockInserted).toHaveLength(0);
+  });
+
+  test("legs that only balance before rounding are refused, not stored out of balance", async () => {
+    // 0.005 + 0.005 = 0.01 unrounded, but each leg stores as 0.01 → 0.02 against 0.01.
+    await expect(post([{ lHeadId: 1, debit: 0.005 }, { lHeadId: 2, debit: 0.005 }, { lHeadId: 3, credit: 0.01 }])).rejects.toThrow(/does not balance/);
+  });
+
+  test("a balanced voucher posts as is, including float dust", async () => {
+    await post([{ lHeadId: 1, debit: 0.1 + 0.2 }, { lHeadId: 2, credit: 0.3 }]);
+    expect(mockInserted).toEqual([{ debit: 0.3, credit: 0, head: 1 }, { debit: 0, credit: 0.3, head: 2 }]);
+  });
+});
