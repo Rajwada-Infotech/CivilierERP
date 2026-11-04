@@ -115,7 +115,7 @@ export function exportToCsv(
     .join("\n");
   // Leading UTF-8 BOM — without it, Excel opens the file using the system's
   // ANSI codepage instead of UTF-8, garbling any non-ASCII character (₹, —,
-  // etc.) into mojibake like "â‚¹"/"â€"" even though the bytes are valid UTF-8.
+  // etc.) into mojibake like "₹"/"â€"" even though the bytes are valid UTF-8.
   const blob = new Blob(["﻿", `${header}\n${body}`], {
     type: "text/csv;charset=utf-8;",
   });

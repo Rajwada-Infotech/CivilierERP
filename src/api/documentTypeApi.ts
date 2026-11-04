@@ -3,7 +3,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE_URL = "/api/document-type";
 
-// â”€â”€ Response types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Response types ────────────────────────────────────────────────────────────
 
 export interface DocTypeRecord {
   TypeOfDocId: number;
@@ -51,7 +51,7 @@ export interface ProjectOption {
   CompanyId: number | null;
 }
 
-// â”€â”€ Payload type shared by create + update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Payload type shared by create + update ────────────────────────────────────
 
 export interface DocTypePayload {
   Prefix: string;
@@ -66,10 +66,10 @@ export interface DocTypePayload {
   ModuleCode?: string | null;
   DocNoPrefix?: string | null;
   FinYearReset?: boolean;
-  // ProjectCode is intentionally excluded â€” server resolves it from ProjectId
+  // ProjectCode is intentionally excluded — server resolves it from ProjectId
 }
 
-// â”€â”€ Fetch lists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Fetch lists ───────────────────────────────────────────────────────────────
 
 export const getDocumentTypes = async (): Promise<DocTypeRecord[]> => {
   const res = await fetchWithAuth(BASE_URL);
@@ -77,7 +77,7 @@ export const getDocumentTypes = async (): Promise<DocTypeRecord[]> => {
   return res.json().catch(() => []);
 };
 
-/** Entry_Type master â€” provides EntryType label + Eprefix */
+/** Entry_Type master — provides EntryType label + Eprefix */
 export const getEntryTypes = async (): Promise<EntryTypeOption[]> => {
   const res = await fetchWithAuth(`${BASE_URL}/entrytypes`);
   if (!res.ok) throw new Error("Failed to fetch entry types");
@@ -98,7 +98,7 @@ export const getProjects = async (): Promise<ProjectOption[]> => {
   return res.json().catch(() => []);
 };
 
-// â”€â”€ Mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Mutations ─────────────────────────────────────────────────────────────────
 
 export const createDocumentType = async (
   data: DocTypePayload,

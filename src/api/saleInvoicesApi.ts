@@ -70,7 +70,7 @@ export const getSaleInvoiceById = async (
   return res.json().catch(() => ({}));
 };
 
-// Fully-paid invoices with no Purchase Order created against them yet â€”
+// Fully-paid invoices with no Purchase Order created against them yet —
 // used by the PO form's "Source Sale Invoice" picker.
 export const getPaidSaleInvoicesForPO = async (): Promise<SaleInvoice[]> => {
   const res = await fetchWithAuth(`${BASE}/paid-for-po`);
