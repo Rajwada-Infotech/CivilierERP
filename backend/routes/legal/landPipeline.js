@@ -356,7 +356,11 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
         (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND IsOnHold = 1) AS onHold,
         (SELECT COUNT(DISTINCT LandId) FROM dbo.LegalWorkflowStepState WHERE Status = 'Pending Verification') AS pendingVerification,
         (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND EntryType = N'New Acquisition' AND WorkflowStatus = 'Completed') AS completed,
-        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND EntryType = N'Existing / Backlog') AS backlogLands;
+        (SELECT COUNT(*) FROM dbo.LegalLand WHERE IsActive = 1 AND EntryType = N'Existing / Backlog') AS backlogLands,
+        (SELECT COUNT(*) FROM dbo.LegalLandTransaction WHERE IsActive = 1 AND TxnType = N'Sale') AS sales,
+        (SELECT COUNT(*) FROM dbo.LegalLand WHERE LandStatus IN (N'Disposed / Transferred', N'Inactive') OR IsActive = 0) AS disposed,
+        (SELECT COUNT(*) FROM dbo.LegalLandRsRecord WHERE IsActive = 1) AS rsRecords,
+        (SELECT COUNT(*) FROM dbo.LegalLandLrRecord WHERE IsActive = 1) AS lrRecords;
       SELECT TOP 8 l.LandId, l.LandCode, l.LandName, l.WorkflowStatus, l.IsOnHold, m.MouzaName, m.JLNo, l.CreatedAt
       FROM dbo.LegalLand l LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
       WHERE l.IsActive = 1 ORDER BY ISNULL(l.UpdatedAt, l.CreatedAt) DESC;
@@ -367,13 +371,18 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
         UNION ALL SELECT N'Documents' FROM dbo.LegalLandDocument d JOIN dbo.LegalLandDocumentVersion v ON v.DocumentId = d.DocumentId AND v.VersionNo = d.CurrentVersionNo WHERE d.IsActive = 1 AND v.ReviewStatus = N'Pending'
         UNION ALL SELECT N'Legal opinions' FROM dbo.LegalOpinion WHERE IsActive = 1 AND OpinionStatus = N'Under Review'
         UNION ALL SELECT N'Payments' FROM dbo.LegalPayment WHERE IsActive = 1 AND VerificationStatus = N'Pending'
-        UNION ALL SELECT N'Deed drafts' FROM dbo.LegalDeedDraft WHERE IsActive = 1 AND ReviewStatus = N'Pending'
-        UNION ALL SELECT N'Registered deeds' FROM dbo.LegalRegisteredDeed WHERE IsActive = 1 AND ApprovalStatus = N'Pending'
-        UNION ALL SELECT N'Settlements' FROM dbo.LegalSettlement WHERE IsActive = 1 AND SettlementStatus = N'Submitted'
+        UNION ALL SELECT N'Legal records' FROM dbo.LegalLandLegalRecord WHERE IsActive = 1 AND VerificationStatus = N'Pending'
+        UNION ALL SELECT N'Land tax receipts' FROM dbo.LegalLandTax WHERE IsActive = 1 AND VerificationStatus = N'Pending'
       ) x GROUP BY x.Kind ORDER BY N DESC;
-      SELECT TOP 6 a.AppointmentDate, a.AppointmentTime, a.TokenNo, o.OfficeName, l.LandId, l.LandCode, l.LandName
-      FROM dbo.LegalRegAppointment a JOIN dbo.LegalLand l ON l.LandId = a.LandId LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = a.RegistrationOfficeId
-      WHERE a.IsActive = 1 AND a.AppointmentStatus IN (N'Scheduled', N'Rescheduled') AND a.AppointmentDate >= CAST(SYSDATETIME() AS DATE) ORDER BY a.AppointmentDate;
+      -- Land waiting for its record approval (Data Verification → L1 → L2), oldest first.
+      SELECT TOP 8 l.LandId, l.LandCode, l.LandName, l.WorkflowStatus,
+             CASE WHEN l.L1Status = N'Approved' THEN N'L2 Executive Approval'
+                  WHEN ISNULL(l.VerificationStatus, N'Draft') = N'Verified' THEN N'L1 Legal Review'
+                  ELSE N'Data Verification' END AS Stage,
+             ISNULL(l.UpdatedAt, l.CreatedAt) AS Since
+      FROM dbo.LegalLand l
+      WHERE l.IsActive = 1 AND ISNULL(l.L2Status, N'Pending') NOT IN (N'Approved', N'Rejected')
+      ORDER BY ISNULL(l.UpdatedAt, l.CreatedAt);
       SELECT TOP 6 p.PaymentDate, p.Amount, p.TransactionRef, l.LandId, l.LandCode, l.LandName
       FROM dbo.LegalPayment p JOIN dbo.LegalLand l ON l.LandId = p.LandId WHERE p.IsActive = 1 AND p.VerificationStatus <> N'Verified' ORDER BY p.PaymentDate;
       SELECT TOP 6 c.CaseNumber, c.CourtName, c.NextHearingDate, s.Name AS Status, l.LandId, l.LandCode
@@ -397,8 +406,8 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
       LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
       WHERE l.IsActive = 1
       ORDER BY l.LandId DESC;`);
-    const [counts, recent, approvals, appointments, payments, cases, transfers, more, allLands] = r.recordsets;
-    res.json({ ...counts[0], ...more[0], recent, approvals, appointments, payments, cases, transfers, allLands });
+    const [counts, recent, approvals, awaitingApproval, payments, cases, transfers, more, allLands] = r.recordsets;
+    res.json({ ...counts[0], ...more[0], recent, approvals, awaitingApproval, payments, cases, transfers, allLands });
   } catch (err) {
     console.error("[legal-land] stats:", err.message);
     res.status(500).json({ error: "Could not load land statistics" });
@@ -1485,14 +1494,14 @@ router.post("/enquiries/:id/convert", requirePageRight(LAND_PAGE, "create"), req
       .input("Lat", sql.Decimal(10, 7), e.GpsLatitude ?? null).input("Lng", sql.Decimal(10, 7), e.GpsLongitude ?? null)
       .input("UserId", sql.Int, req.user?.userId || null)
       .query(`
-        INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LocationAddress, GpsLatitude, GpsLongitude, EnquiryId, LandStatus, IsOnHold, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.LegalLand (LandCode, LandName, DistrictId, MouzaId, Area, AreaUnitId, LocationAddress, GpsLatitude, GpsLongitude, EnquiryId, LandStatus, IsOnHold, IsActive, CreatedBy, CreatedAt,
+                                     EntryType, VerificationStatus, L1Status, L2Status, WorkflowStatus)
         OUTPUT INSERTED.LandId AS id, INSERTED.LandCode AS code
-        SELECT ${nextCodeSql("LegalLand", "LandCode", "@Prefix")}, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @Lat, @Lng, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME()`);
+        SELECT ${nextCodeSql("LegalLand", "LandCode", "@Prefix")}, @Name, @DistrictId, @MouzaId, @Area, @AreaUnitId, @Address, @Lat, @Lng, @EnquiryId, N'Identified', 0, 1, @UserId, SYSUTCDATETIME(),
+               N'New Acquisition', N'Draft', N'Pending', N'Pending', N'Draft (Verification Pending)'`);
     const land = ins.recordset[0];
     await tx.request().input("Id", sql.Int, id).input("LandId", sql.Int, land.id).input("UserId", sql.Int, req.user?.userId || null)
       .query(`UPDATE dbo.LegalLandEnquiry SET EnquiryStatus = N'Converted to Land Record', LandId = @LandId, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE EnquiryId = @Id`);
-    await moveStep(tx, req, land.id, "ENQUIRY", null, "Completed", { remarks: `Converted from enquiry ${e.EnquiryNo}` });
-    await syncWorkflowStatus(tx, land.id);
     await writeAudit(tx, req, { action: "Land created", entityType: "Land Property", entityId: land.id, landId: land.id, newValue: { landCode: land.code, fromEnquiry: e.EnquiryNo } });
     await writeAudit(tx, req, { action: "Enquiry converted", entityType: "Land Enquiry", entityId: id, landId: land.id, oldValue: { status: e.EnquiryStatus }, newValue: { status: "Converted to Land Record", landCode: land.code } });
     await tx.commit();

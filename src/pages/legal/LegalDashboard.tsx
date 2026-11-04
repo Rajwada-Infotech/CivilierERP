@@ -8,20 +8,21 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { LegalShell, LEGAL_ACCENT as ACCENT, LEGAL_GRADIENT } from "@/components/legal/LegalShell";
 import { getLegalSummary } from "@/api/legalMastersApi";
-import { getLandStats, deleteLand, type LandSummaryItem } from "@/api/legalLandApi";
+import { getLandStats, getLandReports, deleteLand, type LandSummaryItem } from "@/api/legalLandApi";
 import { LEGAL_MASTERS, LEGAL_MASTER_GROUPS, legalMasterPath } from "./legalMasters";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
-// What has to be in place before a deed registration task can run end to end (search → deed → L1 → L2).
+// The setup lists the land screens pick from: each shows as done once it has at least one active row.
 const READINESS: { key: string; label: string; hint: string }[] = [
-  { key: "registration-office", label: "Registration offices", hint: "Add the ADSR / DSR offices you register at" },
-  { key: "portal-link", label: "Official portal links", hint: "Add the verified search / certified-copy links" },
-  { key: "deed-type", label: "Deed types", hint: "Classify deeds (sale, gift, POA…)" },
-  { key: "checklist-item", label: "Document checklist", hint: "Review the starting checklist and approve it" },
-  { key: "approval-workflow", label: "L1 / L2 approval workflow", hint: "Pick the reviewer and approver roles" },
-  { key: "task-type", label: "Registration task type", hint: "Tie deed type, checklist and workflow together" },
-  { key: "mouza", label: "Land records (Mouza)", hint: "Add the Mouzas your land parcels sit in" },
+  { key: "district", label: "Districts", hint: "The districts your land sits in" },
+  { key: "mouza", label: "Mouzas", hint: "Add the mouzas (with J.L. number) of your land" },
+  { key: "area-unit", label: "Area units", hint: "Katha, Decimal, Acre …" },
+  { key: "document-type", label: "Document types", hint: "Deed, porcha, tax receipt …" },
+  { key: "deed-type", label: "Deed types", hint: "Sale, gift, partition …" },
+  { key: "registration-office", label: "Registration offices", hint: "The ADSR / DSR offices where deeds were registered" },
+  { key: "approval-authority", label: "L1 / L2 approvers", hint: "Who reviews (L1) and approves (L2) land records" },
+  { key: "portal-link", label: "Government site links", hint: "Banglarbhumi, WB registration … for checking plots" },
 ];
 
 const fmtDate = (d: string | null) =>
@@ -40,6 +41,7 @@ export default function LegalDashboard() {
   const [landSearch, setLandSearch] = useState("");
   const [landToDelete, setLandToDelete] = useState<LandSummaryItem | null>(null);
 
+  const { data: reportList } = useQuery({ queryKey: ["legal-land-reports"], queryFn: getLandReports, staleTime: Infinity });
   const deleteMutation = useMutation({
     mutationFn: (l: LandSummaryItem) => deleteLand(l.LandId, l.LandCode),
     onSuccess: (res) => {
@@ -121,10 +123,10 @@ export default function LegalDashboard() {
                 {([
                   ["All Properties", land.totalLands, Global, "/legal/land/properties"],
                   ["Active Enquiries", land.activeEnquiries ?? 0, MessageQuestion, "/legal/land/enquiries"],
-                  ["Land Sales", land.completed ?? 0, MoneySend, "/legal/land/sales"],
-                  ["RS Records", land.totalLands, Note1, "/legal/land/rs-register"],
-                  ["LR Records of Rights", land.totalLands, DocumentText, "/legal/land/lr-register"],
-                  ["Land Reports", 8, Chart, "/legal/land/reports"],
+                  ["Land Sales", land.sales ?? 0, MoneySend, "/legal/land/sales"],
+                  ["RS Records", land.rsRecords ?? 0, Note1, "/legal/land/rs-register"],
+                  ["LR Records of Rights", land.lrRecords ?? 0, DocumentText, "/legal/land/lr-register"],
+                  ["Land Reports", reportList?.length ?? 0, Chart, "/reports?section=legal"],
                 ] as const).map(([label, value, Icon, path]) => (
                   <button key={label} onClick={() => navigate(path)} className="flex items-center gap-3 rounded-xl border border-border bg-muted/30 p-3 text-left transition-transform hover:-translate-y-0.5">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-card" style={{ background: LEGAL_GRADIENT }}><Icon size={16} /></span>
@@ -228,7 +230,7 @@ export default function LegalDashboard() {
                           {item.Area !== null ? `${item.Area} ${item.UnitName ?? ""}` : "—"}
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground">
-                          {item.EntryType ?? "Newly Acquired"}
+                          {item.EntryType ?? "New Acquisition"}
                         </td>
                         <td className="px-3 py-2.5">
                           <span
@@ -309,7 +311,7 @@ export default function LegalDashboard() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {([
                 ["Waiting for a reviewer", land.approvals.map((a) => ({ k: a.Kind, main: a.Kind, side: String(a.N), land: null as number | null })), "Nothing to review"],
-                ["Upcoming registration appointments", land.appointments.map((a, i) => ({ k: String(i), main: `${a.LandCode} · ${a.OfficeName ?? ""}`, side: `${fmtDate(a.AppointmentDate)} ${a.AppointmentTime ?? ""}`, land: a.LandId })), "None scheduled"],
+                ["Land waiting for approval", land.awaitingApproval.map((a) => ({ k: String(a.LandId), main: `${a.LandCode} · ${a.LandName}`, side: `${a.Stage} · since ${fmtDate(a.Since)}`, land: a.LandId })), "Nothing waiting"],
                 ["Payments awaiting verification", land.payments.map((p, i) => ({ k: String(i), main: `${p.LandCode} · ${p.TransactionRef ?? ""}`, side: `₹${Number(p.Amount).toLocaleString("en-IN")}`, land: p.LandId })), "None pending"],
                 ["Open legal cases & disputes", land.cases.map((c) => ({ k: c.CaseNumber, main: `${c.LandCode} · ${c.CaseNumber}`, side: c.NextHearingDate ? `Hearing ${fmtDate(c.NextHearingDate)}` : c.Status, land: c.LandId })), "No open cases"],
                 ["Recent ownership transfers", land.transfers.map((t, i) => ({ k: String(i), main: `${t.LandCode} · ${t.FromName} → ${t.ToName}`, side: fmtDate(t.EventDate), land: t.LandId })), "No transfers yet"],
@@ -433,7 +435,7 @@ export default function LegalDashboard() {
             <div className="space-y-5 min-w-0">
               {/* ── Setup readiness ── */}
               <div className={`${card} p-4 sm:p-5`}>
-                <p className={eyebrow}>Ready for deed registration</p>
+                <p className={eyebrow}>Setup checklist</p>
                 <ul className="space-y-1">
                   {readiness.map((r) => (
                     <li key={r.key}>

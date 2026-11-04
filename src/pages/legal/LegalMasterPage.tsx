@@ -232,11 +232,13 @@ interface TableProps {
   rowFilter?: (raw: LegalRow) => boolean;
   /** Called with the new row's id after an add (e.g. to open the new land's page). */
   onCreated?: (id: number) => void;
+  /** A reason this row can't be edited or deleted (its Edit / Delete show disabled with the reason), or null. */
+  rowLock?: (raw: LegalRow) => string | null;
   /** Values a new row always gets; these fields are left out of the form (still shown in the table). */
   fixed?: Record<string, string>;
 }
 
-export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated, fixed }: TableProps) {
+export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, onSaved, requestEditId, noAdd, rowClassName, rowFilter, onCreated, fixed, rowLock }: TableProps) {
   const rights = usePageRights(entry.pageKey);
   const { currentUser } = useAuth();
   const isAdminTier = ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "");
@@ -344,9 +346,10 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Operation failed");
+      // Refetch, then hand the refusal back so the form shows only the error (never "saved successfully").
+      await refresh();
+      throw err instanceof Error ? err : new Error("Operation failed");
     }
-    // Refetch either way, so a refused save never leaves the table showing a row the server does not have.
     await refresh();
   };
 
@@ -382,6 +385,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
       requestEditKey={requestEditId && rawById.has(requestEditId) ? requestEditId : null}
       rowActions={rowActions ? (row) => { const raw = rawById.get(row._id); return raw ? rowActions(raw) : null; } : undefined}
       onRowClick={showDetails}
+      isRowLocked={rowLock ? (row) => { const raw = rawById.get(row._id); return raw ? rowLock(raw) : null; } : undefined}
       rowClassName={rowClassName ? (row) => { const raw = rawById.get(row._id); return raw ? rowClassName(raw) : undefined; } : undefined}
     />
     </>

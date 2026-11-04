@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { openLegalMap } from "@/components/legal/LegalDocumentPreview";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Global } from "iconsax-react";
@@ -699,7 +700,16 @@ export default function LandProfilePage() {
                 <Field k="West boundary" v={land.WestBoundary} />
                 <Field
                   k="GPS coordinates"
-                  v={land.GpsLatitude && land.GpsLongitude ? `${land.GpsLatitude}, ${land.GpsLongitude}` : null}
+                  v={land.GpsLatitude != null && land.GpsLongitude != null ? (
+                    <>
+                      {`${land.GpsLatitude}, ${land.GpsLongitude}`}{" "}
+                      <button className="ml-1 text-xs underline" onClick={() => openLegalMap(land.GpsLatitude, land.GpsLongitude, `${land.LandCode} · map`)}>Map</button>
+                    </>
+                  ) : (
+                    <button className="text-xs underline text-muted-foreground hover:text-foreground" onClick={() => navigate(`/legal/land/properties?edit=${landId}`)}>
+                      Not set — add latitude / longitude
+                    </button>
+                  )}
                 />
                 <Field k="Full location address" v={land.LocationAddress} />
                 <Field k="Internal remarks" v={land.Remarks} />
@@ -734,7 +744,7 @@ export default function LandProfilePage() {
                   title="Purchase & Consideration Details"
                   note="Financial and contract details of property purchases: consideration price, advance amount, settlement, and payment proofs."
                 >
-                  <LegalMasterTable entry={table("land-transaction", "Purchase / Acquisition")} parentId={landId} onSaved={refresh} />
+                  <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh} />
                 </Section>
               </div>
             )}

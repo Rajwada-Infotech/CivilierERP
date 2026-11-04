@@ -36,6 +36,10 @@ export const previewLegalFile = (id: unknown, name?: string) => show({ kind: "do
 /** Open a website (an office or portal link) in the right-side panel. */
 export const openLegalLink = (url: string, name?: string) => show({ kind: "site", url, name: name || url });
 
+/** A plot on Google Maps in the side panel (the embed form of the map, which may be shown inside another site). */
+export const openLegalMap = (lat: unknown, lng: unknown, name?: string) =>
+  openLegalLink(`https://maps.google.com/maps?q=${Number(lat)},${Number(lng)}&z=17&output=embed`, name || `Map · ${lat}, ${lng}`);
+
 /** A link cell: opens the site in the side panel. */
 export const LegalLinkChip: React.FC<{ url: unknown; name?: string; onOpen?: () => void }> = ({ url, name, onOpen }) =>
   url ? (
