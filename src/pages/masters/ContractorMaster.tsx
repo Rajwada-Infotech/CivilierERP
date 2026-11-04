@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import React, { useState, useMemo, useRef } from "react";
 import { SheetShell, SheetMark } from "@/components/sheet/Sheet";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -785,7 +786,7 @@ const ContractorMaster: React.FC = () => {
         <tr><td>GST Type</td><td>${c.LGSTType || "—"}</td></tr>
         <tr><td>GSTIN (GST Identification Number)</td><td>${c.LGST || "—"}</td></tr>
         <tr><td>GST State</td><td>${c.LGSTState || "—"}</td></tr>
-        <tr><td>PAN (Permanent Account Number)</td><td>${c.LHeadPan || "—"}</td></tr>
+        <tr><td>PAN (Permanent Account Number)</td><td>${panDisplay(c.LHeadPan) || "—"}</td></tr>
         <tr><td>Contractor Type</td><td>${c.contractorType || "—"}</td></tr>
         <tr><td>Payment Terms</td><td>${c.LHeadPaymentTerms || "—"}</td></tr>
         <tr><td>Group</td><td>${c.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(c.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
@@ -1555,7 +1556,7 @@ const ContractorMaster: React.FC = () => {
                 { label: "GST State", value: viewRecord.LGSTState || "—" },
                 {
                   label: "PAN (Permanent Account Number)",
-                  value: viewRecord.LHeadPan || "—",
+                  value: panDisplay(viewRecord.LHeadPan) || "—",
                   mono: true,
                 },
                 {

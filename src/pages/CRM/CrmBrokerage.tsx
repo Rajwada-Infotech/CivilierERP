@@ -1,3 +1,4 @@
+import { panDisplay } from "@/lib/panDisplay";
 import { CrmStatus } from "@/constants/crmStatuses";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import React, { useEffect, useMemo, useState } from "react";
@@ -338,7 +339,7 @@ const CrmBrokerage: React.FC = () => {
               {selectedBroker && (
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 px-3 py-2 text-xs" style={{ border: RULE_SOFT }}>
                   {selectedBroker.LHeadPhone && <div><span className="text-muted-foreground">Phone </span><span className="tabular-nums">{selectedBroker.LHeadPhone}</span></div>}
-                  {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN </span><span className="font-heading tabular-nums">{selectedBroker.LHeadPan}</span></div>}
+                  {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN </span><span className="font-heading tabular-nums">{panDisplay(selectedBroker.LHeadPan)}</span></div>}
                   {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA </span><span className="font-heading tabular-nums">{selectedBroker.LHeadRera}</span></div>}
                   {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms </span>{selectedBroker.LHeadPaymentTerms}</div>}
                   <div><span className="text-muted-foreground">TDS </span><span className="font-medium">{tdsAllowed ? "Applicable (s.194H)" : "Not applicable"}</span></div>
