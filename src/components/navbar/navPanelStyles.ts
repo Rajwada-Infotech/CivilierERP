@@ -85,7 +85,8 @@ export const NAV_PANEL_CSS = `
 // fills. Closing pops it back into a bubble. The icon gives a soft squash-and-stretch when its panel opens. Put "genie" and
 // "genie-open" / "genie-close" on the sheet and "genie-rub" on the open button. The keyframes are sampled from the spring equation
 // below, so the motion is a physical one, not an eased guess. The individual scale / translate properties are used (not transform), so
-// nothing fights the Tailwind centring on phones.
+// nothing fights the Tailwind centring on phones. --genie-dir is 1 for a panel that drops down from its icon and -1 for one that rises up
+// from it (the mobile nav's sheets); --genie-ox / --genie-oy place the icon on the panel.
 const spring = (zeta: number, w: number) => {
   const wd = w * Math.sqrt(1 - zeta * zeta);
   return (t: number) => 1 - Math.exp(-zeta * w * t) * (Math.cos(wd * t) + ((zeta * w) / wd) * Math.sin(wd * t));
@@ -107,7 +108,7 @@ function genieOutKeyframes(): string {
     const radius = i === STEPS ? 0 : 56 * Math.pow(1 - Math.min(1, p / 0.62), 2);
     const blur = i === STEPS ? 0 : 2.4 * Math.pow(1 - Math.min(1, p / 0.45), 2);
     const rise = i === STEPS ? 0 : -12 * (1 - springY(t));
-    css += `${(p * 100).toFixed(2)}%{scale:${sx.toFixed(4)} ${sy.toFixed(4)};translate:0 ${rise.toFixed(2)}px;opacity:${fade.toFixed(3)};border-radius:${radius.toFixed(1)}px;filter:blur(${blur.toFixed(2)}px)}`;
+    css += `${(p * 100).toFixed(2)}%{scale:${sx.toFixed(4)} ${sy.toFixed(4)};translate:0 calc(var(--genie-dir, 1) * ${rise.toFixed(2)}px);opacity:${fade.toFixed(3)};border-radius:${radius.toFixed(1)}px;filter:blur(${blur.toFixed(2)}px)}`;
   }
   return css + "}";
 }
@@ -116,8 +117,8 @@ export const GENIE_CSS = `
 ${genieOutKeyframes()}
 @keyframes genie-in {
   0%   { scale: 1 1; translate: 0 0; opacity: 1; border-radius: 0; filter: blur(0); }
-  20%  { scale: 1.03 0.985; translate: 0 1px; opacity: 1; border-radius: 6px; filter: blur(0); }
-  100% { scale: 0.1 0.1; translate: 0 -12px; opacity: 0; border-radius: 56px; filter: blur(2.4px); }
+  20%  { scale: 1.03 0.985; translate: 0 calc(var(--genie-dir, 1) * 1px); opacity: 1; border-radius: 6px; filter: blur(0); }
+  100% { scale: 0.1 0.1; translate: 0 calc(var(--genie-dir, 1) * -12px); opacity: 0; border-radius: 56px; filter: blur(2.4px); }
 }
 @keyframes genie-rub {
   0%   { scale: 1 1; }
