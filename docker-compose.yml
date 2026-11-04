@@ -1,6 +1,8 @@
 services:
   frontend-build:
-    image: node:22-alpine
+    # Node 24, as CI builds with: eslint's @humanfs packages need >=24 (a Node 22 `npm ci` printed EBADENGINE warnings on every deploy).
+    # This is the build the deploy runs (`docker compose --profile build run frontend-build`); the root Dockerfile is not used for production.
+    image: node:24-alpine
     working_dir: /app
     command: sh -c "npm ci && npm run build && rm -rf /frontend-dist/* && cp -R dist/. /frontend-dist/"
     volumes:

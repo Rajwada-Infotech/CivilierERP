@@ -11,6 +11,9 @@ import { fonts } from "@/theme/fonts";
 import { StatusPill } from "@/components/StatusPill";
 import { useRefetchOnFocus } from "@/hooks/useRefetchOnFocus";
 import type { MainStackParamList } from "@/navigation/MainStack";
+import { ExportButton } from "@/components/ExportButton";
+import { usePageRights } from "@/hooks/usePageRights";
+import type { ExportColumn } from "@/utils/exportFile";
 import { REPORTS, type ReportRow } from "./reportConfig";
 
 const ACCENT = "#eab308";
@@ -19,6 +22,7 @@ export default function ReportViewScreen() {
   const route = useRoute<RouteProp<MainStackParamList, "ReportView">>();
   const cfg = REPORTS[route.params.report];
 
+  const rights = usePageRights("fixed-asset-record");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -39,6 +43,17 @@ export default function ReportViewScreen() {
         r.lines.some((l) => l.value.toLowerCase().includes(q)),
     );
   }, [data, search]);
+
+  // One export column per line of the card, in the report's own order.
+  const exportColumns = useMemo<ExportColumn<ReportRow>[]>(() => {
+    const first = (data ?? [])[0];
+    return [
+      { header: "FA Item Code", value: (r: ReportRow) => r.code },
+      { header: "Item Name", value: (r: ReportRow) => r.name },
+      ...((data ?? []).some((r) => r.badge) ? [{ header: "Status", value: (r: ReportRow) => r.badge }] : []),
+      ...(first?.lines ?? []).map((l, i) => ({ header: l.label, value: (r: ReportRow) => r.lines[i]?.value })),
+    ];
+  }, [data]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -77,7 +92,12 @@ export default function ReportViewScreen() {
   return (
     <View className="flex-1" style={{ backgroundColor: colors.background }}>
       <View style={{ padding: 16, paddingBottom: 8 }}>
-        <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold, marginBottom: 10 }}>{cfg.title}</Text>
+        <View className="flex-row items-center justify-between" style={{ marginBottom: 10, gap: 10 }}>
+          <Text style={{ flex: 1, color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.semibold }}>{cfg.title}</Text>
+          {rights.canExport && (
+            <ExportButton title={cfg.title} filename={`fa-report-${route.params.report}`} rows={rows} columns={exportColumns} />
+          )}
+        </View>
         <View className="flex-row items-center gap-2" style={{ backgroundColor: colors.card, borderRadius: 10, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10 }}>
           <Search size={14} color={colors.mutedForeground} />
           <TextInput

@@ -5,43 +5,138 @@ import { LegalShell } from "@/components/legal/LegalShell";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { legalMasterByKey } from "../legalMasters";
 import type { LegalRow } from "@/api/legalMastersApi";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { usePageRights } from "@/hooks/usePageRights";
+import { askLegal } from "@/components/legal/LegalAsk";
+import { deleteLand } from "@/api/legalLandApi";
 
-// ?filter=… from the dashboard's land tiles: the same rules the dashboard counts with (landPipeline.js /stats).
+const BACKLOG = "Existing / Backlog"; // every land added here; enquiry-approved land is saved as New Acquisition
+
+// Clean filter rules for the Company Land Register
 const FILTERS: Record<string, { label: string; test: (r: LegalRow) => boolean }> = {
-  "in-progress": { label: "In progress", test: (r) => !r.IsOnHold && r.WorkflowStatus !== "Completed" },
-  "on-hold": { label: "On hold", test: (r) => !!r.IsOnHold },
-  "pending-verification": { label: "Pending verification", test: (r) => Number(r.StepsAwaitingVerification) > 0 },
-  completed: { label: "Completed", test: (r) => r.WorkflowStatus === "Completed" },
+  owned: {
+    label: "Active / Owned",
+    test: (r) => r.LandStatus === "Owned" || r.LandStatus === "Active" || r.IsActive !== false,
+  },
+  disposed: {
+    label: "Disposed / Inactive",
+    test: (r) => r.LandStatus === "Disposed / Transferred" || r.LandStatus === "Inactive" || r.IsActive === false,
+  },
 };
 
-// The Land Property Master register. "Open" goes to the land's pipeline; ?edit=ID opens its edit form
-// (the link from the pipeline's Land Property step).
+// The central Company Land Register: every land property with its unique Land ID.
 export default function LandPropertyListPage() {
   const entry = legalMasterByKey("land")!;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const filter = FILTERS[params.get("filter") ?? ""];
+  const filterKey = params.get("filter") ?? "";
+  const filter = FILTERS[filterKey];
+  const canDelete = usePageRights(entry.pageKey).canDelete;
+  const queryClient = useQueryClient();
+
+  // Deleting a land removes everything recorded on it, so the Land ID must be typed to confirm.
+  const removeLand = async (raw: LegalRow) => {
+    const code = String(raw.LandCode ?? "");
+    const typed = await askLegal({
+      title: `Delete ${code}?`,
+      message: `This permanently removes ${code} (${String(raw.LandName ?? "")}) and everything recorded on it — ownership history, land records, documents and their files, legal records, loans, mutations, payments, tax receipts, valuations, photos and pipeline steps, and the enquiry it came from. This cannot be undone.`,
+      input: { label: `Type ${code} to confirm`, placeholder: code, required: true },
+      confirmText: "Delete land",
+      tone: "danger",
+    });
+    if (typed === null) return;
+    if (typed.trim() !== code) { toast.error(`The Land ID did not match — ${code} was not deleted`); return; }
+    try {
+      toast.success((await deleteLand(Number(raw.LandId), typed.trim())).message);
+      await queryClient.invalidateQueries({ queryKey: ["legal-master"] });
+      queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the land");
+    }
+  };
+
+  const set = (k: string, v: string | null) => {
+    if (v) params.set(k, v);
+    else params.delete(k);
+    setParams(params);
+  };
+
+  const tabBtn = (on: boolean) =>
+    `border px-2.5 py-1 text-xs font-heading font-semibold transition-colors ${
+      on
+        ? "border-foreground bg-foreground text-card"
+        : "border-border text-muted-foreground hover:border-foreground hover:text-foreground"
+    }`;
+
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Legal", "Land Management", entry.label]} />
-      <LegalShell title={entry.label} subtitle="Every land property by its Land ID. Open one to work through its pipeline." icon={Global}>
-        {filter && (
-          <div className="mb-3 flex flex-wrap items-center gap-2 border border-border px-3 py-2 text-xs">
-            <span className="text-muted-foreground">Showing:</span>
-            <span className="font-semibold text-foreground">{filter.label}</span>
-            <button onClick={() => { params.delete("filter"); setParams(params); }} className="ml-auto border border-border px-2 py-1 hover:bg-muted">
-              Show all
-            </button>
-          </div>
-        )}
+      <Breadcrumbs items={["Dashboard", "Legal", "Land Register"]} />
+      <LegalShell
+        title="Company Land Register"
+        subtitle="Every company land in one place, one Land ID each — newly acquired and existing / backlog."
+        icon={Global}
+      >
+
+        <p className="mb-3 border border-border px-3 py-2 text-xs text-muted-foreground">
+          <b className="text-foreground">Add Land</b> here is for land the company already owns (existing / backlog). Enter what
+          you have; ownership history, documents, legal records, loans, mutations, payments and tax can be added later from the
+          Land Profile. <b className="text-foreground">Buying new land?</b> Start it from{" "}
+          <button className="underline hover:text-foreground" onClick={() => navigate("/legal/land/enquiries")}>Land Enquiries</button>{" "}
+          — it joins this register as Newly Acquired once approved.
+        </p>
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted-foreground">Show in the list below:</span>
+          <button className={tabBtn(!filterKey)} onClick={() => set("filter", null)}>
+            All Land
+          </button>
+          <button className={tabBtn(filterKey === "owned")} onClick={() => set("filter", "owned")}>
+            Active / Owned
+          </button>
+          <button className={tabBtn(filterKey === "disposed")} onClick={() => set("filter", "disposed")}>
+            Disposed / Inactive
+          </button>
+          {filter && (
+            <span className="ml-2 text-xs text-muted-foreground">
+              Showing: <b className="text-foreground">{filter.label}</b>{" "}
+              <button className="ml-1 underline hover:text-foreground" onClick={() => set("filter", null)}>Clear</button>
+            </span>
+          )}
+        </div>
+
         <LegalMasterTable
           entry={entry}
           requestEditId={params.get("edit")}
+          defaults={{ LandStatus: "Owned" }}
+          // Land added here is land the company already owns; new purchases come in through Land Enquiries.
+          fixed={{ EntryType: BACKLOG }}
           rowFilter={filter?.test}
+          onCreated={(newId) => navigate(`/legal/land/properties/${newId}?tab=overview`)}
           rowActions={(raw) => (
             <span className="inline-flex gap-1.5">
-              <button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">Open</button>
-              <button onClick={() => navigate(`/legal/land/properties/${raw.LandId}/details`)} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted" title="Everything on this land, with PDF">Details</button>
+              <button
+                onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)}
+                className="rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                title="Open complete 14-tab property profile"
+              >
+                View Details
+              </button>
+              <button
+                onClick={() => navigate(`/legal/land/properties?edit=${raw.LandId}`)}
+                className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Edit basic land information"
+              >
+                Edit
+              </button>
+              {canDelete && (
+                <button
+                  onClick={() => removeLand(raw)}
+                  className="rounded-md border border-destructive/50 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                  title="Delete this land and all its records"
+                >
+                  Delete
+                </button>
+              )}
             </span>
           )}
         />

@@ -644,9 +644,10 @@ export const getActivityPhotos = async (rungId: number, date?: string): Promise<
   return handleResponse<ActivityPhotos>(res);
 };
 
-/** Day 1's After photos become day 2's Before (server-side, idempotent). Returns how many were added. */
+/** Day 1's After photos become day 2's Before (server-side, idempotent). Returns how many were added. Runs by itself when
+ *  the Photos tab opens, so it must not make every list on screen (Activity Reporting behind the dialog) read again. */
 export const carryForwardPhotos = async (rungId: number): Promise<{ carried: number }> => {
-  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/carry-forward`, { method: "POST" });
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos/carry-forward`, { method: "POST", skipRefresh: true });
   return handleResponse<{ carried: number }>(res);
 };
 

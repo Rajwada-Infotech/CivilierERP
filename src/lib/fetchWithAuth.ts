@@ -19,6 +19,9 @@ export interface FetchWithAuthOptions extends RequestInit {
   // When true, the server leaves this request out of the Activity Browser (fetchWithAuth sends an
   // X-Skip-Activity-Log header that backend/middleware/activityAudit.js honours).
   skipActivityLog?: boolean;
+  // When true, a successful write is not treated as a save: the lists on screen are not read again. For housekeeping
+  // writes the user did not make (e.g. opening an activity's photos asks the server to carry photos forward).
+  skipRefresh?: boolean;
 }
 
 // A 502 / 504 from the gateway during a deploy: the browser's fetch is already wrapped (see gatewayFetch.ts) so
@@ -72,7 +75,7 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   // Pull out our custom flag before spreading into fetch() — fetch does not
   // accept unknown options and would silently drop it, so we strip it here.
-  const { skipActivityLog, ...fetchOptions } = options;
+  const { skipActivityLog, skipRefresh, ...fetchOptions } = options;
   const method = (fetchOptions.method || "GET").toUpperCase();
   const isRead = method === "GET" || method === "HEAD";
 
@@ -192,7 +195,7 @@ export async function fetchWithAuth(
 
   // A save: every list on screen reads again, so what was just created shows in every dropdown at once.
   // Activity-log and page-visit writes (skipActivityLog) are not saves.
-  if (!isRead && response.ok && !skipActivityLog) refreshAfterWrite();
+  if (!isRead && response.ok && !skipActivityLog && !skipRefresh) refreshAfterWrite();
 
   return response;
 }

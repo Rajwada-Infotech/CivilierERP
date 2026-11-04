@@ -235,6 +235,11 @@ router.get("/payable-lines", authenticateToken, async (req, res) => {
              ISNULL((
                SELECT SUM(np.PAmount) FROM dbo.NewPayment np
                WHERE np.JVLineId = jvl.LineID AND np.Status = 'Approved'
+             ), 0)
+             -- A payment settling several JV lines (migration 620) gives each its own share.
+             + ISNULL((
+               SELECT SUM(l.Amount) FROM dbo.PaymentJvLineLink l JOIN dbo.NewPayment np ON np.PPaymentID = l.PPaymentID
+               WHERE l.JVLineId = jvl.LineID AND np.Status = 'Approved'
              ), 0) AS PaidAmount
       FROM dbo.JournalVoucherLines jvl
       JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
@@ -504,9 +509,12 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
       const payCheck = await pool
         .request()
         .input("id", sql.Int, id).query(`
-          SELECT COUNT(*) AS cnt FROM dbo.NewPayment np
-          JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
-          WHERE jvl.JVID = @id
+          SELECT (SELECT COUNT(*) FROM dbo.NewPayment np
+                  JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
+                  WHERE jvl.JVID = @id)
+               + (SELECT COUNT(*) FROM dbo.PaymentJvLineLink l
+                  JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = l.JVLineId
+                  WHERE jvl.JVID = @id) AS cnt
         `);
       if (Number(payCheck.recordset[0]?.cnt) > 0) {
         return res.status(409).json({
@@ -674,9 +682,12 @@ router.delete("/:id", authenticateToken, requirePageRight("journal-voucher", "de
     const payCheck = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT COUNT(*) AS cnt FROM dbo.NewPayment np
-        JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
-        WHERE jvl.JVID = @id
+        SELECT (SELECT COUNT(*) FROM dbo.NewPayment np
+                JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
+                WHERE jvl.JVID = @id)
+             + (SELECT COUNT(*) FROM dbo.PaymentJvLineLink l
+                JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = l.JVLineId
+                WHERE jvl.JVID = @id) AS cnt
       `);
     if (Number(payCheck.recordset[0]?.cnt) > 0) {
       return res.status(409).json({

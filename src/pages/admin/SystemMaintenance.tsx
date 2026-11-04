@@ -115,7 +115,7 @@ const SystemMaintenance = () => {
         {isLoading || !state ? (
           <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
         ) : (
-          <div className="grid max-w-3xl gap-5">
+          <div className="grid gap-5">
             <div
               className={`flex flex-wrap items-center justify-between gap-3 bg-card p-4 border ${
                 state.active && state.enforced ? "border-destructive" : state.active ? "border-dashed border-foreground" : "border-foreground"

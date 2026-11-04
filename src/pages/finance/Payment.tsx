@@ -238,7 +238,7 @@ const Payment: React.FC = () => {
   // "Use on-account balance for this payment" checkbox — defaults to true
   // (preserves the existing auto-apply-at-approval behavior); unchecking
   // keeps the party's balance untouched (OASkipAutoApply on save).
-  const [useOnAccountBalance, setUseOnAccountBalance] = useState(true);
+  const [useOnAccountBalance, setUseOnAccountBalance] = useState(false);
   // Context injected from the On A/C Adjustment page
   const [oaAdjustCtx, setOaAdjustCtx] = useState<{
     partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
@@ -1687,7 +1687,14 @@ const Payment: React.FC = () => {
     },
     [companyOptions],
   );
-  const mergedProjectNames = [...new Set(form.mergedInvoices.map((m) => (m.projectName || "").trim()).filter(Boolean))];
+  // Every project of a merge: the invoices being merged now, or - on a saved merged payment being edited, where the invoices are not
+  // re-picked - the projects the list already resolved for it (PMergedProjectNames, joined with ", ").
+  const mergedProjectNames = [...new Set(
+    (form.mergedInvoices.length > 0
+      ? form.mergedInvoices.map((m) => m.projectName || "")
+      : String(form.mergedProjects ?? "").split(", ")
+    ).map((n) => n.trim()).filter(Boolean),
+  )];
   const handleMergeClear = useCallback(() => {
     setForm((prev) => ({ ...prev, mergedInvoices: [] }));
   }, []);
@@ -1744,7 +1751,7 @@ const Payment: React.FC = () => {
 
   // Fetch On Account balance when invoice changes
   useEffect(() => {
-    setUseOnAccountBalance(true); // reset to default for the newly-selected invoice
+    setUseOnAccountBalance(false); // off by default: the balance is shown, and only adjusted if the user turns it on
     if (!form.expenseRef) { setOaBalance(0); return; }
     getOABalanceByRef(form.expenseRef)
       .then((d) => setOaBalance(d.balance ?? 0))

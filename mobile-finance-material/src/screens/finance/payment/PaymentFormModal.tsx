@@ -268,10 +268,10 @@ export function PaymentFormModal({
   // the linked invoice changes (mirrors web's oaBalance effect, keyed on
   // form.expenseRef).
   const [oaBalance, setOaBalance] = useState(0);
-  const [useOnAccountBalance, setUseOnAccountBalance] = useState(true);
+  const [useOnAccountBalance, setUseOnAccountBalance] = useState(false);
 
   useEffect(() => {
-    setUseOnAccountBalance(true);
+    setUseOnAccountBalance(false);
     if (!form.expenseRef) { setOaBalance(0); return; }
     let cancelled = false;
     getOABalanceByRef(form.expenseRef)

@@ -11,6 +11,7 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const allowRoles = require("../middleware/role");
 const { usersHaveCreatedBy } = require("../services/usersCreatedBy");
+const { usersHaveStatusReason } = require("../services/usersStatusReason");
 const { normalizeRole: normalizeRoleFromRoleMiddleware } = allowRoles;
 
 // Privileged roles that can always list users (Password Reset, User Management)
@@ -267,10 +268,11 @@ router.get(
   async (req, res) => {
     try {
       const pool = getPool();
+      const withReason = await usersHaveStatusReason(pool);
       const result = await pool.request().query(`
         SELECT u.id, u.name, u.email, u.RoleId,
                r.RName AS roleName,
-               u.created_datetime, u.discontinue,
+               u.created_datetime, u.discontinue,${withReason ? " u.StatusReason, u.StatusChangedAt, u.StatusChangedBy," : ""}
                ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
                -- lists get the small thumbnail when there is one (migration 575)
                COALESCE(u.avatar_thumb, u.avatar_url) AS avatar_url,
@@ -355,10 +357,24 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId } =
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId, reason } =
       req.body;
     try {
       const pool = getPool();
+
+      // Making a user active or inactive is locked behind a written reason (kept in the activity log). An edit that does
+      // not mention the status leaves it as it is - it used to switch the account back on.
+      const current = await pool.request().input("id", sql.Int, id)
+        .query("SELECT ISNULL(discontinue, 0) AS discontinue FROM dbo.users WHERE id = @id");
+      if (!current.recordset.length) return res.status(404).json({ error: "User not found" });
+      const wasInactive = !!current.recordset[0].discontinue;
+      const nowInactive = discontinue === undefined ? wasInactive : !!discontinue;
+      const statusChanges = nowInactive !== wasInactive;
+      const statusReason = String(reason ?? "").trim();
+      if (statusChanges && statusReason.length < 5) {
+        return res.status(400).json({ error: "Give a reason (at least 5 characters) for making this user active or inactive." });
+      }
+      if (statusChanges) res.locals.activityMessage = `${nowInactive ? "Made inactive" : "Made active"}: ${statusReason}`.slice(0, 120);
 
       // If only `discontinue` was sent (toggle active/inactive), skip updating
       // name/email/RoleId so we don't accidentally NULL them out.
@@ -395,7 +411,7 @@ router.put(
                 : 0,
           )
           .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
-          .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
+          .input("discontinue", sql.Bit, nowInactive ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name,
               email=@email,
@@ -405,6 +421,15 @@ router.put(
               DepartmentId=@DepartmentId
           WHERE id=@id
         `);
+      }
+
+      // Remember why, by whom and when the status last changed (the Users list shows it under the status).
+      if (statusChanges && (await usersHaveStatusReason(pool))) {
+        await pool.request()
+          .input("id", sql.Int, id)
+          .input("reason", sql.NVarChar(120), statusReason.slice(0, 120))
+          .input("by", sql.NVarChar(200), String(req.user?.name || req.user?.email || "").slice(0, 200) || null)
+          .query("UPDATE dbo.users SET StatusReason = @reason, StatusChangedAt = SYSDATETIME(), StatusChangedBy = @by WHERE id = @id");
       }
 
       // Discontinuing a user must stop their existing tokens immediately,

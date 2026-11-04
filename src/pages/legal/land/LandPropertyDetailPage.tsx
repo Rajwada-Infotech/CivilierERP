@@ -37,6 +37,10 @@ export default function LandPropertyDetailPage() {
   const queryClient = useQueryClient();
   const rights = usePageRights("legal-land-master");
   const { data, error, isLoading } = useQuery({ queryKey: ["legal-land", id], queryFn: () => getLandPipeline(id), enabled: id > 0 });
+  // Existing / backlog land has no acquisition pipeline: its history lives on the land profile.
+  useEffect(() => {
+    if (data?.land.EntryType === "Existing / Backlog") navigate(`/legal/land/properties/${id}/profile`, { replace: true });
+  }, [data, id, navigate]);
   const [selected, setSelected] = useState<string>("");
   const [tab, setTab] = useState<"step" | "audit">("step");
   const [remarks, setRemarks] = useState("");

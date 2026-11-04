@@ -119,3 +119,14 @@ export const openLegalFile = async (id: number | string) => {
   else window.location.assign(url);
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 };
+
+/** Official sites saved in Setup → Official Portal Link, for checking land details by hand. */
+export interface LegalPortalLink {
+  LinkId: number; LinkLabel: string; ServiceType: string; Url: string; FallbackInstructions: string | null; LastTestedDate: string | null; OfficeName: string | null;
+}
+export const getLegalPortalLinks = async (): Promise<LegalPortalLink[]> => {
+  const res = await fetchWithAuth(`${BASE}/portal-links`);
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data as LegalPortalLink[];
+};

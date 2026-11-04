@@ -223,15 +223,28 @@ const MASTERS = {
   },
   land: {
     title: "Land Property", group: "Land Management", pageKey: "legal-land-master", table: "LegalLand", pk: "LandId",
-    desc: "The central record of a land property: every enquiry, record, party, document and step hangs off its Land ID.",
+    desc: "The central company record of a land property: identifiers, area, boundaries, possession, and all historical records.",
     label: "LandCode + ' - ' + LandName", orderBy: "LandCode",
     unique: [["LandCode"], "This Land ID already exists"],
     noDelete: true,
-    // Steps waiting for a verifier — also what the dashboard's "Pending verification" tile filters on.
-    extras: [{ name: "StepsAwaitingVerification", label: "Awaiting verification", sql: "(SELECT COUNT(*) FROM dbo.LegalWorkflowStepState s WHERE s.LandId = t.LandId AND s.Status = N'Pending Verification')" }],
+    extras: [
+      { name: "CurrentOwners", label: "Current owner(s)", sql: "(SELECT STRING_AGG(ISNULL(o.OwnerName, p.FullName), ', ') FROM dbo.LegalOwnershipRecord o LEFT JOIN dbo.LegalPerson p ON p.PersonId = o.PersonId WHERE o.LandId = t.LandId AND o.IsActive = 1 AND o.ValidTo IS NULL)" },
+    ],
+    // The same Mouza and Dag number twice is almost always the same land entered twice.
+    check: async (pool, values, id) => {
+      const dags = [["RsDagNo", "RS Dag"], ["LrDagNo", "LR Dag"]].filter(([f]) => values[f]);
+      if (!values.MouzaId || !dags.length) return null;
+      for (const [f, label] of dags) {
+        const r = await pool.request().input("M", values.MouzaId).input("D", String(values[f])).input("Id", id || 0)
+          .query(`SELECT TOP 1 LandCode FROM dbo.LegalLand WHERE MouzaId = @M AND ${f} = @D AND LandId <> @Id AND IsActive = 1`);
+        if (r.recordset.length) return `${r.recordset[0].LandCode} already has this Mouza and ${label} ${values[f]} — open that land instead of adding it again`;
+      }
+      return null;
+    },
     fields: [
       { name: "LandCode", label: "Land ID", type: "text", max: 30, auto: "LND" },
       { name: "LandName", label: "Land title / name", type: "text", required: true, max: 200 },
+      { name: "EntryType", label: "Entry type", type: "select", required: true, options: ["Newly Acquired", "Existing / Backlog"], default: "Newly Acquired" },
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "SubDivisionId", label: "Sub-division", type: "ref", ref: "sub-division", filterBy: "DistrictId" },
       { name: "BlockId", label: "Block", type: "ref", ref: "block", filterBy: "DistrictId" },
@@ -239,12 +252,24 @@ const MASTERS = {
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true },
       { name: "PoliceStationId", label: "Police station", type: "ref", ref: "police-station", filterBy: "DistrictId" },
       { name: "MunicipalityId", label: "Municipality / local body", type: "ref", ref: "municipality", filterBy: "DistrictId" },
+      { name: "RsDagNo", label: "RS Dag / Plot number", type: "text", max: 60 },
+      { name: "LrDagNo", label: "LR Dag / Plot number", type: "text", max: 60 },
+      { name: "RsKhatianNo", label: "RS Khatian number", type: "text", max: 60 },
+      { name: "LrKhatianNo", label: "LR Khatian number", type: "text", max: 60 },
       { name: "Area", label: "Total land area", type: "decimal", required: true, min: 0.000001 },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", required: true },
       { name: "LandTypeId", label: "Land classification", type: "ref", ref: "land-type" },
       { name: "LocationTypeId", label: "Location type", type: "ref", ref: "location-type" },
       { name: "ProjectId", label: "Project", type: "ref", ref: "project" },
-      { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "Dropped"], default: "Identified" },
+      { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Owned", "Active", "Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "On Hold", "Disposed / Transferred", "Inactive"], default: "Owned" },
+      { name: "PossessionStatus", label: "Possession status", type: "select", options: ["In Possession", "Partly in Possession", "Not in Possession", "Disputed", "Unknown"], default: "In Possession" },
+      { name: "VerificationStatus", label: "Verification status", type: "select", options: ["Draft", "Verified", "Rejected"], default: "Draft" },
+      { name: "L1Status", label: "L1 approval status", type: "select", options: ["Pending", "Approved", "Returned"], default: "Pending" },
+      { name: "L2Status", label: "L2 approval status", type: "select", options: ["Pending", "Approved", "Returned", "Rejected"], default: "Pending" },
+      { name: "AcquisitionType", label: "Acquisition type", type: "select", options: ["Purchase", "Gift", "Inheritance", "Transfer", "Other"], default: "Purchase" },
+      // When it was acquired (history) — the date it was entered here is kept separately (Created).
+      { name: "AcquisitionDate", label: "Acquisition date (if known)", type: "date" },
+      { name: "AcquisitionDateApprox", label: "Acquisition date is approximate", type: "bit", default: false },
       { name: "ChecklistTemplateId", label: "Document checklist", type: "ref", ref: "checklist-template" },
       { name: "LocationAddress", label: "Land location (full address)", type: "textarea", max: 1000 },
       { name: "NorthBoundary", label: "North boundary", type: "text", max: 300 },
@@ -258,6 +283,31 @@ const MASTERS = {
       { name: "Remarks", label: "Internal remarks", type: "textarea", max: 1000 },
       ACTIVE,
     ],
+    afterWrite: async (pool, req, row, before) => {
+      if (!before) {
+        await pool.request().input("Id", row.LandId).query(`
+          UPDATE dbo.LegalLand
+          SET VerificationStatus = N'Draft',
+              L1Status = N'Pending',
+              L2Status = N'Pending',
+              WorkflowStatus = N'Draft (Verification Pending)'
+          WHERE LandId = @Id
+        `);
+      } else {
+        const coreCols = ["LandName", "DistrictId", "MouzaId", "Area", "AreaUnitId", "RsDagNo", "LrDagNo", "RsKhatianNo", "LrKhatianNo", "LocationAddress", "AcquisitionDate", "NorthBoundary", "SouthBoundary", "EastBoundary", "WestBoundary"];
+        const modifiedCore = coreCols.some((k) => String(before[k] ?? "") !== String(row[k] ?? ""));
+        if (modifiedCore) {
+          await pool.request().input("Id", row.LandId).query(`
+            UPDATE dbo.LegalLand
+            SET VerificationStatus = N'Draft',
+                L1Status = N'Pending',
+                L2Status = N'Pending',
+                WorkflowStatus = N'Draft (Re-Verification Required)'
+            WHERE LandId = @Id
+          `);
+        }
+      }
+    },
   },
   "land-photo": landChild("Land Photo", "LegalLandPhoto", "PhotoId", "Photographs of the land property — as many as needed.", {
     label: "r.Caption", orderBy: "TakenOn, PhotoId",
@@ -291,6 +341,8 @@ const MASTERS = {
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true, fill: { JLNo: "JLNo" } },
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
+      { name: "GpsLatitude", label: "Latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
+      { name: "GpsLongitude", label: "Longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
       { name: "ApproxArea", label: "Approximate area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "ApproxArea" },
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },
@@ -392,7 +444,9 @@ const MASTERS = {
         { name: "NewOwnerId", label: "New owner in Party master (optional)", type: "ref", ref: "person", fill: { NewOwnerName: "FullName", NewOwnerGuardian: "GuardianName" } },
         { name: "DocTypeId", label: "Transfer document type", type: "ref", ref: "document-type" },
         { name: "DocumentNo", label: "Document number", type: "text", max: 100 },
-        { name: "DeedNo", label: "Deed number", type: "text", max: 60 },
+        { name: "AgreementDate", label: "Agreement date", type: "date" },
+        { name: "DeedTypeId", label: "Deed type", type: "ref", ref: "deed-type" },
+        { name: "DeedNo", label: "Deed / registration number", type: "text", max: 60 },
         { name: "RegistrationOfficeId", label: "Registration office", type: "ref", ref: "registration-office" },
         { name: "RegistrationDate", label: "Registration date", type: "date" },
         { name: "TransferArea", label: "Transfer area", type: "decimal" },
@@ -541,15 +595,23 @@ const MASTERS = {
         { name: "LenderName", label: "Lender", type: "text", required: true, max: 200 },
         { name: "BorrowerName", label: "Borrower", type: "text", max: 200 },
         { name: "MortgageTypeId", label: "Mortgage type", type: "ref", ref: "mortgage-type", required: true },
+        { name: "LoanType", label: "Loan type", type: "text", max: 60 },
         { name: "LoanAccountRef", label: "Loan account reference", type: "text", max: 80 },
         { name: "LoanAmount", label: "Loan amount (₹)", type: "decimal" },
         { name: "OutstandingAmount", label: "Outstanding amount (₹)", type: "decimal" },
         { name: "LoanStartDate", label: "Loan start date", type: "date" },
         { name: "LoanEndDate", label: "Loan end date", type: "date", after: "LoanStartDate" },
+        { name: "LoanStatus", label: "Loan status", type: "select", options: ["Active", "Closed", "Overdue", "Unknown"] },
+        { name: "LoanClosureDate", label: "Loan closure date", type: "date" },
+        { name: "MortgageDeedNo", label: "Mortgage deed number", type: "text", max: 80 },
+        { name: "MortgageRegDate", label: "Mortgage registration date", type: "date" },
         { name: "RegistrationDetails", label: "Mortgage registration details", type: "text", max: 500 },
         { name: "ChargeDetails", label: "Security / charge details", type: "text", max: 500 },
+        { name: "AgreementFileId", label: "Loan agreement", type: "file" },
+        { name: "MortgageDeedFileId", label: "Mortgage deed", type: "file" },
+        { name: "BankNocDetails", label: "Bank NOC details", type: "text", max: 500 },
         { name: "ReleaseDocFileId", label: "NOC / release document", type: "file" },
-        { name: "ClearanceDate", label: "Clearance date", type: "date" },
+        { name: "ClearanceDate", label: "Mortgage release date", type: "date" },
         { name: "MortgageStatus", label: "Mortgage status", type: "select", required: true, options: MORTGAGE_STATUSES, default: "Needs Investigation" },
         VERIFICATION,
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
@@ -707,7 +769,8 @@ const MASTERS = {
       label: "CONVERT(NVARCHAR(10), r.PaymentDate, 105) + ' ₹' + CONVERT(NVARCHAR(30), r.Amount)", orderBy: "PaymentDate, PaymentId", review: REVIEW,
       fields: [
         LAND_ID,
-        { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId", required: true },
+        // Optional: payments of older (backlog) purchases are recorded without a purchase entered here.
+        { name: "TransactionId", label: "Purchase / sale (if recorded here)", type: "ref", ref: "land-transaction", filterBy: "LandId" },
         { name: "PaymentDate", label: "Payment date", type: "date", required: true, default: "today" },
         { name: "TxnTypeId", label: "Payment purpose", type: "ref", ref: "txn-type", required: true },
         { name: "Amount", label: "Amount (₹)", type: "decimal", required: true, min: 0.01 },
@@ -1001,6 +1064,7 @@ const MASTERS = {
         LAND_ID,
         { name: "RegisteredDeedId", label: "Registered deed", type: "ref", ref: "registered-deed", filterBy: "LandId" },
         { name: "ApplicationNo", label: "Mutation application number", type: "text", max: 80 },
+        { name: "CaseNo", label: "Mutation case number", type: "text", max: 80 },
         { name: "ApplicationDate", label: "Application date", type: "date" },
         { name: "OfficeName", label: "BL&LRO office", type: "text", required: true, max: 200 },
         { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza" },
@@ -1015,6 +1079,46 @@ const MASTERS = {
         { name: "OrderDate", label: "Mutation order date", type: "date", requiredWhen: { field: "ApplicationStatus", values: ["Approved"] } },
         { name: "DocFileId", label: "Application copy", type: "file" },
         { name: "OrderFileId", label: "Mutation order", type: "file" },
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  // Legal history beyond court cases: orders, judgments, notices, POA, NOC, affidavits, reports. Information only.
+  "land-legal-record": landChild("Legal Record", "LegalLandLegalRecord", "LegalRecordId",
+    "Legal history of the land — court orders and judgments, notices, affidavits, power of attorney, NOCs, title and due-diligence reports. Records only: nothing is filed or sent.", {
+      label: "r.RecordType + ISNULL(' ' + r.CaseNumber, '') + ISNULL(' (' + CONVERT(NVARCHAR(10), ISNULL(r.OrderDate, r.FilingDate), 105) + ')', '')",
+      orderBy: "FilingDate, LegalRecordId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "RecordType", label: "Record type", type: "select", required: true, options: ["Legal Opinion", "Title Verification Report", "Legal Due Diligence Report", "Legal Clearance", "Land Dispute", "Boundary Dispute", "Court Order", "Court Judgment", "Notice", "Affidavit", "Power of Attorney", "No Objection Certificate", "Other"] },
+        { name: "CaseNumber", label: "Case / reference number", type: "text", max: 80 },
+        { name: "CourtAuthority", label: "Court / authority", type: "text", max: 200 },
+        { name: "PartiesInvolved", label: "Parties involved", type: "text", max: 500 },
+        { name: "FilingDate", label: "Filing / issue date", type: "date" },
+        { name: "OrderDate", label: "Order / judgment date", type: "date" },
+        { name: "RecordStatus", label: "Status", type: "select", options: ["Open", "Pending", "Disposed", "Closed", "In Force", "Expired", "Withdrawn", "Unknown"] },
+        { name: "Description", label: "Description", type: "textarea", max: 2000 },
+        { name: "RelatedPerson", label: "Related person / owner", type: "text", max: 200 },
+        { name: "DocumentRef", label: "Document reference", type: "text", max: 120 },
+        { name: "DocFileId", label: "Document", type: "file" },
+        VERIFICATION,
+        { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
+        ACTIVE,
+      ],
+    }),
+  "land-tax": landChild("Land Tax (Khajna)", "LegalLandTax", "TaxId",
+    "Land tax (khajna) paid year by year, with the receipt.", {
+      label: "r.TaxYear + ISNULL(' ₹' + CONVERT(NVARCHAR(30), r.Amount), '')", orderBy: "TaxYear, TaxId", review: REVIEW,
+      fields: [
+        LAND_ID,
+        { name: "TaxYear", label: "Tax year (e.g. 2025-26)", type: "text", required: true, max: 9 },
+        { name: "PaymentDate", label: "Payment date", type: "date" },
+        { name: "Amount", label: "Amount (₹)", type: "decimal" },
+        { name: "ReceiptNo", label: "Receipt number", type: "text", max: 60 },
+        { name: "PaymentRef", label: "Payment reference", type: "text", max: 100 },
+        { name: "RelatedOwner", label: "Paid in the name of", type: "text", max: 200 },
+        { name: "ReceiptFileId", label: "Receipt", type: "file" },
+        VERIFICATION,
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -1254,7 +1358,7 @@ const MASTERS = {
     fields: [
       { name: "DocTypeCode", label: "Code", type: "text", required: true, max: 20, upper: true },
       { name: "DocTypeName", label: "Name", type: "text", required: true, max: 150 },
-      { name: "Category", label: "Category", type: "select", required: true, options: ["Draft", "Identity", "Tax", "Title", "Land Record", "Revenue", "Payment", "Photograph", "Registration", "Other"] },
+      { name: "Category", label: "Category", type: "select", required: true, options: ["Draft", "Identity", "Tax", "Title", "Land Record", "Revenue", "Payment", "Photograph", "Registration", "Legal", "Survey", "Loan & Mortgage", "Other"] },
       { name: "Sensitivity", label: "Sensitivity", type: "select", required: true, options: ["Internal", "Confidential", "Personal Data"], default: "Internal" },
       { name: "RetentionClass", label: "Retention", type: "select", required: true, options: ["Permanent", "10 Years", "8 Years", "5 Years"], default: "Permanent" },
       { name: "ExpiryDays", label: "Valid for (days, blank = no expiry)", type: "int", min: 1 },
@@ -1421,10 +1525,12 @@ const MASTERS = {
   MASTERS["land-sale"] = {
     ...txn, title: "Sale", scope: { column: "TxnType", value: "Sale" },
     desc: "The company selling this land (or part of it) after acquiring it. The same area cannot be sold twice.",
-    // Only an acquired land can be sold, and never more than its unsold area.
+    // Only an acquired land can be sold (bought through the pipeline up to step 23, or already owned — backlog),
+    // and never more than its unsold area.
     check: async (pool, values, id) => {
       const acquired = (await pool.request().input("Land", values.LandId).query(`
-        SELECT TOP 1 1 AS ok FROM dbo.LegalWorkflowStepState WHERE LandId = @Land AND StepCode = N'OWNERSHIP_TRANSFER' AND Status = N'Completed'`)).recordset[0];
+        SELECT TOP 1 1 AS ok FROM dbo.LegalLand l WHERE l.LandId = @Land AND (l.EntryType = N'Existing / Backlog'
+          OR EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = l.LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed'))`)).recordset[0];
       if (!acquired) return "This land is not acquired yet — complete the purchase up to the ownership transfer (step 23) first";
       return txn.check(pool, { ...values, TxnType: "Sale" }, id);
     },
@@ -1432,10 +1538,10 @@ const MASTERS = {
   };
   txn.lookupOnly = true;
 
-  // Only land the company has acquired (ownership transferred, step 23) can be sold.
+  // Only land the company owns can be sold: acquired through the pipeline (step 23) or already owned (backlog).
   MASTERS["acquired-land"] = {
-    ...MASTERS.land, title: "Land the company has acquired (ownership transferred, step 23)", lookupOnly: true,
-    where: "EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = {t}LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed')",
+    ...MASTERS.land, title: "Land the company owns (acquired at step 23, or existing / backlog land)", lookupOnly: true, check: undefined,
+    where: "({t}EntryType = N'Existing / Backlog' OR EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = {t}LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed'))",
   };
   MASTERS["land-sale"].fields = MASTERS["land-sale"].fields.map((f) =>
     (f.name === "LandId" ? { ...f, ref: "acquired-land", label: "Acquired land property" } : f));

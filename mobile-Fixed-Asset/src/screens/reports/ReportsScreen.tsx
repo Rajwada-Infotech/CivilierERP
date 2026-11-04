@@ -16,6 +16,7 @@ const CARDS: {
   icon: React.ComponentType<{ size?: number; color?: string }>;
 }[] = [
   { key: "depreciation", label: "Total Depreciation", desc: "Posted depreciation & book value per FA Item Code", icon: TrendingUp },
+  { key: "depreciationHistory", label: "Monthly Depreciation History", desc: "Every monthly posting — charge, accumulated depreciation & remaining book value", icon: TrendingUp },
   { key: "owner", label: "FA Owner / Custodian", desc: "Current custodian, department & location per FA Item Code", icon: UserCheck },
   { key: "maintenance", label: "FA Maintenance & Repair", desc: "Repair spend per FA Item Code — vendor, type & total", icon: Wrench },
   { key: "transfer", label: "Asset Transfer Report", desc: "Custody transfers between users, FA Item Code wise", icon: ArrowLeftRight },
