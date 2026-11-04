@@ -1368,7 +1368,7 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {sb === "Reapprove" && a.BookingId && (
-                <button onClick={() => navigate("/admin/approval/inbox")} className={`${KEY_LINE} h-7 px-2`} title="With the approver — approve again, or send back to Data Review">
+                <button onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={`${KEY_LINE} h-7 px-2`} title="Yours to approve again, or send back — on the booking">
                   Re-approve <ChevronRight size={11} />
                 </button>
               )}

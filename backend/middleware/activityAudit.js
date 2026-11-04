@@ -7,15 +7,23 @@ const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion, redisZIncrBy } = require("../redis");
 
-// Housekeeping writes that are not anyone's work, and POSTs that only look things up (previews, checks, sums).
-const SKIP = [
+// Housekeeping writes that are not anyone's work.
+const HOUSEKEEPING = [
   /^\/api\/user-activity/,
   /^\/api\/script-console/, // keeps its own encrypted record (dbo.ScriptRunLog); scripts and keys must not land in this log
   /^\/api\/home\/usage/,
   /^\/api\/users\/(login|logout|refresh)/,
+];
+// POSTs that only look things up (previews, checks, sums). Their replies carry
+// X-Changes-Nothing, so the app does not treat them as a save and re-read every
+// list on screen — a screen that reads one of these as a query would otherwise
+// re-ask it after every answer, forever (a price quote ran twice a second).
+const LOOKUP = [
   /^\/api\/doc-search/,
   /\/(preview|naming-preview|validate|calculate|bulk-search|price-quote)(\?|$)/,
 ];
+const SKIP = [...HOUSEKEEPING, ...LOOKUP];
+const isLookup = (req) => LOOKUP.some((rx) => rx.test(req.originalUrl || req.url));
 
 const ACTION = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
 const WEIGHT = { create: 10, update: 8, delete: 15 };
@@ -172,6 +180,7 @@ async function write(req, res, payload) {
 }
 
 function activityAudit(req, res, next) {
+  if (isLookup(req)) res.setHeader("X-Changes-Nothing", "1");
   if (!ACTION[req.method] || req.headers["x-skip-activity-log"] || SKIP.some((rx) => rx.test(req.originalUrl || req.url))) return next();
   let payload;
   const json = res.json.bind(res);
@@ -188,4 +197,4 @@ function activityAudit(req, res, next) {
   next();
 }
 
-module.exports = { activityAudit, summarise, identify };
+module.exports = { activityAudit, summarise, identify, isLookup };
