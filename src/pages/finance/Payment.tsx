@@ -2407,6 +2407,17 @@ const Payment: React.FC = () => {
                           jvLines={jvLineOptions}
                           jvLinesLoading={jvLinesLoading}
                           selectedJVLine={selectedJVLine}
+                          savedTag={
+                            !editingId
+                              ? null
+                              : form.jvNo
+                                ? { kind: "JV", label: form.jvNo, locked: true }
+                                : form.mergedDocNos?.length
+                                  ? { kind: "Merged", label: form.mergedDocNos.join(", "), locked: true }
+                                  : form.expenseRef
+                                    ? { kind: "EXB", label: form.expenseRef, locked: false }
+                                    : null
+                          }
                           onJVLineSelect={handleJVLineSelect}
                           onJVLineClear={clearJVLineLink}
                           onMergeConfirm={handleMergeConfirm}

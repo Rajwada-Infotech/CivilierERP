@@ -16,6 +16,7 @@ export function ExpenseBookingPicker({
   jvLines = [],
   jvLinesLoading = false,
   selectedJVLine = null,
+  savedTag = null,
   onJVLineSelect,
   onJVLineClear,
   onMergeConfirm,
@@ -35,6 +36,9 @@ export function ExpenseBookingPicker({
   jvLines?: PayableJVLine[];
   jvLinesLoading?: boolean;
   selectedJVLine?: PayableJVLine | null;
+  /** What a saved payment being edited is already tagged to. A fully paid invoice or JV is no longer among the options, so
+   *  it can't be found there. `locked`: saving an edit does not change this tag, so the picker must not offer to. */
+  savedTag?: { kind: string; label: string; locked: boolean } | null;
   onJVLineSelect?: (line: PayableJVLine) => void;
   onJVLineClear?: () => void;
   /** "Merge invoices into one payment" — called with the full, validated
@@ -230,7 +234,7 @@ export function ExpenseBookingPicker({
         {/* Trigger */}
         <button
           type="button"
-          disabled={loading && contractsLoading}
+          disabled={(loading && contractsLoading) || !!savedTag?.locked}
           onClick={() => setOpen((v) => !v)}
           className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait hover:border-primary/40 transition-colors"
         >
@@ -268,6 +272,13 @@ export function ExpenseBookingPicker({
                 {selected.type === "emi" ? "EMI" : "EXB"}
               </span>
               <span className="font-heading tabular-nums text-xs text-primary font-semibold truncate">{selected.label}</span>
+            </span>
+          ) : savedTag ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-heading font-semibold border border-foreground text-foreground">
+                {savedTag.kind}
+              </span>
+              <span className="font-heading tabular-nums text-xs text-foreground font-semibold truncate">{savedTag.label}</span>
             </span>
           ) : (
             <span className="text-muted-foreground">— Choose an invoice, contract or JV —</span>
