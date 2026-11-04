@@ -23,6 +23,7 @@ import { makeAvatarThumb } from "@/lib/avatarThumb";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { UserStatusDialog } from "@/components/UserStatusDialog";
 import { fmtIstDateTime } from "@/lib/istTime";
+import { deactivateHeldUntil, fmtHeldUntil } from "@/lib/userStatusHold";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -291,15 +292,18 @@ function buildUserColumns(
       enableSorting: false,
       cell: ({ row }) => {
         const user = row.original;
+        const heldUntil = deactivateHeldUntil(user);
         return (
           <div className="flex items-center justify-end gap-2.5">
             <button data-row-view onClick={() => setViewUserId(user.id)} className={ACT} title="View" aria-label="View"><Eye size={13} /></button>
             <button onClick={() => setEditUserId(user.id)} className={ACT} title="Edit" aria-label="Edit"><Edit size={13} /></button>
             <button
               onClick={() => onStatus(user)}
+              disabled={!!heldUntil}
+              title={heldUntil ? `Activated less than 90 days ago. Can be made inactive from ${fmtHeldUntil(heldUntil)}.` : undefined}
               className={`${KEY} h-7 px-2.5 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
             >
-              {!user.discontinue ? "Deactivate" : "Activate"}
+              {heldUntil ? `Held to ${fmtHeldUntil(heldUntil)}` : !user.discontinue ? "Deactivate" : "Activate"}
             </button>
             {deleteConfirmId === user.id ? (
               <div className="flex items-center gap-1 ml-1">
