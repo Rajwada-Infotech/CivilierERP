@@ -37,6 +37,7 @@ const { invalidateThread } = require("../services/activityThread");
 const { findOrCreateTag } = require("./dprTagMaster");
 const { bumpCacheVersion } = require("../redis");
 const { makeColumnProbe } = require("../services/columnProbe");
+const { cache } = require("../middleware/cache");
 // ResumedAt arrives with migration 536; this code must keep working on a server that hasn't run it.
 const hasResumedAt = makeColumnProbe("dbo.DependencyActivityAssignment", "ResumedAt");
 
@@ -366,7 +367,25 @@ router.get(
     request.input("offset", sql.Int, offset);
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const resumedExpr = (await hasResumedAt(pool)) ? "daa.ResumedAt" : "CAST(NULL AS DATETIME2)";
+    // Two steps. First the page's rows — only the joins the filters and the search need — then the details
+    // (names, materials, QC, photo count, each a sub-query) for just those rows. In one step the details were
+    // worked out for every candidate row before the page was cut: a search took 11 seconds and read
+    // ~10 million pages, on ~340,000 current activities.
     const r = await request.query(`
+      WITH pageRows AS (
+        SELECT daa.Id, daa.UpdatedAt
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        ${where}
+        ORDER BY daa.UpdatedAt DESC, daa.Id DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      )
       SELECT
         daa.Id AS assignmentId,
         daa.DependencyMasterActivityId AS rungId,
@@ -434,7 +453,8 @@ router.get(
           ORDER BY img.M_Name ASC
           FOR JSON PATH
         ) AS materialsJson
-      FROM dbo.DependencyActivityAssignment daa
+      FROM pageRows p
+      JOIN dbo.DependencyActivityAssignment daa ON daa.Id = p.Id
       JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
       JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
       JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
@@ -445,9 +465,7 @@ router.get(
       LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
       LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-      ${where}
-      ORDER BY daa.UpdatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      ORDER BY p.UpdatedAt DESC, p.Id DESC
     `);
     const rows = r.recordset.map(({ materialsJson, ...row }) => ({
       ...row,
@@ -489,6 +507,9 @@ router.get(
   "/scope-summary",
   authMiddleware,
   requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  // The same counts for everyone with the same project access (the cache keys by it), read again after any
+  // save. Uncached it ran ~8,400 times — recounted after every progress update, by every open Reporting page.
+  cache("dependency-activity-scope", 120, { shared: true, dropOnAnyWrite: true }),
   async (req, res) => {
     const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
     const search = req.query.search ? String(req.query.search).trim() : null;

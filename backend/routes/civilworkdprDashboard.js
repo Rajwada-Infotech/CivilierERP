@@ -4,6 +4,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(apiRateLimit);
 const { getPool } = require("../db");
 const { projectPredicate } = require("../services/projectScope");
+const { cache } = require("../middleware/cache");
 // No extra permission gate here — /api routes are already protected by
 // authMiddleware at the server level. Any authenticated user granted Civil
 // Work DPR rights can view aggregate dashboard stats.
@@ -24,10 +25,11 @@ const { projectPredicate } = require("../services/projectScope");
  * un-updatable history. Dropped in favor of the real, currently-writable
  * DependencyActivityAssignment feed below.
  *
- * No caching — the frontend polls this on a short interval for a
- * near-realtime feel, so a 60s+ cache would just show stale counts.
+ * Cached for 30 s — as long as the page waits between polls — and shared by
+ * everyone with the same project access (the cache keys by it): uncached, every
+ * open dashboard ran these 13 queries itself every 30 s.
  */
-router.get("/", async (req, res) => {
+router.get("/", cache("civilworkdpr-dashboard", 30, { shared: true, fixedTtl: true }), async (req, res) => {
   try {
     const pool = getPool();
     // Project scoping: a restricted user's tiles/feeds only count their projects.
@@ -127,7 +129,7 @@ router.get("/", async (req, res) => {
       pool.request().query(`
         SELECT CAST(CreatedAt AS DATE) AS Day, COUNT(*) AS Cnt
         FROM dbo.DependencyActivityAssignment
-        WHERE CAST(CreatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
+        WHERE CreatedAt >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
         GROUP BY CAST(CreatedAt AS DATE)
       `),
 
@@ -139,7 +141,7 @@ router.get("/", async (req, res) => {
         FROM dbo.DependencyActivityAssignment
         WHERE Status = 'COMPLETED'
           AND UpdatedAt IS NOT NULL
-          AND CAST(UpdatedAt AS DATE) >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
+          AND UpdatedAt >= DATEADD(DAY, -13, CAST(GETDATE() AS DATE)) ${rungInScope}
         GROUP BY CAST(UpdatedAt AS DATE)
       `),
 
