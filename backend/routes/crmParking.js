@@ -1,4 +1,5 @@
 const express = require("express");
+const { round2, sumMoney, unitPrice } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
@@ -718,10 +719,12 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
         WHERE a.Id = @aid AND a.IsActive = 1
       `);
       const appR = appRow.recordset[0];
-      const unitTotal = appR && appR.RatePerSqFt && appR.AreaSqFt ? Math.round(Number(appR.AreaSqFt) * Number(appR.RatePerSqFt)) : 0;
-      const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
-      const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
-      const combinedBase = unitTotal + allotmentBase + holdBase;
+      // The unit's price as everywhere else (unitPrice, to the paisa) — it was rounded to the rupee here, so
+      // near the GST band's threshold this check could pick another band than the booking itself.
+      const unitTotal = appR ? unitPrice(appR.AreaSqFt, appR.RatePerSqFt) : 0;
+      const allotmentBase = sumMoney(allotments, (a) => (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1));
+      const holdBase = sumMoney(holdLineAmounts, (x) => x.lineAmount);
+      const combinedBase = round2(unitTotal + allotmentBase + holdBase);
       // Through the shared resolver so dbo.CrmGstRule governs here too. This
       // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
       // moving the threshold in the master repriced the booking but not this

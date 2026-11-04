@@ -1,4 +1,5 @@
 import { AlertTriangle, IndianRupee } from "lucide-react";
+import { round2, sumMoney } from "@/lib/crmPriceQuote";
 
 // Rupees in Indian grouping; paise shown as two places when there are any ("₹80,56,156.50", never "…156.5").
 export const fmtRupees = (n: number | null | undefined) => {
@@ -36,8 +37,8 @@ export function FinancialStatusBar({
   overdueCount = 0,
   compact = false,
 }: FinancialStatusBarProps) {
-  const onAccount = pendingReceipts + approvedOnAccount;
-  const outstanding = Math.max(0, grandTotal - cleared - onAccount);
+  const onAccount = round2(pendingReceipts + approvedOnAccount);
+  const outstanding = Math.max(0, round2(grandTotal - cleared - onAccount));
   const clearedPct = grandTotal > 0 ? Math.min(100, Math.round((cleared / grandTotal) * 100)) : 0;
   const onAccPct = grandTotal > 0 ? Math.min(100 - clearedPct, Math.round((onAccount / grandTotal) * 100)) : 0;
   const figure = `font-heading font-bold tabular-nums text-foreground ${compact ? "text-sm" : "text-lg"} leading-tight mt-1`;

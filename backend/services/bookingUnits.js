@@ -25,6 +25,15 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 const num = (v) => (v == null || v === "" ? null : Number(v));
 
+/**
+ * A money total, to the paisa. Amounts come from the database exact (DECIMAL 18,2) but become JS numbers,
+ * and adding those leaves float dust (0.1 + 0.2 = 0.30000000000000004): a sum that is really ₹25,000.30 can
+ * read ₹25,000.299999999996, so "covered >= required" fails and a paid milestone still shows ₹0.00 due.
+ * Every money sum worked out in JS goes through here (a difference: round2(a - b)), so a total compares and
+ * stores as exactly what the parts add up to.
+ */
+const sumMoney = (rows, pick = (x) => x) => round2((rows || []).reduce((s, r) => s + (Number(pick(r)) || 0), 0));
+
 // The SQL type of an agreed rate per sq ft on applications and bookings (and
 // their unit / plot lines): 4 decimals, so a rate worked out from a typed price
 // gives that price back (migration 589). Every write of such a rate uses this.
@@ -139,4 +148,4 @@ function allocateConsideration({ lines = [], totalConsideration = 0 } = {}) {
   }));
 }
 
-module.exports = { apportion, priceBooking, allocateConsideration, round2, unitPrice, rateSqlType };
+module.exports = { apportion, priceBooking, allocateConsideration, round2, sumMoney, unitPrice, rateSqlType };

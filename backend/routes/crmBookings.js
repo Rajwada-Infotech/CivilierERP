@@ -1,6 +1,6 @@
 const express = require("express");
 const { parseId } = require("../middleware/validateRequest");
-const { unitPrice, rateSqlType } = require("../services/bookingUnits");
+const { unitPrice, rateSqlType, sumMoney } = require("../services/bookingUnits");
 const { returnLeadToPool } = require("../services/saHandoff");
 const { CrmStatus, DEAD_BOOKING_STATUSES } = require("../constants/crmStatuses");
 const multer = require("multer");
@@ -476,8 +476,8 @@ router.get("/:id", requireAnyPageRight(["crm-bookings", "crm-invoices"], "view")
     ]);
     if (!bkRes.recordset[0]) return res.status(404).json({ error: "Booking not found" });
     const milestones = milRes.recordset;
-    const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
-    const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
+    const totalDue = sumMoney(milestones, (m) => m.AmountDue);
+    const totalPaid = sumMoney(milestones, (m) => m.AmountPaid);
     const stageState = await getStageState(pool, id, { role: req.user?.role, userId: req.user?.userId ?? null });
     res.json({
       booking: bkRes.recordset[0],

@@ -1,4 +1,5 @@
 const { sql } = require("../db");
+const { round2, sumMoney } = require("./bookingUnits");
 const { onAccountWithAvailableSql } = require("./crmPaymentFunding");
 
 // Business rule (confirmed 2026-09-15): every rupee a customer pays lands in
@@ -35,12 +36,12 @@ async function getBookingOnAccountCoverage(pool, bookingId, { withPendingVerific
     WHERE o.BookingId = @bid
   `);
   const pendingVerification = withPendingVerification ? await pendingVerificationTotal(pool, bookingId) : 0;
-  const totalOnAccount = (Number(oaRes.recordset[0]?.TotalOnAccount) || 0) + pendingVerification;
+  const totalOnAccount = round2((Number(oaRes.recordset[0]?.TotalOnAccount) || 0) + pendingVerification);
 
   let cumulativeRequired = 0;
   const milestones = milestonesRes.recordset.map((m) => {
-    const required = m.Status === "Waived" ? 0 : Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0));
-    cumulativeRequired = Math.round((cumulativeRequired + required) * 100) / 100;
+    const required = m.Status === "Waived" ? 0 : Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)));
+    cumulativeRequired = round2(cumulativeRequired + required);
     const alreadyPaid = m.Status === "Paid" || m.Status === "Waived" || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0);
     return {
       ...m,
@@ -104,7 +105,7 @@ async function returnedEntries(pool, bookingId) {
     ORDER BY rp.RPRejectedAt DESC, rp.RPPaymentID DESC`)).recordset;
 }
 async function pendingVerificationTotal(pool, bookingId) {
-  return Math.round((await pendingVerificationEntries(pool, bookingId)).reduce((a, r) => a + Number(r.RPAmount || 0), 0) * 100) / 100;
+  return sumMoney(await pendingVerificationEntries(pool, bookingId), (r) => r.RPAmount);
 }
 
 module.exports = { getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries, isMilestoneOneCoveredByOnAccount, areEarlierMilestonesCoveredByOnAccount };

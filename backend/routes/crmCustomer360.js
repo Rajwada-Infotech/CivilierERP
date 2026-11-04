@@ -1,4 +1,5 @@
 const express = require("express");
+const { sumMoney } = require("../services/bookingUnits");
 const { CrmStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { projectPredicate, crmCustomerGuard } = require("../services/projectScope");
 const router = express.Router();
@@ -309,13 +310,13 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
     }
     const liveBookings = enrichedBookings.filter((b) => !DEAD_BOOKING_STATUSES.includes(b.Status));
     const summary = {
-      totalInvoiced: liveBookings.reduce((s, b) => s + b.invoices.reduce((si, i) => si + Number(i.Amount || 0), 0), 0),
-      totalPaid: liveBookings.reduce((s, b) => s + Number(b.TotalPaid || 0), 0),
-      totalOutstanding: liveBookings.reduce((s, b) => s + Number(b.TotalOutstanding || 0), 0),
-      totalCredited: liveBookings.reduce((s, b) => s + (b.creditNotes || []).filter((n) => n.Status === "Issued" || n.Status === "TimeBarred").reduce((si, n) => si + Number(n.TotalAmount || 0), 0), 0),
-      totalOnAccountBalance: liveBookings.reduce((s, b) => s + b.onAccount.reduce((si, oa) => si + (Number(oa.Amount || 0) - Number(oa.AppliedAmount || 0)), 0), 0),
-      totalBrokeragePaid: liveBookings.reduce((s, b) => s + b.brokerage.reduce((si, br) => si + Number(br.TotalPaid || 0), 0), 0),
-      totalBrokerageDue: liveBookings.reduce((s, b) => s + b.brokerage.reduce((si, br) => si + Math.max(0, Number(br.ComputedAmount || 0) - Number(br.TotalPaid || 0)), 0), 0),
+      totalInvoiced: sumMoney(liveBookings, (b) => sumMoney(b.invoices, (i) => i.Amount)),
+      totalPaid: sumMoney(liveBookings, (b) => b.TotalPaid),
+      totalOutstanding: sumMoney(liveBookings, (b) => b.TotalOutstanding),
+      totalCredited: sumMoney(liveBookings, (b) => sumMoney((b.creditNotes || []).filter((n) => n.Status === "Issued" || n.Status === "TimeBarred"), (n) => n.TotalAmount)),
+      totalOnAccountBalance: sumMoney(liveBookings, (b) => sumMoney(b.onAccount, (oa) => Number(oa.Amount || 0) - Number(oa.AppliedAmount || 0))),
+      totalBrokeragePaid: sumMoney(liveBookings, (b) => sumMoney(b.brokerage, (br) => br.TotalPaid)),
+      totalBrokerageDue: sumMoney(liveBookings, (b) => sumMoney(b.brokerage, (br) => Math.max(0, Number(br.ComputedAmount || 0) - Number(br.TotalPaid || 0)))),
     };
 
     res.json({
