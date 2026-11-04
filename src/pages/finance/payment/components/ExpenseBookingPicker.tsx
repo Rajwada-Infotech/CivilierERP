@@ -36,9 +36,9 @@ export function ExpenseBookingPicker({
   jvLines?: PayableJVLine[];
   jvLinesLoading?: boolean;
   selectedJVLine?: PayableJVLine | null;
-  /** What a saved payment being edited is already tagged to. A fully paid invoice or JV is no longer among the options, so
-   *  it can't be found there. `locked`: saving an edit does not change this tag, so the picker must not offer to. */
-  savedTag?: { kind: string; label: string; locked: boolean } | null;
+  /** What a saved payment being edited is already tagged to, until another is picked. A fully paid invoice or JV is no
+   *  longer among the options, so it can't be found there. */
+  savedTag?: { kind: string; label: string } | null;
   onJVLineSelect?: (line: PayableJVLine) => void;
   onJVLineClear?: () => void;
   /** "Merge invoices into one payment" — called with the full, validated
@@ -88,7 +88,7 @@ export function ExpenseBookingPicker({
   }, []);
 
   const selected = options.find((o) => o.id === value);
-  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary;
+  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary || !!savedTag;
 
   // A search like "194" also matches ledger names ("TDS SECTION 194H"), which
   // buried JV-2026-00194 itself under dozens of unrelated lines — so lines
@@ -234,7 +234,7 @@ export function ExpenseBookingPicker({
         {/* Trigger */}
         <button
           type="button"
-          disabled={(loading && contractsLoading) || !!savedTag?.locked}
+          disabled={loading && contractsLoading}
           onClick={() => setOpen((v) => !v)}
           className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait hover:border-primary/40 transition-colors"
         >

@@ -1287,18 +1287,15 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
 router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(paymentBodySchema), async (req, res) => {
   if (!(await assertPaymentProjectAllowed(req, res, req.body))) return;
   const { id } = req.params;
+  let { PAmount, PProject, PCompany, PExpenseRef } = req.body;
   const {
     PPaymentName,
     PRemarks,
     PMode,
-    PAmount,
     PDocType,
     PDate,
     PBankID,
     PBankName,
-    PProject,
-    PCompany,
-    PExpenseRef,
     parentDocNo,
     rootExBDocNo,
     // Cheque
@@ -1330,6 +1327,60 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
+
+    // What this payment settles. Left alone unless the form says it was changed (tagChange). Checked here, before an approved
+    // payment's ledger entries are reversed below, so a refused change leaves everything as it was.
+    const paymentId = parseInt(id, 10);
+    const tagChange = req.body.tagChange === true;
+    const oldInvoiceLinks = await getLinks(pool, sql, paymentId);
+    const oldJvLinks = (await pool.request().input("id", sql.Int, paymentId)
+      .query("SELECT COUNT(*) AS n FROM dbo.PaymentJvLineLink WHERE PPaymentID = @id")).recordset[0].n;
+    let nextJvLineId = beforeSnapshot?.JVLineId ?? null;
+    let nextPartyId = beforeSnapshot?.PPartyId ?? null;
+    let nextInvoiceLinks = oldInvoiceLinks;
+    const amountChanged = Math.abs((Number(PAmount) || 0) - (Number(beforeSnapshot?.PAmount) || 0)) > 0.005;
+
+    if (tagChange) {
+      if (req.body.ContractId || beforeSnapshot?.ContractId) {
+        return res.status(400).json({ error: "A contract can't be added or changed on a saved payment. Delete the payment and create it again." });
+      }
+      nextJvLineId = req.body.JVLineId ? parseInt(req.body.JVLineId, 10) : null;
+      nextPartyId = req.body.partyId ? parseInt(req.body.partyId, 10) : nextPartyId;
+      nextInvoiceLinks = [];
+      if (Array.isArray(req.body.ExpenseBookingIds) && req.body.ExpenseBookingIds.length > 0) {
+        const resolved = await resolveMergedInvoices(pool, sql, req.body.ExpenseBookingIds);
+        nextInvoiceLinks = resolved.links;
+        PCompany = String(resolved.companyId);
+        PProject = String(resolved.projectRaw ?? "");
+        PAmount = resolved.totalAmount;
+        PExpenseRef = null;
+        nextPartyId = resolved.supplierId;
+        nextJvLineId = null;
+      }
+      if (nextJvLineId) PExpenseRef = null;
+    } else if (amountChanged && (oldJvLinks > 0 || oldInvoiceLinks.length > 0)) {
+      return res.status(400).json({ error: "This payment settles several invoices or JVs, each with its own share. Pick what it settles again to change the amount." });
+    }
+
+    if (nextJvLineId && (tagChange || amountChanged)) {
+      const line = (await pool.request().input("line", sql.Int, nextJvLineId).input("id", sql.Int, paymentId).query(`
+        SELECT jv.JVNo, jv.Status, jvl.LHeadId, jvl.CreditAmount,
+          ISNULL((SELECT SUM(np.PAmount) FROM dbo.NewPayment np
+                  WHERE np.JVLineId = jvl.LineID AND np.PPaymentID <> @id AND ISNULL(np.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Deleted')), 0)
+          + ISNULL((SELECT SUM(k.Amount) FROM dbo.PaymentJvLineLink k JOIN dbo.NewPayment np ON np.PPaymentID = k.PPaymentID
+                  WHERE k.JVLineId = jvl.LineID AND np.PPaymentID <> @id AND ISNULL(np.Status, N'') NOT IN (N'Rejected', N'Cancelled', N'Deleted')), 0) AS OtherPayments
+        FROM dbo.JournalVoucherLines jvl JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+        WHERE jvl.LineID = @line AND jvl.CreditAmount > 0`)).recordset[0];
+      if (!line) return res.status(404).json({ error: "That JV line was not found." });
+      if (tagChange && line.Status !== "Approved") {
+        return res.status(400).json({ error: `${line.JVNo} is ${line.Status}. Only an Approved JV can be paid.` });
+      }
+      const room = Math.round((Number(line.CreditAmount) - Number(line.OtherPayments)) * 100) / 100;
+      if ((Number(PAmount) || 0) > room + 0.005) {
+        return res.status(400).json({ error: `${line.JVNo} has only ₹${room.toFixed(2)} left to pay, after its other payments.` });
+      }
+      nextPartyId = line.LHeadId;
+    }
 
     // A CRM refund payout may already have been paid and settled in CRM.
     // Editing it could change the voucher while leaving that settlement in
@@ -1469,6 +1520,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("PCardId", sql.Int, PCardId || null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply === undefined ? null : (oaSkipAutoApply ? 1 : 0))
       .input("PUpdatedBy", sql.NVarChar(100), userEmail)
+      .input("JVLineId", sql.Int, nextJvLineId)
+      .input("PPartyId", sql.Int, nextPartyId)
       .input("ExpectedStatus", sql.NVarChar(20), beforeSnapshot?.Status || null)
       .input("TDSId", sql.Int, tdsSnapshotPut.tdsId)
       .input("TDSNature", sql.NVarChar(200), tdsSnapshotPut.tdsNature)
@@ -1488,6 +1541,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
           PProject             = @PProject,
           PCompany             = @PCompany,
           PExpenseRef          = @PExpenseRef,
+          ${tagChange || amountChanged ? "JVLineId = @JVLineId, PPartyId = @PPartyId," : ""}
           ParentDocNo          = @ParentDocNo,
           RootExBDocNo         = @RootExBDocNo,
           PChequeNo            = @PChequeNo,
@@ -1513,6 +1567,16 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     }
 
     await replaceAllocations(() => pool.request(), sql, "NewPayment", parseInt(id, 10), expenseHeadAllocationsPut);
+
+    if (tagChange) {
+      await pool.request().input("id", sql.Int, paymentId).query("DELETE FROM dbo.PaymentJvLineLink WHERE PPaymentID = @id");
+      await replaceLinks(() => pool.request(), sql, paymentId, nextInvoiceLinks);
+      // The invoices it no longer settles, and the new ones, recompute what is paid.
+      const docNos = new Set([...oldInvoiceLinks, ...nextInvoiceLinks].map((l) => l.eDocNo));
+      if (beforeSnapshot?.PExpenseRef && beforeSnapshot.PExpenseRef !== PExpenseRef) docNos.add(beforeSnapshot.PExpenseRef);
+      for (const docNo of docNos) await _syncBillStatus(pool, docNo);
+      await bumpCacheVersion("journal-voucher");
+    }
 
     // Sync bill status since amount may have changed
     const updatedRef = await pool.request().input("id", sql.Int, id)

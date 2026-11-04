@@ -859,6 +859,8 @@ const Payment: React.FC = () => {
   // GL posting is identical to any other payment; see
   // backend/routes/journalVoucher.js's GET /payable-lines for eligibility).
   const [selectedJVLine, setSelectedJVLine] = useState<PayableJVLine | null>(null);
+  // On an edit: the invoice / JV was changed here, so the save carries the new tag. Otherwise the saved tag is left alone.
+  const [tagTouched, setTagTouched] = useState(false);
   const { data: jvLineOptions = [], isLoading: jvLinesLoading } = useQuery<PayableJVLine[]>({
     queryKey: ["payment-payable-jv-lines"],
     queryFn: () => getPayableJVLines(),
@@ -892,6 +894,11 @@ const Payment: React.FC = () => {
     }));
   };
   const clearJVLineLink = () => {
+    // Nothing picked here, only a saved tag: just drop it. Picking an invoice comes through here too, and must keep what it filled in.
+    if (!selectedJVLine) {
+      setForm((prev) => (prev.jvLineId ? { ...prev, jvLineId: null } : prev));
+      return;
+    }
     setSelectedJVLine(null);
     setForm((prev) => ({
       ...prev,
@@ -1141,6 +1148,7 @@ const Payment: React.FC = () => {
   };
 
   const openEdit = (rec: PaymentRecord) => {
+    setTagTouched(false);
     setSelectedContract(null);
     setSelectedJVLine(null);
     setEditingId(rec.id);
@@ -2084,6 +2092,7 @@ const Payment: React.FC = () => {
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
       JVLineId: form.jvLineId ?? null,
+      tagChange: !!editingId && tagTouched,
       // Direct Expense Payment (migration 303) — pay one or more Expense
       // Heads straight from the bank instead of a Party/Invoice.
       EExpenseHeadAllocations:
@@ -2397,30 +2406,42 @@ const Payment: React.FC = () => {
                         <ExpenseBookingPicker
                           options={filteredOptions}
                           value={form.expenseId}
-                          onChange={handleExpenseSelect}
+                          onChange={(id, amount) => {
+                            setTagTouched(true);
+                            return handleExpenseSelect(id, amount);
+                          }}
                           loading={loadingExpense}
                           contracts={contractOptions}
                           contractsLoading={contractsLoading}
                           selectedContract={selectedContract}
-                          onContractSelect={handleContractSelect}
+                          onContractSelect={(c) => {
+                            setTagTouched(true);
+                            handleContractSelect(c);
+                          }}
                           onContractClear={clearContractLink}
                           jvLines={jvLineOptions}
                           jvLinesLoading={jvLinesLoading}
                           selectedJVLine={selectedJVLine}
                           savedTag={
-                            !editingId
+                            !editingId || tagTouched
                               ? null
                               : form.jvNo
-                                ? { kind: "JV", label: form.jvNo, locked: true }
+                                ? { kind: "JV", label: form.jvNo }
                                 : form.mergedDocNos?.length
-                                  ? { kind: "Merged", label: form.mergedDocNos.join(", "), locked: true }
+                                  ? { kind: "Merged", label: form.mergedDocNos.join(", ") }
                                   : form.expenseRef
-                                    ? { kind: "EXB", label: form.expenseRef, locked: false }
+                                    ? { kind: "EXB", label: form.expenseRef }
                                     : null
                           }
-                          onJVLineSelect={handleJVLineSelect}
+                          onJVLineSelect={(line) => {
+                            setTagTouched(true);
+                            handleJVLineSelect(line);
+                          }}
                           onJVLineClear={clearJVLineLink}
-                          onMergeConfirm={handleMergeConfirm}
+                          onMergeConfirm={(selected) => {
+                            setTagTouched(true);
+                            handleMergeConfirm(selected);
+                          }}
                           mergedSummary={mergedSummary}
                           onMergeClear={handleMergeClear}
                           onRefreshOptions={refetchExpenseOptions}
