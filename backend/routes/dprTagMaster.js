@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
+const { cache } = require("../middleware/cache");
 
 // Tags for Civil Work DPR activities (dbo.DprTagMaster). A tag is linked to an activity through
 // dbo.ActivityMaster.TagId; new tags are also auto-created from the Activity Master form.
@@ -38,7 +39,9 @@ async function findOrCreateTag(pool, rawName, actor) {
 }
 
 // GET / — every tag with how many activities use it
-router.get("/", authMiddleware, async (req, res) => {
+// One list for everyone, read again after any save (activity counts change when activities are added). The tag
+// picker sits on many civil-work screens; uncached this ran ~26,500 times, each counting 412,000 activities.
+router.get("/", authMiddleware, cache("dpr-tag-master", 300, { shared: true, dropOnAnyWrite: true }), async (req, res) => {
   try {
     const pool = await getPool();
     const r = await pool.request().query(`

@@ -1,4 +1,4 @@
-﻿// Vehicle In/Out document â€” maps a full Vehicle In/Out record (GET
+﻿// Vehicle In/Out document — maps a full Vehicle In/Out record (GET
 // /vehicle-in-out/:id, with Items) onto the shared letterhead layout
 // (letterheadDocument.ts) for Print and Generate PDF. Used by the Vehicle In/Out
 // page and the Approval Inbox popup.
@@ -45,16 +45,16 @@ export function buildVehicleInOutLetterhead(rec: any, company: LetterheadCompany
       {
         label: "Received From :",
         lines: [
-          rec.SupplierName || "â€”",
+          rec.SupplierName || "—",
           supplier.address || "",
           supplier.contact ? `Contact: ${supplier.contact}` : "",
           supplier.gst ? `GSTIN: ${supplier.gst}` : "",
         ],
       },
-      { label: "Purchase Order :", lines: [rec.PONumber || "â€”"] },
-      { label: "Project / Site :", lines: [rec.ProjectName || "â€”"] },
-      { label: "Vehicle :", lines: [rec.VehicleNo || "â€”", rec.ChallanNo ? `Challan No: ${rec.ChallanNo}` : ""] },
-      { label: "Gate Entry :", lines: [entry || "â€”"] },
+      { label: "Purchase Order :", lines: [rec.PONumber || "—"] },
+      { label: "Project / Site :", lines: [rec.ProjectName || "—"] },
+      { label: "Vehicle :", lines: [rec.VehicleNo || "—", rec.ChallanNo ? `Challan No: ${rec.ChallanNo}` : ""] },
+      { label: "Gate Entry :", lines: [entry || "—"] },
       ...(exit ? [{ label: "Gate Exit :", lines: [exit] }] : []),
     ],
     columns: [
@@ -64,15 +64,15 @@ export function buildVehicleInOutLetterhead(rec: any, company: LetterheadCompany
     ],
     rows: items.map((it) => ({
       cells: [
-        it.ItemName || "â€”",
+        it.ItemName || "—",
         `${Number(it.ReceivedQty ?? it.Quantity ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 3 })}${it.UomName ? ` ${it.UomName}` : ""}`,
-        Number(it.Weight) > 0 ? `${Number(it.Weight).toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${it.WeightUnit || "kg"}` : "â€”",
+        Number(it.Weight) > 0 ? `${Number(it.Weight).toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${it.WeightUnit || "kg"}` : "—",
       ],
-      sub: [it.Brand ? `Brand: ${it.Brand}` : "", it.Quality ? `Quality: ${it.Quality}` : ""].filter(Boolean).join("  Â·  ") || null,
+      sub: [it.Brand ? `Brand: ${it.Brand}` : "", it.Quality ? `Quality: ${it.Quality}` : ""].filter(Boolean).join("  ·  ") || null,
     })),
     summary: [
       { label: "Total Items", value: String(items.length) },
-      { label: "Challan No", value: rec.ChallanNo || "â€”", bold: true, rule: true },
+      { label: "Challan No", value: rec.ChallanNo || "—", bold: true, rule: true },
     ],
     notes: remarks ? [{ title: "Remarks", lines: [remarks] }] : [],
     signLabel: "Received By",

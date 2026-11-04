@@ -44,7 +44,6 @@ yarn.lock
 pnpm-lock.yaml
 bun.lock
 README/
-backend/uploads/tickets/
 implementation_plan.md
 hotfix_portal.txt
 hotfix_ticketchat.txt
@@ -65,7 +64,6 @@ CivilierERP Documentation.pdf
 # Never committed; production is served from /apk-releases/ by nginx instead.
 public/downloads/
 
-backend/uploads/crm-invoices/
 
 # Generated at CI build time (git commit + build timestamp) so a deploy can
 # verify what actually landed on a box instead of trusting "no error" — see
@@ -75,3 +73,6 @@ backend/build-info.json
 
 # Firebase client config (holds an API key) - supplied to EAS as the GOOGLE_SERVICES_JSON file secret
 google-services.json
+
+# Files people upload live on the server's uploads volume, never in git.
+backend/uploads/

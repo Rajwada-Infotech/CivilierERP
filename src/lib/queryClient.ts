@@ -48,6 +48,11 @@ const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("
 /** True for a minute after a save in this tab or another tab of this browser. */
 export const wantsFresh = () => Date.now() - lastWriteAt < FRESH_FOR_MS;
 
+/** The X-Fresh header for a read: how many ms ago the last save was (the server's caches that clear on every save
+ *  only skip themselves right after one — backend/middleware/cache.js), or nothing when there was none lately. */
+export const freshHeader = (): Record<string, string> =>
+  wantsFresh() ? { "X-Fresh": String(Math.max(1, Date.now() - lastWriteAt)) } : {};
+
 export function refreshAfterWrite(fromOtherTab = false) {
   lastWriteAt = Date.now();
   if (!fromOtherTab) channel?.postMessage("saved");

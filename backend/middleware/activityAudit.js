@@ -7,13 +7,15 @@ const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const { bumpCacheVersion, redisZIncrBy } = require("../redis");
 
-// Housekeeping writes that are not anyone's work.
+// Housekeeping writes that are not anyone's work and change no business data.
 const HOUSEKEEPING = [
   /^\/api\/user-activity/,
-  /^\/api\/script-console/, // keeps its own encrypted record (dbo.ScriptRunLog); scripts and keys must not land in this log
   /^\/api\/home\/usage/,
   /^\/api\/users\/(login|logout|refresh)/,
 ];
+// The Script Console keeps its own encrypted record (dbo.ScriptRunLog); scripts and keys must not land in this
+// log. Not housekeeping: a script can change data, so it still refreshes caches (middleware/writeInvalidator.js).
+const OWN_LOG = [/^\/api\/script-console/];
 // POSTs that only look things up (previews, checks, sums). Their replies carry
 // X-Changes-Nothing, so the app does not treat them as a save and re-read every
 // list on screen — a screen that reads one of these as a query would otherwise
@@ -22,8 +24,9 @@ const LOOKUP = [
   /^\/api\/doc-search/,
   /\/(preview|naming-preview|validate|calculate|bulk-search|price-quote)(\?|$)/,
 ];
-const SKIP = [...HOUSEKEEPING, ...LOOKUP];
+const SKIP = [...HOUSEKEEPING, ...OWN_LOG, ...LOOKUP];
 const isLookup = (req) => LOOKUP.some((rx) => rx.test(req.originalUrl || req.url));
+const isHousekeeping = (req) => HOUSEKEEPING.some((rx) => rx.test(req.originalUrl || req.url));
 
 const ACTION = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
 const WEIGHT = { create: 10, update: 8, delete: 15 };
@@ -197,4 +200,4 @@ function activityAudit(req, res, next) {
   next();
 }
 
-module.exports = { activityAudit, summarise, identify, isLookup };
+module.exports = { activityAudit, summarise, identify, isLookup, isHousekeeping };

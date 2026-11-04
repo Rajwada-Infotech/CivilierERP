@@ -259,7 +259,23 @@ const WORKFLOW_ID_MAP = {
  * Fetch the active workflow for a module.
  * Returns null if none configured.
  */
+// A workflow changes only when Approval Setup is saved, but every approval check read it from the database
+// (~330,000 reads). Kept here for WORKFLOW_TTL_MS, dropped at once when Approval Setup saves
+// (invalidateWorkflowCache, routes/approvalWorkflows.js); another server instance sees a change within the TTL.
+// Each caller gets its own copy, so nothing a caller does to it can reach the next one.
+const WORKFLOW_TTL_MS = 15_000;
+const workflowCache = new Map();
+function invalidateWorkflowCache() { workflowCache.clear(); }
+
 async function getWorkflow(module) {
+  const hit = workflowCache.get(module);
+  if (hit && Date.now() - hit.at < WORKFLOW_TTL_MS) return hit.value && structuredClone(hit.value);
+  const value = await readWorkflow(module);
+  workflowCache.set(module, { value, at: Date.now() });
+  return value && structuredClone(value);
+}
+
+async function readWorkflow(module) {
   const pool = getPool();
   const workflowId = WORKFLOW_ID_MAP[module] || module;
   const result = await pool
@@ -445,39 +461,35 @@ async function hasUserApprovedLevel(tableName, recordId, level, userId, executor
   return result.recordset.length > 0;
 }
 
-async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
+// This cycle's approvals of one record (Level >= 1), in one read — the level checks below work on these rows.
+async function cycleApprovals(tableName, recordId, executor = null) {
   const exec = executor || getPool();
   const cutoff = currentCycleCutoffSql(tableName, recordId);
-  if (levelDef?.mode === "all" && Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0) {
-    const result = await exec
-      .request()
-      .input("TableName", sql.NVarChar(100), tableName)
-      .input("RecordId", sql.Int, recordId)
-      .input("Level", sql.Int, level).query(`
-        SELECT DISTINCT UserId, Role FROM dbo.ApprovalAuditLog
-        WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
-          AND ActionStatus = 'Approved'
-          AND ActionAt >= ${cutoff}
-      `);
-    // Super Admin parallel sign-off immediately satisfies any multi-user level
-    if (result.recordset.some((r) => isSuperAdmin(r.Role))) {
-      return true;
-    }
-    const approvedUserIds = new Set(
-      result.recordset.filter((r) => r.UserId != null).map((r) => r.UserId),
-    );
-    return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
-  }
   const result = await exec
     .request()
     .input("TableName", sql.NVarChar(100), tableName)
-    .input("RecordId", sql.Int, recordId)
-    .input("Level", sql.Int, level).query(`
-      SELECT TOP 1 1 AS found FROM dbo.ApprovalAuditLog
-      WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level AND ActionStatus = 'Approved'
+    .input("RecordId", sql.Int, recordId).query(`
+      SELECT Level, UserId, Role FROM dbo.ApprovalAuditLog
+      WHERE TableName = @TableName AND RecordId = @RecordId AND Level >= 1 AND ActionStatus = 'Approved'
         AND ActionAt >= ${cutoff}
     `);
-  return result.recordset.length > 0;
+  return result.recordset;
+}
+
+// Whether one level is satisfied, from this cycle's approval rows (see the mode rules above).
+function levelSatisfiedBy(rows, level, levelDef) {
+  const atLevel = rows.filter((r) => Number(r.Level) === Number(level));
+  if (levelDef?.mode === "all" && Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0) {
+    // Super Admin parallel sign-off immediately satisfies any multi-user level
+    if (atLevel.some((r) => isSuperAdmin(r.Role))) return true;
+    const approvedUserIds = new Set(atLevel.filter((r) => r.UserId != null).map((r) => r.UserId));
+    return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
+  }
+  return atLevel.length > 0;
+}
+
+async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
+  return levelSatisfiedBy(await cycleApprovals(tableName, recordId, executor), level, levelDef);
 }
 
 /**
@@ -489,9 +501,10 @@ async function isLevelSatisfied(tableName, recordId, level, levelDef, executor =
  * alone would.
  */
 async function resolveCurrentLevel(tableName, recordId, totalLevels, levelDefs, executor = null, opts = {}) {
+  // One read for every level (it used to be one query per level, ~1.7 million of them).
+  const rows = totalLevels > 0 ? await cycleApprovals(tableName, recordId, executor) : [];
   for (let level = 1; level <= totalLevels; level++) {
-    const satisfied = await isLevelSatisfied(tableName, recordId, level, levelDefs[level - 1], executor);
-    if (!satisfied) return level;
+    if (!levelSatisfiedBy(rows, level, levelDefs[level - 1])) return level;
   }
   // Every level reads as approved. For a record that is still Pending this
   // means it was amended after approval: the edit routes flip Status back to
@@ -968,6 +981,8 @@ module.exports = {
   guardEdit,
   guardEditAnyStage,
   restartApprovalCycle,
+  invalidateWorkflowCache,
+  levelSatisfiedBy,
   getWorkflow,
   getApprovedLevelCount,
   getRecordStatus,

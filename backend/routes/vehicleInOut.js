@@ -9,20 +9,20 @@
  * Perms   : Module="Material", SubModule="VehicleInOut"
  *
  * Attachments (camera captures + file picks) are stored as binary in
- * dbo.VehicleInOutAttachments â€” same pattern as dbo.ticket_attachments.
+ * dbo.VehicleInOutAttachments — same pattern as dbo.ticket_attachments.
  * No disk dependency: any app instance can serve any attachment, and
  * attachments are included in normal DB backups automatically.
  *
  * Routes
- *   GET    /                     â€” paginated list
- *   GET    /next-number          â€” preview next VEH-YYYY-NNNNN
- *   GET    /:id                  â€” single record (includes attachments[])
- *   POST   /                     â€” create (links pending attachmentIds)
- *   PUT    /:id                  â€” update (links/unlinks attachmentIds)
- *   DELETE /:id                  â€” delete (attachments cascade-delete)
- *   POST   /upload                â€” upload one or more files to DB, returns attachment ids/urls
- *   GET    /attachment/:attachId â€” stream a single attachment's binary
- *   DELETE /attachment/:attachId â€” remove a single attachment (e.g. user removes it before saving)
+ *   GET    /                     — paginated list
+ *   GET    /next-number          — preview next VEH-YYYY-NNNNN
+ *   GET    /:id                  — single record (includes attachments[])
+ *   POST   /                     — create (links pending attachmentIds)
+ *   PUT    /:id                  — update (links/unlinks attachmentIds)
+ *   DELETE /:id                  — delete (attachments cascade-delete)
+ *   POST   /upload                — upload one or more files to DB, returns attachment ids/urls
+ *   GET    /attachment/:attachId — stream a single attachment's binary
+ *   DELETE /attachment/:attachId — remove a single attachment (e.g. user removes it before saving)
  */
 
 "use strict";
@@ -51,10 +51,10 @@ const {
   getVehicleInOutItemsEnriched,
 } = require("../services/poVehicleGrnChain");
 
-// The entry/exit time pickers send a naive "YYYY-MM-DDTHH:MM" string â€” the
+// The entry/exit time pickers send a naive "YYYY-MM-DDTHH:MM" string — the
 // user's local (IST) wall-clock reading, with no timezone info attached.
 // `new Date(...)` on a string like that parses it against the SERVER
-// process's own timezone, which on this EC2 host is UTC â€” so "07:02" was
+// process's own timezone, which on this EC2 host is UTC — so "07:02" was
 // being read as 07:02 UTC (12:32 PM IST), well after the real IST "now",
 // and the future-time guard below rejected an exit time that was actually
 // hours in the past. Pin the offset explicitly instead of trusting
@@ -68,11 +68,11 @@ function parseIstDateTime(value) {
 
 const router = express.Router();
 
-// â”€â”€ Rate-limit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Rate-limit ────────────────────────────────────────────────────────────────
 router.use(apiRateLimit);
 
-// â”€â”€ Permission guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Approve/Reject are exempt â€” transition() (approvalService.js) is the real
+// ── Permission guard ─────────────────────────────────────────────────────────
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
 // authority there (role whitelist / approval-inbox edit right / named
 // workflow approver), not this blanket per-module permission gate.
 router.use((req, res, next) => {
@@ -80,7 +80,7 @@ router.use((req, res, next) => {
   return checkPermissionForMethod("Material", "VehicleInOut")(req, res, next);
 });
 
-// Any route with :id â€” refuse a Vehicle In/Out whose project is outside the
+// Any route with :id — refuse a Vehicle In/Out whose project is outside the
 // user's scope. /attachment/:attachId and /po-*/:poId use other param names.
 router.param("id", async (req, res, next, id) => {
   if (!req.projectScope) return next();
@@ -99,7 +99,7 @@ router.param("id", async (req, res, next, id) => {
   }
 });
 
-// â”€â”€ Multer â€” memory storage (files go to DB, not disk) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Multer — memory storage (files go to DB, not disk) ───────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB per file
@@ -118,7 +118,7 @@ const upload = multer({
   },
 });
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const CACHE_KEY = "vehicle_in_out";
 
 function userEmail(req, res) {
@@ -188,10 +188,10 @@ async function getAttachmentsFor(pool, vehicleInOutId) {
 /**
  * PO line items with how much has already been received across Vehicle
  * In/Out lots (excluding Rejected/Deleted header records and, when editing
- * an existing record, that record's own rows â€” otherwise a record would
+ * an existing record, that record's own rows — otherwise a record would
  * count its own already-saved quantity against itself and shrink its own
  * editable range every time it's opened). Independent of GRN's
- * PurchaseOrderItems.ReceivedQty â€” see migration 191's header comment.
+ * PurchaseOrderItems.ReceivedQty — see migration 191's header comment.
  */
 async function getPOItemsWithRemaining(pool, poId, excludeVehicleInOutId) {
   const request = pool.request().input("POID", sql.Int, poId);
@@ -242,8 +242,8 @@ class ValidationError extends Error {
  * left to receive on the PO (ordered - already received across other
  * lots, excluding this record's own rows when editing). Throws
  * ValidationError (caught by the route as a 400) if any line would push
- * received-so-far past what was ordered â€” the "don't let me save 1000
- * when I ordered 100" rule, enforced per PO line item. Pure â€” no writes â€”
+ * received-so-far past what was ordered — the "don't let me save 1000
+ * when I ordered 100" rule, enforced per PO line item. Pure — no writes —
  * so callers can validate before touching the header row.
  */
 const VALID_QUALITIES = new Set(["Excellent", "Good", "Bad"]);
@@ -258,13 +258,13 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
     .map((it) => ({
       poItemId: parseInt(it.poItemId, 10),
       receivedQty: Number(it.receivedQty) || 0,
-      // Optional real-time capture, base64 data URL â€” passed straight
+      // Optional real-time capture, base64 data URL — passed straight
       // through to the row without any validation of its own.
       photoBase64: typeof it.photoBase64 === "string" && it.photoBase64 ? it.photoBase64 : null,
-      // Quick inspection grade for this line â€” independent of the formal
+      // Quick inspection grade for this line — independent of the formal
       // quality-rejection debit note flow.
       quality: VALID_QUALITIES.has(it.quality) ? it.quality : null,
-      // Optional free-text brand for this line, captured at entry time â€”
+      // Optional free-text brand for this line, captured at entry time —
       // not sourced from the PO item, since the same ordered item can
       // arrive under different brands lot to lot.
       brand: typeof it.brand === "string" && it.brand.trim() ? it.brand.trim().slice(0, 100) : null,
@@ -293,7 +293,7 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
     }
     if (line.receivedQty > po.remainingQty + 1e-6) {
       throw new ValidationError(
-        `${po.itemName || "Item"}: cannot receive ${line.receivedQty} â€” only ${po.remainingQty} remaining on the PO (ordered ${po.orderedQty}, already received ${po.receivedSoFar}).`,
+        `${po.itemName || "Item"}: cannot receive ${line.receivedQty} — only ${po.remainingQty} remaining on the PO (ordered ${po.orderedQty}, already received ${po.receivedSoFar}).`,
       );
     }
   }
@@ -335,7 +335,7 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
   }
 }
 
-// â”€â”€ GET /next-number â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET /next-number ─────────────────────────────────────────────────────────
 router.get("/next-number", async (req, res) => {
   try {
     const pool = getPool();
@@ -347,7 +347,7 @@ router.get("/next-number", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /po-ids-with-vio â€” distinct PO ids that have at least one Vehicle
+// ── GET /po-ids-with-vio — distinct PO ids that have at least one Vehicle
 // In/Out record logged against them. Used by GRN.tsx to only offer POs in
 // its picker that have actually had a vehicle bring goods in, rather than
 // every Approved PO regardless of whether anything's arrived yet.
@@ -363,7 +363,7 @@ router.get("/po-ids-with-vio", async (req, res) => {
   }
 });
 
-// â”€â”€ GET / â€” paginated list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET / — paginated list ────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -372,14 +372,37 @@ router.get("/", async (req, res) => {
     const offset = (page - 1) * limit;
 
     const finYear = req.query.finYear || null;
-    const search = req.query.search || null;
+    const search = String(req.query.search || "").trim();
+
+    // A bare number means a document number: "85" is VEH-2026-00085, not every record with an 8 and a 5 somewhere in
+    // it (VEH-2026-00850, vehicle WB 85 1234). Only when no document has that number does it look in vehicle and
+    // challan numbers. Anything else searches the text columns as before.
+    const DOC_TAIL = "TRY_CAST(RIGHT(v.DocNo, PATINDEX('%[^0-9]%', REVERSE(v.DocNo) + 'x') - 1) AS BIGINT)";
+    const isDocNumber = /^\d{1,18}$/.test(search);
+    let searchSql = "";
+    if (isDocNumber) {
+      const hit = await pool
+        .request()
+        .input("FinYear", sql.NVarChar(20), finYear)
+        .input("DocTail", sql.BigInt, search)
+        .query(`
+          SELECT TOP 1 1 AS Hit FROM dbo.VehicleInOut v
+          WHERE ${DOC_TAIL} = @DocTail AND (@FinYear IS NULL OR v.FinYear = @FinYear)${projectPredicate(req.projectScope, "v.ProjectID")}
+        `);
+      searchSql = hit.recordset.length
+        ? `AND ${DOC_TAIL} = @DocTail`
+        : "AND (v.VehicleNo LIKE @Search OR v.ChallanNo LIKE @Search)";
+    } else if (search) {
+      searchSql = "AND (v.DocNo LIKE @Search OR v.VehicleNo LIKE @Search OR v.ChallanNo LIKE @Search OR v.SupplierName LIKE @Search OR v.PONumber LIKE @Search)";
+    }
 
     const request = pool
       .request()
       .input("Offset", sql.Int, offset)
       .input("Limit", sql.Int, limit)
       .input("FinYear", sql.NVarChar(20), finYear)
-      .input("Search", sql.NVarChar(255), search ? `%${search}%` : null);
+      .input("Search", sql.NVarChar(255), `%${search}%`)
+      .input("DocTail", sql.BigInt, isDocNumber ? search : null);
 
     const result = await request.query(`
       SELECT
@@ -410,13 +433,7 @@ router.get("/", async (req, res) => {
       LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
       WHERE 1=1
         AND (@FinYear IS NULL OR v.FinYear = @FinYear)
-        AND (
-          @Search IS NULL OR
-          v.DocNo      LIKE @Search OR
-          v.VehicleNo  LIKE @Search OR
-          v.ChallanNo  LIKE @Search OR
-          v.SupplierName LIKE @Search
-        )${projectPredicate(req.projectScope, "v.ProjectID")}
+        ${searchSql}${projectPredicate(req.projectScope, "v.ProjectID")}
       ORDER BY v.VehicleInOutID DESC
       OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 
@@ -424,19 +441,13 @@ router.get("/", async (req, res) => {
       FROM dbo.VehicleInOut v
       WHERE 1=1
         AND (@FinYear IS NULL OR v.FinYear = @FinYear)
-        AND (
-          @Search IS NULL OR
-          v.DocNo      LIKE @Search OR
-          v.VehicleNo  LIKE @Search OR
-          v.ChallanNo  LIKE @Search OR
-          v.SupplierName LIKE @Search
-        )${projectPredicate(req.projectScope, "v.ProjectID")};
+        ${searchSql}${projectPredicate(req.projectScope, "v.ProjectID")};
     `);
 
     const rows = result.recordsets[0];
     const total = result.recordsets[1][0]?.Total ?? 0;
 
-    // Each entry's lines for the register â€” item, quantity, quality grade and weight (photos stay on GET /:id).
+    // Each entry's lines for the register — item, quantity, quality grade and weight (photos stay on GET /:id).
     if (rows.length) {
       const ir = pool.request();
       rows.forEach((r, i) => ir.input(`v${i}`, sql.Int, r.VehicleInOutID));
@@ -466,10 +477,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€ GET /po-options â€” POs that can be picked on a Vehicle In/Out entry â”€â”€â”€â”€â”€â”€â”€
+// ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── GET /po-options — POs that can be picked on a Vehicle In/Out entry ───────
 // The form's PO picker used to read /api/purchase-orders, which is gated by the
-// separate Purchase Orders page right â€” so a store user with Vehicle In/Out
+// separate Purchase Orders page right — so a store user with Vehicle In/Out
 // rights but none on Purchase Orders got an empty "No POs available" list.
 // This serves just what the picker needs, under the Vehicle In/Out right this
 // router already enforces. Must stay above "/:id".
@@ -492,20 +503,20 @@ router.get("/po-options", async (req, res) => {
   }
 });
 
-// â”€â”€ PO <-> supplier chat, under the Vehicle In/Out right â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PO <-> supplier chat, under the Vehicle In/Out right ─────────────────────
 // The "Supplier" tab of a Vehicle In/Out entry embeds the PO chat. It used the
 // Purchase Orders routes (separate right); same handlers, gated by this router.
 const poHandlers = () => require("./purchaseOrders").poHandlers;
 router.get("/po-chat/:id/comments", (req, res) => poHandlers().listComments(req, res));
 router.post("/po-chat/:id/comment", (req, res) => poHandlers().addComment(req, res));
 
-// â”€â”€ GET /pending-summary â€” POs with goods still outstanding after partial
+// ── GET /pending-summary — POs with goods still outstanding after partial
 // Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
 // PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
 // aggregated across all line items on the PO. LastVehicleInOutID points at
 // the most recent lot already logged against that PO (if any), so clicking
 // a widget row can jump straight to what's already come in.
-// Must be registered before "/:id" â€” otherwise Express matches "/:id" first
+// Must be registered before "/:id" — otherwise Express matches "/:id" first
 // with id=NaN, the lookup finds nothing, and this 404s as "Not found".
 router.get("/pending-summary", async (req, res) => {
   try {
@@ -528,7 +539,7 @@ router.get("/pending-summary", async (req, res) => {
         -- catalog rows are tagged 'SubGroup'/'Group' (their catalog-tree
         -- category, not "Goods" vs "Service") or have no Item_Master_Group
         -- match at all, so an exact 'Goods' filter silently excluded almost
-        -- every real PO's items from this CTE â€” which meant it never
+        -- every real PO's items from this CTE — which meant it never
         -- appeared in ItemAgg below, so pending-summary (and therefore the
         -- Vehicle In/Out PO picker) reported it as having nothing pending
         -- and hid it entirely, even freshly-approved POs no vehicle had
@@ -631,8 +642,8 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /po/:poId/pending-grn â€” Vehicle In/Out lots eligible for a new GRN â”€â”€â”€
-// Excludes any lot that already has an active (non-Rejected) GRN â€” the
+// ── GET /po/:poId/pending-grn — Vehicle In/Out lots eligible for a new GRN ───
+// Excludes any lot that already has an active (non-Rejected) GRN — the
 // "PO -> Vehicle In/Out -> GRN" picker on the GRN form uses this to only
 // offer lots that haven't been consumed yet.
 router.get("/po/:poId/pending-grn", async (req, res) => {
@@ -647,7 +658,7 @@ router.get("/po/:poId/pending-grn", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /:id/po â€” fetch linked PO details (no PO permission needed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET /:id/po — fetch linked PO details (no PO permission needed) ──────────
 router.get("/:id/po", async (req, res) => {
   try {
     const pool = getPool();
@@ -697,7 +708,7 @@ router.get("/:id/po", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /:id/items-enriched â€” this record's items joined with PO rate/UOM/tax â”€â”€
+// ── GET /:id/items-enriched — this record's items joined with PO rate/UOM/tax ──
 // Used by the GRN form once a Vehicle In/Out lot is picked: builds GRN line
 // items straight from what this specific vehicle actually brought in.
 router.get("/:id/items-enriched", async (req, res) => {
@@ -712,7 +723,7 @@ router.get("/:id/items-enriched", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /po-items/:poId â€” PO line items with remaining-to-receive quantity â”€â”€â”€
+// ── GET /po-items/:poId — PO line items with remaining-to-receive quantity ───
 // Used both when picking a PO on a new record (no excludeVehicleInOutId) and
 // when editing an existing one (excludeVehicleInOutId=<this record's id>, so
 // its own already-saved quantities don't count against its own remaining).
@@ -731,7 +742,7 @@ router.get("/po-items/:poId", async (req, res) => {
   }
 });
 
-// â”€â”€ GET /:id/items â€” this record's own saved received quantities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET /:id/items — this record's own saved received quantities ─────────────
 router.get("/:id/items", async (req, res) => {
   try {
     const pool = getPool();
@@ -748,7 +759,7 @@ router.get("/:id/items", async (req, res) => {
   }
 });
 
-// â”€â”€ POST / â€” create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── POST / — create ───────────────────────────────────────────────────────────
 router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
@@ -769,7 +780,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     challanNo,
     attachmentIds, // array of ids returned by POST /upload, still unlinked
     remarks,
-    items, // [{ poItemId, receivedQty }] â€” quantity received in this lot
+    items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
   if (!poId)
@@ -778,9 +789,9 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
     return res.status(400).json({ error: "challanNo is required" });
-  // Exit time is a backfill of when the vehicle actually left â€” never a
+  // Exit time is a backfill of when the vehicle actually left — never a
   // future appointment. The UI already caps the picker at "now", this is
-  // just the server-side backstop. Parsed via parseIstDateTime â€” the picker
+  // just the server-side backstop. Parsed via parseIstDateTime — the picker
   // sends a naive "wall clock" string with no timezone, and comparing it
   // raw against Date.now() reads it in the server process's own TZ (UTC on
   // this host), not the IST it actually represents.
@@ -791,7 +802,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
   let recordId = null;
 
   try {
-    // â”€â”€ 0a. A Short Closed PO is permanently retired â€” no further receipts â”€â”€
+    // ── 0a. A Short Closed PO is permanently retired — no further receipts ──
     if (poId) {
       const poStatusCheck = await pool
         .request()
@@ -800,12 +811,12 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
       const poStatus = poStatusCheck.recordset[0]?.Status;
       if (poStatus === "Short Closed") {
         return res.status(400).json({
-          error: "This Purchase Order has been Short Closed â€” no further transactions are permitted.",
+          error: "This Purchase Order has been Short Closed — no further transactions are permitted.",
         });
       }
     }
 
-    // â”€â”€ 0b. Validate received quantities against what's left on the PO â”€â”€â”€â”€â”€â”€
+    // ── 0b. Validate received quantities against what's left on the PO ──────
     // before touching the header row, so a rejected submission never
     // creates an orphaned Vehicle In/Out record.
     // Before the per-line quantity check, gate the whole submission if the PO
@@ -820,10 +831,10 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     }
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, null);
 
-    // â”€â”€ 1. Resolve doc type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 1. Resolve doc type ──────────────────────────────────────────────────
     const docTypeId = await resolveDocTypeId(pool, sql, "VEH");
 
-    // â”€â”€ 2. Lock next doc number â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 2. Lock next doc number ──────────────────────────────────────────────
     const finalDocNo = await lockNextDocNumber(pool, sql, {
       docTypeId,
       finYear: finYear || null,
@@ -833,7 +844,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
       parentDocNo: null,
     });
 
-    // â”€â”€ 3. Insert record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 3. Insert record ─────────────────────────────────────────────────────
     // Header, attachments and item lines are one unit: the header used to be saved on its own, so a failure
     // while saving the lines (an oversized photo, a PO line changed underneath) left an entry with no items
     // behind — and the user, seeing the error, saved again and got another one.
@@ -884,10 +895,10 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
 
     recordId = insert.recordset[0].VehicleInOutID;
 
-    // â”€â”€ 5. Link any attachments uploaded while filling out the form â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 5. Link any attachments uploaded while filling out the form ─────────
     await linkAttachments(tx, recordId, parseIdList(attachmentIds));
 
-    // â”€â”€ 6. Persist the validated received-quantity lines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 6. Persist the validated received-quantity lines ────────────────────
     await saveVehicleInOutItems(tx, recordId, validatedItems);
 
     await tx.commit();
@@ -896,14 +907,14 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
       throw writeErr;
     }
 
-    // â”€â”€ 4. Back-patch DocNumberSequence with the real PK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── 4. Back-patch DocNumberSequence with the real PK ────────────────────
     await backPatchRecordId(pool, sql, finalDocNo, "VehicleInOut", recordId);
 
     await bumpCacheVersion(CACHE_KEY);
 
-    // Auto-submit: transition Draft â†’ Pending immediately so no manual
+    // Auto-submit: transition Draft → Pending immediately so no manual
     // "Submit" step is required after creation (same pattern as Material
-    // Requests). Non-fatal â€” record is saved either way.
+    // Requests). Non-fatal — record is saved either way.
     try {
       await transition(
         "vehicle-in-out",
@@ -925,7 +936,7 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
   }
 });
 
-// â”€â”€ PUT /:id â€” update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PUT /:id — update ─────────────────────────────────────────────────────────
 router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
@@ -948,7 +959,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     challanNo,
     attachmentIds, // any newly-uploaded (still-unlinked) attachment ids to attach
     remarks,
-    items, // [{ poItemId, receivedQty }] â€” quantity received in this lot
+    items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
   if (!poId)
@@ -966,7 +977,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 
-    // Validate before writing anything â€” excludeVehicleInOutId=id so this
+    // Validate before writing anything — excludeVehicleInOutId=id so this
     // record's own previously-saved quantities don't count against its
     // own remaining allowance while re-editing it.
     const validatedItems = await validateVehicleInOutItems(pool, poId, items, id);
@@ -1047,7 +1058,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     }
 
     // A corrected, previously-Rejected record goes straight back into the
-    // approval queue on save â€” no separate "Submit" click. transition()'s
+    // approval queue on save — no separate "Submit" click. transition()'s
     // Pending branch writes a fresh Level=0 marker, which restarts approval
     // at level 1 regardless of what was approved before the rejection (see
     // approvalService.js's currentCycleCutoffSql).
@@ -1060,7 +1071,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
         console.error("[vehicle-in-out] auto-resubmit after edit failed:", resubmitErr.message);
         return res.status(207).json({
           success: true,
-          message: "Updated, but could not be re-submitted for approval â€” submit it manually.",
+          message: "Updated, but could not be re-submitted for approval — submit it manually.",
           resubmitError: resubmitErr.message,
         });
       }
@@ -1068,7 +1079,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
 
     res.json({
       success: true,
-      message: wasApproved ? "Updated â€” sent back for approval" : undefined,
+      message: wasApproved ? "Updated — sent back for approval" : undefined,
       reopenedForApproval: wasApproved,
       resubmitted,
     });
@@ -1077,7 +1088,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
   }
 });
 
-// â”€â”€ PUT /:id/submit â€” Draft/Rejected â†’ Pending â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PUT /:id/submit — Draft/Rejected → Pending ────────────────────────────────
 // Records are auto-submitted on creation; this is only needed to re-submit
 // after a rejection (or as a fallback if auto-submit failed).
 router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
@@ -1104,8 +1115,8 @@ router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req
   }
 });
 
-// â”€â”€ PUT /:id/approve â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// No requirePageRight gate â€” transition() is the real authority (role
+// ── PUT /:id/approve ──────────────────────────────────────────────────────────
+// No requirePageRight gate — transition() is the real authority (role
 // whitelist / approval-inbox edit right / named workflow approver); the
 // page-right gate used to 403 a named approver before transition() ever
 // ran, same bug fixed for journal-voucher.js.
@@ -1135,7 +1146,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-// â”€â”€ PUT /:id/reject â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PUT /:id/reject ───────────────────────────────────────────────────────────
 router.put("/:id/reject", async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
@@ -1163,9 +1174,9 @@ router.put("/:id/reject", async (req, res) => {
   }
 });
 
-// â”€â”€ DELETE /:id â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── DELETE /:id ───────────────────────────────────────────────────────────────
 // Attachments cascade-delete automatically via FK_VehicleInOutAttachments_Parent
-// (ON DELETE CASCADE) â€” no manual cleanup needed since everything lives in SQL.
+// (ON DELETE CASCADE) — no manual cleanup needed since everything lives in SQL.
 router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
@@ -1184,7 +1195,7 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
     if (!check.recordset[0])
       return res.status(404).json({ error: "Not found" });
 
-    // â”€â”€ Guard: a GRN already exists against this specific Vehicle In/Out record â”€â”€
+    // ── Guard: a GRN already exists against this specific Vehicle In/Out record ──
     const grnCheck = await pool
       .request()
       .input("ID", sql.Int, id)
@@ -1210,13 +1221,13 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
   }
 });
 
-// â”€â”€ POST /upload â€” attachment / camera photo (stored in DB, not disk) â”€â”€â”€â”€â”€â”€â”€â”€
+// ── POST /upload — attachment / camera photo (stored in DB, not disk) ────────
 // Files are uploaded while the user is still filling out the form, before a
-// VehicleInOutID exists â€” same flow as ticket attachments. Each row starts
+// VehicleInOutID exists — same flow as ticket attachments. Each row starts
 // with VehicleInOutID = NULL and gets linked once the parent record is
 // actually saved (see linkAttachments() in POST / and PUT /:id above).
 // Attaching files is part of creating a record as much as editing one, so it needs
-// create OR edit â€” it used to need edit alone, which refused create-only users.
+// create OR edit — it used to need edit alone, which refused create-only users.
 const uploadFiles = (req, res, next) =>
   upload.array("file", 20)(req, res, (err) => {
     if (!err) return next();
@@ -1271,7 +1282,7 @@ router.post("/upload", requireAnyPageAction("vehicle-in-out", ["create", "edit"]
   }
 });
 
-// â”€â”€ GET /attachment/:attachId â€” stream binary from DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── GET /attachment/:attachId — stream binary from DB ─────────────────────────
 router.get("/attachment/:attachId", async (req, res) => {
   try {
     const attachId = parseInt(req.params.attachId, 10);
@@ -1302,7 +1313,7 @@ router.get("/attachment/:attachId", async (req, res) => {
   }
 });
 
-// â”€â”€ DELETE /attachment/:attachId â€” remove a single attachment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── DELETE /attachment/:attachId — remove a single attachment ─────────────────
 // Used when the user removes a captured photo / file before saving the form,
 // or removes one from an existing record while editing.
 // A file that's still un-linked (uploaded on a form that hasn't been saved yet)

@@ -2,7 +2,7 @@
 // PO link, attachments and camera, print and the mutations. The page and its parts
 // read from this one object.
 import * as vehApi from "@/api/vehicleInOutApi";
-import React, { useRef, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Webcam from "react-webcam";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +41,16 @@ export function useVehicleInOut() {
   const [showPODetails, setShowPODetails] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  // The list is searched on the server, across every page; it used to filter only the 15 rows on screen.
+  const [appliedSearch, setAppliedSearch] = useState("");
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setAppliedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
   const [page, setPage] = useState(1);
   const [filterFY, setFilterFY] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -98,12 +108,13 @@ export function useVehicleInOut() {
     isLoading,
     isFetching,
   } = useQuery({
-    queryKey: ["vehicle-in-out", page, filterFY],
+    queryKey: ["vehicle-in-out", page, filterFY, appliedSearch],
     queryFn: () =>
       vehApi.getVehicleInOuts({
         page,
         limit: 15,
         finYear: filterFY || undefined,
+        search: appliedSearch || undefined,
       }),
     placeholderData: (prev) => prev,
   });
@@ -650,17 +661,7 @@ export function useVehicleInOut() {
     setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
 
   // ── Filtered list ─────────────────────────────────────────────────────────────
-  const filteredRecords = records.filter((r: any) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      r.DocNo?.toLowerCase().includes(q) ||
-      r.VehicleNo?.toLowerCase().includes(q) ||
-      r.ChallanNo?.toLowerCase().includes(q) ||
-      r.SupplierName?.toLowerCase().includes(q) ||
-      r.PONumber?.toLowerCase().includes(q)
-    );
-  });
+  const filteredRecords = records;
 
   // One request for every visible row's approval trail instead of one per
   // row — see useApprovalTrailsBulk's own comment.

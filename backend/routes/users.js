@@ -147,6 +147,22 @@ router.post("/login", async (req, res) => {
     // FIXED: Normalize role
     const normalizedRole = normalizeRole(user.roleName);
 
+    // Each login page is for its own people. Checked after the password, so a page can't be used to learn who has an account.
+    // `portal` comes from the web login pages; apps already installed on phones don't send it and are left as they were.
+    const portal = req.body.portal;
+    if (portal === "staff" || portal === "supplier") {
+      const isSupplier = normalizedRole === "supplier" || String(user.roleName || "").trim().toLowerCase() === "supplier";
+      if (portal === "staff" && isSupplier) {
+        return res.status(403).json({ error: "Supplier accounts sign in on the Supplier Portal." });
+      }
+      if (portal === "staff" && normalizedRole === "customer") {
+        return res.status(403).json({ error: "Customer accounts sign in on the Customer Portal." });
+      }
+      if (portal === "supplier" && !isSupplier) {
+        return res.status(403).json({ error: "This page is for supplier accounts. Please use the main login." });
+      }
+    }
+
     // Maintenance mode: only a super admin may sign in.
     {
       const { getMaintenanceState } = require("../services/maintenanceMode");
@@ -373,6 +389,16 @@ router.put(
       const statusReason = String(reason ?? "").trim();
       if (statusChanges && statusReason.length < 5) {
         return res.status(400).json({ error: "Give a reason (at least 5 characters) for making this user active or inactive." });
+      }
+      // A user switched back on cannot be switched off again for 90 days, whoever asks. On an active user the last status
+      // change is the day they were activated; an account that was never switched off has no date and is not held.
+      if (statusChanges && nowInactive && (await usersHaveStatusReason(pool))) {
+        const held = await pool.request().input("id", sql.Int, id).query(`
+          SELECT CONVERT(VARCHAR(10), DATEADD(DAY, 90, StatusChangedAt), 23) AS Until
+          FROM dbo.users WHERE id = @id AND StatusChangedAt IS NOT NULL AND DATEADD(DAY, 90, StatusChangedAt) > SYSDATETIME()`);
+        if (held.recordset.length) {
+          return res.status(409).json({ error: `This user was activated less than 90 days ago and cannot be made inactive until ${held.recordset[0].Until}.` });
+        }
       }
       if (statusChanges) res.locals.activityMessage = `${nowInactive ? "Made inactive" : "Made active"}: ${statusReason}`.slice(0, 120);
 

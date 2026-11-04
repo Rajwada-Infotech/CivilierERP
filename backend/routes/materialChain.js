@@ -194,7 +194,7 @@ async function getGRNsForPO(pool, poId) {
 async function getGRN(pool, id) {
   const r = await pool.request().input("id", sql.Int, id).query(`
     SELECT grn.GRNID AS id, grn.GRNNo, grn.DocNo, grn.GRNDate, grn.Status,
-           grn.POID, po.PurchaseOrderNo, po.DocNo AS PODocNo,
+           grn.POID, grn.VehicleInOutID, po.PurchaseOrderNo, po.DocNo AS PODocNo,
            grn.SupplierID, ahm.LHeadName AS SupplierName
     FROM dbo.GoodsReceiptNotes grn
     LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
@@ -202,6 +202,51 @@ async function getGRN(pool, id) {
     WHERE grn.GRNID = @id
   `);
   return r.recordset[0] || null;
+}
+
+// The GRNs raised against one vehicle entry.
+async function getGRNsForVIO(pool, vioId) {
+  const r = await pool.request().input("vioId", sql.Int, vioId).query(`
+    SELECT grn.GRNID AS id, grn.GRNNo, grn.DocNo, grn.GRNDate, grn.Status,
+           grn.SupplierID, ahm.LHeadName AS SupplierName, grn.TotalAmount
+    FROM dbo.GoodsReceiptNotes grn
+    LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
+    WHERE grn.VehicleInOutID = @vioId
+    ORDER BY grn.GRNID
+  `);
+  return r.recordset;
+}
+
+// Invoices booked straight against a PO, with no GRN in between.
+async function getExpensesForPO(pool, poId) {
+  const r = await pool.request().input("poId", sql.Int, poId).query(`
+    SELECT Eid AS id, EDocNo, EDocDate, EStatus, ENetAmount, EVendorInvoiceNo
+    FROM dbo.ExpenseBooking
+    WHERE ESourceType IN ('PO', 'WO_PO') AND TRY_CAST(ESourceId AS INT) = @poId
+    ORDER BY Eid
+  `);
+  return r.recordset;
+}
+
+// The invoices of several GRNs, each once: a merged invoice covers more than one of them.
+async function getExpensesForGRNs(pool, grns) {
+  const out = [];
+  const seen = new Set();
+  for (const grn of grns) {
+    for (const eb of await getExpensesForGRN(pool, grn.id)) {
+      if (!seen.has(eb.id)) {
+        seen.add(eb.id);
+        out.push(eb);
+      }
+    }
+  }
+  return out;
+}
+
+// The vehicle entries those GRNs came in on, each once.
+async function getVIOsOfGRNs(pool, grns) {
+  const ids = [...new Set(grns.map((g) => g.VehicleInOutID).filter(Boolean))];
+  return (await Promise.all(ids.map((id) => getVIO(pool, id)))).filter(Boolean);
 }
 
 // Invoices a GRN went into, merged ones included (services/expenseGrnLink.js).
@@ -323,8 +368,29 @@ async function upstreamOfPO(pool, po) {
   return out;
 }
 
-// Everything downstream of a Work Order: its MRs, their quotations and POs, and each PO's GRNs / vehicle
-// entries / invoices - one flat, de-duplicated list in document-stage order.
+// Everything downstream of some POs: their vehicle entries, GRNs and invoices (through a GRN or straight against the PO),
+// one de-duplicated list in document-stage order. Every document in the chain goes through this, so they all show the same.
+async function downstreamOfPOs(pool, pos) {
+  const vios = [];
+  const grns = [];
+  const invoices = [];
+  for (const po of pos) {
+    vios.push(...(await getVIOsForPO(pool, po.id)));
+    grns.push(...(await getGRNsForPO(pool, po.id)));
+    invoices.push(...(await getExpensesForPO(pool, po.id)));
+  }
+  invoices.push(...(await getExpensesForGRNs(pool, grns)));
+  const seen = new Set();
+  const uniqueInvoices = invoices.filter((eb) => (seen.has(eb.id) ? false : (seen.add(eb.id), true)));
+  return [...vios.map(vioNode), ...grns.map(grnNode), ...uniqueInvoices.map(expenseNode)];
+}
+
+const uniqueById = (rows) => {
+  const seen = new Set();
+  return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+};
+
+// Everything downstream of a Work Order: its MRs, their quotations and POs, and on to each PO's invoices.
 async function downstreamOfWO(pool, woId) {
   const mrs = await getMRsForWO(pool, woId);
   const qts = [];
@@ -333,28 +399,8 @@ async function downstreamOfWO(pool, woId) {
     qts.push(...(await getQTsForMR(pool, mr.id)));
     pos.push(...(await getPOsForMR(pool, mr.id)));
   }
-  const seenPO = new Set();
-  const uniquePOs = pos.filter((p) => (seenPO.has(p.id) ? false : (seenPO.add(p.id), true)));
-  const vios = [];
-  const grns = [];
-  for (const po of uniquePOs) {
-    vios.push(...(await getVIOsForPO(pool, po.id)));
-    grns.push(...(await getGRNsForPO(pool, po.id)));
-  }
-  // A merged invoice covers several of these GRNs: list it once.
-  const expenses = [];
-  const seenEB = new Set();
-  for (const grn of grns) {
-    for (const eb of await getExpensesForGRN(pool, grn.id)) if (!seenEB.has(eb.id)) { seenEB.add(eb.id); expenses.push(eb); }
-  }
-  return [
-    ...mrs.map(mrNode),
-    ...qts.map(qtNode),
-    ...uniquePOs.map(poNode),
-    ...vios.map(vioNode),
-    ...grns.map(grnNode),
-    ...expenses.map(expenseNode),
-  ];
+  const uniquePOs = uniqueById(pos);
+  return [...mrs.map(mrNode), ...qts.map(qtNode), ...uniquePOs.map(poNode), ...(await downstreamOfPOs(pool, uniquePOs))];
 }
 
 router.get("/:type/:id", authMiddleware, async (req, res) => {
@@ -388,8 +434,8 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
         if (wo) upstream.push(woNode(wo));
       }
       const qts = await getQTsForMR(pool, id);
-      const pos = await getPOsForMR(pool, id);
-      downstream = [...qts.map(qtNode), ...pos.map(poNode)];
+      const pos = uniqueById(await getPOsForMR(pool, id));
+      downstream = [...qts.map(qtNode), ...pos.map(poNode), ...(await downstreamOfPOs(pool, pos))];
     } else if (type === "qt") {
       const qt = await getQT(pool, id);
       if (!qt) return res.status(404).json({ error: "Quotation not found" });
@@ -404,16 +450,14 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
           upstream.push(mrNode(mr));
         }
       }
-      const pos = await getPOsForQT(pool, id);
-      downstream = pos.map(poNode);
+      const pos = uniqueById(await getPOsForQT(pool, id));
+      downstream = [...pos.map(poNode), ...(await downstreamOfPOs(pool, pos))];
     } else if (type === "po") {
       const po = await getPO(pool, id);
       if (!po) return res.status(404).json({ error: "Purchase Order not found" });
       current = poNode(po);
       upstream = await upstreamOfPO(pool, po);
-      const vios = await getVIOsForPO(pool, id);
-      const grns = await getGRNsForPO(pool, id);
-      downstream = [...vios.map(vioNode), ...grns.map(grnNode)];
+      downstream = await downstreamOfPOs(pool, [po]);
     } else if (type === "vio") {
       const vio = await getVIO(pool, id);
       if (!vio) return res.status(404).json({ error: "Vehicle In/Out not found" });
@@ -424,6 +468,8 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
           upstream = [...(await upstreamOfPO(pool, po)), poNode(po)];
         }
       }
+      const grns = await getGRNsForVIO(pool, id);
+      downstream = [...grns.map(grnNode), ...(await getExpensesForGRNs(pool, grns)).map(expenseNode)];
     } else if (type === "grn") {
       const grn = await getGRN(pool, id);
       if (!grn) return res.status(404).json({ error: "GRN not found" });
@@ -434,6 +480,7 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
           upstream = [...(await upstreamOfPO(pool, po)), poNode(po)];
         }
       }
+      upstream.push(...(await getVIOsOfGRNs(pool, [grn])).map(vioNode));
       const expenses = await getExpensesForGRN(pool, id);
       downstream = expenses.map(expenseNode);
     } else if (type === "expense") {
@@ -449,7 +496,8 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
         }
         if (grns.length) {
           const po = grns[0].POID ? await getPO(pool, grns[0].POID) : null;
-          upstream = po ? [...(await upstreamOfPO(pool, po)), poNode(po), ...grns.map(grnNode)] : grns.map(grnNode);
+          const vios = (await getVIOsOfGRNs(pool, grns)).map(vioNode);
+          upstream = po ? [...(await upstreamOfPO(pool, po)), poNode(po), ...vios, ...grns.map(grnNode)] : [...vios, ...grns.map(grnNode)];
         }
       } else if ((eb.ESourceType === "PO" || eb.ESourceType === "WO_PO") && eb.ESourceId) {
         const po = await getPO(pool, parseInt(eb.ESourceId, 10));

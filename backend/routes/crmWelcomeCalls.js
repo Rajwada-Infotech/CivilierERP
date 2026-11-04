@@ -1,4 +1,5 @@
 const express = require("express");
+const { sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
@@ -279,9 +280,9 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
 
     const milestones = milRes.recordset;
-    const totalDue = milestones.reduce((s, m) => s + (m.AmountDue || 0), 0);
-    const totalPaid = milestones.reduce((s, m) => s + (m.AmountPaid || 0), 0);
-    const onAccountBalance = oaRes.recordset.reduce((s, r) => s + (Number(r.Amount) - Number(r.AppliedAmount)), 0);
+    const totalDue = sumMoney(milestones, (m) => m.AmountDue);
+    const totalPaid = sumMoney(milestones, (m) => m.AmountPaid);
+    const onAccountBalance = sumMoney(oaRes.recordset, (r) => Number(r.Amount) - Number(r.AppliedAmount));
     const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
     const consecutiveNonReached = computeStreak(recentCallsRes.recordset.map((r) => r.Outcome));
 

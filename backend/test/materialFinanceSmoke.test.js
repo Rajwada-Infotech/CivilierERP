@@ -136,6 +136,9 @@ function superAdminToken() {
   );
 }
 
+// Approval checks keep the workflow in memory (approvalService.getWorkflow); each test sets up its own.
+beforeEach(() => require("../services/approvalService").invalidateWorkflowCache());
+
 describe("material + finance smoke: no auth token", () => {
   const readEndpoints = [
     "/api/material-requests/companies",

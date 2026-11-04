@@ -1,4 +1,5 @@
 const { sql } = require("../db");
+const { round2, sumMoney } = require("./bookingUnits");
 const { getNextDocNumber } = require("./docNumber");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
@@ -999,7 +1000,7 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
     const schedule = rows.filter((r) => r.ExtraChargeId == null && r.ParkingAllotmentId == null);
     const only = schedule.length === 1 ? schedule[0] : null;
     if (only && !["Paid", "Waived"].includes(only.Status) && !(Number(only.AmountPaid || 0) > 0)) {
-      const fixedOthers = rows.filter((r) => r.Id !== only.Id).reduce((s, r) => s + Number(r.AmountDue), 0);
+      const fixedOthers = sumMoney(rows.filter((r) => r.Id !== only.Id), (r) => r.AmountDue);
       const amt = Math.max(0, Math.round((grandTotal - fixedOthers) * 100) / 100);
       await poolOrTx.request().input("id", sql.Int, only.Id).input("amt", sql.Decimal(18, 2), amt)
         .input("pct", sql.Decimal(5, 2), Math.round((amt / grandTotal) * 10000) / 100)
@@ -1008,8 +1009,8 @@ async function recalculateRemainingMilestones(poolOrTx, bookingId, { fixedMilest
     return;
   }
 
-  const settledTotal = settled.reduce((s, r) => s + Number(r.AmountDue), 0);
-  const remainingTarget = Math.max(0, grandTotal - settledTotal);
+  const settledTotal = sumMoney(settled, (r) => r.AmountDue);
+  const remainingTarget = Math.max(0, round2(grandTotal - settledTotal));
   // Weight priority per milestone: its own stored Percent (preserves any
   // prior redistribution or manual override) > the Payment Plan Template's
   // percentage for that milestone number > an even share as the last resort.
@@ -1134,7 +1135,6 @@ async function tierBrokeragePercent(pool, dealValue) {
 //                      Executed (created now so it's visible/tracked, but
 //                      not payable until then).
 function buildBrokerageTranches(plan, totalAmount, agreementExecuted) {
-  const round2 = (n) => Math.round(n * 100) / 100;
   if (plan === "TwoPart") {
     const first = round2(totalAmount / 2);
     const second = round2(totalAmount - first);
@@ -1176,7 +1176,7 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
   // leaving parking/extras out entirely — see booking 41, where the old
   // per-milestone schedule's real total was TotalValue + ParkingTotal,
   // confirmed against CrmPaymentMilestone.AmountDue sums.)
-  const dealValue = Number(bk.TotalValue || 0) + Number(bk.ParkingTotal || 0) + Number(bk.ExtraChargesTotal || 0);
+  const dealValue = sumMoney([bk.TotalValue, bk.ParkingTotal, bk.ExtraChargesTotal]);
   const totalPercent = bk.BrokerageRatePercent != null ? Number(bk.BrokerageRatePercent) : await tierBrokeragePercent(pool, dealValue);
   const totalBrokerageAmount = Math.round(dealValue * totalPercent) / 100;
   if (totalBrokerageAmount <= 0) return null;

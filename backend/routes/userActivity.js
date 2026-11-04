@@ -216,13 +216,7 @@ router.get(
 
       const whereClause = whereConditions.join(" AND ");
 
-      const dataRequest = pool.request();
-      for (const [name, type, value] of queryInputs) {
-        dataRequest.input(name, type, value);
-      }
-
-      const dataResult = await dataRequest.query(`
-        SELECT
+      const { rows: pageRows, total } = await pageWithTotal(pool, queryInputs, whereClause, `
           Id AS id, UserId AS userId, UserName AS userName,
           UserEmail AS userEmail, UserRole AS userRole,
           EventType AS event, CreatedAt AS timestamp,
@@ -231,18 +225,10 @@ router.get(
           ActionType AS actionType, Resource AS resource,
           Details AS details, SessionId AS sessionId,
           SessionDuration AS sessionDuration,
-          RequestMethod AS requestMethod, RequestUrl AS requestUrl,
-          COUNT(*) OVER() AS totalCount
-        FROM dbo.UserActivityLog
-        WHERE ${whereClause}
-        ORDER BY ${sortColumn} ${order}
-        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
-      `);
-
-      const total = dataResult.recordset[0]?.totalCount ?? 0;
+          RequestMethod AS requestMethod, RequestUrl AS requestUrl`, `${sortColumn} ${order}`, offset, limit);
 
       res.json({
-        data: await nameIds(dataResult.recordset.map(mapActivityRow)),
+        data: await nameIds(pageRows.map(mapActivityRow)),
         total,
         page,
         limit,
@@ -262,6 +248,25 @@ router.get(
     }
   },
 );
+
+// One page of the log and the total it belongs to, as two queries side by side. A COUNT(*) OVER() in the page
+// query made the database read every row of the period — Details and all — just to count it (~17,500 runs
+// at ~50 ms); a plain count reads the index only, and the page reads just its own rows. `inputs`: the
+// [name, type, value] the WHERE uses; `select` / `orderBy`: the page's columns and order.
+async function pageWithTotal(pool, inputs, where, select, orderBy, offset, limit) {
+  const withInputs = () => {
+    const r = pool.request();
+    for (const [name, type, value] of inputs) r.input(name, type, value);
+    return r;
+  };
+  const [count, rows] = await Promise.all([
+    withInputs().query(`SELECT COUNT(*) AS total FROM dbo.UserActivityLog WHERE ${where}`),
+    withInputs().query(`SELECT ${select} FROM dbo.UserActivityLog WHERE ${where}
+      ORDER BY ${orderBy} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`),
+  ]);
+  // From the count, so a page past the end still says how many there are.
+  return { rows: rows.recordset, total: count.recordset[0]?.total ?? 0 };
+}
 
 // ── User-wise view ─────────────────────────────────────────────────────────
 // Background calls the app makes by itself (usage pings, the activity log's own traffic) are not something the
@@ -337,21 +342,13 @@ router.get(
       else if (type === "reads") where.push("EventType = 'action' AND ActionType = 'read'");
       const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
       const limit = Math.min(normalizePositiveInt(req.query.limit, 100), 500);
-      const request = getPool().request();
-      for (const [n, ty, v] of inputs) request.input(n, ty, v);
-      const result = await request.query(`
-        SELECT Id AS id, UserId AS userId, UserName AS userName, UserEmail AS userEmail, UserRole AS userRole,
+      const { rows, total } = await pageWithTotal(getPool(), inputs, where.join(" AND "), `
+               Id AS id, UserId AS userId, UserName AS userName, UserEmail AS userEmail, UserRole AS userRole,
                EventType AS event, CreatedAt AS timestamp, IpAddress AS ipAddress, DeviceInfo AS deviceInfo,
                ActionType AS actionType, Resource AS resource, Details AS details, SessionId AS sessionId,
-               SessionDuration AS sessionDuration, RequestMethod AS requestMethod, RequestUrl AS requestUrl,
-               COUNT(*) OVER() AS totalCount
-        FROM dbo.UserActivityLog
-        WHERE ${where.join(" AND ")}
-        ORDER BY CreatedAt DESC
-        OFFSET ${(page - 1) * limit} ROWS FETCH NEXT ${limit} ROWS ONLY
-      `);
-      const total = result.recordset[0]?.totalCount ?? 0;
-      res.json({ data: await nameIds(result.recordset.map(mapActivityRow)), total, page, limit, pages: Math.ceil(total / limit) });
+               SessionDuration AS sessionDuration, RequestMethod AS requestMethod, RequestUrl AS requestUrl`,
+        "CreatedAt DESC", (page - 1) * limit, limit);
+      res.json({ data: await nameIds(rows.map(mapActivityRow)), total, page, limit, pages: Math.ceil(total / limit) });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch the user's activity" });
     }
@@ -630,3 +627,4 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.pageWithTotal = pageWithTotal;

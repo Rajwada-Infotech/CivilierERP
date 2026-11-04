@@ -1,4 +1,5 @@
 const express = require("express");
+const { sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
@@ -344,7 +345,7 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     if (!b.proof) return res.status(400).json({ error: "Attach the payment proof (challan / receipt) the customer paid to the Sub-Registrar" });
     const confirmed = b.ConfirmedAmount != null && b.ConfirmedAmount !== "" ? parseFloat(b.ConfirmedAmount) : NaN;
     if (!(confirmed > 0)) return res.status(400).json({ error: "Enter the amount the customer paid" });
-    const expected = Number(row.StampDuty || 0) + Number(row.RegistrationFee || 0);
+    const expected = sumMoney([row.StampDuty, row.RegistrationFee]);
     if (expected > 0 && Math.abs(confirmed - expected) > 0.5 && !String(b.Remarks || "").trim()) {
       return res.status(400).json({ error: `The amount paid (₹${confirmed.toLocaleString("en-IN")}) differs from stamp duty + registration fee (₹${expected.toLocaleString("en-IN")}) — add a remark explaining why` });
     }

@@ -68,10 +68,10 @@ export interface UOM {
  * Represents one line item inside a GRN.
  *
  * Fields added in migration 034:
- *   rate        â€" unit rate (â‚¹) for this item
+ *   rate        â€" unit rate (₹) for this item
  *   quantity    â€" billing quantity (may differ from receivedQty when partial
  *                 billing is allowed)
- *   totalAmount â€" derived as rate Ã— quantity; stored for audit / reporting
+ *   totalAmount â€" derived as rate × quantity; stored for audit / reporting
  *                 so downstream modules (Expense Booking, etc.) don't need
  *                 to recompute it.
  */
@@ -82,11 +82,11 @@ export interface GRNItemLine {
   receivedQty: number;
   remainingQty: number;
   uom: string;
-  /** Unit rate in â‚¹.  Defaults to 0. */
+  /** Unit rate in ₹.  Defaults to 0. */
   rate: number;
   /** Billing quantity. Separate from receivedQty so partial billing works. */
   quantity: number;
-  /** Computed: rate Ã— quantity. Stored for audit trail. */
+  /** Computed: rate × quantity. Stored for audit trail. */
   totalAmount: number;
   // Inherited from the linked PO line's own Cost Centre (which was itself
   // auto-filled from Item Master) — not re-resolved here, since every GRN

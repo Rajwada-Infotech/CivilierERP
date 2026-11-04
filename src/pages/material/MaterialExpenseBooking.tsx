@@ -474,19 +474,15 @@ export default function MaterialExpenseBooking() {
     }) as unknown as Record<string, unknown>[];
   }, [statusFilter, finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
 
-  // Deep-link support — Linked Documents panels and Trial Balance's ledger
-  // drill-down navigate here as /material/expense-booking?view=<Eid> to open
-  // this exact Invoice/booking. View-only users get the read-only preview
-  // instead of the editable form — openEditForm had no permission check at
-  // all here, letting a deep link bypass rights.canEdit entirely.
+  // Deep-link support — Linked Documents panels, Trial Balance's ledger drill-down and reminders
+  // navigate here with ?view=<Eid> to open this exact Invoice in the read-only preview. The preview
+  // has its own Edit button for those allowed to edit.
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    if (rights.canEdit) {
-      openEditForm({ id: viewId } as unknown as ExpenseRecord);
-    } else {
-      openPreview({ id: viewId } as unknown as ExpenseRecord);
-    }
+    apiFetch(`${API}/${viewId}`)
+      .then((row: any) => setPreviewRecord(dbToRecord(row)))
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to open this invoice."));
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps

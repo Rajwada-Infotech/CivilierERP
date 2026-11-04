@@ -9,6 +9,7 @@ const request = require("supertest");
 
 let mockQueries = [];
 jest.mock("../middleware/apiRateLimit", () => (_req, _res, next) => next());
+jest.mock("../middleware/cache", () => ({ cache: () => (_req, _res, next) => next() }));
 jest.mock("../db", () => ({
   sql: require("mssql"),
   getPool: () => ({
