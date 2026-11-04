@@ -446,7 +446,7 @@ export const MobileNav: React.FC = () => {
       {open && (
         <div className="fixed inset-0 z-[60] md:hidden">
           <div
-            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/40"
             style={{ animation: closing ? "mnFadeOut 300ms ease-in both" : "mnFade 220ms ease-out both" }}
             onClick={close}
           />
@@ -455,8 +455,8 @@ export const MobileNav: React.FC = () => {
             ref={sheetRef}
             role="dialog"
             aria-label={sheet === "menu" ? `${activeMod.label} menu` : "Account"}
-            className={`mn-sheet genie ${closing ? "genie-close" : "genie-open"}`}
-            style={{ ["--mn-mod" as string]: modColor(), ["--mn-mod-wash" as string]: modColor(0.1), ["--genie-dir" as string]: -1 } as React.CSSProperties}
+            className={`mn-sheet genie genie-up ${closing ? "genie-close" : "genie-open"}`}
+            style={{ ["--mn-mod" as string]: modColor(), ["--mn-mod-wash" as string]: modColor(0.1) } as React.CSSProperties}
           >
             <div className="mn-grab"><span /></div>
 
