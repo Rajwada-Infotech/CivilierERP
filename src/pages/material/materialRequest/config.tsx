@@ -65,6 +65,8 @@ export interface FormHeader {
   remarks: string;
   docTypeId: number | null;
   docNoPreview: string;
+  /** The number of the MR being edited. */
+  docNo: string;
 }
 
 export const defaultHeader: FormHeader = {
@@ -78,6 +80,7 @@ export const defaultHeader: FormHeader = {
   remarks: "",
   docTypeId: null,
   docNoPreview: "",
+  docNo: "",
 };
 
 export const blankCartItem = (): CartItem => ({
