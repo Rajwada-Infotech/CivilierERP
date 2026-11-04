@@ -1,12 +1,13 @@
-import { ClipboardList, IndianRupee, Boxes, Settings2, Megaphone, Cpu, ListChecks, HardHat } from "lucide-react";
+import { Scale, ClipboardList, IndianRupee, Boxes, Settings2, Megaphone, Cpu, ListChecks, HardHat } from "lucide-react";
 import { CIVIL_WORK_DPR_REPORTS } from "@/pages/reports/defs/civilWorkDpr";
 import { CORE_REPORTS } from "@/pages/reports/defs/core";
 import { FOLLOWUP_REPORTS } from "@/pages/reports/defs/followup";
+import { LEGAL_REPORTS } from "@/pages/reports/defs/legal";
 import { SALES_CRM_REPORTS } from "@/pages/reports/defs/salesCrm";
 import type { ModuleSection, ReportDef } from "@/pages/reports/types";
 
 // Every report, assembled from the per-module definition files, and the module sections that group them.
-export const ALL_REPORTS: ReportDef[] = [...CORE_REPORTS, ...CIVIL_WORK_DPR_REPORTS, ...SALES_CRM_REPORTS, ...FOLLOWUP_REPORTS];
+export const ALL_REPORTS: ReportDef[] = [...CORE_REPORTS, ...CIVIL_WORK_DPR_REPORTS, ...SALES_CRM_REPORTS, ...FOLLOWUP_REPORTS, ...LEGAL_REPORTS];
 
 export const REPORT_MAP = new Map(ALL_REPORTS.map((r) => [r.id, r]));
 
@@ -171,5 +172,13 @@ export const MODULE_SECTIONS: ModuleSection[] = [
       "crm-aging-analysis",
       "crm-inventory-status",
     ],
+  },
+  {
+    id: "legal",
+    label: "Legal",
+    accent: "#7c4a2e",
+    description: "Company land: register, ownership, documents, legal cases, loans, sales, deeds, mutation & audit",
+    icon: Scale,
+    reportIds: LEGAL_REPORTS.map((r) => r.id),
   },
 ];

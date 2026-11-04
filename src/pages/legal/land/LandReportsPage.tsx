@@ -12,7 +12,7 @@ import { getLandReport, getLandReports, getLandStats } from "@/api/legalLandApi"
 import { getLegalLookup } from "@/api/legalMastersApi";
 import { usePageRights as useRights } from "@/hooks/usePageRights";
 
-// Land Management reports (pipeline step 30): pick a report on the left, read and export it on the right.
+// Land reports (also listed on the top Reports page, Legal section): pick a report, read and export it.
 
 const card = "rounded-2xl bg-card/80 backdrop-blur-lg border border-border shadow-sm";
 const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v);
@@ -24,7 +24,8 @@ const cell = (v: unknown) =>
 export default function LandReportsPage() {
   const rights = usePageRights("legal-land-reports");
   const { data: list } = useQuery({ queryKey: ["legal-land-reports"], queryFn: getLandReports, staleTime: Infinity });
-  const [key, setKey] = useState("land-register");
+  // Opened from the top Reports page on a chosen report (?report=…).
+  const [key, setKey] = useState(() => new URLSearchParams(window.location.search).get("report") || "land-register");
   const [q, setQ] = useState("");
   const [landCode, setLandCode] = useState("");
   const landRights = useRights("legal-land-master");
@@ -53,7 +54,7 @@ export default function LandReportsPage() {
               ["Total Land Properties", stats.totalLands],
               ["Existing / Backlog Records", stats.backlogLands ?? 0],
               ["Properties On Hold", stats.onHold ?? 0],
-              ["Disposed / Transferred", stats.completed ?? 0],
+              ["Disposed / Transferred", stats.disposed ?? 0],
             ] as const).map(([l, v]) => (
               <div key={l} className={`${card} p-3`}>
                 <div className="text-xl font-heading font-bold tabular-nums text-foreground">{v ?? 0}</div>

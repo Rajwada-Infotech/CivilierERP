@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   type SetupItem,
@@ -59,6 +59,8 @@ import { recordsNavItems } from "./sidebars/RecordsSidebar";
 import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
+import { GENIE_CSS } from "@/components/navbar/navPanelStyles";
+import { useGeniePanel } from "@/components/navbar/useGeniePanel";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { legalNavItems } from "./sidebars/LegalSidebar";
 import type {
@@ -109,6 +111,18 @@ export const MobileNav: React.FC = () => {
   const [sheet, setSheet] = useState<null | "menu" | "me">(null);
   const open = sheet !== null;
   const setOpen = (v: boolean) => { if (!v) setSheet(null); };
+  // A sheet swells up out of its bar tab like a bubble and pops back into it when closed (the closing is played by close()).
+  const { closing, close } = useGeniePanel(open, setOpen);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // Put the bubble's origin on the tab it came from. offsetLeft / offsetTop are the sheet's layout box, not its animated one.
+    const el = sheetRef.current;
+    const tab = sheet ? document.querySelector<HTMLElement>(`.mn-bar [data-tab="${sheet}"]`) : null;
+    if (!el || !tab) return;
+    const r = tab.getBoundingClientRect();
+    el.style.setProperty("--genie-ox", `${r.left + r.width / 2 - el.offsetLeft}px`);
+    el.style.setProperty("--genie-oy", `${r.top + r.height / 2 - el.offsetTop}px`);
+  }, [sheet]);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [query, setQuery] = useState("");
@@ -415,9 +429,9 @@ export const MobileNav: React.FC = () => {
   // ── Bottom bar items ──────────────────────────────────────────────────────
   const barItems: { id: string; label: string; icon: React.ElementType; active: boolean; onClick: () => void }[] = [
     { id: "home", label: "Home", icon: TbHome, active: !sheet && location.pathname === "/home", onClick: () => go("/home") },
-    { id: "menu", label: "Menu", icon: TbMenu2, active: sheet === "menu", onClick: () => setSheet(sheet === "menu" ? null : "menu") },
+    { id: "menu", label: "Menu", icon: TbMenu2, active: sheet === "menu", onClick: () => (sheet === "menu" ? close() : setSheet("menu")) },
     { id: "reports", label: "Reports", icon: TbChartBar, active: !sheet && location.pathname.startsWith("/reports"), onClick: () => go("/reports") },
-    { id: "me", label: "Me", icon: TbUser, active: sheet === "me", onClick: () => setSheet(sheet === "me" ? null : "me") },
+    { id: "me", label: "Me", icon: TbUser, active: sheet === "me", onClick: () => (sheet === "me" ? close() : setSheet("me")) },
   ];
 
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -426,16 +440,22 @@ export const MobileNav: React.FC = () => {
   return (
     <>
       {logoutOverlay}
-      <style>{MOBILE_NAV_CSS}</style>
+      <style>{MOBILE_NAV_CSS + GENIE_CSS}</style>
 
       {/* ── Sheet (above the bar) ────────────────────────────────────────────── */}
       {open && (
-        <div className="fixed inset-0 z-[60] md:hidden" style={{ animation: "mnFade 180ms ease-out both" }}>
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSheet(null)} />
+        <div className="fixed inset-0 z-[60] md:hidden">
           <div
+            className="absolute inset-0 bg-black/40"
+            style={{ animation: closing ? "mnFadeOut 300ms ease-in both" : "mnFade 220ms ease-out both" }}
+            onClick={close}
+          />
+          <div
+            key={sheet}
+            ref={sheetRef}
             role="dialog"
             aria-label={sheet === "menu" ? `${activeMod.label} menu` : "Account"}
-            className="mn-sheet"
+            className={`mn-sheet genie genie-up ${closing ? "genie-close" : "genie-open"}`}
             style={{ ["--mn-mod" as string]: modColor(), ["--mn-mod-wash" as string]: modColor(0.1) } as React.CSSProperties}
           >
             <div className="mn-grab"><span /></div>
@@ -451,7 +471,7 @@ export const MobileNav: React.FC = () => {
                     <p className="mn-label">CivilierERP · {activeModKey === "__none__" ? "Menu" : "You are in"}</p>
                     <p className="mn-title truncate">{activeModKey === "__none__" ? "Choose a module" : activeMod.label}</p>
                   </div>
-                  <button onClick={() => setSheet(null)} aria-label="Close menu" className="mn-key">
+                  <button onClick={close} aria-label="Close menu" className="mn-key">
                     <TbX size={15} stroke={1.5} />
                   </button>
                 </div>
@@ -655,7 +675,7 @@ export const MobileNav: React.FC = () => {
                       {roleLabel}
                     </span>
                   </div>
-                  <button onClick={() => setSheet(null)} aria-label="Close" className="mn-key self-start">
+                  <button onClick={close} aria-label="Close" className="mn-key self-start">
                     <TbX size={15} stroke={1.5} />
                   </button>
                 </div>
@@ -722,6 +742,7 @@ export const MobileNav: React.FC = () => {
               <button
                 key={id}
                 onClick={onClick}
+                data-tab={id}
                 aria-label={isMenu ? `${label} menu` : label}
                 aria-current={active && !isMenu && id !== "me" ? "page" : undefined}
                 className={`mn-tab ${active ? "on" : ""}`}
@@ -764,7 +785,7 @@ export const MobileNav: React.FC = () => {
 // re-flow to as many columns as fit.
 const MOBILE_NAV_CSS = `
 @keyframes mnFade { from { opacity: 0 } to { opacity: 1 } }
-@keyframes mnSheet { from { transform: translateY(100%) } to { transform: translateY(0) } }
+@keyframes mnFadeOut { from { opacity: 1 } to { opacity: 0 } }
 .mn-sheet, .mn-bar {
   --mn-ink: hsl(var(--foreground));
   --mn-graphite: hsl(var(--muted-foreground));
@@ -786,12 +807,11 @@ const MOBILE_NAV_CSS = `
   color: var(--mn-ink);
   border-top: 3px solid var(--mn-mod);
   box-shadow: 0 -1.5px 0 var(--mn-ink), 0 -10px 30px hsl(0 0% 0% / 0.18);
-  animation: mnSheet 280ms cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 @media (min-width: 560px) {
-  .mn-sheet { left: 50%; right: auto; width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
+  .mn-sheet { left: 0; right: 0; margin: 0 auto; width: min(560px, calc(100vw - 32px));
     border: 1.5px solid var(--mn-ink); border-top: 3px solid var(--mn-mod); box-shadow: 6px 6px 0 hsl(var(--foreground) / 0.14);
-    bottom: calc(76px + env(safe-area-inset-bottom, 0px)); animation: mnFade 200ms ease-out both; }
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
 }
 .mn-sheet .mn-grab { display: flex; justify-content: center; padding: 8px 0 2px; flex-shrink: 0; }
 .mn-sheet .mn-grab span { width: 36px; height: 3px; background: var(--mn-rule); }

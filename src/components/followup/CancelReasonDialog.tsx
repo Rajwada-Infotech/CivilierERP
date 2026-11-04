@@ -1,3 +1,4 @@
+import { KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -50,7 +51,7 @@ export const CancelReasonDialog: React.FC<{
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-red-600">
+          <DialogTitle className="flex items-center gap-2 text-destructive">
             <XCircle size={16} /> Cancel Task
           </DialogTitle>
           <DialogDescription>
@@ -60,7 +61,7 @@ export const CancelReasonDialog: React.FC<{
 
         <div>
           <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1.5">
-            Cancel Reason <span className="text-red-500">*</span>
+            Cancel Reason <span className="text-destructive">*</span>
           </label>
           <select
             value={reasonId}
@@ -74,19 +75,20 @@ export const CancelReasonDialog: React.FC<{
             ))}
           </select>
           {!isLoading && templates.length === 0 && (
-            <p className="text-xs text-amber-600 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               No active Cancel Templates configured. Ask an admin to add one under Setup → Cancel Template.
             </p>
           )}
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button type="button" variant="outline" className={`${KEY_LINE} h-9 px-4`} onClick={() => onOpenChange(false)} disabled={submitting}>
             Back
           </Button>
           <Button
             type="button"
             variant="destructive"
+            className={`${KEY_RED_SOLID} h-9 px-4`}
             disabled={!reasonId || submitting}
             onClick={() => onConfirm(reasonId)}
           >

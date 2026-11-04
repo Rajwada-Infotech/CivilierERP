@@ -9,7 +9,8 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
-import { NAV_PANEL_CSS } from "@/components/navbar/navPanelStyles";
+import { NAV_PANEL_CSS, GENIE_CSS } from "@/components/navbar/navPanelStyles";
+import { useGenieVisibility } from "@/components/navbar/useGeniePanel";
 import { ALL_MODULES, hexToHsl } from "./moduleDefs";
 import {
   ChevronDown,
@@ -56,6 +57,7 @@ const Dropdown = ({
   children,
   className,
   style,
+  genie = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -63,9 +65,27 @@ const Dropdown = ({
   children: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
+  /** swell out of the trigger like a bubble, and pop back into it (see navPanelStyles GENIE_CSS) */
+  genie?: boolean;
 }) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   useClickOutside(wrapperRef, onClose, open);
+  const bubble = useGenieVisibility(open);
+
+  if (genie) {
+    return (
+      <div className="relative shrink-0" ref={wrapperRef}>
+        <style dangerouslySetInnerHTML={{ __html: GENIE_CSS }} />
+        {trigger}
+        <div
+          style={{ ...style, display: bubble.shown ? undefined : "none" }}
+          className={`genie ${bubble.className} absolute top-full mt-2.5 z-50 border border-foreground bg-card shadow-[5px_5px_0_hsl(var(--foreground)/0.12)] overflow-visible ${className || ""}`}
+        >
+          {children}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative shrink-0" ref={wrapperRef}>
@@ -754,12 +774,13 @@ export const TopNavbar = () => {
           <Dropdown
             open={userOpen}
             onClose={closeUser}
+            genie
             className="right-0 w-[17rem] p-0 np-sheet"
             trigger={
               <div className="relative">
                 <button
                   onClick={toggleUser}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90 overflow-hidden ring-2 ring-border hover:ring-primary/40 transition-all ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90 overflow-hidden ring-2 ring-border hover:ring-primary/40 transition-all ${userOpen ? "genie-pop" : ""} ${currentUser?.avatarUrl ? "bg-muted" : "gradient-accent"}`}
                 >
                   {currentUser?.avatarUrl ? (
                     <img

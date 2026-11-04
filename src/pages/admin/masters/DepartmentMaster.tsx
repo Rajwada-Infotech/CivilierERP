@@ -175,7 +175,7 @@ const DepartmentMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading departments...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load departments.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load departments.</div>;
 
   return (
     <>
@@ -203,7 +203,7 @@ const DepartmentMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50 transition-colors"
-              style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.35)", color: "#0d9488" }}
+              style={{ background: "hsl(var(--foreground) / 0.14)", border: "1px solid hsl(var(--foreground) / 0.35)", color: "hsl(var(--foreground))" }}
             >
               <Upload size={13} /> {importing ? "Importing…" : "Import CSV"}
             </button>

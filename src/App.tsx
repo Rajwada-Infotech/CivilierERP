@@ -138,7 +138,6 @@ const LegalActiveLandPage = lazy(() => import("./pages/legal/LegalActiveLandPage
 const LegalPendingQueuePage = lazy(() => import("./pages/legal/LegalPendingQueuePage"));
 const LandEnquiryPage = lazy(() => import("./pages/legal/land/LandEnquiryPage"));
 const LandPropertyListPage = lazy(() => import("./pages/legal/land/LandPropertyListPage"));
-const LandPropertyDetailPage = lazy(() => import("./pages/legal/land/LandPropertyDetailPage"));
 const LandReportsPage = lazy(() => import("./pages/legal/land/LandReportsPage"));
 const LandDetailsPage = lazy(() => import("./pages/legal/land/LandDetailsPage"));
 const LandProfilePage = lazy(() => import("./pages/legal/land/LandProfilePage"));

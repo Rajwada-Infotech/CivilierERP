@@ -32,7 +32,8 @@ const Reports: React.FC = () => {
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [finYears, setFinYears] = useState<FinYearOption[]>([]);
-  const [openSection, setOpenSection] = useState<string | null>(null);
+  // ?section=<id> opens that module's reports (a module's own "Reports" link, e.g. the Legal dashboard).
+  const [openSection, setOpenSection] = useState<string | null>(() => new URLSearchParams(window.location.search).get("section"));
   const [activeReport, setActiveReport] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     companyId: "",

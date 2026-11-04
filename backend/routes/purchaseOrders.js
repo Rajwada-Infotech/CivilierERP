@@ -744,6 +744,8 @@ async function getPOSelect(pool) {
     po.ExpectedDeliveryDate,
     po.SupplierID,
     ah.LHeadName          AS SupplierName,
+    ah.LGSTType           AS SupplierGstType,
+    ah.LGST               AS SupplierGst,
     po.CompanyId,
     co.name               AS CompanyName,
     po.ProjectId,

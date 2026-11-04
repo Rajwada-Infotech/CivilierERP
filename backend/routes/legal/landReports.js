@@ -1,27 +1,22 @@
 "use strict";
-
 // Land Management reports (pipeline step 30). One read-only query per report; the page shows them as tables
 // with export. Report keys come from this list, never from SQL in the request.
 //   GET /           the report list
 //   GET /:key       one report's rows
-
 const express = require("express");
 const { getPool } = require("../../db");
 const { requirePageRight } = require("../../middleware/requirePageRight");
 const apiRateLimit = require("../../middleware/apiRateLimit");
-
 const router = express.Router();
 router.use(apiRateLimit);
-
 const PAGE = "legal-land-reports";
 const LAND = "l.LandCode AS [Land ID], l.LandName AS [Land]";
 const JOIN_LAND = "JOIN dbo.LegalLand l ON l.LandId = x.LandId";
-
 const REPORTS = [
   { key: "land-register", group: "Land", title: "Land Property Register", sql: `
     SELECT ${LAND}, m.MouzaName + ' (J.L. ' + ISNULL(m.JLNo, '-') + ')' AS Mouza, d.DistrictName AS District,
-           CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName AS Unit, l.LandStatus AS [Land status],
-           CASE WHEN l.IsCancelled = 1 THEN N'Cancelled' WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Workflow],
+           CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName AS Unit, l.EntryType AS [Entry type], l.LandStatus AS [Land status],
+           CASE WHEN l.IsCancelled = 1 THEN N'Cancelled' WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Approval status],
            (SELECT STRING_AGG(r.OwnerName + ' ' + CAST(CAST(r.SharePct AS DECIMAL(7,2)) AS NVARCHAR(10)) + '%', ', ')
               FROM dbo.LegalOwnershipRecord r WHERE r.LandId = l.LandId AND r.IsActive = 1 AND r.ValidTo IS NULL) AS [Current owners]
     FROM dbo.LegalLand l LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
@@ -77,12 +72,6 @@ const REPORTS = [
   { key: "mortgages", group: "Legal", title: "Mortgage & Loan Register", sql: `
     SELECT ${LAND}, x.LenderName AS Lender, t.Name AS Type, x.LoanAmount AS [Loan], x.OutstandingAmount AS Outstanding, x.MortgageStatus AS Status, x.VerificationStatus AS Verification
     FROM dbo.LegalMortgage x ${JOIN_LAND} LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.MortgageTypeId WHERE x.IsActive = 1 ORDER BY l.LandCode` },
-  { key: "due-diligence", group: "Legal", title: "Legal Due Diligence", sql: `
-    SELECT ${LAND}, SUM(CASE WHEN x.Result = N'Clear' THEN 1 ELSE 0 END) AS Clear, SUM(CASE WHEN x.Result = N'Issue Found' THEN 1 ELSE 0 END) AS [Issues],
-           SUM(CASE WHEN x.Result = N'Pending' THEN 1 ELSE 0 END) AS Pending,
-           (SELECT TOP 1 o.FinalOpinion + ' (' + o.OpinionStatus + ')' FROM dbo.LegalOpinion o WHERE o.LandId = l.LandId AND o.IsActive = 1 ORDER BY o.OpinionId DESC) AS [Latest opinion],
-           (SELECT TOP 1 c.Decision FROM dbo.LegalClearance c WHERE c.LandId = l.LandId AND c.IsActive = 1 ORDER BY c.ClearanceId DESC) AS Clearance
-    FROM dbo.LegalDueDiligence x ${JOIN_LAND} WHERE x.IsActive = 1 GROUP BY l.LandId, l.LandCode, l.LandName ORDER BY l.LandCode` },
   { key: "legal-hold", group: "Legal", title: "Legal Hold / Dispute", sql: `
     SELECT ${LAND}, x.HoldCategory AS Category, x.HoldReason AS Reason, x.HoldDate AS [Since], x.ExpectedReviewDate AS [Review by],
            CASE WHEN x.ResumedAt IS NULL THEN N'On hold' ELSE N'Resumed ' + CONVERT(NVARCHAR(10), x.ResumedAt, 105) END AS Status
@@ -93,36 +82,23 @@ const REPORTS = [
     SELECT ${LAND}, x.ValuationDate AS [Date], x.MarketRate AS [Market rate], x.EstimatedMarketValue AS [Market value], x.GovernmentValuation AS [Govt. value],
            x.ValuationSource AS Source, x.VerificationStatus AS Verification
     FROM dbo.LegalValuation x ${JOIN_LAND} WHERE x.IsActive = 1 ORDER BY x.ValuationDate DESC` },
-  { key: "deed-preparation", group: "Deed & Registration", title: "Deed Preparation", sql: `
-    SELECT ${LAND}, x.DeedCode AS Deed, t.DeedTypeName AS Type, x.ConsiderationAmount AS Consideration, x.DeedWriter AS Writer,
-           (SELECT TOP 1 'v' + CAST(d.VersionNo AS NVARCHAR(10)) + ' ' + d.ReviewStatus FROM dbo.LegalDeedDraft d WHERE d.DeedId = x.DeedId AND d.IsActive = 1 ORDER BY d.VersionNo DESC) AS [Latest draft],
-           x.RegistrationStatus AS Status
-    FROM dbo.LegalLandDeed x ${JOIN_LAND} LEFT JOIN dbo.LegalDeedType t ON t.DeedTypeId = x.DeedTypeId WHERE x.IsActive = 1 ORDER BY l.LandCode` },
-  { key: "registration-pending", group: "Deed & Registration", title: "Registration Pending", sql: `
-    SELECT ${LAND}, x.DeedCode AS Deed, o.OfficeName AS Office, x.RegistrationStatus AS Status,
-           (SELECT TOP 1 a.AppointmentDate FROM dbo.LegalRegAppointment a WHERE a.DeedId = x.DeedId AND a.IsActive = 1 AND a.AppointmentStatus IN (N'Scheduled', N'Rescheduled') ORDER BY a.AppointmentDate) AS [Appointment],
-           (SELECT TOP 1 r.Result FROM dbo.LegalRegAttempt r WHERE r.DeedId = x.DeedId AND r.IsActive = 1 ORDER BY r.AttemptDate DESC, r.AttemptId DESC) AS [Last attempt]
-    FROM dbo.LegalLandDeed x ${JOIN_LAND} LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = x.RegistrationOfficeId
-    WHERE x.IsActive = 1 AND x.RegistrationStatus NOT IN (N'Successfully Registered', N'Registered Deed Awaiting', N'Completed') ORDER BY l.LandCode` },
-  { key: "registered-deeds", group: "Deed & Registration", title: "Registered Deeds", sql: `
-    SELECT ${LAND}, x.RegisteredDeedNo AS [Deed no.], x.RegistrationDate AS [Registered], o.OfficeName AS Office, x.CertifiedCopyStatus AS [Certified copy], x.ApprovalStatus AS Approval
-    FROM dbo.LegalRegisteredDeed x ${JOIN_LAND} LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = x.RegistrationOfficeId WHERE x.IsActive = 1 ORDER BY x.RegistrationDate DESC` },
+  // Deeds as recorded on each land's Acquisition & Purchase tab (one row per transfer).
+  { key: "registered-deeds", group: "Deed & Registration", title: "Deed Register", sql: `
+    SELECT ${LAND}, x.EventDate AS [Date], t.Name AS [Transfer], x.PreviousOwnerName AS [From], x.NewOwnerName AS [To],
+           ISNULL(x.DeedNo, x.DocumentNo) AS [Deed no.], x.RegistrationDate AS [Registered], o.OfficeName AS Office, x.VerificationStatus AS Verification
+    FROM dbo.LegalOwnershipEvent x ${JOIN_LAND} LEFT JOIN dbo.LegalLookupValue t ON t.LookupId = x.TransferTypeId
+    LEFT JOIN dbo.LegalRegistrationOffice o ON o.OfficeId = x.RegistrationOfficeId WHERE x.IsActive = 1 ORDER BY x.EventDate DESC` },
   { key: "mutation-pending", group: "Mutation & Closure", title: "Mutation Pending", mutation: false },
   { key: "mutation-completed", group: "Mutation & Closure", title: "Mutation Completed", mutation: true },
-  { key: "settlements", group: "Mutation & Closure", title: "Financial Settlement", sql: `
-    SELECT ${LAND}, t.TransactionNo AS [Transaction], x.AgreementValue AS [Agreement value], x.TotalReceived AS Received, x.TotalPaid AS Paid,
-           x.RemainingBalance AS Balance, x.SettlementDate AS [Date], x.SettlementStatus AS Status
-    FROM dbo.LegalSettlement x ${JOIN_LAND} LEFT JOIN dbo.LegalLandTransaction t ON t.TransactionId = x.TransactionId WHERE x.IsActive = 1 ORDER BY x.SettlementDate DESC` },
-  { key: "workflow-status", group: "Mutation & Closure", title: "Workflow Status & Waiting Time", sql: `
-    SELECT ${LAND}, CASE WHEN l.IsCancelled = 1 THEN N'Cancelled' WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Current step],
-           (SELECT MAX(s.UpdatedAt) FROM dbo.LegalWorkflowStepState s WHERE s.LandId = l.LandId) AS [Last moved],
-           DATEDIFF(day, ISNULL((SELECT MAX(s.UpdatedAt) FROM dbo.LegalWorkflowStepState s WHERE s.LandId = l.LandId), l.CreatedAt), SYSUTCDATETIME()) AS [Days waiting]
-    FROM dbo.LegalLand l WHERE l.IsActive = 1 ORDER BY [Days waiting] DESC` },
+  { key: "workflow-status", group: "Mutation & Closure", title: "Approval Status & Waiting Time", sql: `
+    SELECT ${LAND}, l.EntryType AS [Entry type], CASE WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Approval status],
+           l.L1Status AS L1, l.L2Status AS L2, ISNULL(l.UpdatedAt, l.CreatedAt) AS [Last changed],
+           DATEDIFF(day, ISNULL(l.UpdatedAt, l.CreatedAt), SYSUTCDATETIME()) AS [Days waiting]
+    FROM dbo.LegalLand l WHERE l.IsActive = 1 ORDER BY CASE WHEN l.L2Status = N'Approved' THEN 1 ELSE 0 END, [Days waiting] DESC` },
   { key: "audit", group: "Mutation & Closure", title: "User Activity / Audit", sql: `
     SELECT TOP 500 a.CreatedAt AS [When], u.name AS [User], a.Action, a.EntityType AS [Record], a.EntityId AS [Id], l.LandCode AS [Land ID], a.Remarks
     FROM dbo.LegalRecordAudit a LEFT JOIN dbo.users u ON u.id = a.UserId LEFT JOIN dbo.LegalLand l ON l.LandId = a.LandId ORDER BY a.EventId DESC` },
 ];
-
 const txnSql = (type) => `
   SELECT ${LAND}, x.TransactionNo AS [Transaction], x.BuyerName AS Buyer, x.SellerNames AS [Seller(s)], CAST(x.TxnArea AS DECIMAL(18,4)) AS Area, u.UnitName AS Unit,
          x.TotalValue AS Value, ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = x.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0) AS [Verified paid],
@@ -134,11 +110,9 @@ const mutationSql = (done) => `
   SELECT ${LAND}, x.ApplicationNo AS [Application], x.ApplicationDate AS [Applied], x.OfficeName AS Office, x.NewOwner AS [New owner(s)], x.ApplicationStatus AS Status,
          x.HearingDate AS [Hearing], x.OrderNo AS [Order no.], x.OrderDate AS [Order date]
   FROM dbo.LegalMutation x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.ApplicationStatus ${done ? "=" : "<>"} N'Approved' ORDER BY x.MutationId DESC`;
-
 router.get("/", requirePageRight(PAGE, "view"), (_req, res) => {
   res.json(REPORTS.map(({ key, group, title }) => ({ key, group, title })));
 });
-
 router.get("/:key", requirePageRight(PAGE, "view"), async (req, res) => {
   const rep = REPORTS.find((r) => r.key === req.params.key);
   if (!rep) return res.status(404).json({ error: "Unknown report" });
@@ -151,5 +125,4 @@ router.get("/:key", requirePageRight(PAGE, "view"), async (req, res) => {
     res.status(500).json({ error: "Could not run the report" });
   }
 });
-
 module.exports = router;

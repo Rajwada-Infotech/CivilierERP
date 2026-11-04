@@ -6,13 +6,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
   updateUserProfile,
-  updateUserPreferences,
   changePassword,
   getUserActivity,
   uploadAvatar,
   removeAvatar,
 } from "@/api/userProfileApi";
-import { Switch } from "@/components/ui/switch";
 import {
   ProfileShell,
   ProfileSection,
@@ -21,6 +19,7 @@ import {
   PasswordForm,
 } from "@/components/layout/ProfileShell";
 import { toast } from "sonner";
+import { ProfileSettings } from "@/components/profile/ProfileSettings";
 import {
   User,
   Activity,
@@ -34,7 +33,7 @@ import {
   HardDrive,
   Camera,
   Trash2,
-  Bell,
+  Settings,
 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BodyPortal } from "@/components/ui/body-portal";
@@ -122,7 +121,6 @@ export default function DBAProfile() {
     currentUser,
     updateCurrentUserName,
     updateCurrentUserAvatar,
-    updateCurrentUserShowLoginReminders,
   } = useAuth();
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
   const queryClient = useQueryClient();
@@ -173,19 +171,6 @@ export default function DBAProfile() {
       setEditingPassword(false);
     },
     onError: (e: Error) => toast.error(e.message),
-  });
-  const preferencesMutation = useMutation({
-    mutationFn: (showLoginReminders: boolean) =>
-      updateUserPreferences(userId, { showLoginReminders }),
-    onSuccess: (_data, showLoginReminders) => {
-      updateCurrentUserShowLoginReminders(showLoginReminders);
-      toast.success(
-        showLoginReminders
-          ? "Login reminders popup enabled"
-          : "Login reminders popup disabled",
-      );
-    },
-    onError: () => toast.error("Failed to update preference"),
   });
 
   const avatarUploadMutation = useMutation({
@@ -253,6 +238,7 @@ export default function DBAProfile() {
     { key: "profile", label: "Profile", icon: User },
     { key: "permissions", label: "Permissions", icon: Database },
     { key: "activity", label: "Activity", icon: Activity },
+    { key: "settings", label: "Settings", icon: Settings },
   ];
 
   return (
@@ -293,6 +279,9 @@ export default function DBAProfile() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
       >
+        {/* SETTINGS TAB: one component for every profile page */}
+        {activeTab === "settings" && <ProfileSettings />}
+
         {/* PROFILE TAB */}
         {activeTab === "profile" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -502,26 +491,6 @@ export default function DBAProfile() {
                     onCancel={() => setEditingPassword(false)}
                   />
                 )}
-              </ProfileSection>
-
-              <ProfileSection title="Preferences" icon={Bell}>
-                <div className="flex items-center justify-between gap-4 py-1">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground">
-                      Show reminders popup on login
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Pop up pending alerts (from the bell icon) right after you sign in.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={currentUser?.showLoginReminders !== false}
-                    disabled={preferencesMutation.isPending}
-                    onCheckedChange={(checked) =>
-                      preferencesMutation.mutate(checked)
-                    }
-                  />
-                </div>
               </ProfileSection>
             </div>
           </div>

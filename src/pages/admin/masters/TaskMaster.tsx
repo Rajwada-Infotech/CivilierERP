@@ -1175,7 +1175,7 @@ const TaskMaster: React.FC = () => {
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading tasks...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load tasks.</div>;
+  if (error) return <div className="p-6 text-destructive">Failed to load tasks.</div>;
 
   return (
     <>
@@ -1203,7 +1203,7 @@ const TaskMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50 transition-colors"
-              style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.35)", color: "#0d9488" }}
+              style={{ background: "hsl(var(--foreground) / 0.14)", border: "1px solid hsl(var(--foreground) / 0.35)", color: "hsl(var(--foreground))" }}
             >
               <Upload size={13} /> {importing ? "Importing…" : "Import CSV"}
             </button>
@@ -1286,7 +1286,7 @@ const TaskMaster: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => updateStatus(row._id, "Hold")}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-amber-500 hover:bg-[#ffe2021a] transition-colors"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-muted-foreground hover:bg-muted transition-colors"
                     title="Put on hold"
                   >
                     <PauseCircle size={14} />
@@ -1295,7 +1295,7 @@ const TaskMaster: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => updateStatus(row._id, "Active")}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-colors"
                     title="Resume (set Active)"
                   >
                     <PlayCircle size={14} />
@@ -1450,7 +1450,7 @@ const TaskMaster: React.FC = () => {
               onClick={handleCreateSubtask}
               disabled={savingSubtask}
               className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-colors"
-              style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.35)", color: "#0d9488" }}
+              style={{ background: "hsl(var(--foreground) / 0.14)", border: "1px solid hsl(var(--foreground) / 0.35)", color: "hsl(var(--foreground))" }}
             >
               {savingSubtask ? "Adding…" : "Add Subtask"}
             </button>
