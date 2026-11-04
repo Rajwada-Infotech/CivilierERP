@@ -2680,3 +2680,18 @@ select[aria-hidden="true"] {
   body.legal-printing .legal-print-host h3 { break-after: avoid; }
 }
 
+
+/* ── Animation choices (Settings on every profile page; see src/lib/uiPrefs.ts) ─────────────────────────────────────────────────────
+   <html data-anim-menus / data-anim-pages / data-anim-counts="off"> is set for whatever the person switched off on this device.
+   "none" takes the element straight to its resting state, so nothing is left half drawn. */
+html[data-anim-menus="off"] .genie-open,
+html[data-anim-menus="off"] .genie-close,
+html[data-anim-menus="off"] .genie-rub svg,
+html[data-anim-menus="off"] .genie-pop { animation: none !important; }
+html[data-anim-pages="off"] .sheet-in,
+html[data-anim-pages="off"] .sheet-in > *,
+html[data-anim-pages="off"] .sheet-in .title,
+html[data-anim-pages="off"] .sheet-in .cell > header > span:nth-child(3),
+html[data-anim-pages="off"] .crm-sheet .grow,
+html[data-anim-pages="off"] .crm-sheet .draw,
+html[data-anim-pages="off"] .animate-in { animation: none !important; }

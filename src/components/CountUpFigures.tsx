@@ -4,6 +4,7 @@
 // alone. Nothing moves under reduced motion. It only rewrites the digits of text React already rendered and always
 // ends on React's exact text, so the page reads the same once it settles.
 import React, { useEffect, useRef } from "react";
+import { countAnimationsOn } from "@/lib/uiPrefs";
 
 const FIGURE = /^(\D{0,4}?)(-?\d[\d,]*(?:\.\d+)?)(\s?\D{0,4})$/;
 const MIN_PX = 18;
@@ -35,7 +36,7 @@ export const CountUpScope: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const host = root.current;
-    if (!host || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (!host || !countAnimationsOn()) return;
     const runs = new WeakMap<Text, Run>();
     const live = new Set<Run>();
     const stop = (r: Run) => {

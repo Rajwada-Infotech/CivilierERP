@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { menuAnimationsOn } from "@/lib/uiPrefs";
 
 // The top bar's drop-down panels leave their icon like a genie out of a bottle (and go back in when closed). Opening is a CSS
 // animation on the panel; closing needs the panel to stay on screen until the animation has played, which is what this hook
-// does: close() plays it, then hides the panel. With "reduce motion" on, close() hides it at once.
+// does: close() plays it, then hides the panel. With the menu animations switched off in Settings (or "reduce motion" on), close()
+// hides it at once.
 export const GENIE_CLOSE_MS = 300;
 
 export function useGeniePanel(open: boolean, setOpen: (value: boolean) => void) {
@@ -13,7 +15,7 @@ export function useGeniePanel(open: boolean, setOpen: (value: boolean) => void) 
 
   const close = useCallback(() => {
     if (!open || closing) return;
-    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!menuAnimationsOn()) {
       setOpen(false);
       return;
     }
@@ -37,7 +39,7 @@ export function useGenieVisibility(open: boolean) {
       setPhase("open");
       return;
     }
-    if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!menuAnimationsOn()) {
       setPhase("closed");
       return;
     }

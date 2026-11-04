@@ -4,9 +4,13 @@ import "./index.css";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { isChunkLoadError, reloadForNewVersion } from "./lib/chunkReload";
 import { installGatewayFetch } from "./lib/gatewayFetch";
+import { applyUiPrefs } from "./lib/uiPrefs";
 
 // From here on every call to our API (not only the ones using fetchWithAuth) handles the few seconds of a deploy.
 installGatewayFetch();
+
+// The animation choices saved from Settings (profile pages) go on <html> before anything draws.
+applyUiPrefs();
 
 // Global safety net: unhandled promise rejections that slip past React Query
 // are logged to the console (visible in DevTools / server logs) but never
