@@ -71,10 +71,11 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   // ── Setup: Workflow ──
   S("approval-authority", "Approval Control", "Workflow", ShieldTick, "Who verifies and who approves at L1 / L2 — admin only"),
   // ── Setup: Parties ──
-  S("buyer", "Buyer", "Parties", UserTick, "PAN, Aadhaar & land documents"),
-  S("seller", "Seller", "Parties", UserMinus, "PAN, Aadhaar & title documents"),
-  S("owner", "Owner", "Parties", Crown1, "Recorded owners of land"),
-  S("customer", "Legal Customer", "Parties", People, "Legal module customers — not the Sales / CRM customers"),
+  // We are the company: we buy land from Sellers and sell land to Buyers; Owners are the people in a land's ownership chain.
+  // Each list also fills itself when a new name is typed in a purchase, sale or ownership entry.
+  S("buyer", "Buyer", "Parties", UserTick, "Who buys land from us (sales)"),
+  S("seller", "Seller", "Parties", UserMinus, "Who we buy land from (purchases)"),
+  S("owner", "Owner", "Parties", Crown1, "Past and present owners in land ownership chains"),
   S("witness", "Witness", "Parties", Eye, "Deed witnesses & ID proof"),
   S("advocate", "Advocate", "Parties", Judge, "Enrolment, practice & chamber"),
 ];

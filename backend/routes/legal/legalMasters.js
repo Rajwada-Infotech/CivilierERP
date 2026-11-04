@@ -280,8 +280,9 @@ router.get("/meta", (req, res) => {
   res.json(PAGED.map(([key, m]) => ({
     key, title: m.title, group: m.group, pageKey: m.pageKey, desc: m.desc, pk: m.pk, parent: m.parent, noDelete: !!m.noDelete, adminOnly: !!m.adminOnly,
     extras: (m.extras || []).map(({ name, label }) => ({ name, label })),
-    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto }) =>
-      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto })),
+    fields: m.fields.map(({ name, label, type, required, options, ref, filterBy, blankOk, fill, default: def, upper, max, mask, auto, suggest, party, hidden }) =>
+      ({ name, label, type, required: !!required, options, ref, filterBy, blankOk: !!blankOk, fill, default: def, upper: !!upper, max, mask, auto: !!auto, suggest, party, hidden: !!hidden,
+        creatable: type === "ref" && creatableRef(ref) })),
   })));
 });
 
@@ -427,10 +428,66 @@ router.get("/:master", withRight("view"), listCache, async (req, res) => {
   }
 });
 
+// A party name typed or picked in a form (seller of a purchase, buyer of a sale, an owner in the chain): the name
+// is matched to that party list (same role, same name) and added there when it is new, so every party typed once
+// is offered next time. `party` is the role; `partyId` (optional) is the column that keeps the matched person's id.
+// Several names can be given comma-separated (co-owner sellers); each is matched or added.
+// A dropdown whose list takes a plain name (Transfer Type, Payment Mode… and the party lists): a new name typed in
+// the form arrives as "new:<name>" and is matched (same list, same name) or added to that list, then saved by its id.
+const creatableRef = (ref) => {
+  const m = MASTERS[ref];
+  return !!m && !!m.scope && (m.table === "LegalLookupValue" || m.table === "LegalPerson");
+};
+async function resolveNewRefs(pool, cfg, body, userId, added = []) {
+  for (const f of cfg.fields) {
+    const v = body[f.name];
+    if (f.type !== "ref" || typeof v !== "string" || !v.startsWith("new:") || !creatableRef(f.ref)) continue;
+    const m = MASTERS[f.ref], name = v.slice(4).trim().replace(/\s+/g, " ").slice(0, m.table === "LegalPerson" ? 200 : 150);
+    if (!name) { body[f.name] = null; continue; }
+    const isPerson = m.table === "LegalPerson", col = isPerson ? "FullName" : "Name";
+    const found = (await pool.request().input("Scope", m.scope.value).input("Name", name)
+      .query(`SELECT TOP 1 ${m.pk} AS id FROM dbo.${m.table} WHERE ${m.scope.column} = @Scope AND LTRIM(RTRIM(${col})) = @Name`)).recordset[0];
+    if (found) { body[f.name] = found.id; continue; }
+    body[f.name] = (await pool.request().input("Scope", m.scope.value).input("Name", name).input("UserId", userId || null)
+      .query(`INSERT INTO dbo.${m.table} (${m.scope.column}, ${col}${isPerson ? ", PartyType" : ""}, IsActive, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.${m.pk} AS id VALUES (@Scope, @Name${isPerson ? ", N'Individual'" : ""}, 1, @UserId, SYSUTCDATETIME())`)).recordset[0].id;
+    added.push({ table: m.table, pk: m.pk, id: body[f.name] });
+  }
+}
+
+/** Takes back list entries added for a save that was then refused. */
+async function dropAdded(pool, added) {
+  for (const a of added.reverse()) await pool.request().input("Id", a.id).query(`DELETE FROM dbo.${a.table} WHERE ${a.pk} = @Id`).catch(() => {});
+}
+
+async function resolveParties(pool, cfg, body, userId, added = []) {
+  for (const f of cfg.fields) {
+    if (!f.party || body[f.name] === undefined) continue;
+    const names = String(body[f.name] ?? "").split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean);
+    const ids = [];
+    for (const name of names) {
+      const found = (await pool.request().input("Role", f.party).input("Name", name.slice(0, 200))
+        .query("SELECT TOP 1 PersonId FROM dbo.LegalPerson WHERE PersonRole = @Role AND IsActive = 1 AND LTRIM(RTRIM(FullName)) = @Name")).recordset[0];
+      if (found) { ids.push(found.PersonId); continue; }
+      const row = (await pool.request().input("Role", f.party).input("Name", name.slice(0, 200)).input("UserId", userId || null)
+        .query(`INSERT INTO dbo.LegalPerson (PersonRole, FullName, PartyType, IsActive, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.PersonId VALUES (@Role, @Name, N'Individual', 1, @UserId, SYSUTCDATETIME())`)).recordset[0];
+      ids.push(row.PersonId);
+      added.push({ table: "LegalPerson", pk: "PersonId", id: row.PersonId });
+    }
+    body[f.name] = names.join(", ");
+    if (f.partyId) body[f.partyId] = ids.length === 1 ? ids[0] : null;
+  }
+}
+
 router.post("/:master", withRight("create"), async (req, res) => {
   const cfg = MASTERS[req.params.master];
   try {
     const pool = getPool();
+    await resolveParties(pool, cfg, req.body, req.user?.userId, res.locals.added = []);
+    await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
+    // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
+    res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
@@ -475,6 +532,10 @@ router.put("/:master/:id", withRight("edit"), async (req, res) => {
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
+    await resolveParties(pool, cfg, req.body, req.user?.userId, res.locals.added = []);
+    await resolveNewRefs(pool, cfg, req.body, req.user?.userId, res.locals.added);
+    // A refused save (validation, a business rule, a duplicate…) takes back the list entries it just added.
+    res.once("finish", () => { if (res.statusCode >= 400 && res.locals.added.length) dropAdded(pool, res.locals.added); });
     const { values, error } = await validate(pool, cfg, req.body);
     if (error) return res.status(400).json({ error });
     // A master's own business rule (the same area cannot be sold twice…); `id` is null on add.
