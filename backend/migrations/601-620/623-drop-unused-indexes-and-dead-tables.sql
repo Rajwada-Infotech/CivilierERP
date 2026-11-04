@@ -21,6 +21,7 @@
 -- C. Empty tables no code uses (each dropped only while still empty and nothing references it):
 --      BookingPaymentTerms (migrations 083 / 262 already meant to retire it), FollowupApplicants_DEPRECATED,
 --      ProjectUnitTypeSpec, CrmUnitLineage, DprActivityChainTemplate(Item), sysdiagrams (left by SQL tools).
+--    Kept instead if it has rows, a foreign key points at it, or a view / procedure / function / trigger uses it.
 --
 -- No row of data is removed. Safe to re-run.
 
@@ -87,6 +88,9 @@ BEGIN
     IF ISNULL(@rows, 0) = 0
        AND NOT EXISTS (SELECT 1 FROM sys.foreign_keys fk
                        WHERE fk.referenced_object_id = OBJECT_ID('dbo.' + @name) AND fk.parent_object_id <> fk.referenced_object_id)
+       -- Nor a view, procedure, function or trigger made on the server by hand (not in any migration) uses it.
+       AND NOT EXISTS (SELECT 1 FROM sys.sql_expression_dependencies dep
+                       WHERE dep.referenced_id = OBJECT_ID('dbo.' + @name) AND dep.referencing_id <> OBJECT_ID('dbo.' + @name))
     BEGIN
       -- Its own outgoing foreign keys go with it.
       SET @dropSql = N'DROP TABLE dbo.' + QUOTENAME(@name);
