@@ -265,8 +265,9 @@ router.get(
 
 // ── User-wise view ─────────────────────────────────────────────────────────
 // Background calls the app makes by itself (usage pings, the activity log's own traffic) are not something the
-// person did, so they are left out unless ?noise=1 is sent.
-const NOISE_SQL = "(Resource IS NULL OR (Resource NOT LIKE '/api/home/usage%' AND Resource NOT LIKE '/api/user-activity%'))";
+// person did, so they are left out unless ?noise=1 is sent. So are price quotes logged before they were treated
+// as look-ups (middleware/activityAudit.js LOOKUP) — a screen re-asking one logged 809 "creates" for one user.
+const NOISE_SQL = "(Resource IS NULL OR (Resource NOT LIKE '/api/home/usage%' AND Resource NOT LIKE '/api/user-activity%' AND Resource NOT LIKE '%/price-quote'))";
 
 function userViewFilters(req) {
   const [periodFrom, periodTo] = computeDateRange(req.query.period);
