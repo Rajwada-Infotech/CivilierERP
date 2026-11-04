@@ -445,12 +445,13 @@ const MASTERS = {
         { name: "TransferTypeId", label: "Transfer type", type: "ref", ref: "transfer-type", required: true },
         { name: "EventDate", label: "Transfer date", type: "date", required: true },
         // Earlier owners are history, typed in by name; linking a Party master entry is optional and fills the name.
-        { name: "PreviousOwnerName", label: "From — previous owner name", type: "text", max: 200 },
+        // Owners are picked from (or added to) the Owner list; the matched owner's id is kept in PreviousOwnerId / NewOwnerId.
+        { name: "PreviousOwnerName", label: "From — previous owner", type: "text", max: 200, suggest: "owner", party: "Owner", partyId: "PreviousOwnerId" },
         { name: "PreviousOwnerGuardian", label: "Previous owner's father / husband", type: "text", max: 200 },
-        { name: "PreviousOwnerId", label: "Previous owner in Party master (optional)", type: "ref", ref: "person", fill: { PreviousOwnerName: "FullName", PreviousOwnerGuardian: "GuardianName" } },
-        { name: "NewOwnerName", label: "To — new owner name", type: "text", required: true, max: 200 },
+        { name: "PreviousOwnerId", label: "Previous owner (Owner list)", type: "ref", ref: "person", hidden: true },
+        { name: "NewOwnerName", label: "To — new owner", type: "text", required: true, max: 200, suggest: "owner", party: "Owner", partyId: "NewOwnerId" },
         { name: "NewOwnerGuardian", label: "New owner's father / husband", type: "text", max: 200 },
-        { name: "NewOwnerId", label: "New owner in Party master (optional)", type: "ref", ref: "person", fill: { NewOwnerName: "FullName", NewOwnerGuardian: "GuardianName" } },
+        { name: "NewOwnerId", label: "New owner (Owner list)", type: "ref", ref: "person", hidden: true },
         { name: "DocTypeId", label: "Transfer document type", type: "ref", ref: "document-type" },
         { name: "DocumentNo", label: "Document number", type: "text", max: 100 },
         { name: "AgreementDate", label: "Agreement date", type: "date" },
@@ -474,16 +475,16 @@ const MASTERS = {
       orderBy: "ValidFrom, RecordId", review: REVIEW,
       fields: [
         LAND_ID,
-        { name: "OwnerName", label: "Owner name", type: "text", required: true, max: 200 },
+        { name: "OwnerName", label: "Owner", type: "text", required: true, max: 200, suggest: "owner", party: "Owner", partyId: "PersonId" },
         { name: "OwnerGuardian", label: "Father / husband name", type: "text", max: 200 },
-        { name: "PersonId", label: "Owner in Party master (optional)", type: "ref", ref: "person", fill: { OwnerName: "FullName", OwnerGuardian: "GuardianName" } },
+        { name: "PersonId", label: "Owner (Owner list)", type: "ref", ref: "person", hidden: true },
         { name: "OwnershipTypeId", label: "Ownership type", type: "ref", ref: "ownership-type", required: true },
         { name: "RelationshipTypeId", label: "Relationship", type: "ref", ref: "relationship-type" },
         { name: "SharePct", label: "Ownership share (%)", type: "decimal", required: true, maxValue: 100 },
         { name: "ValidFrom", label: "Ownership start date", type: "date", required: true },
         { name: "ValidTo", label: "Ownership end date (blank = current)", type: "date", after: "ValidFrom" },
         { name: "EventId", label: "Created by transfer", type: "ref", ref: "ownership-event", filterBy: "LandId" },
-        { name: "PreviousOwnerName", label: "Previous owner name", type: "text", max: 200 },
+        { name: "PreviousOwnerName", label: "Previous owner", type: "text", max: 200, suggest: "owner" },
         { name: "TransferDocFileId", label: "Transfer document", type: "file" },
         VERIFICATION,
         { name: "VerificationRemarks", label: "Verification remarks", type: "textarea", max: 1000 },
@@ -753,7 +754,7 @@ const MASTERS = {
         { name: "TransactionNo", label: "Transaction number", type: "text", max: 30, auto: "TXN" },
         { name: "TxnType", label: "Purchase or sale", type: "select", required: true, options: ["Purchase", "Sale"], default: "Purchase" },
         { name: "BuyerName", label: "Buyer / company", type: "text", required: true, max: 200 },
-        { name: "BuyerId", label: "Buyer in Party master (optional)", type: "ref", ref: "person", fill: { BuyerName: "FullName" } },
+        { name: "BuyerId", label: "Buyer (Buyer list)", type: "ref", ref: "person", hidden: true },
         { name: "SellerNames", label: "Seller(s)", type: "text", required: true, max: 500 },
         { name: "TxnArea", label: "Area (selling / buying)", type: "decimal", required: true, min: 0.000001 },
         { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", required: true },
@@ -1529,7 +1530,9 @@ const MASTERS = {
   MASTERS["land-purchase"] = {
     ...txn, title: "Purchase", scope: { column: "TxnType", value: "Purchase" }, check: undefined,
     desc: "The company acquiring this land. Sellers are the land's current owners; the whole land (all owners' shares) can be bought in one purchase.",
-    fields: base.map((f) => (f.name === "BuyerName" ? { ...f, label: "Buyer (company)" } : f.name === "SellerNames" ? { ...f, label: "Seller(s) — the current owners" } : f)),
+    // The company buys: the buyer is one of our companies; the sellers come from (or are added to) the Seller list.
+    fields: base.map((f) => (f.name === "BuyerName" ? { ...f, label: "Buyer (our company)", suggest: "company" }
+      : f.name === "SellerNames" ? { ...f, label: "Seller(s) — the land's owners, comma-separated", suggest: "seller", party: "Seller" } : f)),
   };
   MASTERS["land-sale"] = {
     ...txn, title: "Sale", scope: { column: "TxnType", value: "Sale" },
@@ -1560,7 +1563,9 @@ const MASTERS = {
       if (!acquired) return "This land is not owned by the company yet — set its Land status to Owned (or Registered / Mutated) once the purchase is registered";
       return txn.check(pool, { ...values, TxnType: "Sale" }, id);
     },
-    fields: base.map((f) => (f.name === "SellerNames" ? { ...f, label: "Seller (the company)" } : f)),
+    // The company sells: the seller is one of our companies; the buyer comes from (or is added to) the Buyer list.
+    fields: base.map((f) => (f.name === "SellerNames" ? { ...f, label: "Seller (our company)", suggest: "company" }
+      : f.name === "BuyerName" ? { ...f, label: "Buyer", suggest: "buyer", party: "Buyer", partyId: "BuyerId" } : f)),
   };
   txn.lookupOnly = true;
 
@@ -1578,6 +1583,8 @@ const EXTERNAL_REFS = {
   project: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'P'" },
   role: { sql: "SELECT RId AS value, RName AS label FROM dbo.Role ORDER BY RName", exists: "SELECT 1 FROM dbo.Role WHERE RId = @v" },
   user: { sql: "SELECT id AS value, name AS label FROM dbo.users ORDER BY name", exists: "SELECT 1 FROM dbo.users WHERE id = @v" },
+  // Our own companies: the buyer when we buy land, the seller when we sell it.
+  company: { sql: "SELECT id AS value, name AS label FROM dbo.enterprise WHERE business_type = 'C' AND (discontinue IS NULL OR discontinue = 0) ORDER BY name", exists: "SELECT 1 FROM dbo.enterprise WHERE id = @v AND business_type = 'C'" },
 };
 
 module.exports = { MASTERS, EXTERNAL_REFS, DUE_DILIGENCE_CHECKS, VERIFICATION_CHECKS, FINAL_CHECKS };

@@ -23,7 +23,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { LegalMasterTable } from "../LegalMasterPage";
 import { OwnershipStep } from "./steps/OwnershipStep";
 import { GovtSiteLinks } from "@/components/legal/GovtSiteLinks";
-import { DocumentsStep } from "./steps/DocumentsStep";
+import { DocumentsStep, RecordDocuments, type DocLink } from "./steps/DocumentsStep";
+import { getLandDocuments } from "@/api/legalDocumentsApi";
+import { getLegalRows, type LegalRow } from "@/api/legalMastersApi";
 
 // The Central Land Details Profile: complete property record, one page per Land ID.
 // Every section maintains historical records linked directly to this property.
@@ -158,6 +160,29 @@ export default function LandProfilePage() {
     queryClient.invalidateQueries({ queryKey: ["legal-land-stats"] });
   };
 
+  // Documents filed under a legal record / loan: opened from that row, counted per row.
+  const [docsFor, setDocsFor] = useState<DocLink | null>(null);
+  const { data: landDocs } = useQuery({ queryKey: ["legal-land-docs", landId], queryFn: () => getLandDocuments(landId), enabled: landId > 0 });
+  const docCount = (kind: DocLink["kind"], id: number) =>
+    (landDocs?.documents ?? []).filter((d) => (kind === "legal" ? d.RelatedLegalRecordId : d.RelatedMortgageId) === id).length;
+  const docsButton = (link: DocLink) => (
+    <button onClick={(e) => { e.stopPropagation(); setDocsFor(link); }} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
+      Documents ({docCount(link.kind, link.id)})
+    </button>
+  );
+  // Child records are added from their parent's row: payments under a purchase / sale, new Khatian under its
+  // mutation, hearings under their court case. The dialog lists that parent's children with the parent fixed.
+  type Child = { key: string; field: string; id: number; title: string; label: string };
+  const [child, setChild] = useState<Child | null>(null);
+  const childRows = (key: string) => getLegalRows(key, landId);
+  const { data: payRows } = useQuery({ queryKey: ["legal-master", "payment", landId], queryFn: () => childRows("payment"), enabled: landId > 0 });
+  const { data: khatianRows } = useQuery({ queryKey: ["legal-master", "mutation-record", landId], queryFn: () => childRows("mutation-record"), enabled: landId > 0 });
+  const { data: hearingRows } = useQuery({ queryKey: ["legal-master", "case-hearing", landId], queryFn: () => childRows("case-hearing"), enabled: landId > 0 });
+  const childButton = (c: Child, rows: LegalRow[] | undefined) => (
+    <button onClick={(e) => { e.stopPropagation(); setChild(c); }} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted">
+      {c.label} ({(rows ?? []).filter((r) => Number(r[c.field]) === c.id).length})
+    </button>
+  );
   const [actionModal, setActionModal] = useState<{
     type: "verify" | "submit-l1" | "action-l1" | "action-l2";
     action?: "Approve" | "Return" | "Reject";
@@ -498,6 +523,27 @@ export default function LandProfilePage() {
             </div>
 
             {/* Modal: Action confirmation dialog */}
+            <Dialog open={!!child} onOpenChange={(o) => { if (!o) setChild(null); }}>
+              <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>{child?.title}</DialogTitle>
+                  <DialogDescription>Records belonging to this one only; a new one is added under it.</DialogDescription>
+                </DialogHeader>
+                {child && (
+                  <LegalMasterTable key={`${child.key}-${child.id}`} entry={table(child.key, child.label)} parentId={landId} onSaved={refresh}
+                    fixed={{ [child.field]: String(child.id) }} rowFilter={(r) => Number(r[child.field]) === child.id} />
+                )}
+              </DialogContent>
+            </Dialog>
+            <Dialog open={!!docsFor} onOpenChange={(o) => { if (!o) setDocsFor(null); }}>
+              <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Documents · {docsFor?.label}</DialogTitle>
+                  <DialogDescription>Documents filed under this {docsFor?.kind === "loan" ? "loan / mortgage" : "legal record"}. They also show on the Documents tab.</DialogDescription>
+                </DialogHeader>
+                {docsFor && <RecordDocuments landId={landId} link={docsFor} onSaved={refresh} />}
+              </DialogContent>
+            </Dialog>
             <Dialog open={!!actionModal} onOpenChange={() => setActionModal(null)}>
               <DialogContent className="max-w-md">
                 <DialogHeader>
@@ -744,7 +790,8 @@ export default function LandProfilePage() {
                   title="Purchase & Consideration Details"
                   note="Financial and contract details of property purchases: consideration price, advance amount, settlement, and payment proofs."
                 >
-                  <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh} />
+                  <LegalMasterTable entry={table("land-purchase", "Purchase / Acquisition")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => childButton({ key: "payment", field: "TransactionId", id: Number(raw.TransactionId), title: `Payments · ${String(raw.TransactionNo ?? "purchase")}`, label: "Payments" }, payRows)} />
                 </Section>
               </div>
             )}
@@ -784,13 +831,15 @@ export default function LandProfilePage() {
                   title="Court Cases & Disputes"
                   note="Past and ongoing court cases, plaintiffs, defendants, advocates, and case statuses."
                 >
-                  <LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh} />
+                  <LegalMasterTable entry={table("legal-case", "Court Case")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => childButton({ key: "case-hearing", field: "CaseId", id: Number(raw.CaseId), title: `Hearings · ${String(raw.CaseNumber ?? "case")}`, label: "Hearings" }, hearingRows)} />
                 </Section>
                 <Section
                   title="Legal Orders, Notices & Opinions"
                   note="Judgments, court orders, legal notices, legal opinions, and due-diligence clearance reports."
                 >
-                  <LegalMasterTable entry={table("land-legal-record", "Legal Record")} parentId={landId} onSaved={refresh} />
+                  <LegalMasterTable entry={table("land-legal-record", "Legal Record")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => docsButton({ kind: "legal", id: Number(raw.LegalRecordId), label: `${String(raw.RecordType ?? "Legal record")}${raw.CaseNumber ? ` ${String(raw.CaseNumber)}` : ""}` })} />
                 </Section>
               </div>
             )}
@@ -801,7 +850,8 @@ export default function LandProfilePage() {
                 title="Loan & Mortgage History"
                 note="Historical and active mortgages, bank loans, loan amounts, release dates, and bank NOCs. Closed loans are preserved."
               >
-                <LegalMasterTable entry={table("mortgage", "Mortgage & Loan")} parentId={landId} onSaved={refresh} />
+                <LegalMasterTable entry={table("mortgage", "Mortgage & Loan")} parentId={landId} onSaved={refresh}
+                  rowActions={(raw) => docsButton({ kind: "loan", id: Number(raw.MortgageId), label: `${String(raw.LenderName ?? "Loan")}${raw.LoanAccountRef ? ` · ${String(raw.LoanAccountRef)}` : ""}` })} />
               </Section>
             )}
 
@@ -812,13 +862,14 @@ export default function LandProfilePage() {
                   title="Mutation Applications & Certificates"
                   note="BL&LRO mutation case numbers, previous and new owners, order dates, and certificate records."
                 >
-                  <LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh} />
+                  <LegalMasterTable entry={table("mutation", "Mutation")} parentId={landId} onSaved={refresh}
+                    rowActions={(raw) => childButton({ key: "mutation-record", field: "MutationId", id: Number(raw.MutationId), title: `New Khatian / RoR · ${String(raw.ApplicationNo ?? raw.CaseNo ?? "mutation")}`, label: "New Khatian" }, khatianRows)} />
                 </Section>
                 <Section
                   title="New Khatian / RoR Post-Mutation"
-                  note="New Khatian and plot records created following mutation."
+                  note="New Khatian and plot records created by each mutation. Add one with New Khatian on its mutation's row above."
                 >
-                  <LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} />
+                  <LegalMasterTable entry={table("mutation-record", "New Khatian / RoR")} parentId={landId} onSaved={refresh} noAdd />
                 </Section>
               </div>
             )}

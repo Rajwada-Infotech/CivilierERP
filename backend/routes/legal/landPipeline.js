@@ -849,6 +849,8 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
 
   for (const n of c.to) {
     let eventId = null;
+    // Every new owner is in the Owner list (matched by name, added when new), so the same person is offered next time.
+    const personId = await ownerPersonId(tx, n.name, n.guardian, userId);
     {  // every owner, the first one too, gets a chain entry so it can be shown, edited and verified
       const ev = await tx.request()
         .input("Land", sql.Int, landId).input("Type", sql.Int, c.transferTypeId || (await tx.request().query("SELECT TOP 1 LookupId AS id FROM dbo.LegalLookupValue WHERE Category = N'transfer-type' AND Name = N'Sale'")).recordset[0]?.id)
@@ -857,20 +859,20 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
         .input("DocType", sql.Int, c.doc.docTypeId).input("DocNo", sql.NVarChar(100), c.doc.documentNo).input("DeedNo", sql.NVarChar(60), c.doc.deedNo)
         .input("Office", sql.Int, c.doc.officeId).input("RegDate", sql.Date, c.doc.regDate).input("Share", sql.Decimal(7, 4), n.share)
         .input("Value", sql.Decimal(18, 2), c.doc.value).input("File", sql.Int, c.doc.fileId).input("Deed", sql.Int, registeredDeedId)
-        .input("Remarks", sql.NVarChar(1000), c.first ? (c.remarks || "Earliest documented owner") : c.remarks).input("UserId", sql.Int, userId)
+        .input("Remarks", sql.NVarChar(1000), c.first ? (c.remarks || "Earliest documented owner") : c.remarks).input("UserId", sql.Int, userId).input("Person", sql.Int, personId)
         .query(`
           INSERT INTO dbo.LegalOwnershipEvent (LandId, TransferTypeId, EventDate, PreviousOwnerName, PreviousOwnerGuardian, NewOwnerName, NewOwnerGuardian, DocTypeId, DocumentNo, DeedNo,
-            RegistrationOfficeId, RegistrationDate, TransferSharePct, TransferValue, DocFileId, RegisteredDeedId, VerificationStatus, Remarks, CreatedBy)
+            RegistrationOfficeId, RegistrationDate, TransferSharePct, TransferValue, DocFileId, RegisteredDeedId, VerificationStatus, Remarks, CreatedBy, NewOwnerId)
           OUTPUT INSERTED.EventId AS id
-          VALUES (@Land, @Type, @Date, @Prev, @PrevG, @New, @NewG, @DocType, @DocNo, @DeedNo, @Office, @RegDate, @Share, @Value, @File, @Deed, N'Pending', @Remarks, @UserId)`);
+          VALUES (@Land, @Type, @Date, @Prev, @PrevG, @New, @NewG, @DocType, @DocNo, @DeedNo, @Office, @RegDate, @Share, @Value, @File, @Deed, N'Pending', @Remarks, @UserId, @Person)`);
       eventId = ev.recordset[0].id;
     }
     await tx.request().input("Land", sql.Int, landId).input("Name", sql.NVarChar(200), n.name).input("G", sql.NVarChar(200), n.guardian)
       .input("Type", sql.Int, newOwnershipType).input("Rel", sql.Int, n.relationshipTypeId).input("Share", sql.Decimal(7, 4), n.share)
       .input("Date", sql.Date, c.date).input("Event", sql.Int, eventId).input("Prev", sql.NVarChar(200), fromNames)
-      .input("File", sql.Int, c.doc.fileId).input("UserId", sql.Int, userId)
-      .query(`INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, RelationshipTypeId, SharePct, ValidFrom, EventId, PreviousOwnerName, TransferDocFileId, VerificationStatus, CreatedBy)
-              VALUES (@Land, @Name, @G, @Type, @Rel, @Share, @Date, @Event, @Prev, @File, N'Pending', @UserId)`);
+      .input("File", sql.Int, c.doc.fileId).input("UserId", sql.Int, userId).input("Person", sql.Int, personId)
+      .query(`INSERT INTO dbo.LegalOwnershipRecord (LandId, OwnerName, OwnerGuardian, OwnershipTypeId, RelationshipTypeId, SharePct, ValidFrom, EventId, PreviousOwnerName, TransferDocFileId, VerificationStatus, CreatedBy, PersonId)
+              VALUES (@Land, @Name, @G, @Type, @Rel, @Share, @Date, @Event, @Prev, @File, N'Pending', @UserId, @Person)`);
     if (inheritanceId) {
       await tx.request().input("Land", sql.Int, landId).input("Inh", sql.Int, inheritanceId).input("Name", sql.NVarChar(200), n.name).input("G", sql.NVarChar(200), n.guardian)
         .input("Rel", sql.Int, n.relationshipTypeId).input("Share", sql.Decimal(7, 4), n.share).input("UserId", sql.Int, userId)
@@ -908,6 +910,20 @@ async function applyOwnershipChange(tx, req, landId, c, { registeredDeedId = nul
 }
 
 // Step 5: add the first owner, or record one change of ownership.
+/** The Owner-list person for a name (same name, and same father / husband when both are known), added when new. */
+async function ownerPersonId(conn, name, guardian, userId) {
+  const n = String(name || "").trim().replace(/\s+/g, " ").slice(0, 200);
+  if (!n) return null;
+  const g = String(guardian || "").trim().slice(0, 200) || null;
+  const hit = (await conn.request().input("Name", sql.NVarChar(200), n).input("G", sql.NVarChar(200), g)
+    .query(`SELECT TOP 1 PersonId FROM dbo.LegalPerson WHERE PersonRole = N'Owner' AND IsActive = 1 AND LTRIM(RTRIM(FullName)) = @Name
+            AND (@G IS NULL OR GuardianName IS NULL OR GuardianName = @G) ORDER BY CASE WHEN GuardianName = @G THEN 0 ELSE 1 END`)).recordset[0];
+  if (hit) return hit.PersonId;
+  return (await conn.request().input("Name", sql.NVarChar(200), n).input("G", sql.NVarChar(200), g).input("UserId", sql.Int, userId || null)
+    .query(`INSERT INTO dbo.LegalPerson (PersonRole, FullName, GuardianName, PartyType, IsActive, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.PersonId VALUES (N'Owner', @Name, @G, N'Individual', 1, @UserId, SYSUTCDATETIME())`)).recordset[0].PersonId;
+}
+
 router.post("/:id/ownership/change", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
   const id = idParam(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });

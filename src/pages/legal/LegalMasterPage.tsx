@@ -120,6 +120,31 @@ const FileField: React.FC<{ value: unknown; savedName: string; onChange: (v: unk
   );
 };
 
+/** A party list's label is "Name (PAN)": the name alone is what a form field holds. */
+const nameOf = (label: string) => label.replace(/ \([A-Z]{5}[0-9]{4}[A-Z]\)$/, "");
+
+/** Pick from the list or type a new entry. For a ref, the value is the picked row's id, or "new:<text>" for a
+ *  new name (the server adds it to that list on save); for a text field it is the text itself. */
+const Combo: React.FC<{ id: string; value: unknown; options: { value: string; label: string }[]; asRef: boolean; onChange: (v: unknown) => void; error: boolean }> = ({ id, value, options, asRef, onChange, error }) => {
+  const v = String(value ?? "");
+  const shown = !asRef ? v : v.startsWith("new:") ? v.slice(4) : options.find((o) => o.value === v)?.label ?? "";
+  const isNew = asRef ? v.startsWith("new:") : !!v.trim() && !options.some((o) => o.label.toLowerCase() === v.trim().toLowerCase());
+  return (
+    <div>
+      <input list={id} value={shown} placeholder="Select or type"
+        className={`h-[38px] w-full rounded-lg border bg-muted px-3 text-sm ${error ? "border-destructive" : "border-border"}`}
+        onChange={(e) => {
+          const t = e.target.value;
+          if (!asRef) return onChange(t);
+          const hit = options.find((o) => o.label.toLowerCase() === t.trim().toLowerCase());
+          onChange(hit ? hit.value : t.trim() ? `new:${t}` : "");
+        }} />
+      <datalist id={id}>{options.map((o) => <option key={o.value} value={o.label} />)}</datalist>
+      {isNew && <p className="mt-1 text-[0.6875rem] text-muted-foreground">New — it will be added to the list when you save.</p>}
+    </div>
+  );
+};
+
 function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, defaults: Record<string, string>): FieldDef {
   const base = { name: f.name, label: f.label, required: f.required };
   if (f.auto) {
@@ -138,6 +163,22 @@ function toFieldDef(f: LegalFieldMeta, lookups: Record<string, LegalOption[]>, d
   // A page's own starting value (the land's Mouza for its RS records, "Existing / Backlog" for backlog land).
   if (defaults[f.name] !== undefined) {
     return { ...toFieldDef({ ...f }, lookups, {}), defaultValue: defaults[f.name] };
+  }
+  // A name typed or picked from a list (owner, seller, buyer, our company).
+  if (f.suggest) {
+    const opts = (lookups[f.suggest] ?? []).filter((o) => o.active !== false).map((o) => ({ value: nameOf(o.label), label: nameOf(o.label) }));
+    return { ...base, type: "custom", render: (p) => <Combo id={`dl-${f.name}`} value={p.value} options={opts} asRef={false} onChange={p.onChange} error={p.error} /> };
+  }
+  // A short list (transfer type, payment mode, a party list…): pick, or type a new one.
+  if (f.type === "ref" && f.creatable) {
+    return {
+      ...base,
+      type: "custom",
+      render: (p) => (
+        <Combo id={`dl-${f.name}`} value={p.value} asRef onChange={p.onChange} error={p.error}
+          options={refOptions(f, lookups, p.formData).map((o) => ({ value: String(o.value), label: nameOf(o.label) }))} />
+      ),
+    };
   }
   switch (f.type) {
     case "textarea":
@@ -249,6 +290,8 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   const parentField = parentId ? master?.parent : undefined;
   const allFields = useMemo(() => master?.fields ?? [], [master]);
   const fields = useMemo(() => allFields.filter((f) => f.name !== parentField), [allFields, parentField]);
+  // Server-kept fields (a matched party's id) stay in the payload but never show in the form or the table.
+  const shownFields = useMemo(() => fields.filter((f) => !f.hidden), [fields]);
 
   const { data: rows, isLoading, error } = useQuery({
     queryKey: ["legal-master", entry.key, parentId ?? null],
@@ -256,7 +299,10 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
     staleTime: 60 * 1000,
   });
 
-  const refs = useMemo(() => [...new Set(fields.filter((f) => f.type === "ref").map((f) => f.ref!))], [fields]);
+  const refs = useMemo(() => [...new Set([
+    ...shownFields.filter((f) => f.type === "ref").map((f) => f.ref!),
+    ...shownFields.filter((f) => f.suggest).map((f) => f.suggest!),
+  ])], [shownFields]);
   const lookupResults = useQueries({
     queries: refs.map((ref) => ({ queryKey: ["legal-lookup", ref], queryFn: () => getLegalLookup(ref), staleTime: 60 * 1000 })),
   });
@@ -276,9 +322,9 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   );
   // A pick filtered by the (hidden) parent behaves as if the parent were in the form.
   const formFields = useMemo(
-    () => fields.filter((f) => !fixed || !(f.name in fixed)).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
+    () => shownFields.filter((f) => !fixed || !(f.name in fixed)).map((f) => toFieldDef(f.filterBy === parentField ? { ...f, filterBy: undefined } : f, lookups, defaults)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fields, lookups, parentField, JSON.stringify(defaults), JSON.stringify(fixed)],
+    [shownFields, lookups, parentField, JSON.stringify(defaults), JSON.stringify(fixed)],
   );
   const extras = useMemo(() => master?.extras ?? [], [master]);
   const data = useMemo(
@@ -290,12 +336,12 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
   // Every field as a column (the table scrolls sideways): documents as a preview chip, long notes cut to one
   // line with the full text on hover, then Status.
   const columns: ColumnDef[] = useMemo(() => {
-    const shown = fields.filter((f) => !isStatus(f));
+    const shown = shownFields.filter((f) => !isStatus(f));
     const cols: ColumnDef[] = shown.map((f, i) => ({ key: displayKey(f), label: f.label, hideOnMobile: i >= 2 }));
     for (const x of extras) cols.push({ key: `${x.name}__display`, label: x.label, hideOnMobile: true });
     if (fields.some(isStatus)) cols.push({ key: "status", label: "Status" });
     return cols;
-  }, [fields, extras]);
+  }, [shownFields, fields, extras]);
   const columnRenderers = useMemo(
     () => Object.fromEntries([
       ...fields.filter((f) => f.type === "file").map((f) => [displayKey(f), (v: unknown, row: RecordWithId) => <LegalFileLink id={row[f.name]} name={String(v || "")} />]),
@@ -342,7 +388,7 @@ export function LegalMasterTable({ entry, parentId, defaults = {}, rowActions, o
         toast.success(added.message);
         if (onCreated && added.id) onCreated(Number(added.id));
       }
-      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), payload(event.record))).message);
+      if (event.action === "update") toast.success((await updateLegalRow(entry.key, Number(event.id), { ...payload(event.record), ...fixed })).message);
       if (event.action === "delete") toast.success((await deleteLegalRow(entry.key, Number(event.id))).message);
       onSaved?.();
     } catch (err) {
