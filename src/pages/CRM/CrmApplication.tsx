@@ -899,6 +899,7 @@ const CrmApplication: React.FC = () => {
         if (!res.ok) throw new Error(data.error || "Failed to save changes");
         setUnitLocked(true);
         toast.success("Project/Unit selection updated");
+        window.dispatchEvent(new CustomEvent("approval-action"));
         // Parking already picked in another block than the new unit — the next step is Parking, to check it.
         if (data.parkingWarning) toast.warning(data.parkingWarning, { duration: 12000 });
         if (form.PreferredUnitIds[0]) qc.invalidateQueries({ queryKey: ["unit-master"] });
@@ -957,6 +958,8 @@ const CrmApplication: React.FC = () => {
       body: JSON.stringify(patch),
     });
     if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Save failed"); }
+    // A changed item the verifier had ticked goes back to be verified — the booking and sent-back markers follow.
+    window.dispatchEvent(new CustomEvent("approval-action"));
   };
 
   // Moves forward and persists CurrentStep (fire-and-forget — a failed save
@@ -1365,7 +1368,7 @@ const CrmApplication: React.FC = () => {
                 </button>
               )}
               {sb === "Reapprove" && a.BookingId && (
-                <button onClick={() => navigate("/admin/approval/inbox")} className={`${KEY_LINE} h-7 px-2`} title="With the approver — approve again, or send back to Data Review">
+                <button onClick={() => navigate(`/crm/bookings?view=${a.BookingId}`)} className={`${KEY_LINE} h-7 px-2`} title="Yours to approve again, or send back — on the booking">
                   Re-approve <ChevronRight size={11} />
                 </button>
               )}

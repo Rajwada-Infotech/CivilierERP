@@ -237,7 +237,7 @@ const CrmBooking: React.FC = () => {
             {/* The stage itself is shown in Status; only Data Review has a button here. */}
             {/* Sent back: correct it; resubmitted: recheck it — in place of the plain checklist button. */}
             {sentBackByBooking.get(b.Id) === "Reapprove" ? (
-              <button onClick={() => navigate("/admin/approval/inbox")} className={`${KEY_LINE} h-7 px-2`} title="With the approver — approve again, or send back to Data Review">
+              <button onClick={() => openBooking(b.Id)} className={`${KEY_LINE} h-7 px-2`} title="Yours to approve again, or send back — on the booking">
                 Re-approve <ChevronRight size={11} />
               </button>
             ) : sentBackByBooking.get(b.Id) ? (

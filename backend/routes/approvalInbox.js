@@ -1089,6 +1089,7 @@ function buildInboxQueries(module, projectScope = null) {
           a.ApplicantName                       AS SupplierName,
           b.GrandTotal                          AS Amount,
           ${NULL_EXTRA}
+          ${require("../services/crmBookingStageService").sendBackTargetsSql("b.WorkflowStage")} AS SendBackTo,
           CAST(b.CreatedBy AS NVARCHAR(255))    AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,

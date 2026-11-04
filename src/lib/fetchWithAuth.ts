@@ -194,8 +194,11 @@ export async function fetchWithAuth(
   }
 
   // A save: every list on screen reads again, so what was just created shows in every dropdown at once.
-  // Activity-log and page-visit writes (skipActivityLog) are not saves.
-  if (!isRead && response.ok && !skipActivityLog && !skipRefresh) refreshAfterWrite();
+  // Activity-log and page-visit writes (skipActivityLog) are not saves, nor is a POST the server marks as a
+  // look-up (X-Changes-Nothing: a price quote, a preview) — re-reading after one made a screen that reads it
+  // ask again after every answer, without end.
+  const changedNothing = response.headers?.get?.("X-Changes-Nothing") === "1";
+  if (!isRead && response.ok && !skipActivityLog && !skipRefresh && !changedNothing) refreshAfterWrite();
 
   return response;
 }

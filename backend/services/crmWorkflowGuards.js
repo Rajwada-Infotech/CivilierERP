@@ -695,6 +695,12 @@ async function acceptAgreementDate(pool, agreementId, acceptedBy) {
   // engine's own "Pending" transition expects a submitting user/role.
   await pool.request().input("id", sql.Int, agreementId)
     .query("UPDATE dbo.CrmAgreement SET ProposedDateStatus = 'Matched', DateApprovalStatus = 'Pending' WHERE Id = @id");
+  // The date approval shares the agreement's approval log (same table) and
+  // was set Pending without a "sent for approval" marker — so the agreement's
+  // own earlier approvals counted toward the date approval's levels. A fresh
+  // cycle marker makes it start at level 1, like every other submission.
+  await require("./approvalService").restartApprovalCycle("crm-agreement-date", agreementId, null, null,
+    `Agreement date accepted by the ${acceptedBy === "Company" ? "company" : "customer"} — sent for date approval`);
 
   await pool.request()
     .input("agid", sql.Int, agreementId)

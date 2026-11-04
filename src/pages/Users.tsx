@@ -21,6 +21,8 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BodyPortal } from "@/components/ui/body-portal";
 import { makeAvatarThumb } from "@/lib/avatarThumb";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { UserStatusDialog } from "@/components/UserStatusDialog";
+import { fmtIstDateTime } from "@/lib/istTime";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -32,6 +34,10 @@ interface User {
   RoleId: number;
   created_datetime: string;
   discontinue: boolean;
+  /** why, by whom and when the status was last switched (migration 621) */
+  StatusReason?: string | null;
+  StatusChangedAt?: string | null;
+  StatusChangedBy?: string | null;
   can_accept_tickets?: boolean;
   DepartmentId?: number | null;
   DepartmentName?: string | null;
@@ -81,7 +87,7 @@ const addUserApi = async (user: {
   return res.json().catch(() => ({}));
 };
 
-const updateUserApi = async (id: number, data: Partial<User>) => {
+const updateUserApi = async (id: number, data: Partial<User> & { reason?: string }) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: authHeaders(),
@@ -180,7 +186,7 @@ function buildUserColumns(
   setDeleteConfirmId: (id: number | null) => void,
   setEditUserId: (id: number) => void,
   setViewUserId: (id: number) => void,
-  updateMutation: { mutate: (args: { id: number; data: any }) => void },
+  onStatus: (user: User) => void,
   ticketAccessMutation: {
     mutate: (args: { id: number; canAccept: boolean }) => void;
     isPending?: boolean;
@@ -261,11 +267,20 @@ function buildUserColumns(
     {
       accessorKey: "discontinue",
       header: "Status",
-      size: 110,
-      cell: ({ getValue }) => {
+      size: 190,
+      cell: ({ row, getValue }) => {
         const inactive = getValue() as boolean;
+        const u = row.original;
         return (
-          !inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>
+          <div className="leading-tight">
+            {!inactive ? <SheetMark text="Active" tone="done" /> : <span className={LBL}>Inactive</span>}
+            {u.StatusReason && (
+              <p className="mt-1 max-w-[220px] whitespace-normal text-[0.6875rem] text-muted-foreground" title={u.StatusReason}>
+                {u.StatusReason}
+                <span className="block text-[0.625rem] opacity-80">{[u.StatusChangedBy, u.StatusChangedAt ? fmtIstDateTime(u.StatusChangedAt) : ""].filter(Boolean).join(" · ")}</span>
+              </p>
+            )}
+          </div>
         );
       },
     },
@@ -281,7 +296,7 @@ function buildUserColumns(
             <button data-row-view onClick={() => setViewUserId(user.id)} className={ACT} title="View" aria-label="View"><Eye size={13} /></button>
             <button onClick={() => setEditUserId(user.id)} className={ACT} title="Edit" aria-label="Edit"><Edit size={13} /></button>
             <button
-              onClick={() => updateMutation.mutate({ id: user.id, data: { discontinue: !user.discontinue } })}
+              onClick={() => onStatus(user)}
               className={`${KEY} h-7 px-2.5 border ${!user.discontinue ? "border-foreground/40 text-muted-foreground hover:text-destructive hover:border-destructive" : "border-foreground text-foreground hover:bg-primary/10"}`}
             >
               {!user.discontinue ? "Deactivate" : "Activate"}
@@ -319,6 +334,9 @@ const Users = () => {
     queryFn: getDepartmentOptions,
   });
 
+  // Making a user active / inactive asks for a reason first: the change waits here until the dialog is confirmed.
+  const [statusChange, setStatusChange] = useState<{ id: number; name: string; makeActive: boolean; data: Partial<User> } | null>(null);
+
   const addMutation = useMutation({
     mutationFn: addUserApi,
     onSuccess: () => {
@@ -331,11 +349,12 @@ const Users = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<User> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<User> & { reason?: string } }) =>
       updateUserApi(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       toast.success("User updated successfully.");
+      setStatusChange(null);
       resetForm();
       setDrawerOpen(false);
     },
@@ -378,7 +397,7 @@ const Users = () => {
   const [showPass, setShowPass] = useState(false);
 
   const columns = useMemo(
-    () => buildUserColumns(roles, deleteConfirmId, setDeleteConfirmId, setEditUserId, setViewUserId, updateMutation, ticketAccessMutation, deleteMutation),
+    () => buildUserColumns(roles, deleteConfirmId, setDeleteConfirmId, setEditUserId, setViewUserId, (u) => setStatusChange({ id: u.id, name: u.name, makeActive: !!u.discontinue, data: { discontinue: !u.discontinue } }), ticketAccessMutation, deleteMutation),
     [roles, deleteConfirmId, deleteMutation.isPending, ticketAccessMutation.isPending],
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -426,17 +445,21 @@ const Users = () => {
     }
 
     if (editUserId !== null) {
-      updateMutation.mutate({
-        id: editUserId,
-        data: {
-          name: form.name.trim(),
-          email: form.email.trim(),
-          RoleId: form.RoleId,
-          DepartmentId: form.DepartmentId || null,
-          discontinue: !form.isActive,
-          can_accept_tickets: form.canAcceptTickets,
-        },
-      });
+      const data = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        RoleId: form.RoleId,
+        DepartmentId: form.DepartmentId || null,
+        discontinue: !form.isActive,
+        can_accept_tickets: form.canAcceptTickets,
+      };
+      // Switching the account on or off in this form also asks for a reason.
+      const was = allUsers.find((u) => u.id === editUserId);
+      if (was && !!was.discontinue !== !form.isActive) {
+        setStatusChange({ id: editUserId, name: form.name.trim(), makeActive: form.isActive, data });
+      } else {
+        updateMutation.mutate({ id: editUserId, data });
+      }
     } else {
       addMutation.mutate({
         name: form.name.trim(),
@@ -783,6 +806,18 @@ const Users = () => {
             </form>
           </div>
         </div></BodyPortal>
+      )}
+
+      {statusChange && (
+        <BodyPortal>
+          <UserStatusDialog
+            userName={statusChange.name}
+            makeActive={statusChange.makeActive}
+            busy={updateMutation.isPending}
+            onClose={() => setStatusChange(null)}
+            onConfirm={(reason) => updateMutation.mutate({ id: statusChange.id, data: { ...statusChange.data, reason } })}
+          />
+        </BodyPortal>
       )}
 
       {/* ── View User Modal ── */}

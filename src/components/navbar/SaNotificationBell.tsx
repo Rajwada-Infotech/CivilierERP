@@ -4,7 +4,8 @@ import { CheckCheck } from "lucide-react";
 import { useSaNotifications } from "@/hooks/useSaNotifications";
 import { useNavigate } from "react-router-dom";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { NAV_PANEL_CSS } from "./navPanelStyles";
+import { NAV_PANEL_CSS, GENIE_CSS } from "./navPanelStyles";
+import { useGeniePanel } from "./useGeniePanel";
 
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -21,6 +22,7 @@ export const SaNotificationBell: React.FC = () => {
   const { notifications, unreadCount, markRead, markAllRead } = useSaNotifications();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { closing, close } = useGeniePanel(open, setOpen);
 
   const recent = notifications.slice(0, 10);
 
@@ -33,9 +35,10 @@ export const SaNotificationBell: React.FC = () => {
       else if (n.refType === "crm_service_ticket") navigate("/crm/service-tickets");
       else if (n.refType === "crm_handover") navigate("/crm/handover");
       else if (n.refType === "crm_payment") navigate(`/crm/payments?bookingId=${n.refId}`);
+      else if (n.refType === "crm_booking") navigate(`/crm/bookings?view=${n.refId}`);
       else if (n.refType?.startsWith("crm_")) navigate("/crm/dashboard");
     }
-    setOpen(false);
+    close();
   };
 
   return (
@@ -43,8 +46,8 @@ export const SaNotificationBell: React.FC = () => {
       {/* Same button chrome as ReminderBell, right next to it; the count tag is ink here (red on Reminders) so the two
           stay tellable apart at a glance. */}
       <button
-        onClick={() => setOpen((p) => !p)}
-        className="relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+        onClick={() => (open ? close() : setOpen(true))}
+        className={`relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors ${open && !closing ? "genie-rub" : ""}`}
         title="Sales notifications"
       >
         <ChromeIcons.announce size={18} style={{ color: unreadCount > 0 ? "hsl(var(--foreground))" : undefined }} />
@@ -57,16 +60,17 @@ export const SaNotificationBell: React.FC = () => {
 
       {open && (
         <>
-          <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
+          <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS + GENIE_CSS }} />
           {/* backdrop */}
-          <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setOpen(false)} /></BodyPortal>
+          <BodyPortal><div className="fixed inset-0 z-40" onClick={close} /></BodyPortal>
           {/* Phones: a panel fixed under the top bar, centred on the screen (pinned to the bell it ran off the
               right edge, and the phone rule capping w-[…] boxes to their parent squeezed it to the bell's width).
               Wider screens: dropped from the bell as before. Width set inline so that rule can't touch it. */}
           <div
-            className="np-sheet fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-full -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 flex flex-col animate-in fade-in duration-200"
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-full -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50"
             style={{ width: "min(calc(100vw - 1.5rem), 360px)" }}
           >
+          <div className={`np-sheet genie ${closing ? "genie-close" : "genie-open"} flex flex-col`}>
             {/* Title block: what this is, how many are unread, and mark-all-read */}
             <div className="np-head">
               <div className="min-w-0">
@@ -103,6 +107,7 @@ export const SaNotificationBell: React.FC = () => {
                 ))
               )}
             </div>
+          </div>
           </div>
         </>
       )}

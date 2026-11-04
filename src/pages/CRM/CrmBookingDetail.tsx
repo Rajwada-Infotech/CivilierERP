@@ -1,4 +1,5 @@
-import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack } from "@/constants/crmStatuses";
+import { CrmStatus, bookingWorkflowStageLabel, isBookingClosed, bookingSendBack, bookingSendBackChain, bookingSendBackChoices } from "@/constants/crmStatuses";
+import { SendBackChoices } from "@/components/ApprovalActions";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import { fmtIstDateTime } from "@/lib/istTime";
 import React, { useEffect, useMemo, useState } from "react";
@@ -250,6 +251,22 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchChecklist(bookingId),
   });
   const checklistItems: any[] = checklistData?.items || [];
+  // One refresh after any step of the chain (send, tick / flag, approve, send
+  // back) — and after a refused one, since a refusal means someone else moved
+  // it: this booking, its checklist, the lists, the inbox and the sent-back
+  // markers all show where it is now. "approval-action" refreshes the menu
+  // badge and sent-back markers everywhere, and brings this page along when
+  // the action happened elsewhere (application wizard, Approval Inbox).
+  const refreshChain = () => {
+    ["crm-booking-detail", "crm-booking-checklist", "crm-booking-money-receipts"].forEach((k) => qc.invalidateQueries({ queryKey: [k, bookingId] }));
+    ["crm-bookings", "approval-inbox"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    window.dispatchEvent(new CustomEvent("approval-action"));
+  };
+  useEffect(() => {
+    const onAction = () => ["crm-booking-detail", "crm-booking-checklist"].forEach((k) => qc.invalidateQueries({ queryKey: [k, bookingId] }));
+    window.addEventListener("approval-action", onAction);
+    return () => window.removeEventListener("approval-action", onAction);
+  }, [qc, bookingId]);
   const checklistAllChecked = !!checklistData?.allChecked;
   const [checklistBusyKey, setChecklistBusyKey] = useState<string | null>(null);
   const [checklistFlaggingKey, setChecklistFlaggingKey] = useState<string | null>(null);
@@ -809,10 +826,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const [bookingRequesting, setBookingRequesting] = useState(false);
   const [stageActioning, setStageActioning] = useState<"approve" | "reject" | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
+  // Where the send-back goes, when the stage allows more than one (stageState.SendBackTo).
+  const [rejectTo, setRejectTo] = useState<string | null>(null);
   const [rejectRemark, setRejectRemark] = useState("");
   const currentStage = booking?.WorkflowStage || stageState?.WorkflowStage || "Review";
   // Sent back by an approval: who sent it, whose turn it is now (crmStatuses.bookingSendBack).
   const sendBack = bookingSendBack(currentStage, booking?.RejectedFromStage);
+  const sendBackChain = bookingSendBackChain(stageState?.history);
+  // "Correct in application" opens the step of the first flagged item (else the first step).
+  const correctionStep = (() => {
+    const flagged = checklistItems.find((it: any) => it.CheckStatus === "NeedsRecheck");
+    return flagged ? checklistStep(flagged.ItemKey) : 1;
+  })();
   const { data: sentBackData } = useSentBack();
   const sendBackRow = ((sentBackData?.rows || []) as any[]).find((r) => r.Kind === "booking" && r.BookingId === booking?.Id && r.State === "SentBack");
   // A cancelled / rejected / expired / transferred booking has no stage left to work on:
@@ -832,14 +857,10 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Approval failed");
       toast.success(resData.confirmed ? "Booking confirmed" : `Approved - moved to ${resData.label || "next stage"}`);
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
-      // The menu's Approval Inbox badge re-counts at once.
-      window.dispatchEvent(new CustomEvent("approval-action"));
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setStageActioning(null);
     }
   };
@@ -854,21 +875,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const res = await fetchWithAuth(`${API}/${bookingId}/reject`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note: rejectRemark.trim() }),
+        body: JSON.stringify({ note: rejectRemark.trim(), toStage: rejectTo }),
       });
       const resData = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(resData.error || "Reject failed");
       toast.success(`Sent back to ${resData.label || "previous stage"}`);
       setRejectOpen(false);
       setRejectRemark("");
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-bookings"] });
-      qc.invalidateQueries({ queryKey: ["approval-inbox"] });
-      // The menu's Approval Inbox badge re-counts at once.
-      window.dispatchEvent(new CustomEvent("approval-action"));
+      setRejectTo(null);
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setStageActioning(null);
     }
   };
@@ -891,6 +909,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setChecklistBusyKey(null);
     }
   };
@@ -913,12 +932,11 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       if (resData.mrWarning) {
         toast.warning(`Money Receipt could not be auto-created — use the payment form to submit it manually. (${resData.mrWarning})`, { duration: 8000 });
       }
-      qc.invalidateQueries({ queryKey: ["crm-booking-detail", bookingId] });
       qc.invalidateQueries({ queryKey: ["crm-booking-invoices", bookingId] });
-      qc.invalidateQueries({ queryKey: ["crm-booking-money-receipts", bookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
+      refreshChain();
       setBookingRequesting(false);
     }
   };
@@ -1200,26 +1218,33 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
               <div className="flex items-start gap-2 px-3 py-2.5 text-xs text-foreground bg-destructive/5" style={{ border: "1px solid hsl(var(--destructive) / 0.5)" }}>
                 <AlertTriangle size={13} className="text-destructive shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0 space-y-1">
-                  <div>
-                    <span className="font-semibold">Sent back by {sendBack.from}{sendBackRow?.ByName ? ` (${sendBackRow.ByName}${sendBackRow.At ? `, ${sinceLabel(sendBackRow.At)}` : ""})` : ""}: </span>
-                    “{booking.StageRemarks}”
-                  </div>
+                  {sendBackChain.length > 1 ? (
+                    // Sent back more than once this round — every reason, oldest first.
+                    sendBackChain.map((c, i) => (
+                      <div key={i} className={i === sendBackChain.length - 1 ? "" : "text-muted-foreground"}>
+                        <span className="font-semibold">{c.from} → {c.to}{c.byName ? ` (${c.byName}${c.at ? `, ${sinceLabel(c.at)}` : ""})` : ""}: </span>
+                        “{c.remark}”
+                      </div>
+                    ))
+                  ) : (
+                    <div>
+                      <span className="font-semibold">Sent back by {sendBack.from}{sendBackRow?.ByName ? ` (${sendBackRow.ByName}${sendBackRow.At ? `, ${sinceLabel(sendBackRow.At)}` : ""})` : ""}: </span>
+                      “{booking.StageRemarks}”
+                    </div>
+                  )}
                   <div className="text-muted-foreground">{sendBack.next}</div>
                 </div>
                 {/* The action for whoever's turn it is. */}
                 {sendBack.preparerCorrects ? (
                   booking.ApplicationId && (
-                    <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=1`}
+                    <Link to={`/crm/applications?edit=${booking.ApplicationId}&step=${correctionStep}`}
                       className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 bg-foreground text-card font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:opacity-90">
                       Correct in application ›
                     </Link>
                   )
-                ) : (
-                  <Link to="/admin/approval/inbox"
-                    className="shrink-0 self-center inline-flex items-center gap-1 h-7 px-2.5 border border-foreground font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] hover:bg-foreground hover:text-card">
-                    Open in Approval Inbox ›
-                  </Link>
-                )}
+                ) : canActOnStage ? (
+                  <span className="shrink-0 self-center text-[0.625rem] font-heading font-semibold uppercase tracking-[0.1em]">Yours — Approve or Reject at the foot of the page</span>
+                ) : null}
               </div>
             )}
 
@@ -3058,6 +3083,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
         <DialogHeader>
           <DialogTitle className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground">Send Back for Correction</DialogTitle>
         </DialogHeader>
+        <SendBackChoices choices={bookingSendBackChoices(stageState?.SendBackTo)} value={rejectTo} onChange={setRejectTo} />
         <textarea value={rejectRemark} onChange={(e) => setRejectRemark(e.target.value)} autoFocus
           placeholder="What needs to be corrected? (required)"
           className="w-full min-h-[110px] text-sm border border-border px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />

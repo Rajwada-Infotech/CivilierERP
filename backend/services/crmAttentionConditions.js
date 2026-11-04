@@ -58,8 +58,8 @@ const ENGINE_SENT_BACK = {
   "crm-agreement-date":      { area: "Agreement date",           path: "/crm/agreements",        no: "AgreementNo",    booking: "BookingId",     link: "/crm/agreements?id={id}" },
   "crm-cancellations":       { area: "Cancellation",             path: "/crm/cancellations",     no: "CancellationNo", booking: "BookingId",     link: "/crm/cancellations?bookingId={bookingId}" },
   "crm-refunds":             { area: "Refund",                   path: "/crm/refunds",           no: "RefundNo",       booking: "BookingId",     link: "/crm/refunds?search={no}" },
-  "crm-resales":             { area: "Resale",                   path: "/crm/resales",           no: null,             booking: "FromBookingId", link: "/crm/resales" },
-  "crm-ownership-changes":   { area: "Ownership change",         path: "/crm/ownership-changes", no: "ChangeNo",       booking: "BookingId",     link: "/crm/ownership-changes" },
+  "crm-resales":             { area: "Resale",                   path: "/crm/resales",           no: null,             booking: "FromBookingId", link: "/crm/resales/{id}" },
+  "crm-ownership-changes":   { area: "Ownership change",         path: "/crm/ownership-changes", no: "ChangeNo",       booking: "BookingId",     link: "/crm/ownership-changes?id={id}" },
   "crm-credit-notes":        { area: "Credit note",              path: "/crm/credit-notes",      no: "DocNo",          booking: "BookingId",     link: "/crm/credit-notes?id={id}" },
   "crm-credit-note-cancel":  { area: "Credit note cancellation", path: "/crm/credit-notes",      no: "DocNo",          booking: "BookingId",     link: "/crm/credit-notes?id={id}" },
   "crm-transfer-deeds":      { area: "Transfer deed",            path: "/crm/transfer-deeds",    no: "DeedNo",         booking: "BookingId",     link: "/crm/transfer-deeds?id={id}" },
@@ -67,7 +67,7 @@ const ENGINE_SENT_BACK = {
   "crm-noc":                 { area: "NOC",                      path: "/crm/noc",               no: "NocNo",          booking: "BookingId",     link: "/crm/noc?bookingId={bookingId}" },
   "crm-sales-deed-senior":   { area: "Sale deed",                path: "/crm/sales-deed",        no: "DeedNo",         booking: "BookingId",     link: "/crm/sales-deed?deedId={id}" },
   "crm-sales-deed-director": { area: "Sale deed (Director)",     path: "/crm/sales-deed",        no: "DeedNo",         booking: "BookingId",     link: "/crm/sales-deed?deedId={id}" },
-  "crm-brokerage":           { area: "Brokerage",                path: "/crm/brokerage",         no: null,             booking: "BookingId",     link: "/crm/brokerage" },
+  "crm-brokerage":           { area: "Brokerage",                path: "/crm/brokerage",         no: null,             booking: "BookingId",     link: "/crm/brokerage?view={id}" },
 };
 // The three flows that keep their own record of a send-back.
 const OWN_SENT_BACK = {

@@ -16,6 +16,8 @@ export interface InboxItem {
   Reference: string | null;
   RecordDate: string | null;
   Status: string;
+  /** CRM bookings: where a send-back may go from its stage, comma-separated, default first (SEND_BACK_TARGETS). */
+  SendBackTo?: string | null;
   ContractorName: string | null;
   SupplierName: string | null;
   // Resolved project name where that module's table (or one it already

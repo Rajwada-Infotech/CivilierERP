@@ -46,12 +46,16 @@ export const addUser = async (user: {
   return res.json().catch(() => ({}));
 };
 
-export const updateUser = async (id: number, user: Partial<User>) => {
+// Making a user active or inactive needs a `reason` (the server refuses the change without one).
+export const updateUser = async (id: number, user: Partial<User> & { reason?: string }) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     body: JSON.stringify(user),
   });
-  if (!res.ok) throw new Error("Failed to update user");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || "Failed to update user");
+  }
   return res.json().catch(() => ({}));
 };
 

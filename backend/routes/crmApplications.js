@@ -483,6 +483,10 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
 
     const existing = await pool.request().input("id", sql.Int, id)
       .query("SELECT Id, PreferredUnitId, Status, ProjectId, CompanyId, PaymentPlanId, DepositBankId, CustomerId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
+    // What Data Review ticked, before this save (a changed item goes back to be verified).
+    const checklistCols = require("../services/crmApplicationChecklist");
+    const beforeChecked = await checklistCols.snapshotColumns(pool, "CrmApplication", "Id", id, checklistCols.APPLICATION_ITEM_COLUMNS);
+    const plotsBefore = (await getApplicationPlotIds(pool, id)).sort().join(",");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
     // A villa built on plots can only be picked by the plot's current owner.
     if (Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0) {
@@ -804,6 +808,12 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const parkingWarning = unitIsChanging && newUnitId
       ? await require("../services/crmEntityCreation").parkingOutsideUnitBlock(pool, { applicationId: id, unitId: newUnitId })
       : null;
+    // Data a verifier already ticked, changed by this save: that item goes back to be verified.
+    const afterChecked = await checklistCols.snapshotColumns(pool, "CrmApplication", "Id", id, checklistCols.APPLICATION_ITEM_COLUMNS);
+    await checklistCols.resetForChangedColumns(pool, { applicationId: id }, checklistCols.APPLICATION_ITEM_COLUMNS, beforeChecked, afterChecked, "application edited");
+    if ((await getApplicationPlotIds(pool, id)).sort().join(",") !== plotsBefore) {
+      await checklistCols.resetVerifiedItems(pool, { applicationId: id }, ["ProjectUnitRate"], "plots changed");
+    }
     res.json({ success: true, parkingWarning });
   } catch (e) {
     console.error("[crm-applications] PUT error:", e.message);
@@ -963,7 +973,10 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       // running it after this commit is correct and matches existing order —
       // folding them into this atomic boundary would mean a single unrelated
       // parking hiccup rolls back the Booking/Milestone sync too.
-      if (a) {
+      // Once the booking is sent for approval its price, plan and schedule
+      // are the approvers' to judge — a re-submit must not rewrite them.
+      const syncClosed = await require("../services/crmEntityCreation").applicationEditsClosedReason(pool, booking.id);
+      if (a && !syncClosed) {
         const tx = pool.transaction();
         await tx.begin();
         try {

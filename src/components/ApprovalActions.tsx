@@ -89,6 +89,27 @@ interface ApprovalActionsProps {
   /** Draw in the drawing-sheet style even where it can't be detected: inside a dialog, which renders outside the
    *  page's sheet. */
   sheet?: boolean;
+  /** Where a rejection may send the record back to (default first) — shown
+   *  as a choice when there is more than one; the chosen one goes as `toStage`. */
+  sendBackChoices?: SendBackChoice[];
+}
+
+export type SendBackChoice = { value: string; label: string; note?: string };
+
+/** Pick where a send-back goes — the inbox's Reject and the booking's Send Back share it. */
+export function SendBackChoices({ choices, value, onChange }: { choices: SendBackChoice[]; value: string | null; onChange: (v: string) => void }) {
+  if (choices.length < 2) return null;
+  const current = value ?? choices[0].value;
+  return (
+    <div className="space-y-1.5 text-sm" role="radiogroup" aria-label="Send back to">
+      {choices.map((o) => (
+        <label key={o.value} className="flex items-start gap-2 cursor-pointer">
+          <input type="radio" name="send-back-to" className="mt-1" checked={current === o.value} onChange={() => onChange(o.value)} />
+          <span><span className="font-medium">{o.label}</span>{o.note && <span className="text-muted-foreground text-xs"> — {o.note}</span>}</span>
+        </label>
+      ))}
+    </div>
+  );
 }
 
 export function ApprovalActions({
@@ -104,10 +125,12 @@ export function ApprovalActions({
   reviewInstead,
   extraSubmitStatuses = [],
   sheet: sheetProp = false,
+  sendBackChoices,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [rejectTo, setRejectTo] = useState<string | null>(null);
   // Drawn in ink, squared, on a drawing-sheet page (the Approval Inbox); unchanged elsewhere.
   const rootRef = useRef<HTMLDivElement>(null);
   const sheet = useInSheet(rootRef) || sheetProp;
@@ -131,7 +154,9 @@ export function ApprovalActions({
       // matter what was entered. Sending both is harmless — every route
       // destructures only the one key it actually reads.
       const body =
-        action === "reject" ? { note: rejectNote, Remarks: rejectNote } : undefined;
+        action === "reject"
+          ? { note: rejectNote, Remarks: rejectNote, ...(sendBackChoices?.length ? { toStage: rejectTo ?? sendBackChoices[0].value } : {}) }
+          : undefined;
       const path = actionPathSuffix
         ? `${endpoint}/${recordId}/${actionPathSuffix}/${action}`
         : `${endpoint}/${recordId}/${action}`;
@@ -189,6 +214,7 @@ export function ApprovalActions({
       if (action === "reject") {
         setRejectOpen(false);
         setRejectNote("");
+        setRejectTo(null);
       }
       onSuccess?.(action, data);
     } catch (err: unknown) {
@@ -297,6 +323,7 @@ export function ApprovalActions({
           <DialogHeader>
             <DialogTitle className={sheet ? "font-heading text-lg font-bold tracking-tight pb-3 border-b border-foreground" : undefined}>{sheet ? "Reject record" : "Reject Record"}</DialogTitle>
           </DialogHeader>
+          {sendBackChoices && <SendBackChoices choices={sendBackChoices} value={rejectTo} onChange={setRejectTo} />}
           <Textarea
             placeholder="Reason for rejection (optional but recommended)"
             value={rejectNote}

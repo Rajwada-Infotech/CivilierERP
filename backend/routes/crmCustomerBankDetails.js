@@ -441,6 +441,9 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (!app.recordset.length) return res.status(404).json({ error: "Application not found" });
 
     if (!(await requireAssignedOrApprover(req, res, pool, { applicationId: aid }))) return;
+    // What Data Review ticked, before this save (a changed item goes back to be verified).
+    const checklistCols = require("../services/crmApplicationChecklist");
+    const beforeChecked = await checklistCols.snapshotColumns(pool, "CrmCustomerBankDetail", "ApplicationId", aid, checklistCols.BANK_DETAIL_ITEM_COLUMNS);
 
     // Once the Application's Booking exists, this row is shared with — and
     // frozen the same way as — the Booking-keyed endpoint below (both write
@@ -603,6 +606,10 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
       await maybeAutoCreateAgreement(pool, linkedBookingId, actor);
     }
 
+    {
+      const afterChecked = await checklistCols.snapshotColumns(pool, "CrmCustomerBankDetail", "ApplicationId", aid, checklistCols.BANK_DETAIL_ITEM_COLUMNS);
+      await checklistCols.resetForChangedColumns(pool, { applicationId: aid }, checklistCols.BANK_DETAIL_ITEM_COLUMNS, beforeChecked, afterChecked, "bank / KYC edited");
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-customer-bank-details] PUT /application error:", e.message);

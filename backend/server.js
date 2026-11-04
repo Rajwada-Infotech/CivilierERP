@@ -478,6 +478,8 @@ async function createApp() {
         "X-Skip-Activity-Log",
         "X-Fresh",
       ],
+      // A look-up POST's reply says it saved nothing (middleware/activityAudit.js).
+      exposedHeaders: ["X-Changes-Nothing"],
       optionsSuccessStatus: 204,
     }),
   );
