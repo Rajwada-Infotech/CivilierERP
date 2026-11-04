@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { sumMoney } from "@/lib/crmPriceQuote";
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -273,7 +274,7 @@ const CrmParkingBooking: React.FC = () => {
   const standalone = allotments.filter((a) => a.BookingId == null);
   const standalonePending = standalone.filter((a) => a.PaymentStatus !== CrmStatus.PAID);
   const standalonePaid = standalone.filter((a) => a.PaymentStatus === CrmStatus.PAID);
-  const sum = (list: Allotment[]) => list.reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
+  const sum = (list: Allotment[]) => sumMoney(list, (a) => a.TotalAmount);
   const linkedCount = allotments.length - standalone.length;
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setNewDialogOpen(false); };

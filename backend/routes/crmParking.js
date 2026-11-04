@@ -1,4 +1,5 @@
 const express = require("express");
+const { round2, sumMoney, unitPrice } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
@@ -17,7 +18,7 @@ const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus, requireNotMidApproval, assertWelcomeChecklistUnlocked } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
+const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn, gstOn } = require("../services/crmGst");
 
 router.use(apiRateLimit);
 router.use(authMiddleware);
@@ -197,9 +198,9 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   if (!slot.recordset.length) throw parkingError("Selected parking slot is not active");
   const slotNo = slot.recordset[0].SlotNo;
 
-  const lineAmount = Charge * qty;
-  const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
-  const totalAmount = lineAmount + gstAmount;
+  const lineAmount = round2(Charge * qty);
+  const gstAmount = gstOn(lineAmount, GstRate);
+  const totalAmount = round2(lineAmount + gstAmount);
 
   // ── BEGIN ATOMIC SECTION ────────────────────────────────────────────────
   // assertSlotAvailable, guardAndConvertHold, and the INSERT all run inside
@@ -315,9 +316,9 @@ async function applyEditParking(pool, id, b) {
     newRateSnapshot = override;
   }
 
-  const lineAmount = effectiveRate * qty;
-  const gstAmount = Math.round((lineAmount * Number(GstRateSnapshot)) / 100 * 100) / 100;
-  const totalAmount = lineAmount + gstAmount;
+  const lineAmount = round2(effectiveRate * qty);
+  const gstAmount = gstOn(lineAmount, GstRateSnapshot);
+  const totalAmount = round2(lineAmount + gstAmount);
 
   await pool.request()
     .input("id",   sql.Int, id)
@@ -718,10 +719,12 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
         WHERE a.Id = @aid AND a.IsActive = 1
       `);
       const appR = appRow.recordset[0];
-      const unitTotal = appR && appR.RatePerSqFt && appR.AreaSqFt ? Math.round(Number(appR.AreaSqFt) * Number(appR.RatePerSqFt)) : 0;
-      const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
-      const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
-      const combinedBase = unitTotal + allotmentBase + holdBase;
+      // The unit's price as everywhere else (unitPrice, to the paisa) — it was rounded to the rupee here, so
+      // near the GST band's threshold this check could pick another band than the booking itself.
+      const unitTotal = appR ? unitPrice(appR.AreaSqFt, appR.RatePerSqFt) : 0;
+      const allotmentBase = sumMoney(allotments, (a) => (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1));
+      const holdBase = sumMoney(holdLineAmounts, (x) => x.lineAmount);
+      const combinedBase = round2(unitTotal + allotmentBase + holdBase);
       // Through the shared resolver so dbo.CrmGstRule governs here too. This
       // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
       // moving the threshold in the master repriced the booking but not this
@@ -733,7 +736,7 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
     }
 
     const holds = holdLineAmounts.map(({ h, lineAmount }) => {
-      const gstAmount = Math.round((lineAmount * unitParkingRate) / 100 * 100) / 100;
+      const gstAmount = gstOn(lineAmount, unitParkingRate);
       return {
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
@@ -807,9 +810,9 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
     assertSlotSelected(ParkingType, parkingSlotId);
 
-    const lineAmount = Charge * qty;
-    const gstAmount = Math.round((lineAmount * GstRate) / 100 * 100) / 100;
-    const totalAmount = lineAmount + gstAmount;
+    const lineAmount = round2(Charge * qty);
+    const gstAmount = gstOn(lineAmount, GstRate);
+    const totalAmount = round2(lineAmount + gstAmount);
 
     const slot = await pool.request().input("sid", sql.Int, parkingSlotId)
       .query("SELECT SlotNo FROM dbo.ParkingSlot WHERE Id = @sid AND IsActive = 1");

@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { round2 } from "@/lib/crmPriceQuote";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -287,7 +288,7 @@ const CrmMoneyReceipts: React.FC = () => {
         map.set(r.BookingId, g);
       }
       g.receipts.push(r);
-      g.totalAmount += Number(r.Amount) || 0;
+      g.totalAmount = round2(g.totalAmount + (Number(r.Amount) || 0));
     }
     return [...map.values()];
   }, [rows]);

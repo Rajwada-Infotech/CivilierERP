@@ -10,6 +10,7 @@
 // Posting starts capturing from 2026-06-28 — no historical backfill.
 
 const { sql } = require("../db");
+const { round2, sumMoney } = require("./bookingUnits");
 const { autoCreateFixedAssetsFromGRN } = require("./fixedAssetAutoAlloc");
 const { normalizePaymentDimensions } = require("./paymentDimensions");
 
@@ -249,7 +250,7 @@ async function hasCompanyFundTransferPosting(pool, ftId, companyId) {
 /**
  * Post a balanced voucher. `legs` is an array of
  *   { lHeadId, debit?, credit?, narration? }
- * Throws if total debit !== total credit (to the cent) — a balance error here
+ * Throws unless total debit === total credit to the paisa, on the rounded legs it stores — a balance error here
  * means the calling code's accounting logic is wrong, not a retryable issue.
  */
 async function postVoucher(pool, {
@@ -273,11 +274,15 @@ async function postVoucher(pool, {
     throw new Error("postVoucher requires at least 2 legs");
   }
 
-  const totalDebit  = Math.round(legs.reduce((s, l) => s + (l.debit  || 0), 0) * 100) / 100;
-  const totalCredit = Math.round(legs.reduce((s, l) => s + (l.credit || 0), 0) * 100) / 100;
-  if (Math.abs(totalDebit - totalCredit) > 0.01) {
+  // Checked on exactly what is stored — each leg to the paisa — and to the paisa, in whole paise. It used to
+  // total the unrounded legs, allow a 1-paisa difference, and round each leg only when saving it, so a voucher
+  // could pass the check and still be stored a paisa out of balance (one such GRN voucher is on production).
+  const paise = (n) => Math.round(round2(n || 0) * 100);
+  const debitPaise = legs.reduce((s, l) => s + paise(l.debit), 0);
+  const creditPaise = legs.reduce((s, l) => s + paise(l.credit), 0);
+  if (debitPaise !== creditPaise) {
     throw new Error(
-      `Voucher ${voucherNo} does not balance: debit ${totalDebit} !== credit ${totalCredit}`,
+      `Voucher ${voucherNo} does not balance: debit ${debitPaise / 100} !== credit ${creditPaise / 100}`,
     );
   }
 
@@ -288,8 +293,8 @@ async function postVoucher(pool, {
   try {
     for (const leg of legs) {
       if (!leg.lHeadId) throw new Error(`Voucher ${voucherNo} has a leg with no lHeadId`);
-      const debit = Math.round((leg.debit || 0) * 100) / 100;
-      const credit = Math.round((leg.credit || 0) * 100) / 100;
+      const debit = round2(leg.debit || 0);
+      const credit = round2(leg.credit || 0);
       if (debit === 0 && credit === 0) continue;
 
       await tx
@@ -425,12 +430,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
     console.error(`[postGRNApproval] fixed-asset auto-allocation failed for GRN ${grnId} (non-fatal):`, err.message);
   }
 
-  const baseAmount = items.reduce(
-    (s, i) => s + (Number(i.totalAmount) || 0),
-    0,
-  );
-  const totalInclGst = Number(grn.TotalAmount) || 0;
-  const gstAmount = Math.max(0, totalInclGst - baseAmount);
+  const totalInclGst = round2(Number(grn.TotalAmount) || 0);
 
   if (totalInclGst <= 0)
     return { posted: false, stockPosted: true, reason: `GRN ${grnId} total is ${totalInclGst} (<= 0)` };
@@ -477,6 +477,13 @@ async function postGRNApproval(pool, grnId, userEmail) {
     if (unique.length <= 2) return ` — ${unique.join(", ")}`;
     return ` — ${unique[0]} & ${unique.length - 1} more`;
   };
+
+  // Every leg to the paisa, and the GST leg the exact rest: the voucher balances by construction. Before, the
+  // base lines and the GST (total - base) were left unrounded and postVoucher rounded each leg on its own — the
+  // rounded legs could miss the GRN total by a paisa, and its 1-paisa tolerance let that through.
+  for (const bucket of [...purchaseAmountByHead.values(), ...fixedAssetAmountByHead.values()]) bucket.amount = round2(bucket.amount);
+  const baseAmount = sumMoney([...purchaseAmountByHead.values(), ...fixedAssetAmountByHead.values()], (b) => b.amount);
+  const gstAmount = Math.max(0, round2(totalInclGst - baseAmount));
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -697,8 +704,8 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       reason: `ExpenseBooking ${ebId}: no LHeadId set and EName "${eb.EName}" did not match any AccountHeadMaster head`,
     };
 
-  const baseAmount = Number(eb.EAmount) || 0;
-  const gstAndTerms = Math.max(0, netAmount - baseAmount);
+  const baseAmount = round2(Number(eb.EAmount) || 0);
+  const gstAndTerms = Math.max(0, round2(netAmount - baseAmount));
 
   // Multi Expense Head tagging (migration 303, dbo.ExpenseHeadAllocation) —
   // a direct/TOD booking can tag its own Dr leg(s) to specific GL heads
@@ -718,11 +725,18 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
 
   let debitLegs;
   if (useAllocations) {
+    // The heads can differ from the invoice total by its round-off (up to 50 paise, the tolerance the booking
+    // screen allows); the last head carries the exact rest so the voucher balances. Before, the legs were the
+    // heads as entered and postVoucher refused anything off by more than a paisa — approving such a booking
+    // failed (or, off by exactly a paisa, posted out of balance).
     debitLegs = allocations.map((a) => ({
       lHeadId: a.lHeadId,
-      debit: a.amount,
+      debit: round2(a.amount),
       narration: `${docNo} — ${a.lHeadName || "expense booked"}`,
     }));
+    const last = debitLegs[debitLegs.length - 1];
+    const rest = round2(round2(netAmount) - sumMoney(debitLegs.slice(0, -1), (l) => l.debit));
+    if (rest >= 0) last.debit = rest; // never a negative leg: a head too small to carry it posts as entered
   } else {
     const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
     const provisionalCreditHeadId = await getGLHeadId(

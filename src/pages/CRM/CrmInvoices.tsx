@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { sumMoney } from "@/lib/crmPriceQuote";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -232,7 +233,7 @@ const CrmInvoices: React.FC = () => {
                   {groups.map((g) => {
                     const isCollapsed = collapsed.has(g.BookingId);
                     const live = g.Invoices.filter((i) => i.Status !== "Void");
-                    const invoicedTotal = live.reduce((sum, i) => sum + Number(i.Amount || 0), 0);
+                    const invoicedTotal = sumMoney(live, (i) => i.Amount);
                     const pct = g.MilestoneTotal ? Math.min(100, Math.round((g.MilestoneInvoiced / g.MilestoneTotal) * 100)) : 0;
                     return (
                       <div key={g.BookingId} className="bg-card" style={{ border: RULE }}>

@@ -66,6 +66,16 @@ export function usePriceQuote(input: PriceQuoteInput | null) {
   });
 }
 
+/**
+ * Money to the paisa, the same rule as the server (backend/services/bookingUnits.js round2 / sumMoney).
+ * Amounts arrive exact but are JS numbers, and adding or subtracting them leaves float dust: a balance that is
+ * really nothing can read ₹0.0000001, so "outstanding > 0" shows "₹0.00 due" instead of "Fully collected".
+ * Every money sum or difference a CRM screen works out goes through these.
+ */
+export const round2 = (n: number) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+export const sumMoney = <T,>(rows: readonly T[] | null | undefined, pick: (r: T) => unknown = (x) => x) =>
+  round2((rows || []).reduce((s, r) => s + (Number(pick(r)) || 0), 0));
+
 /** Indian-format rupees, paise only when there are any. */
 export function inr(n: number | null | undefined): string {
   return `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;

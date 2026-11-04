@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { sumMoney } from "@/lib/crmPriceQuote";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -352,8 +353,8 @@ export default function CrmOnAccount() {
   const deposits = data?.deposits || [];
   const total = data?.total || 0;
   const pageCR = deposits.reduce((s, d) => s + (UNAVAILABLE.includes(d.Status) ? 0 : Number(d.Amount)), 0);
-  const pageDR = deposits.reduce((s, d) => s + (UNAVAILABLE.includes(d.Status) ? 0 : Number(d.AppliedAmount)), 0);
-  const pageBAL = deposits.reduce((s, d) => s + Number(d.AvailableBalance), 0);
+  const pageDR = sumMoney(deposits, (d) => (UNAVAILABLE.includes(d.Status) ? 0 : d.AppliedAmount));
+  const pageBAL = sumMoney(deposits, (d) => d.AvailableBalance);
   const util = summary && summary.TotalReceived > 0 ? Math.round((summary.TotalApplied / summary.TotalReceived) * 100) : 0;
 
   function onAdjustDone() {

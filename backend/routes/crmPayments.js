@@ -1,4 +1,5 @@
 const express = require("express");
+const { round2, sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const router = express.Router();
@@ -180,7 +181,7 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
       await tx.rollback();
       return { error: `This on-account payment is ${oaRow.Status.toLowerCase()} and cannot be applied` };
     }
-    remaining = Number(oaRow.Amount) - Number(oaRow.AppliedAmount);
+    remaining = round2(Number(oaRow.Amount) - Number(oaRow.AppliedAmount));
     // Refunds and re-booking transfers reserve on-account funds before they
     // are actually paid/applied. Do not let a manual adjustment or the
     // automatic full-funding sweep spend those same rupees while a claim is
@@ -213,9 +214,9 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
       await tx.rollback();
       return { error: `Cannot apply to "${targetRow.MilestoneName}" — it has been Waived` };
     }
-    const milestoneBalance = Number(m.recordset[0].AmountDue) - Number(m.recordset[0].AmountPaid || 0);
+    const milestoneBalance = round2(Number(m.recordset[0].AmountDue) - Number(m.recordset[0].AmountPaid || 0));
 
-    requested = Math.min(remaining, milestoneBalance, amount != null ? amount : Infinity);
+    requested = round2(Math.min(remaining, milestoneBalance, amount != null ? amount : Infinity));
     if (!requested || requested <= 0) {
       await tx.rollback();
       return { error: "Nothing to apply" };
@@ -462,13 +463,15 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
         overdueCount: 0, overdueAmount: 0,
       };
       for (const r of rows) {
-        const balance = Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
+        const balance = Math.max(0, round2(Number(r.AmountDue || 0) - Number(r.AmountPaid || 0)));
         const paid = Number(r.AmountPaid || 0);
         if (r.DemandStatus === CrmStatus.PENDING) { summary.pendingCount++; summary.pendingAmount += balance; }
         else if (r.DemandStatus === CrmStatus.DEMANDED) { summary.demandedCount++; summary.demandedAmount += balance; }
         else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += paid; }
         if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
       }
+      // Running totals, to the paisa.
+      for (const k of ["pendingAmount", "demandedAmount", "paidAmount", "overdueAmount"]) summary[k] = round2(summary[k]);
       return summary;
     }
 
@@ -1258,10 +1261,10 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     // Compute summary
     const activeMilestones = milRes.recordset.filter((m) => m.Status !== "Waived");
     const waivedMilestones = milRes.recordset.filter((m) => m.Status === "Waived");
-    const totalDue  = activeMilestones.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
-    const totalPaid = milRes.recordset.reduce((s, m) => s + (m.AmountPaid || 0), 0);
-    const balance = activeMilestones.reduce((s, m) => s + Math.max(0, Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)), 0);
-    const waivedDue = waivedMilestones.reduce((s, m) => s + Number(m.AmountDue || 0), 0);
+    const totalDue  = sumMoney(activeMilestones, (m) => m.AmountDue);
+    const totalPaid = sumMoney(milRes.recordset, (m) => m.AmountPaid);
+    const balance = sumMoney(activeMilestones, (m) => Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0))));
+    const waivedDue = sumMoney(waivedMilestones, (m) => m.AmountDue);
 
     // VirtuallyCovered: money is genuinely on-account for this milestone
     // even though the real sweep (Status='Paid') only fires automatically
@@ -1293,7 +1296,6 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     // The booking's money by stage. Collected = everything Finance has
     // verified (adjusted onto milestones + held On Account).
     const pending = await pendingVerificationEntries(pool, bid);
-    const round2 = (n) => Math.round(n * 100) / 100;
     const held = Number(oaRes.recordset[0]?.OnAccountAvailable) || 0;
     const inVerification = round2(pending.reduce((a, r) => a + Number(r.RPAmount || 0), 0));
     const collected = round2(totalPaid + held);
@@ -1685,7 +1687,7 @@ router.get("/booking/:bookingId/on-account", requireAnyPageRight(["crm-payments"
       ORDER BY o.CreatedAt DESC
     `);
     const rows = result.recordset;
-    const available = rows.reduce((s, r) => s + (Number(r.AvailableBalance) || 0), 0);
+    const available = sumMoney(rows, (r) => r.AvailableBalance);
     res.json({ payments: rows, availableBalance: available });
   } catch (e) {
     console.error("[crm-payments] GET /booking/:id/on-account error:", e.message);

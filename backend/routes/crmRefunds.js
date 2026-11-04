@@ -1,4 +1,5 @@
 const express = require("express");
+const { round2, sumMoney } = require("../services/bookingUnits");
 const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -104,9 +105,9 @@ async function getUnclaimedRemaining(pool, onAccountId, { excludeRefundId = null
     `);
   const row = r.recordset[0];
   if (!row) return { found: false, remaining: 0, reserved: 0, unclaimed: 0 };
-  const remaining = Number(row.Amount) - Number(row.AppliedAmount || 0);
-  const reserved = Number(row.ReservedByRefunds || 0) + Number(row.ReservedByTransfers || 0);
-  return { found: true, remaining, reserved, unclaimed: Math.round((remaining - reserved) * 100) / 100 };
+  const remaining = round2(Number(row.Amount) - Number(row.AppliedAmount || 0));
+  const reserved = round2(Number(row.ReservedByRefunds || 0) + Number(row.ReservedByTransfers || 0));
+  return { found: true, remaining, reserved, unclaimed: round2(remaining - reserved) };
 }
 
 // Once a buy-back payout is approved for processing, its source credit is
@@ -765,7 +766,7 @@ async function refundWaitsForFinance(pool, refundId) {
   if (!r?.BookingId) return null;
   const pending = await require("../services/crmOnAccountCoverage").pendingVerificationEntries(pool, r.BookingId);
   if (!pending.length) return null;
-  const total = pending.reduce((a, e) => a + Number(e.RPAmount || 0), 0);
+  const total = sumMoney(pending, (e) => e.RPAmount);
   return `${pending.length} payment${pending.length === 1 ? "" : "s"} for this booking (Rs ${total.toLocaleString("en-IN")}: ${pending.map((e) => e.RPDocNo || `#${e.RPPaymentID}`).join(", ")}) ${pending.length === 1 ? "is" : "are"} still with Finance. Once verified ${pending.length === 1 ? "it is" : "they are"} added to this refund — have Finance verify or reject ${pending.length === 1 ? "it" : "them"} first.`;
 }
 
@@ -1184,7 +1185,7 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
         SELECT Amount, AppliedAmount FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
       `);
       const oa = oaLock.recordset[0];
-      const remaining = oa ? Number(oa.Amount) - Number(oa.AppliedAmount || 0) : 0;
+      const remaining = oa ? round2(Number(oa.Amount) - Number(oa.AppliedAmount || 0)) : 0;
       if (!oa || Number(rf.GrossAmount) > remaining + 0.01) {
         throw new Error(
           `Refund ${refundId}: source on-account ${rf.SourceOnAccountId} has only ₹${remaining.toLocaleString("en-IN")} remaining, ` +
