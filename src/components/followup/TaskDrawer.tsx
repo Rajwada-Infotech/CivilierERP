@@ -1,3 +1,4 @@
+import { KEY_INK, KEY_LINE, KEY_RED } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -702,7 +703,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                     <button
                       type="button"
                       onClick={() => onStatusChange(taskId, "Hold")}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-muted text-muted-foreground border border-muted-foreground/25 hover:bg-muted-foreground/20 transition-colors"
+                      className={`${KEY_LINE} h-8 px-3`}
                     >
                       <Pause size={12} /> Put on Hold
                     </button>
@@ -710,7 +711,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                     <button
                       type="button"
                       onClick={() => onStatusChange(taskId, "Active")}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-foreground/10 text-foreground border border-foreground/25 hover:bg-foreground/20 transition-colors"
+                      className={`${KEY_LINE} h-8 px-3`}
                     >
                       <Play size={12} /> Resume
                     </button>
@@ -718,14 +719,14 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   <button
                     type="button"
                     onClick={() => onStatusChange(taskId, "Closed")}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-destructive/10 text-destructive border border-destructive/25 hover:bg-destructive/20 transition-colors"
+                    className={`${KEY_RED} h-8 px-3`}
                   >
                     <CheckCircle2 size={12} /> Close Task
                   </button>
                   <button
                     type="button"
                     onClick={() => setCancelDialogOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-muted text-muted-foreground border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/25 transition-colors"
+                    className={`${KEY_LINE} h-8 px-3`}
                   >
                     <XCircle size={12} /> Cancel Task
                   </button>
@@ -806,7 +807,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                               type="button"
                               onClick={() => handleMarkFollowUpDone(f.Id)}
                               disabled={markingDoneId === f.Id}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-semibold bg-foreground/10 text-foreground border border-foreground/25 hover:bg-foreground/20 transition-colors disabled:opacity-50"
+                              className={`${KEY_LINE} h-7 px-2.5`}
                               title="Mark this follow-up as done"
                             >
                               <Check size={11} /> Done
@@ -923,7 +924,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors"
+                  className={`${KEY_LINE} h-8 px-3`}
                 >
                   <Paperclip size={12} /> Attach
                 </button>
@@ -942,8 +943,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   type="button"
                   onClick={handleSaveFollowUp}
                   disabled={submitting || !note.trim()}
-                  className="ml-auto px-4 py-1.5 rounded-lg text-xs font-semibold text-card disabled:opacity-40 transition-opacity"
-                  style={{ background: INK }}
+                  className={`ml-auto ${KEY_INK} h-8 px-3`}
                 >
                   Save
                 </button>
@@ -1038,8 +1038,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   type="button"
                   onClick={() => filesTabInputRef.current?.click()}
                   disabled={uploadingFiles}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-card disabled:opacity-50 transition-opacity"
-                  style={{ background: INK }}
+                  className={`${KEY_INK} h-8 px-3`}
                 >
                   <Paperclip size={12} /> {uploadingFiles ? "Uploading…" : "Attach Files"}
                 </button>

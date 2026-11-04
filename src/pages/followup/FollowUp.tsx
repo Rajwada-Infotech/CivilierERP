@@ -1,4 +1,5 @@
-import { SheetStats, PRIORITY_TONES } from "@/components/followup/sheetParts";
+import { KEY, KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetStats, PRIORITY_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -282,8 +283,7 @@ const TaskRow: React.FC<{
         <button
           type="button"
           onClick={() => onCreateSubtask(task)}
-          className="inline-flex items-center gap-1 text-[0.6875rem] font-medium px-2 py-1 rounded-md border transition-colors hover:bg-muted/60"
-          style={{ borderColor: "hsl(var(--foreground) / 0.35)", color: ACCENT }}
+          className={`${KEY_LINE} h-8 px-3`}
           title="Create a subtask under this follow-up"
         >
           <ListPlus size={12} /> Subtask
@@ -585,7 +585,7 @@ const FollowUp: React.FC = () => {
               key={p}
               type="button"
               onClick={() => setPriorityFilter(active ? null : p)}
-              className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+              className={`${KEY} h-8 px-3 border ${
                 active ? "" : "border-border text-muted-foreground hover:bg-muted"
               }`}
               style={active ? { background: `color-mix(in srgb, ${color} 16%, transparent)`, borderColor: `color-mix(in srgb, ${color} 45%, transparent)`, color } : undefined}
@@ -743,7 +743,7 @@ const FollowUp: React.FC = () => {
             <button
               type="button"
               onClick={() => setSubtaskParent(null)}
-              className="px-3 py-2 rounded-lg text-sm font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-9 px-4`}
             >
               Cancel
             </button>
@@ -751,8 +751,7 @@ const FollowUp: React.FC = () => {
               type="button"
               onClick={handleCreateSubtask}
               disabled={savingSubtask}
-              className="px-3 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 transition-colors"
-              style={{ background: "hsl(var(--foreground) / 0.14)", border: "1px solid hsl(var(--foreground) / 0.35)", color: ACCENT }}
+              className={`${KEY_INK} h-9 px-4`}
             >
               {savingSubtask ? "Creating…" : "Create Subtask"}
             </button>

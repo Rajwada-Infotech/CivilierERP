@@ -1,3 +1,4 @@
+import { KEY_LINE, KEY_RED_SOLID } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -81,12 +82,13 @@ export const CancelReasonDialog: React.FC<{
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button type="button" variant="outline" className={`${KEY_LINE} h-9 px-4`} onClick={() => onOpenChange(false)} disabled={submitting}>
             Back
           </Button>
           <Button
             type="button"
             variant="destructive"
+            className={`${KEY_RED_SOLID} h-9 px-4`}
             disabled={!reasonId || submitting}
             onClick={() => onConfirm(reasonId)}
           >

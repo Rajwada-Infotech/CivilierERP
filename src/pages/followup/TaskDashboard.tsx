@@ -1,4 +1,5 @@
-import { SheetSection, SheetStats, PRIORITY_TONES, STATUS_TONES, SERIES_TONES } from "@/components/followup/sheetParts";
+import { KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetSection, SheetStats, PRIORITY_TONES, STATUS_TONES, SERIES_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -458,8 +459,7 @@ const TaskDashboard: React.FC = () => {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 active:scale-90 disabled:opacity-50"
-          style={{ borderColor: `hsl(var(--foreground) / 0.30)`, color: ACCENT }}
+          className={`group ${KEY_LINE} h-9 px-4`}
         >
           <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
           Refresh

@@ -1,4 +1,5 @@
-import { SheetSection, SheetStats, STATUS_TONES } from "@/components/followup/sheetParts";
+import { KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetSection, SheetStats, STATUS_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -350,7 +351,7 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
         <div className="no-print flex items-center gap-2">
           <button
             onClick={handlePrint}
-            className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
+            className={`${KEY_LINE} h-9 px-4`}
           >
             <Printer size={12} /> Print
           </button>

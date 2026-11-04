@@ -1,7 +1,14 @@
 import React from "react";
 
-// The parts of a Follow-Up page drawn the way the other dashboards draw them: ruled figures in place of icon tiles, and a
+// The parts of a working page drawn the way the other dashboards draw them: ruled figures in place of icon tiles, and a
 // section heading with its letter and rule. Colours are the sheet's only: ink, blue, red and graphite.
+// The same keys as the other sheet pages. Add the size where used: h-9 px-4 for a page's own actions, h-8 px-3 inside a row.
+export const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 rounded-none transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+export const KEY_INK = `${KEY} bg-foreground text-card border border-foreground hover:bg-foreground/90`;
+export const KEY_LINE = `${KEY} bg-card border border-foreground text-foreground hover:bg-primary/10`;
+export const KEY_RED = `${KEY} bg-card border border-destructive text-destructive hover:bg-destructive/10`;
+export const KEY_RED_SOLID = `${KEY} bg-destructive text-white border border-destructive hover:bg-destructive/90`;
+
 export const TONE = {
   ink: "hsl(var(--foreground))",
   blue: "hsl(var(--primary))",
@@ -28,6 +35,8 @@ export interface SheetStat {
   value: React.ReactNode;
   /** Written in red: something needs attention. */
   red?: boolean;
+  /** A small line under the figure. */
+  note?: React.ReactNode;
   active?: boolean;
   onClick?: () => void;
 }
@@ -42,6 +51,7 @@ export const SheetStats: React.FC<{ items: SheetStat[]; loading?: boolean }> = (
         <>
           <p className="label" style={{ color: s.active ? "var(--ink)" : color }}>{s.label}</p>
           <p className="figure" style={{ fontSize: "clamp(18px, 2vw, 26px)", marginTop: 9, color }}>{loading ? "…" : s.value}</p>
+          {s.note && <p style={{ fontSize: 11.5, color: "var(--graphite)", marginTop: 6 }}>{s.note}</p>}
           {s.onClick && <span style={{ display: "block", height: 2, marginTop: 8, background: s.active ? "var(--ink)" : "transparent" }} />}
         </>
       );

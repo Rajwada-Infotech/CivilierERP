@@ -1,4 +1,5 @@
-import { SheetSection, SheetStats, PRIORITY_TONES, STATUS_TONES, SERIES_TONES } from "@/components/followup/sheetParts";
+import { KEY, KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetSection, SheetStats, PRIORITY_TONES, STATUS_TONES, SERIES_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -610,7 +611,7 @@ const TagPerformanceReport: React.FC = () => {
       action={
         <button
           onClick={handlePrint}
-          className="no-print h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
+          className={`no-print ${KEY_LINE} h-9 px-4`}
         >
           <Printer size={12} /> Print
         </button>
@@ -742,7 +743,7 @@ const TagPerformanceReport: React.FC = () => {
                   key={key}
                   type="button"
                   onClick={() => setDetailFilter(key)}
-                  className={`text-[0.6875rem] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                  className={`${KEY} h-8 px-3 border ${
                     detailFilter === key ? "" : "border-border text-muted-foreground hover:bg-muted"
                   }`}
                   style={detailFilter === key ? { background: `hsl(var(--foreground) / 0.16)`, borderColor: `hsl(var(--foreground) / 0.45)`, color: ACCENT } : undefined}

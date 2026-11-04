@@ -1,4 +1,5 @@
-import { SheetStats, PRIORITY_TONES, STATUS_TONES } from "@/components/followup/sheetParts";
+import { KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetStats, PRIORITY_TONES, STATUS_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -449,7 +450,7 @@ const TaskPerformanceReport: React.FC = () => {
       action={
         <button
           onClick={handlePrint}
-          className="no-print h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
+          className={`no-print ${KEY_LINE} h-9 px-4`}
         >
           <Printer size={12} /> Print
         </button>

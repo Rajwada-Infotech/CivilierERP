@@ -1,4 +1,4 @@
-import { PRIORITY_TONES } from "@/components/followup/sheetParts";
+import { PRIORITY_TONES, KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -375,8 +375,7 @@ const TaskTransfer: React.FC = () => {
           <Button
             variant="outline"
             size="icon"
-            className="rounded-full h-11 w-11 border-2"
-            style={{ borderColor: `hsl(var(--foreground) / 0.33)` }}
+            className="h-9 w-9 border border-foreground"
             disabled={!bothSelected || checkedA.size === 0}
             onClick={() => setConfirmDirection("AtoB")}
             title={`Transfer selected tasks to ${userBName}`}
@@ -386,8 +385,7 @@ const TaskTransfer: React.FC = () => {
           <Button
             variant="outline"
             size="icon"
-            className="rounded-full h-11 w-11 border-2"
-            style={{ borderColor: `hsl(var(--foreground) / 0.33)` }}
+            className="h-9 w-9 border border-foreground"
             disabled={!bothSelected || checkedB.size === 0}
             onClick={() => setConfirmDirection("BtoA")}
             title={`Transfer selected tasks to ${userAName}`}
@@ -478,8 +476,9 @@ const TaskTransfer: React.FC = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isTransferring}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel className={`${KEY_LINE} h-9 px-4 mt-0`} disabled={isTransferring}>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              className={`${KEY_INK} h-9 px-4`}
               disabled={isTransferring}
               onClick={(e) => {
                 e.preventDefault();
