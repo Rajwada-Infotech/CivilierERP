@@ -120,40 +120,40 @@ export default function LandDetailsPage() {
               <Table rows={current} cols={[["OwnerName", "Owner"], ["OwnerGuardian", "Father / husband"], ["SharePct", "Share %"], ["ValidFrom", "Since"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="Ownership chain" {...at("ownership")}>
-              <Table rows={data.chain} cols={[["EventDate", "Date"], ["TransferType", "Type"], ["PreviousOwnerName", "From"], ["NewOwnerName", "To"], ["SharePct", "Share %"], ["DocumentNo", "Document"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.chain} cols={[["EventDate", "Transfer date"], ["TransferType", "Transfer type"], ["PreviousOwnerName", "From (previous owner)"], ["NewOwnerName", "To (new owner)"], ["SharePct", "Share %"], ["DocumentNo", "Deed / document no."], ["DocFileId", "Deed copy"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="RS / LR records" {...at("records")}>
-              <Table rows={data.records} cols={[["Kind", "Record"], ["Khatian", "Khatian"], ["Dag", "Dag"], ["RecordedHolder", "Holder"], ["Area", "Area"], ["Share", "Share"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.records} cols={[["Kind", "Record (RS / LR)"], ["Khatian", "Khatian no."], ["Dag", "Dag no."], ["RecordedHolder", "Recorded holder"], ["Area", "Area"], ["Share", "Share"], ["DocFileId", "Record copy"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="Documents" {...at("documents")}>
-              <Table rows={data.documents} cols={[["DocumentCode", "Code"], ["Title", "Title"], ["DocTypeName", "Type"], ["DocumentNo", "Number"], ["CurrentVersionNo", "Version"], ["DocFileId", "File"], ["ReviewStatus", "Review"]]} />
+              <Table rows={data.documents} cols={[["DocumentCode", "Document ID"], ["Title", "Title"], ["DocTypeName", "Document type"], ["DocumentNo", "Document no."], ["CurrentVersionNo", "Version"], ["DocFileId", "Copy"], ["ReviewStatus", "Review"]]} />
             </Section>
             <Section title="Legal checks" {...at("legal")}>
-              <Table rows={data.legal} cols={[["Kind", "Item"], ["Detail", "Detail"], ["Status", "Result / status"]]} />
+              <Table rows={data.legal} cols={[["Kind", "Legal item"], ["Detail", "Case / lender / reference"], ["Status", "Result / status"]]} />
             </Section>
             <Section title="Legal records" {...at("legal")}>
-              <Table rows={data.legalRecords ?? []} cols={[["RecordType", "Type"], ["CaseNumber", "Case / ref no."], ["CourtAuthority", "Court / authority"], ["FilingDate", "Filed"], ["OrderDate", "Order"], ["RecordStatus", "Status"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.legalRecords ?? []} cols={[["RecordType", "Record type"], ["CaseNumber", "Case / ref no."], ["CourtAuthority", "Court / authority"], ["FilingDate", "Filed"], ["OrderDate", "Order"], ["RecordStatus", "Status"], ["DocFileId", "Order / notice copy"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="Loans & mortgages" {...at("loans")}>
-              <Table rows={data.loans ?? []} cols={[["LenderName", "Lender"], ["LoanType", "Type"], ["LoanAmount", "Amount ₹"], ["OutstandingAmount", "Outstanding ₹"], ["LoanStartDate", "Start"], ["LoanClosureDate", "Closed"], ["LoanStatus", "Status"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.loans ?? []} cols={[["LenderName", "Lender"], ["LoanType", "Loan type"], ["LoanAmount", "Amount ₹"], ["OutstandingAmount", "Outstanding ₹"], ["LoanStartDate", "Start"], ["LoanClosureDate", "Closed"], ["LoanStatus", "Status"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="Payments" {...at("payments")}>
-              <Table rows={data.payments ?? []} cols={[["PaymentDate", "Date"], ["TxnType", "Type"], ["Amount", "Amount ₹"], ["Payer", "Paid by"], ["Payee", "Paid to"], ["PaymentMode", "Mode"], ["Ref", "Reference"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.payments ?? []} cols={[["PaymentDate", "Payment date"], ["TxnType", "Payment purpose"], ["Amount", "Amount ₹"], ["Payer", "Paid by"], ["Payee", "Paid to"], ["PaymentMode", "Mode"], ["Ref", "Reference"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="Land tax (Khajna)" {...at("tax")}>
               <Table rows={data.taxes ?? []} cols={[["TaxYear", "Year"], ["PaymentDate", "Paid on"], ["Amount", "Amount ₹"], ["ReceiptNo", "Receipt no."], ["RelatedOwner", "Owner"], ["DocFileId", "Receipt"], ["VerificationStatus", "Verification"]]} />
             </Section>
             <Section title="Survey & valuation" {...at("survey")}>
-              <Table rows={data.valuations ?? []} cols={[["ValuationDate", "Date"], ["EstimatedMarketValue", "Market value ₹"], ["GovernmentValuation", "Govt. value ₹"], ["ValuationSource", "Source"], ["Surveyor", "Surveyor"], ["SurveyDate", "Survey date"], ["DocFileId", "File"], ["VerificationStatus", "Verification"]]} />
+              <Table rows={data.valuations ?? []} cols={[["ValuationDate", "Valuation date"], ["EstimatedMarketValue", "Market value ₹"], ["GovernmentValuation", "Govt. value ₹"], ["ValuationSource", "Source"], ["Surveyor", "Surveyor"], ["SurveyDate", "Survey date"], ["DocFileId", "Valuation report"], ["VerificationStatus", "Verification"]]} />
             </Section>
             {(!backlog || data.transactions.length > 0) && <Section title="Purchase & sale" {...at("transfers")}>
-              <Table rows={data.transactions} cols={[["TransactionNo", "No."], ["TxnType", "Type"], ["BuyerName", "Buyer"], ["SellerNames", "Seller(s)"], ["Area", "Area"], ["TotalValue", "Value ₹"], ["Paid", "Verified paid ₹"], ["TxnStatus", "Status"]]} />
+              <Table rows={data.transactions} cols={[["TransactionNo", "Transaction no."], ["TxnType", "Purchase / sale"], ["BuyerName", "Buyer"], ["SellerNames", "Seller(s)"], ["Area", "Area"], ["TotalValue", "Value ₹"], ["Paid", "Verified paid ₹"], ["TxnStatus", "Status"]]} />
             </Section>}
             {data.deeds.length > 0 && <Section title="Deed & registration" {...at("transfers")}>
-              <Table rows={data.deeds} cols={[["DeedCode", "Deed"], ["DeedTypeName", "Type"], ["ConsiderationAmount", "Consideration ₹"], ["OfficeName", "Office"], ["RegisteredDeedNo", "Registered no."], ["RegistrationDate", "Registered on"], ["RegistrationStatus", "Status"]]} />
+              <Table rows={data.deeds} cols={[["DeedCode", "Deed ID"], ["DeedTypeName", "Deed type"], ["ConsiderationAmount", "Consideration ₹"], ["OfficeName", "Office"], ["RegisteredDeedNo", "Registered no."], ["RegistrationDate", "Registered on"], ["RegistrationStatus", "Status"]]} />
             </Section>}
             <Section title="Mutation" {...at("mutation")}>
-              <Table rows={data.mutations} cols={[["ApplicationNo", "Application"], ["OfficeName", "Office"], ["ApplicationStatus", "Status"], ["OrderNo", "Order"], ["OrderDate", "Order date"]]} />
+              <Table rows={data.mutations} cols={[["ApplicationNo", "Mutation application no."], ["OfficeName", "BL&LRO office"], ["ApplicationStatus", "Application status"], ["OrderNo", "Mutation order no."], ["OrderDate", "Order date"]]} />
             </Section>
           </div>
         )}

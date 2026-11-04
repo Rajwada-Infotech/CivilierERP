@@ -36,9 +36,9 @@ const PAN = { name: "Pan", label: "PAN", type: "text", max: 10, upper: true, pat
 const EMAIL = { name: "Email", label: "Email", type: "text", max: 150, pattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", patternMsg: "Enter a valid email" };
 const PHONE = { name: "Phone", label: "Phone", type: "text", max: 15, pattern: "^[+]?[0-9 -]{8,15}$", patternMsg: "Enter a valid phone number" };
 const LAND_DOC = [
-  { name: "LandDocTypeId", label: "Land record document", type: "ref", ref: "document-type" },
-  { name: "LandDocNo", label: "Related document number", type: "text", max: 60 },
-  { name: "LandDocFileId", label: "Land record document copy", type: "file" },
+  { name: "LandDocTypeId", label: "Title document type (deed, porcha, RoR…)", type: "ref", ref: "document-type" },
+  { name: "LandDocNo", label: "Title document number", type: "text", max: 60 },
+  { name: "LandDocFileId", label: "Title document copy", type: "file" },
 ];
 
 // Short code / name lists (Ownership Type, Payment Mode…): every one is rows of LegalLookupValue, by Category.
@@ -48,10 +48,10 @@ const lookup = (key, title, group, desc) => ({
   label: "Name", orderBy: "SortOrder, Name",
   unique: [["Category", "Name"], `This ${title.toLowerCase()} already exists`],
   fields: [
-    { name: "Name", label: "Name", type: "text", required: true, max: 150 },
-    { name: "Code", label: "Code", type: "text", max: 30, upper: true },
-    { name: "Description", label: "Description", type: "textarea", max: 500 },
-    { name: "SortOrder", label: "Sort order", type: "int", min: 0, default: 0 },
+    { name: "Name", label: title, type: "text", required: true, max: 150 },
+    { name: "Code", label: `${title} code`, type: "text", max: 30, upper: true },
+    { name: "Description", label: "Meaning / when to use", type: "textarea", max: 500 },
+    { name: "SortOrder", label: "Display order in lists", type: "int", min: 0, default: 0 },
     ACTIVE,
   ],
 });
@@ -189,7 +189,7 @@ const MASTERS = {
       { name: "Share", label: "Share", type: "text", max: 30 },
       { name: "RorDate", label: "RoR date (as on)", type: "date" },
       { name: "CopyType", label: "Copy type", type: "select", options: ["Certified Copy", "Online / Digital", "Photocopy", "Not Obtained"] },
-      { name: "Source", label: "Source", type: "text", max: 200 },
+      { name: "Source", label: "Record source (office / portal)", type: "text", max: 200 },
       { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
       ACTIVE,
     ],
@@ -214,7 +214,7 @@ const MASTERS = {
     label: "LandTypeName", orderBy: "LandTypeName",
     unique: [["LandTypeCode"], "This land type code already exists"],
     fields: [
-      { name: "LandTypeCode", label: "Code", type: "text", required: true, max: 20, upper: true },
+      { name: "LandTypeCode", label: "Land type code", type: "text", required: true, max: 20, upper: true },
       { name: "LandTypeName", label: "Land type", type: "text", required: true, max: 100 },
       { name: "ConversionNeeded", label: "Needs conversion before building", type: "bit", default: false },
       { name: "Description", label: "Description", type: "textarea", max: 500 },
@@ -349,8 +349,8 @@ const MASTERS = {
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "MouzaId", label: "Mouza", type: "ref", ref: "mouza", required: true, filterBy: "DistrictId", blankOk: true, fill: { JLNo: "JLNo" } },
       { name: "JLNo", label: "J.L. number", type: "text", max: 30 },
-      { name: "GpsLatitude", label: "Latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
-      { name: "GpsLongitude", label: "Longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
+      { name: "GpsLatitude", label: "GPS latitude", type: "decimal", signed: true, min: -90, maxValue: 90 },
+      { name: "GpsLongitude", label: "GPS longitude", type: "decimal", signed: true, min: -180, maxValue: 180 },
       { name: "ApproxArea", label: "Approximate area", type: "decimal" },
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", requiredWith: "ApproxArea" },
       { name: "ContactPerson", label: "Seller / contact person", type: "text", max: 200 },
@@ -385,8 +385,8 @@ const MASTERS = {
       { name: "Share", label: "Share", type: "text", max: 30 },
       { name: "RecordDate", label: "RS record date", type: "date" },
       { name: "CopyTypeId", label: "Copy type", type: "ref", ref: "copy-type" },
-      { name: "Source", label: "Source", type: "text", max: 200 },
-      { name: "DocFileId", label: "Document", type: "file" },
+      { name: "Source", label: "Record source (office / portal)", type: "text", max: 200 },
+      { name: "DocFileId", label: "RS record copy (porcha)", type: "file" },
       VERIFICATION,
       { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
       ACTIVE,
@@ -413,8 +413,8 @@ const MASTERS = {
       { name: "Share", label: "Share", type: "text", max: 30 },
       { name: "RorDate", label: "RoR date (as on)", type: "date" },
       { name: "CopyTypeId", label: "Copy type", type: "ref", ref: "copy-type" },
-      { name: "Source", label: "Source", type: "text", max: 200 },
-      { name: "DocFileId", label: "Document", type: "file" },
+      { name: "Source", label: "Record source (office / portal)", type: "text", max: 200 },
+      { name: "DocFileId", label: "LR RoR copy", type: "file" },
       VERIFICATION,
       { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
       ACTIVE,
@@ -499,8 +499,8 @@ const MASTERS = {
       fields: [
         LAND_ID,
         { name: "RecordId", label: "Ownership record", type: "ref", ref: "ownership-record", filterBy: "LandId", required: true },
-        { name: "CheckItem", label: "Check", type: "select", required: true, options: OWNERSHIP_CHECKS },
-        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Verified", "Rejected", "Needs Correction", "Reattachment Required", "Not Applicable"], default: "Pending" },
+        { name: "CheckItem", label: "Check item", type: "select", required: true, options: OWNERSHIP_CHECKS },
+        { name: "Result", label: "Check result", type: "select", required: true, options: ["Pending", "Verified", "Rejected", "Needs Correction", "Reattachment Required", "Not Applicable"], default: "Pending" },
         { name: "Remarks", label: "Reviewer remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -513,7 +513,7 @@ const MASTERS = {
         LAND_ID,
         { name: "DeceasedName", label: "Deceased owner name", type: "text", required: true, max: 200 },
         { name: "DeceasedGuardian", label: "Deceased's father / husband", type: "text", max: 200 },
-        { name: "DeceasedPersonId", label: "Deceased in Party master (optional)", type: "ref", ref: "person", fill: { DeceasedName: "FullName", DeceasedGuardian: "GuardianName" } },
+        { name: "DeceasedPersonId", label: "Deceased owner from Owner list (optional)", type: "ref", ref: "person", fill: { DeceasedName: "FullName", DeceasedGuardian: "GuardianName" } },
         { name: "DateOfDeath", label: "Date of death", type: "date" },
         { name: "DeathCertFileId", label: "Death certificate", type: "file" },
         { name: "HeirCertFileId", label: "Legal heir certificate", type: "file" },
@@ -534,7 +534,7 @@ const MASTERS = {
         { name: "InheritanceId", label: "Inheritance", type: "ref", ref: "inheritance", filterBy: "LandId", required: true },
         { name: "HeirName", label: "Legal heir name", type: "text", required: true, max: 200 },
         { name: "HeirGuardian", label: "Heir's father / husband", type: "text", max: 200 },
-        { name: "PersonId", label: "Heir in Party master (optional)", type: "ref", ref: "person", fill: { HeirName: "FullName", HeirGuardian: "GuardianName" } },
+        { name: "PersonId", label: "Heir from Owner list (optional)", type: "ref", ref: "person", fill: { HeirName: "FullName", HeirGuardian: "GuardianName" } },
         { name: "RelationshipTypeId", label: "Relationship with deceased", type: "ref", ref: "relationship-type" },
         { name: "SharePct", label: "Inheritance share (%)", type: "decimal", required: true, maxValue: 100 },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
@@ -589,9 +589,9 @@ const MASTERS = {
         LAND_ID,
         { name: "CaseId", label: "Court case", type: "ref", ref: "legal-case", filterBy: "LandId", required: true },
         { name: "HearingDate", label: "Hearing date", type: "date", required: true },
-        { name: "Purpose", label: "Purpose", type: "text", max: 300 },
-        { name: "Outcome", label: "Outcome", type: "textarea", max: 1000 },
-        { name: "NextDate", label: "Next date", type: "date", after: "HearingDate" },
+        { name: "Purpose", label: "Hearing purpose", type: "text", max: 300 },
+        { name: "Outcome", label: "Hearing outcome", type: "textarea", max: 1000 },
+        { name: "NextDate", label: "Next hearing date", type: "date", after: "HearingDate" },
         { name: "DocFileId", label: "Order / record", type: "file" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
         ACTIVE,
@@ -638,7 +638,7 @@ const MASTERS = {
         { name: "PeriodFrom", label: "Search period from", type: "date" },
         { name: "PeriodTo", label: "Search period to", type: "date", after: "PeriodFrom" },
         { name: "SearchSource", label: "Search source", type: "text", max: 300 },
-        { name: "Result", label: "Result", type: "select", required: true, options: ["Not Checked", "Not Found", "Found - Clear", "Found - Issue", "Search Failed"], default: "Not Checked" },
+        { name: "Result", label: "Check result", type: "select", required: true, options: ["Not Checked", "Not Found", "Found - Clear", "Found - Issue", "Search Failed"], default: "Not Checked" },
         { name: "DocFileId", label: "Supporting document", type: "file" },
         VERIFICATION,
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
@@ -652,8 +652,8 @@ const MASTERS = {
       review: { field: "Result", by: "ReviewedBy", at: "ReviewedAt" },
       fields: [
         LAND_ID,
-        { name: "CheckItem", label: "Check", type: "select", required: true, options: DUE_DILIGENCE_CHECKS },
-        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Clear", "Issue Found"], default: "Pending" },
+        { name: "CheckItem", label: "Check item", type: "select", required: true, options: DUE_DILIGENCE_CHECKS },
+        { name: "Result", label: "Check result", type: "select", required: true, options: ["Pending", "Clear", "Issue Found"], default: "Pending" },
         { name: "Findings", label: "Findings", type: "textarea", max: 1000, requiredWhen: { field: "Result", values: ["Issue Found"] } },
         { name: "DocFileId", label: "Supporting document", type: "file" },
         ACTIVE,
@@ -665,10 +665,10 @@ const MASTERS = {
       fields: [
         LAND_ID,
         { name: "AdvocateId", label: "Advocate", type: "ref", ref: "advocate", required: true },
-        { name: "Purpose", label: "Purpose", type: "select", required: true, options: ["Title Verification", "Legal Opinion", "Due Diligence", "Court Case", "Deed Review", "Other"], default: "Legal Opinion" },
+        { name: "Purpose", label: "Assignment purpose", type: "select", required: true, options: ["Title Verification", "Legal Opinion", "Due Diligence", "Court Case", "Deed Review", "Other"], default: "Legal Opinion" },
         { name: "AssignedDate", label: "Assigned date", type: "date", required: true, default: "today" },
         { name: "DueDate", label: "Due date", type: "date", after: "AssignedDate" },
-        { name: "AssignmentStatus", label: "Status", type: "select", required: true, options: ["Assigned", "In Progress", "Completed", "Withdrawn"], default: "Assigned" },
+        { name: "AssignmentStatus", label: "Assignment status", type: "select", required: true, options: ["Assigned", "In Progress", "Completed", "Withdrawn"], default: "Assigned" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -756,10 +756,10 @@ const MASTERS = {
         { name: "BuyerName", label: "Buyer / company", type: "text", required: true, max: 200 },
         { name: "BuyerId", label: "Buyer (Buyer list)", type: "ref", ref: "person", hidden: true },
         { name: "SellerNames", label: "Seller(s)", type: "text", required: true, max: 500 },
-        { name: "TxnArea", label: "Area (selling / buying)", type: "decimal", required: true, min: 0.000001 },
+        { name: "TxnArea", label: "Area", type: "decimal", required: true, min: 0.000001 },
         { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", required: true },
         { name: "RatePerUnit", label: "Rate per unit (₹)", type: "decimal" },
-        { name: "TotalValue", label: "Total land value (₹)", type: "decimal", required: true, min: 0.01 },
+        { name: "TotalValue", label: "Total value (₹)", type: "decimal", required: true, min: 0.01 },
         { name: "AdvanceAmount", label: "Advance amount (₹)", type: "decimal" },
         { name: "AgreementDate", label: "Agreement date", type: "date" },
         { name: "ExpectedRegistrationDate", label: "Expected registration date", type: "date" },
@@ -769,7 +769,7 @@ const MASTERS = {
         { name: "AdvocateFees", label: "Advocate fees (₹)", type: "decimal" },
         { name: "OtherExpenses", label: "Other expenses (₹)", type: "decimal" },
         { name: "AgreementFileId", label: "Agreement document", type: "file" },
-        { name: "TxnStatus", label: "Status", type: "select", required: true, options: ["Draft", "Negotiation", "Agreement Signed", "Payment in Progress", "Registered", "Completed", "Cancelled"], default: "Draft" },
+        { name: "TxnStatus", label: "Transaction status", type: "select", required: true, options: ["Draft", "Negotiation", "Agreement Signed", "Payment in Progress", "Registered", "Completed", "Cancelled"], default: "Draft" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
       ],
@@ -780,7 +780,7 @@ const MASTERS = {
       fields: [
         LAND_ID,
         // Optional: payments of older (backlog) purchases are recorded without a purchase entered here.
-        { name: "TransactionId", label: "Purchase / sale (if recorded here)", type: "ref", ref: "land-transaction", filterBy: "LandId" },
+        { name: "TransactionId", label: "Against purchase / sale (optional)", type: "ref", ref: "land-transaction", filterBy: "LandId" },
         { name: "PaymentDate", label: "Payment date", type: "date", required: true, default: "today" },
         { name: "TxnTypeId", label: "Payment purpose", type: "ref", ref: "txn-type", required: true },
         { name: "Amount", label: "Amount (₹)", type: "decimal", required: true, min: 0.01 },
@@ -803,7 +803,7 @@ const MASTERS = {
         LAND_ID,
         { name: "TransactionId", label: "Purchase / sale", type: "ref", ref: "land-transaction", filterBy: "LandId" },
         { name: "ExpenseTypeId", label: "Expense type", type: "ref", ref: "expense-type", required: true },
-        { name: "ExpenseDate", label: "Date", type: "date", required: true, default: "today" },
+        { name: "ExpenseDate", label: "Expense date", type: "date", required: true, default: "today" },
         { name: "Amount", label: "Amount (₹)", type: "decimal", required: true, min: 0.01 },
         { name: "PaidTo", label: "Paid to", type: "text", max: 200 },
         { name: "PaymentModeId", label: "Payment mode", type: "ref", ref: "payment-mode" },
@@ -878,7 +878,7 @@ const MASTERS = {
         LAND_ID,
         { name: "AgreementId", label: "Agreement", type: "ref", ref: "agreement", filterBy: "LandId", required: true },
         { name: "PartyName", label: "Party name", type: "text", required: true, max: 200 },
-        { name: "PersonId", label: "Party in Party master (optional)", type: "ref", ref: "person", fill: { PartyName: "FullName" } },
+        { name: "PersonId", label: "Party from Seller / Buyer list (optional)", type: "ref", ref: "person", fill: { PartyName: "FullName" } },
         { name: "PartyRole", label: "Role", type: "select", required: true, options: ["Buyer", "Seller", "Co-owner", "Legal Heir", "Authorized Signatory"] },
         { name: "OwnershipSharePct", label: "Ownership share (%)", type: "decimal", maxValue: 100 },
         { name: "ConsentStatus", label: "Consent", type: "select", required: true, options: ["Pending", "Approved", "Rejected", "Signature Pending", "Not Applicable"], default: "Pending" },
@@ -956,8 +956,8 @@ const MASTERS = {
       fields: [
         LAND_ID,
         { name: "DraftId", label: "Draft", type: "ref", ref: "deed-draft", filterBy: "LandId", required: true },
-        { name: "CheckItem", label: "Check", type: "select", required: true, options: DRAFT_CHECKS },
-        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Correct", "Incorrect", "Not Applicable"], default: "Pending" },
+        { name: "CheckItem", label: "Check item", type: "select", required: true, options: DRAFT_CHECKS },
+        { name: "Result", label: "Check result", type: "select", required: true, options: ["Pending", "Correct", "Incorrect", "Not Applicable"], default: "Pending" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 500, requiredWhen: { field: "Result", values: ["Incorrect"] } },
         ACTIVE,
       ],
@@ -1013,7 +1013,7 @@ const MASTERS = {
         { name: "BuyerAttendance", label: "Buyer attendance", type: "select", required: true, options: ["Pending", "Present", "Absent"], default: "Pending" },
         { name: "SellerAttendance", label: "Seller attendance", type: "select", required: true, options: ["Pending", "Present", "Absent"], default: "Pending" },
         { name: "WitnessDetails", label: "Witness details", type: "textarea", max: 1000 },
-        { name: "AppointmentStatus", label: "Status", type: "select", required: true, options: ["Scheduled", "Rescheduled", "Completed", "Cancelled", "Missed"], default: "Scheduled" },
+        { name: "AppointmentStatus", label: "Appointment status", type: "select", required: true, options: ["Scheduled", "Rescheduled", "Completed", "Cancelled", "Missed"], default: "Scheduled" },
         { name: "SlipFileId", label: "Appointment slip", type: "file" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
@@ -1106,11 +1106,11 @@ const MASTERS = {
         { name: "PartiesInvolved", label: "Parties involved", type: "text", max: 500 },
         { name: "FilingDate", label: "Filing / issue date", type: "date" },
         { name: "OrderDate", label: "Order / judgment date", type: "date" },
-        { name: "RecordStatus", label: "Status", type: "select", options: ["Open", "Pending", "Disposed", "Closed", "In Force", "Expired", "Withdrawn", "Unknown"] },
+        { name: "RecordStatus", label: "Case / record status", type: "select", options: ["Open", "Pending", "Disposed", "Closed", "In Force", "Expired", "Withdrawn", "Unknown"] },
         { name: "Description", label: "Description", type: "textarea", max: 2000 },
         { name: "RelatedPerson", label: "Related person / owner", type: "text", max: 200 },
         { name: "DocumentRef", label: "Document reference", type: "text", max: 120 },
-        { name: "DocFileId", label: "Document", type: "file" },
+        { name: "DocFileId", label: "Order / notice copy", type: "file" },
         VERIFICATION,
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000 },
         ACTIVE,
@@ -1141,8 +1141,8 @@ const MASTERS = {
         { name: "MutationId", label: "Mutation", type: "ref", ref: "mutation", filterBy: "LandId", required: true },
         { name: "HearingDate", label: "Hearing date", type: "date", required: true },
         { name: "ObjectionRaised", label: "Objection raised", type: "select", required: true, options: ["No", "Yes"], default: "No" },
-        { name: "Outcome", label: "Outcome", type: "textarea", max: 1000 },
-        { name: "NextDate", label: "Next date", type: "date", after: "HearingDate" },
+        { name: "Outcome", label: "Hearing outcome", type: "textarea", max: 1000 },
+        { name: "NextDate", label: "Next hearing date", type: "date", after: "HearingDate" },
         { name: "DocFileId", label: "Hearing record", type: "file" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 500 },
         ACTIVE,
@@ -1177,8 +1177,8 @@ const MASTERS = {
       review: { field: "Result", by: "CheckedBy", at: "CheckedAt" },
       fields: [
         LAND_ID,
-        { name: "CheckItem", label: "Check", type: "select", required: true, options: FINAL_CHECKS },
-        { name: "Result", label: "Result", type: "select", required: true, options: ["Pending", "Confirmed", "Issue Found", "Not Applicable"], default: "Pending" },
+        { name: "CheckItem", label: "Check item", type: "select", required: true, options: FINAL_CHECKS },
+        { name: "Result", label: "Check result", type: "select", required: true, options: ["Pending", "Confirmed", "Issue Found", "Not Applicable"], default: "Pending" },
         { name: "Remarks", label: "Remarks", type: "textarea", max: 1000, requiredWhen: { field: "Result", values: ["Issue Found", "Not Applicable"] } },
         ACTIVE,
       ],
@@ -1221,7 +1221,7 @@ const MASTERS = {
     unique: [["State", "DistrictName"], "This district already exists in this state"],
     fields: [
       { name: "DistrictName", label: "District", type: "text", required: true, max: 100 },
-      { name: "DistrictCode", label: "Code", type: "text", max: 20, upper: true },
+      { name: "DistrictCode", label: "District code", type: "text", max: 20, upper: true },
       { name: "State", label: "State", type: "text", required: true, max: 100, default: "West Bengal" },
       ACTIVE,
     ],
@@ -1257,8 +1257,8 @@ const MASTERS = {
     unique: [["DistrictId", "BodyName"], "This local body already exists in this district"],
     fields: [
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
-      { name: "BodyName", label: "Name", type: "text", required: true, max: 150 },
-      { name: "BodyType", label: "Type", type: "select", required: true, options: ["Municipal Corporation", "Municipality", "Notified Area Authority", "Development Authority", "Gram Panchayat", "Panchayat Samiti"], default: "Municipality" },
+      { name: "BodyName", label: "Local body name", type: "text", required: true, max: 150 },
+      { name: "BodyType", label: "Local body type", type: "select", required: true, options: ["Municipal Corporation", "Municipality", "Notified Area Authority", "Development Authority", "Gram Panchayat", "Panchayat Samiti"], default: "Municipality" },
       { name: "WardCount", label: "Number of wards", type: "int", min: 1 },
       PHONE,
       { name: "Address", label: "Office address", type: "textarea", max: 500 },
@@ -1335,7 +1335,7 @@ const MASTERS = {
     label: "DeedTypeName", orderBy: "DeedTypeName",
     unique: [["DeedTypeCode"], "This deed type code already exists"],
     fields: [
-      { name: "DeedTypeCode", label: "Code", type: "text", required: true, max: 20, upper: true },
+      { name: "DeedTypeCode", label: "Deed type code", type: "text", required: true, max: 20, upper: true },
       { name: "DeedTypeName", label: "Official / display name", type: "text", required: true, max: 150 },
       { name: "TransactionType", label: "Transaction type", type: "select", required: true, options: ["Purchase", "Sale", "Gift", "Exchange", "Lease", "Mortgage", "Power of Attorney", "Partition", "Development Agreement", "Rectification", "Other"] },
       { name: "Description", label: "Description", type: "textarea", max: 500 },
@@ -1348,8 +1348,8 @@ const MASTERS = {
     label: "TaskTypeName", orderBy: "TaskTypeName",
     unique: [["TaskTypeCode"], "This task type code already exists"],
     fields: [
-      { name: "TaskTypeCode", label: "Code", type: "text", required: true, max: 20, upper: true },
-      { name: "TaskTypeName", label: "Name", type: "text", required: true, max: 150 },
+      { name: "TaskTypeCode", label: "Task type code", type: "text", required: true, max: 20, upper: true },
+      { name: "TaskTypeName", label: "Task type name", type: "text", required: true, max: 150 },
       { name: "DeedTypeId", label: "Deed type", type: "ref", ref: "deed-type", required: true },
       { name: "ChecklistTemplateId", label: "Default checklist", type: "ref", ref: "checklist-template", required: true, filterBy: "DeedTypeId", blankOk: true, fill: { Jurisdiction: "Jurisdiction" } },
       { name: "WorkflowId", label: "Approval workflow", type: "ref", ref: "approval-workflow", required: true },
@@ -1366,8 +1366,8 @@ const MASTERS = {
     label: "DocTypeName", orderBy: "Category, DocTypeName",
     unique: [["DocTypeCode"], "This document type code already exists"],
     fields: [
-      { name: "DocTypeCode", label: "Code", type: "text", required: true, max: 20, upper: true },
-      { name: "DocTypeName", label: "Name", type: "text", required: true, max: 150 },
+      { name: "DocTypeCode", label: "Document type code", type: "text", required: true, max: 20, upper: true },
+      { name: "DocTypeName", label: "Document type name", type: "text", required: true, max: 150 },
       { name: "Category", label: "Category", type: "select", required: true, options: ["Draft", "Identity", "Tax", "Title", "Land Record", "Revenue", "Payment", "Photograph", "Registration", "Legal", "Survey", "Loan & Mortgage", "Other"] },
       { name: "Sensitivity", label: "Sensitivity", type: "select", required: true, options: ["Internal", "Confidential", "Personal Data"], default: "Internal" },
       { name: "RetentionClass", label: "Retention", type: "select", required: true, options: ["Permanent", "10 Years", "8 Years", "5 Years"], default: "Permanent" },
@@ -1403,7 +1403,7 @@ const MASTERS = {
       { name: "DocTypeId", label: "Document type", type: "ref", ref: "document-type", required: true },
       { name: "Requirement", label: "Requirement", type: "select", required: true, options: ["Required", "Conditional", "Optional"], default: "Required" },
       { name: "StageNeeded", label: "Needed by", type: "select", required: true, options: ["Search", "Deed Details", "Before L1", "Before L2", "Closure"], default: "Before L1" },
-      { name: "SortOrder", label: "Order", type: "int", required: true, min: 1, default: 1 },
+      { name: "SortOrder", label: "Display order", type: "int", required: true, min: 1, default: 1 },
       { name: "ReminderDays", label: "Remind every (days)", type: "int", min: 1 },
       { name: "AllowNA", label: "Can be marked N/A (with reason)", type: "bit", default: true },
       { name: "Waivable", label: "Can be waived by an approver", type: "bit", default: false },
@@ -1452,9 +1452,9 @@ const MASTERS = {
     unique: [["Category", "ReasonCode"], "This code already exists in this category"],
     fields: [
       { name: "Category", label: "Category", type: "select", required: true, options: ["Task Status", "Missing Document", "Return", "Rejection", "Cancellation", "On Hold", "Discrepancy", "Waiver"] },
-      { name: "ReasonCode", label: "Code", type: "text", required: true, max: 40, upper: true },
-      { name: "ReasonLabel", label: "Label", type: "text", required: true, max: 150 },
-      { name: "SortOrder", label: "Order", type: "int", min: 0, default: 0 },
+      { name: "ReasonCode", label: "Reason code", type: "text", required: true, max: 40, upper: true },
+      { name: "ReasonLabel", label: "Reason shown to users", type: "text", required: true, max: 150 },
+      { name: "SortOrder", label: "Display order", type: "int", min: 0, default: 0 },
       { name: "Description", label: "Meaning", type: "textarea", max: 500 },
       ACTIVE,
     ],
@@ -1532,7 +1532,8 @@ const MASTERS = {
     desc: "The company acquiring this land. Sellers are the land's current owners; the whole land (all owners' shares) can be bought in one purchase.",
     // The company buys: the buyer is one of our companies; the sellers come from (or are added to) the Seller list.
     fields: base.map((f) => (f.name === "BuyerName" ? { ...f, label: "Buyer (our company)", suggest: "company" }
-      : f.name === "SellerNames" ? { ...f, label: "Seller(s) — the land's owners, comma-separated", suggest: "seller", party: "Seller" } : f)),
+      : f.name === "SellerNames" ? { ...f, label: "Seller(s) — the land's owners, comma-separated", suggest: "seller", party: "Seller" }
+      : f.name === "TxnArea" ? { ...f, label: "Area bought" } : f.name === "TotalValue" ? { ...f, label: "Purchase price (₹)" } : f)),
   };
   MASTERS["land-sale"] = {
     ...txn, title: "Sale", scope: { column: "TxnType", value: "Sale" },
@@ -1565,7 +1566,8 @@ const MASTERS = {
     },
     // The company sells: the seller is one of our companies; the buyer comes from (or is added to) the Buyer list.
     fields: base.map((f) => (f.name === "SellerNames" ? { ...f, label: "Seller (our company)", suggest: "company" }
-      : f.name === "BuyerName" ? { ...f, label: "Buyer", suggest: "buyer", party: "Buyer", partyId: "BuyerId" } : f)),
+      : f.name === "BuyerName" ? { ...f, label: "Buyer", suggest: "buyer", party: "Buyer", partyId: "BuyerId" }
+      : f.name === "TxnArea" ? { ...f, label: "Area sold" } : f.name === "TotalValue" ? { ...f, label: "Sale price (₹)" } : f)),
   };
   txn.lookupOnly = true;
 
@@ -1575,7 +1577,7 @@ const MASTERS = {
     where: "({t}EntryType = N'Existing / Backlog' OR {t}LandStatus IN (N'Owned', N'Active', N'Registered', N'Mutated', N'In Dispute') OR EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = {t}LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed'))",
   };
   MASTERS["land-sale"].fields = MASTERS["land-sale"].fields.map((f) =>
-    (f.name === "LandId" ? { ...f, ref: "acquired-land", label: "Acquired land property" } : f));
+    (f.name === "LandId" ? { ...f, ref: "acquired-land", label: "Land property (owned by the company)" } : f));
 }
 
 // Pickers backed by core ERP tables rather than a Legal master.
