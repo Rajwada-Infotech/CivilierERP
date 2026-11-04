@@ -11,8 +11,8 @@ const cell = (v: unknown) =>
     : typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v) ? new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v);
 
-// No company / date filters: land is not split by company or financial year.
-const LEGAL_FILTERS = { companyParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null, dataKey: "rows" } as const;
+// Day / Range / Financial year filter each report's own date column (server-side); land is not split by company or project.
+const LEGAL_FILTERS = { companyParam: null, projectParam: null, finYearParam: "finYearId", singleDateParam: "dateFrom", dateFromParam: "dateFrom", dateToParam: "dateTo", dataKey: "rows" } as const;
 
 const legal = (key: string, label: string, description: string, columns: string[]): ReportDef => ({
   id: `legal-${key}`, label, description, icon: FileText, color: "#7c4a2e",

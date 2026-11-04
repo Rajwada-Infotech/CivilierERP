@@ -110,6 +110,12 @@ const mutationSql = (done) => `
   SELECT ${LAND}, x.ApplicationNo AS [Application], x.ApplicationDate AS [Applied], x.OfficeName AS Office, x.NewOwner AS [New owner(s)], x.ApplicationStatus AS Status,
          x.HearingDate AS [Hearing], x.OrderNo AS [Order no.], x.OrderDate AS [Order date]
   FROM dbo.LegalMutation x ${JOIN_LAND} WHERE x.IsActive = 1 AND x.ApplicationStatus ${done ? "=" : "<>"} N'Approved' ORDER BY x.MutationId DESC`;
+// The date column each report's Day / Range / Financial-year filter applies to.
+const DATE_COL = {
+  "enquiry-register": "Date", "current-ownership": "Since", "ownership-history": "Date", inheritance: "Date of death",
+  "rejected-documents": "Reviewed", "legal-cases": "Next hearing", valuations: "Date", "registered-deeds": "Date",
+  "mutation-pending": "Applied", "mutation-completed": "Applied", "workflow-status": "Last changed", audit: "When",
+};
 router.get("/", requirePageRight(PAGE, "view"), (_req, res) => {
   res.json(REPORTS.map(({ key, group, title }) => ({ key, group, title })));
 });
@@ -118,8 +124,25 @@ router.get("/:key", requirePageRight(PAGE, "view"), async (req, res) => {
   if (!rep) return res.status(404).json({ error: "Unknown report" });
   try {
     const q = rep.sql || (rep.txn ? txnSql(rep.txn) : mutationSql(rep.mutation));
-    const r = await getPool().request().query(q);
-    res.json({ title: rep.title, columns: r.recordset.columns ? Object.keys(r.recordset.columns) : Object.keys(r.recordset[0] || {}), rows: r.recordset });
+    const pool = getPool();
+    const r = await pool.request().query(q);
+    // Reports page filters (Day / Range / Financial year) apply to the report's own date column; reports without one
+    // (e.g. the land register) ignore them.
+    let { dateFrom, dateTo } = req.query;
+    const fyId = parseInt(req.query.finYearId, 10);
+    if (fyId) {
+      const fy = (await pool.request().input("id", fyId).query("SELECT FStartDate, FEndDate FROM dbo.FinYear WHERE FId = @id")).recordset[0];
+      if (fy) { dateFrom = fy.FStartDate.toISOString().slice(0, 10); dateTo = fy.FEndDate.toISOString().slice(0, 10); }
+    }
+    const day = (v) => (v ? new Date(v).toISOString().slice(0, 10) : null);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(dateFrom || "") ? dateFrom : null;
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(dateTo || "") ? dateTo : from; // a single day sends only dateFrom
+    let rows = r.recordset;
+    const col = DATE_COL[rep.key];
+    const landCode = String(req.query.landCode || "");
+    if (landCode) rows = rows.filter((x) => x["Land ID"] === landCode);
+    if (col && from) rows = rows.filter((x) => { const d = day(x[col]); return d && d >= from && d <= to; });
+    res.json({ title: rep.title, columns: r.recordset.columns ? Object.keys(r.recordset.columns) : Object.keys(r.recordset[0] || {}), rows });
   } catch (err) {
     console.error("[legal-reports]", rep.key, err.message);
     res.status(500).json({ error: "Could not run the report" });
