@@ -1,12 +1,11 @@
 import React from "react";
 
-const TEAL = "#0d9488";
+const INK = "hsl(var(--foreground))";
 
 function colorFor(pct: number): string {
-  if (pct >= 100) return "#22c55e";
-  if (pct >= 50) return TEAL;
-  if (pct >= 1) return "#f59e0b";
-  return "#64748b";
+  if (pct >= 100) return INK;
+  if (pct >= 1) return "hsl(var(--primary))";
+  return "hsl(var(--muted-foreground))";
 }
 
 interface ProgressBarProps {
@@ -39,9 +38,9 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ value, onCommit, disab
 
   return (
     <div className="flex items-center gap-2 w-full" onClick={(e) => e.stopPropagation()}>
-      <div className={`relative flex-1 ${trackHeight} rounded-full bg-muted overflow-hidden min-w-[60px]`}>
+      <div className={`relative flex-1 ${trackHeight} bg-muted overflow-hidden min-w-[60px]`}>
         <div
-          className="h-full rounded-full transition-[width] duration-150"
+          className="h-full transition-[width] duration-150"
           style={{ width: `${local}%`, background: color }}
         />
         {!disabled && (
@@ -65,7 +64,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ value, onCommit, disab
         )}
       </div>
       <span
-        className={`shrink-0 font-mono font-semibold ${size === "sm" ? "text-[0.625rem] w-7" : "text-xs w-8"} text-right`}
+        className={`shrink-0 tabular-nums font-semibold ${size === "sm" ? "text-[0.625rem] w-7" : "text-xs w-8"} text-right`}
         style={{ color }}
         title={disabled ? "Auto-calculated from sub-tasks" : undefined}
       >

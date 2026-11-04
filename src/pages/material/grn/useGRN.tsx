@@ -16,7 +16,7 @@ import { getGodowns } from "@/api/godownsApi";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
-import { GRNItemLine, PendingItemsData, RemainingItemsPanel, createEmptyItem, parseJsonArray, round3, deriveFYFromDate, bridge, GRN_TEMPLATE_COLUMNS } from "./config";
+import { GRNItemLine, PendingItemsData, RemainingItemsPanel, createEmptyItem, parseJsonArray, round3, deriveFYFromDate, bridge, GRN_TEMPLATE_COLUMNS, supplierChargesGst } from "./config";
 
 export function useGRN() {
   bridge.queryClient = useQueryClient();
@@ -205,6 +205,7 @@ export function useGRN() {
     // grnSourceMode === "remaining" (no Vehicle In/Out on this GRN).
     directEntryReason: "" as string,
     poTotalAmount: 0 as number,
+    poSupplierChargesGst: false as boolean,
     poSubtotalAmount: 0 as number,
     poReceivedAmount: 0 as number,
     remarks: "",
@@ -511,6 +512,7 @@ export function useGRN() {
         parentDocNo: "",
         rootExBDocNo: "",
         poTotalAmount: 0,
+        poSupplierChargesGst: false,
         poSubtotalAmount: 0,
       }));
       setPendingVehicleInOuts([]);
@@ -548,6 +550,7 @@ export function useGRN() {
         grnNo: "",
         docNo: "",
         poTotalAmount: Number(po.TotalAmount ?? 0),
+        poSupplierChargesGst: supplierChargesGst(po.SupplierGstType, po.SupplierGst),
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
       }));
@@ -720,6 +723,7 @@ export function useGRN() {
         rootExBDocNo: po.RootExBDocNo || "",
         finYear: po.FinYearName || activeFinYear || "",
         poTotalAmount: Number(po.TotalAmount ?? 0),
+        poSupplierChargesGst: supplierChargesGst(po.SupplierGstType, po.SupplierGst),
         poSubtotalAmount: Number(po.SubtotalAmount ?? 0),
         poReceivedAmount: Number(po.POTotalReceived ?? 0),
       });
@@ -904,6 +908,7 @@ export function useGRN() {
       grnSourceMode: fullGrn.VehicleInOutID ? "vehicleInOut" : "remaining",
       directEntryReason: fullGrn.DirectEntryReason || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
+      poSupplierChargesGst: supplierChargesGst(fullGrn.SupplierGstType, fullGrn.SupplierGst),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
       poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
       remarks: fullGrn.Remarks || "",

@@ -1,3 +1,4 @@
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import Webcam from "react-webcam";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -26,24 +27,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
-import {
-  AlertCircle,
-  ArrowLeft,
-  Building2,
-  Camera,
-  Check,
-  CheckCircle2,
-  ChevronsUpDown,
-  FolderOpen,
-  Loader2,
-  Paperclip,
-  Phone,
-  Send,
-  ShieldAlert,
-  User,
-  X,
-  XCircle,
-} from "lucide-react";
+import { Camera, Check, CheckCircle2, ChevronsUpDown, Loader2, Paperclip, Phone, Send, X, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BodyPortal } from "@/components/ui/body-portal";
 
@@ -60,46 +44,13 @@ interface CustomerOption {
   LHeadPhone: string | null;
 }
 
-// ─── Priority config ──────────────────────────────────────────────────────────
+const RULE = "1px solid hsl(var(--foreground))";
+const RULE_SOFT = "1px solid hsl(var(--foreground) / 0.15)";
+const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
+const INP = "w-full h-9 rounded-none border border-foreground/40 focus:border-foreground focus-visible:ring-0 focus-visible:ring-offset-0 bg-card px-2.5 text-sm text-foreground outline-none transition-colors";
+const INP_ERROR = "border-destructive focus:border-destructive";
 
-const PRIORITIES = [
-  {
-    value: "Urgent" as const,
-    label: "Urgent",
-    color: "text-red-600",
-    bg: "bg-red-500/10",
-    border: "border-red-400/30",
-    ring: "ring-red-400/40",
-    icon: ShieldAlert,
-  },
-  {
-    value: "High" as const,
-    label: "High",
-    color: "text-orange-500",
-    bg: "bg-orange-500/10",
-    border: "border-orange-400/30",
-    ring: "ring-orange-400/40",
-    icon: AlertCircle,
-  },
-  {
-    value: "Medium" as const,
-    label: "Medium",
-    color: "text-amber-500",
-    bg: "bg-[#ffe2021a]",
-    border: "border-amber-400/30",
-    ring: "ring-amber-400/40",
-    icon: AlertCircle,
-  },
-  {
-    value: "Low" as const,
-    label: "Low",
-    color: "text-blue-500",
-    bg: "bg-blue-500/10",
-    border: "border-blue-400/30",
-    ring: "ring-blue-400/40",
-    icon: AlertCircle,
-  },
-];
+const PRIORITIES = ["Urgent", "High", "Medium", "Low"] as const;
 
 // ─── Combobox (shadcn Popover + Command) ──────────────────────────────────────
 
@@ -129,9 +80,10 @@ function Combobox({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "w-full justify-between font-normal h-10",
+            INP,
+            "justify-between font-normal hover:bg-card hover:text-foreground",
             !selected && "text-muted-foreground",
-            error && "border-red-400 ring-2 ring-red-400/20",
+            error && INP_ERROR,
           )}
         >
           <span className="truncate">
@@ -192,24 +144,11 @@ function Combobox({
 
 // ─── Section card ─────────────────────────────────────────────────────────────
 
-function Section({
-  icon: Icon,
-  title,
-  children,
-}: {
-  icon: React.ElementType;
-  title: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden">
-      <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
-        <Icon size={13} className="text-muted-foreground" />
-        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          {title}
-        </span>
-      </div>
-      <div className="p-5">{children}</div>
+    <div className="px-4 py-4 space-y-3" style={{ borderBottom: RULE_SOFT }}>
+      <h2 className="font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em]">{title}</h2>
+      {children}
     </div>
   );
 }
@@ -228,13 +167,13 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
+    <div className="space-y-1 min-w-0">
+      <Label className={LBL}>
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
+        {required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
       {children}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -408,9 +347,9 @@ const CreateTicket = () => {
       subtitle="Fill in the details below to raise a ticket"
       icon={Send}
     >
-      <div className="space-y-5">
+      <section className="bg-card" style={{ border: RULE }}>
           {/* ── Section 1: Context ── */}
-          <Section icon={Building2} title="Context">
+          <Section title="Context">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Company">
                 <Combobox
@@ -434,7 +373,7 @@ const CreateTicket = () => {
           </Section>
 
           {/* ── Section 2: Customer ── */}
-          <Section icon={User} title="Customer">
+          <Section title="Customer">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Customer Name" required error={errors.customerName}>
                 <Combobox
@@ -450,13 +389,13 @@ const CreateTicket = () => {
                 <div className="relative">
                   <Phone
                     size={13}
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                   />
                   <Input
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="Auto-filled from customer"
-                    className="pl-9"
+                    className={`${INP} pl-9`}
                   />
                 </div>
               </Field>
@@ -464,28 +403,23 @@ const CreateTicket = () => {
           </Section>
 
           {/* ── Section 3: Ticket Details ── */}
-          <Section icon={FolderOpen} title="Ticket Details">
+          <Section title="Ticket Details">
             <div className="space-y-4">
               {/* Priority */}
               <Field label="Priority">
-                <div className="grid grid-cols-4 gap-2">
+                <div className="seg" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
                   {PRIORITIES.map((p) => {
-                    const Icon = p.icon;
-                    const active = priority === p.value;
+                    const active = priority === p;
                     return (
                       <button
-                        key={p.value}
+                        key={p}
                         type="button"
-                        onClick={() => setPriority(p.value)}
-                        className={cn(
-                          "flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-xl border text-xs font-medium transition-all",
-                          active
-                            ? `${p.bg} ${p.border} ${p.color} ring-2 ${p.ring}`
-                            : "border-border text-muted-foreground hover:bg-muted/50",
-                        )}
+                        aria-pressed={active}
+                        onClick={() => setPriority(p)}
+                        className={cn("h-9", active && "on")}
+                        style={active && p === "Urgent" ? { background: "hsl(var(--destructive))", color: "#fff" } : undefined}
                       >
-                        <Icon size={14} />
-                        {p.label}
+                        {p}
                       </button>
                     );
                   })}
@@ -502,11 +436,7 @@ const CreateTicket = () => {
                       setErrors((p) => ({ ...p, subject: "" }));
                   }}
                   placeholder="Brief description of the issue"
-                  className={
-                    errors.subject
-                      ? "border-red-400 ring-2 ring-red-400/20"
-                      : ""
-                  }
+                  className={cn(INP, errors.subject && INP_ERROR)}
                 />
               </Field>
 
@@ -521,23 +451,18 @@ const CreateTicket = () => {
                   }}
                   rows={5}
                   placeholder="Describe the problem in detail — steps to reproduce, error messages, etc."
-                  className={cn(
-                    "resize-none",
-                    errors.issueDetails
-                      ? "border-red-400 ring-2 ring-red-400/20"
-                      : "",
-                  )}
+                  className={cn(INP, "h-auto py-2 resize-none", errors.issueDetails && INP_ERROR)}
                 />
               </Field>
             </div>
           </Section>
 
           {/* ── Section 4: Attachment ── */}
-          <Section icon={Paperclip} title="Attachment">
+          <Section title="Attachment">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* File upload */}
               <div>
-                <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
+                <Label className={`${LBL} mb-1 block`}>
                   Files
                 </Label>
                 <input
@@ -561,7 +486,7 @@ const CreateTicket = () => {
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition-all text-sm text-muted-foreground"
+                  className="w-full h-9 flex items-center gap-2.5 px-2.5 border border-dashed border-foreground/40 hover:border-foreground transition-colors text-sm text-muted-foreground"
                 >
                   <Paperclip size={14} />
                   {attachmentFiles.length > 0
@@ -572,7 +497,7 @@ const CreateTicket = () => {
 
               {/* Camera */}
               <div>
-                <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
+                <Label className={`${LBL} mb-1 block`}>
                   Camera
                 </Label>
                 <button
@@ -581,7 +506,7 @@ const CreateTicket = () => {
                     setCameraError(null);
                     setShowCamera(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-border hover:bg-muted/30 transition-all text-sm text-muted-foreground"
+                  className="w-full h-9 flex items-center gap-2.5 px-2.5 border border-foreground/40 hover:border-foreground transition-colors text-sm text-muted-foreground"
                 >
                   <Camera size={14} />
                   {capturedImages.length > 0
@@ -627,7 +552,7 @@ const CreateTicket = () => {
                           prev.filter((_, idx) => idx !== i),
                         )
                       }
-                      className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
+                      className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-white flex items-center justify-center hover:bg-destructive/90 transition-colors"
                     >
                       <X size={10} />
                     </button>
@@ -638,18 +563,18 @@ const CreateTicket = () => {
           </Section>
 
           {/* ── Submit row ── */}
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-end gap-2 px-4 py-3">
             <Button
               variant="outline"
               onClick={() => navigate("/ticket")}
-              className="gap-2"
+              className={`${KEY_LINE} h-9 px-4`}
             >
-              <ArrowLeft size={13} /> Cancel
+              Cancel
             </Button>
             <Button
               onClick={handleSubmit}
               disabled={submitting}
-              className="gap-2 px-6"
+              className={`${KEY_INK} h-9 px-4`}
             >
               {submitting ? (
                 <>
@@ -662,11 +587,11 @@ const CreateTicket = () => {
               )}
             </Button>
           </div>
-        </div>
+      </section>
       {/* ── Camera modal ── */}
       {showCamera && (
-        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Camera size={15} className="text-muted-foreground" />
@@ -687,7 +612,7 @@ const CreateTicket = () => {
             <div className="p-4">
               {cameraError ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
-                  <XCircle size={32} className="text-red-400" />
+                  <XCircle size={32} className="text-destructive" />
                   <p className="text-sm text-muted-foreground">{cameraError}</p>
                   <p className="text-xs text-muted-foreground/60">
                     Please allow camera access in your browser settings and try
@@ -722,7 +647,7 @@ const CreateTicket = () => {
 
             <div className="flex gap-3 px-5 py-4 border-t border-border">
               <Button
-                className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                className={`flex-1 ${KEY_INK} h-9 px-4`}
                 onClick={capturePhoto}
                 disabled={!!cameraError}
               >
@@ -730,7 +655,7 @@ const CreateTicket = () => {
               </Button>
               <Button
                 variant="outline"
-                className="flex-1"
+                className={`flex-1 ${KEY_LINE} h-9 px-4`}
                 onClick={() => setShowCamera(false)}
               >
                 Cancel

@@ -1029,6 +1029,8 @@ router.get("/:id", async (req, res) => {
           p.GST AS ParentGST,
           p.TotalAmount    AS POTotalAmount,
           p.SubtotalAmount AS POSubtotalAmount,
+          s.LGSTType AS SupplierGstType,
+          s.LGST AS SupplierGst,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription,
           vio.DocNo AS VehicleInOutDocNo,

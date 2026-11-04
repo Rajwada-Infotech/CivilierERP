@@ -1,3 +1,5 @@
+import { KEY, KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetSection, SheetStats, PRIORITY_TONES, STATUS_TONES, SERIES_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -32,7 +34,6 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ExportMenu } from "@/components/ExportMenu";
 import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
-import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import {
   Dialog,
   DialogContent,
@@ -48,7 +49,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/task-performance-report";
-const ACCENT = "#0d9488";
+const ACCENT = "hsl(var(--foreground))";
 
 const STATUSES = ["Active", "Hold", "Cancel", "Closed"] as const;
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
@@ -58,18 +59,9 @@ const STATUS_LABELS: Record<string, string> = {
   Cancel: "Cancelled",
   Closed: "Completed",
 };
-const STATUS_COLORS: Record<string, string> = {
-  Active: "#3b82f6",
-  Hold: "#f59e0b",
-  Cancel: "#64748b",
-  Closed: "#22c55e",
-};
-const PRIORITY_COLORS: Record<string, string> = {
-  "Very Important": "#ef4444",
-  Important: "#22c55e",
-  Normal: "#3b82f6",
-};
-const TAG_PALETTE = ["#0d9488", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#22c55e", "#ef4444", "#94a3b8", "#14b8a6", "#f97316"];
+const STATUS_COLORS = STATUS_TONES;
+const PRIORITY_COLORS = PRIORITY_TONES;
+const TAG_PALETTE = SERIES_TONES;
 
 interface Company {
   id: number;
@@ -162,13 +154,8 @@ function useGlass() {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
   const cardStyle = {
-    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: `1px solid ${ACCENT}26`,
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : `0 4px 24px ${ACCENT}0f, inset 0 1px 0 rgba(255,255,255,0.9)`,
+    background: "hsl(var(--card))",
+    border: `1px solid hsl(var(--foreground) / 0.15)`,
   };
   return { isDark, cardStyle };
 }
@@ -190,7 +177,7 @@ function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
       className="inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
-      style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
+      style={{ borderColor: `color-mix(in srgb, ${color} 30%, transparent)`, color, background: `color-mix(in srgb, ${color} 10%, transparent)` }}
     >
       {label}
     </span>
@@ -213,8 +200,8 @@ const DonutCard: React.FC<{ title: string; icon: React.ElementType; data: DonutP
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden" style={cardStyle}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
-        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `hsl(var(--foreground) / 0.15)` : `hsl(var(--foreground) / 0.12)` }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `hsl(var(--foreground) / 0.15)` }}>
           <Icon size={11} style={{ color: ACCENT }} />
         </div>
         <span className="text-xs font-heading font-semibold text-foreground">{title}</span>
@@ -271,8 +258,8 @@ const TagBarChart: React.FC<{ data: TagStat[]; isDark: boolean; cardStyle: React
   const chartData = [...data].sort((a, b) => b.total - a.total).slice(0, 12);
   return (
     <div className="rounded-xl overflow-hidden" style={cardStyle}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
-        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `hsl(var(--foreground) / 0.15)` : `hsl(var(--foreground) / 0.12)` }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `hsl(var(--foreground) / 0.15)` }}>
           <TrendingUp size={11} style={{ color: ACCENT }} />
         </div>
         <span className="text-xs font-heading font-semibold text-foreground">Tag Comparison (Top 12 by volume)</span>
@@ -283,23 +270,23 @@ const TagBarChart: React.FC<{ data: TagStat[]; isDark: boolean; cardStyle: React
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(260, chartData.length * 34)}>
             <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={"hsl(var(--border))"} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
               <Tooltip
-                cursor={{ fill: isDark ? "rgba(148,163,184,0.06)" : "rgba(100,116,139,0.06)" }}
+                cursor={{ fill: "hsl(var(--foreground) / 0.05)" }}
                 contentStyle={{
-                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
-                  border: `1px solid ${ACCENT}30`,
+                  background: "hsl(var(--card))",
+                  border: `1px solid hsl(var(--foreground) / 0.19)`,
                   borderRadius: 8,
                   fontSize: 12,
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              <Bar dataKey="completed" name="Completed" fill="#22c55e" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="pending" name="Pending" fill="#f59e0b" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="ongoing" name="Ongoing" fill="#3b82f6" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="overdue" name="Overdue" fill="#ef4444" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="completed" name="Completed" fill="hsl(var(--foreground))" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="pending" name="Pending" fill="hsl(var(--muted-foreground))" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="ongoing" name="Ongoing" fill="hsl(var(--primary))" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="overdue" name="Overdue" fill="hsl(var(--destructive))" radius={[0, 3, 3, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -463,7 +450,7 @@ const TagPerformanceReport: React.FC = () => {
         header: "Total Tasks",
         size: 90,
         cell: ({ row }) => (
-          <button type="button" onClick={() => openTagDetail(row.original, "all")} className="font-mono hover:underline">
+          <button type="button" onClick={() => openTagDetail(row.original, "all")} className="tabular-nums hover:underline">
             {row.original.total}
           </button>
         ),
@@ -474,7 +461,7 @@ const TagPerformanceReport: React.FC = () => {
         header: "Completed",
         size: 90,
         cell: ({ row }) => (
-          <button type="button" onClick={() => openTagDetail(row.original, "completed")} className="font-mono text-emerald-500 hover:underline">
+          <button type="button" onClick={() => openTagDetail(row.original, "completed")} className="tabular-nums text-foreground hover:underline">
             {row.original.completed}
           </button>
         ),
@@ -485,7 +472,7 @@ const TagPerformanceReport: React.FC = () => {
         header: "Pending",
         size: 90,
         cell: ({ row }) => (
-          <button type="button" onClick={() => openTagDetail(row.original, "pending")} className="font-mono text-amber-500 hover:underline">
+          <button type="button" onClick={() => openTagDetail(row.original, "pending")} className="tabular-nums text-muted-foreground hover:underline">
             {row.original.pending}
           </button>
         ),
@@ -496,7 +483,7 @@ const TagPerformanceReport: React.FC = () => {
         header: "Ongoing",
         size: 90,
         cell: ({ row }) => (
-          <button type="button" onClick={() => openTagDetail(row.original, "ongoing")} className="font-mono text-blue-500 hover:underline">
+          <button type="button" onClick={() => openTagDetail(row.original, "ongoing")} className="tabular-nums text-primary hover:underline">
             {row.original.ongoing}
           </button>
         ),
@@ -507,7 +494,7 @@ const TagPerformanceReport: React.FC = () => {
         header: "Overdue",
         size: 90,
         cell: ({ row }) => (
-          <button type="button" onClick={() => openTagDetail(row.original, "overdue")} className="font-mono text-red-500 hover:underline">
+          <button type="button" onClick={() => openTagDetail(row.original, "overdue")} className="tabular-nums text-destructive hover:underline">
             {row.original.overdue}
           </button>
         ),
@@ -524,7 +511,7 @@ const TagPerformanceReport: React.FC = () => {
               <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
                 <div className="h-full rounded-full" style={{ width: `${pct}%`, background: ACCENT }} />
               </div>
-              <span className="text-xs font-mono">{pct}%</span>
+              <span className="text-xs tabular-nums">{pct}%</span>
             </div>
           );
         },
@@ -539,9 +526,9 @@ const TagPerformanceReport: React.FC = () => {
           return (
             <div className="flex items-center gap-2">
               <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
-                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? "#22c55e" : "#8b5cf6" }} />
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? "hsl(var(--foreground))" : "hsl(var(--foreground))" }} />
               </div>
-              <span className="text-xs font-mono">{pct}%</span>
+              <span className="text-xs tabular-nums">{pct}%</span>
             </div>
           );
         },
@@ -624,7 +611,7 @@ const TagPerformanceReport: React.FC = () => {
       action={
         <button
           onClick={handlePrint}
-          className="no-print h-8 px-3 inline-flex items-center gap-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted text-foreground transition-colors"
+          className={`no-print ${KEY_LINE} h-9 px-4`}
         >
           <Printer size={12} /> Print
         </button>
@@ -640,24 +627,20 @@ const TagPerformanceReport: React.FC = () => {
 
       <div id="tagperf-printable">
         {isFetching === false && rows.length === 0 && !isLoading && (
-          <div className="rounded-xl border border-amber-400/30 bg-[#ffe2021a] px-4 py-3 flex items-center gap-2 text-sm text-amber-600 mb-5">
+          <div className="rounded-xl border border-muted-foreground/30 bg-muted px-4 py-3 flex items-center gap-2 text-sm text-muted-foreground mb-5">
             <AlertCircle size={16} className="shrink-0" />
             <span>No tasks match the selected filters.</span>
           </div>
         )}
 
         {/* ── Summary ──────────────────────────────────────────────────── */}
-        <GlassSection title="Overview" icon={ClipboardList} accentColor={ACCENT}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {isLoading
-              ? Array.from({ length: 3 }).map((_, i) => <GlassCardSkeleton key={i} />)
-              : [
-                  { label: "Tags Tracked", value: summary.tagsTracked, icon: TagsIcon, accentColor: ACCENT },
-                  { label: "Tagged Tasks", value: summary.totalTaggedTasks, icon: ClipboardList, accentColor: "#3b82f6" },
-                  { label: "Avg. Completion %", value: `${summary.avgCompletionPct}%`, icon: TrendingUp, accentColor: "#8b5cf6" },
-                ].map((s) => <GlassCard key={s.label} {...s} />)}
-          </div>
-        </GlassSection>
+        <SheetSection tag="A" title="Overview">
+          <SheetStats loading={isLoading} items={[
+                  { label: "Tags Tracked", value: summary.tagsTracked },
+                  { label: "Tagged Tasks", value: summary.totalTaggedTasks },
+                  { label: "Avg. Completion %", value: `${summary.avgCompletionPct}%` },
+                ]} />
+        </SheetSection>
 
         {/* ── Filters ──────────────────────────────────────────────────── */}
         <div className="no-print rounded-xl p-4 my-5" style={cardStyle}>
@@ -705,16 +688,16 @@ const TagPerformanceReport: React.FC = () => {
               </div>
             </FilterField>
           </div>
-          {dateError && <p className="text-xs mt-2" style={{ color: "#ef4444" }}>{dateError}</p>}
+          {dateError && <p className="text-xs mt-2" style={{ color: "hsl(var(--destructive))" }}>{dateError}</p>}
         </div>
 
         {/* ── Charts ───────────────────────────────────────────────────── */}
-        <GlassSection title="Distribution" icon={TagsIcon} accentColor={ACCENT}>
+        <SheetSection tag="B" title="Distribution">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <DonutCard title="Tasks by Tag (%)" icon={TagsIcon} data={pieData} isDark={isDark} cardStyle={cardStyle} />
             <TagBarChart data={tagStats} isDark={isDark} cardStyle={cardStyle} />
           </div>
-        </GlassSection>
+        </SheetSection>
 
         {/* ── Table ────────────────────────────────────────────────────── */}
         <div className="mt-5 rounded-xl overflow-hidden" style={cardStyle}>
@@ -760,10 +743,10 @@ const TagPerformanceReport: React.FC = () => {
                   key={key}
                   type="button"
                   onClick={() => setDetailFilter(key)}
-                  className={`text-[0.6875rem] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                  className={`${KEY} h-8 px-3 border ${
                     detailFilter === key ? "" : "border-border text-muted-foreground hover:bg-muted"
                   }`}
-                  style={detailFilter === key ? { background: `${ACCENT}29`, borderColor: `${ACCENT}73`, color: ACCENT } : undefined}
+                  style={detailFilter === key ? { background: `hsl(var(--foreground) / 0.16)`, borderColor: `hsl(var(--foreground) / 0.45)`, color: ACCENT } : undefined}
                 >
                   {DETAIL_FILTER_LABELS[key]}
                 </button>
@@ -784,13 +767,13 @@ const TagPerformanceReport: React.FC = () => {
                 key={t.Id}
                 type="button"
                 onClick={() => setSelectedTaskId(String(t.Id))}
-                className="w-full text-left rounded-lg border border-border/70 p-3 text-sm hover:border-teal-500/40 hover:bg-card transition-colors"
+                className="w-full text-left rounded-lg border border-border/70 p-3 text-sm hover:border-foreground/40 hover:bg-card transition-colors"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">{t.TaskNo || `#${t.Id}`}</span>
+                  <span className="tabular-nums text-xs text-muted-foreground">{t.TaskNo || `#${t.Id}`}</span>
                   <div className="flex items-center gap-1.5">
-                    <Badge label={STATUS_LABELS[t.Status] || t.Status} color={STATUS_COLORS[t.Status] || "#64748b"} />
-                    <Badge label={t.Priority} color={PRIORITY_COLORS[t.Priority] || "#64748b"} />
+                    <Badge label={STATUS_LABELS[t.Status] || t.Status} color={STATUS_COLORS[t.Status] || "hsl(var(--muted-foreground))"} />
+                    <Badge label={t.Priority} color={PRIORITY_COLORS[t.Priority] || "hsl(var(--muted-foreground))"} />
                   </div>
                 </div>
                 <p className="font-medium text-foreground mt-1">{t.Subject}</p>

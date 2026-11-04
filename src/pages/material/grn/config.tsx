@@ -12,6 +12,10 @@ import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { type GRNItemLine as GRNItemLineBase, type UOM } from "@/api/grnApi";
 
 
+// A non-GST (Unregistered) supplier charges no GST, so its PO value must not be labelled as including it. Same rule as backend/routes/grns.js.
+export const supplierChargesGst = (gstType?: string | null, gstNo?: string | null) =>
+  gstType === "Unregistered" ? false : gstType ? true : !!(gstNo && String(gstNo).trim());
+
 export const GRN_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
   { header: "GRN Date", accessor: (r) => r.GrnDate ? new Date(r.GrnDate as string).toLocaleDateString("en-IN") : "" },
