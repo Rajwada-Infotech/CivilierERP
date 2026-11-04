@@ -147,6 +147,22 @@ router.post("/login", async (req, res) => {
     // FIXED: Normalize role
     const normalizedRole = normalizeRole(user.roleName);
 
+    // Each login page is for its own people. Checked after the password, so a page can't be used to learn who has an account.
+    // `portal` comes from the web login pages; apps already installed on phones don't send it and are left as they were.
+    const portal = req.body.portal;
+    if (portal === "staff" || portal === "supplier") {
+      const isSupplier = normalizedRole === "supplier" || String(user.roleName || "").trim().toLowerCase() === "supplier";
+      if (portal === "staff" && isSupplier) {
+        return res.status(403).json({ error: "Supplier accounts sign in on the Supplier Portal." });
+      }
+      if (portal === "staff" && normalizedRole === "customer") {
+        return res.status(403).json({ error: "Customer accounts sign in on the Customer Portal." });
+      }
+      if (portal === "supplier" && !isSupplier) {
+        return res.status(403).json({ error: "This page is for supplier accounts. Please use the main login." });
+      }
+    }
+
     // Maintenance mode: only a super admin may sign in.
     {
       const { getMaintenanceState } = require("../services/maintenanceMode");
