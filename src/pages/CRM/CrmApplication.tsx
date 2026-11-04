@@ -40,6 +40,10 @@ import { AttachmentsStep } from "./applications/AttachmentsStep";
 
 import { useUrlParam } from "@/hooks/useUrlParam";
 import { readCrmDraft, writeCrmDraft, clearCrmDraft } from "@/lib/crmDraftStore";
+// The status filter's choices: the application's own statuses, then its booking sent back / resubmitted.
+const SENT_BACK_FILTERS = ["SentBack", "Resubmitted"] as const;
+const STATUS_FILTERS: readonly string[] = ["All", ...STATUSES, ...SENT_BACK_FILTERS];
+
 const CrmApplication: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -53,7 +57,8 @@ const CrmApplication: React.FC = () => {
   // Searches as you type (after a short pause); Enter still searches at once.
   useSearchAsYouType(searchInput, (v) => updateFilter(setSearch)(v));
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  // In the address too, so a refresh or a shared link keeps the filter; an unknown value reads as "All".
+  const [statusFilter, setStatusFilter] = useUrlParam("status", "All", STATUS_FILTERS);
   // In the address, so a refresh or a shared link keeps it.
   const [activeStage, setActiveStage] = useUrlParam<Stage>("stage", "InProcess", STAGES);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
@@ -1507,7 +1512,7 @@ const CrmApplication: React.FC = () => {
                   <SelectItem value="All">All statuses</SelectItem>
                   {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   {/* Its booking sent back for an update, or resubmitted for a recheck. */}
-                  {(["SentBack", "Resubmitted"] as const).map((s) => (
+                  {SENT_BACK_FILTERS.map((s) => (
                     <SelectItem key={s} value={s}>{SENT_BACK_STATE[s].label} — {SENT_BACK_STATE[s].note}</SelectItem>
                   ))}
                 </SelectContent>
