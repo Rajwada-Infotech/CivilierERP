@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ChromeIcons } from "@/components/icons/moduleIcons";
 import { useTheme, THEME_DOTS, type Theme } from "@/contexts/ThemeContext";
-import { NAV_PANEL_CSS } from "./navPanelStyles";
+import { NAV_PANEL_CSS, GENIE_CSS } from "./navPanelStyles";
+import { useGenieVisibility } from "./useGeniePanel";
 
 // ─── useClickOutside ──────────────────────────────────────────────────────────
 
@@ -85,14 +86,15 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
   const onToggle = onToggleProp ?? (() => setInternalOpen((p) => !p));
 
   useClickOutside(ref, onClose, open);
+  const genie = useGenieVisibility(open);
 
   return (
     <div ref={ref} className="relative shrink-0">
-      <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: NAV_PANEL_CSS + GENIE_CSS }} />
       {/* Trigger */}
       <button
         onClick={onToggle}
-        className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+        className={`w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors ${open ? "genie-rub" : ""}`}
         title="Change theme"
       >
         <ChromeIcons.theme size={18} />
@@ -100,8 +102,8 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
 
       {/* Panel */}
       <div
-        className={`np-sheet absolute top-full mt-3 z-50 transition-opacity duration-200 right-0 w-56
-          ${open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}`}
+        style={{ display: genie.shown ? undefined : "none" }}
+        className={`np-sheet genie ${genie.className} absolute top-full mt-3 z-50 right-0 w-56`}
       >
         <ThemeOptions
           currentTheme={theme}
