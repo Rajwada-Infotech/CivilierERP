@@ -1,4 +1,5 @@
 import { Trash2, ArrowLeft, Send, Printer } from "lucide-react";
+import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { SheetMark, statusTone } from "@/components/sheet/Sheet";
 import { printStatusLabel } from "@/utils/printStatus";
 import { fmtDate, HEAD, LBL, RULE, KEY, KEY_INK, KEY_LINE, spaced } from "./config";
@@ -69,6 +70,8 @@ export function QtView({ m }: { m: QtState }) {
           </div>
         ))}
       </div>
+
+      <DocumentChainPanel docType="qt" id={r.QuotationId} />
 
       {/* Items */}
       <div className="bg-card" style={{ border: RULE }}>
