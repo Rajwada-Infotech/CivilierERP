@@ -199,18 +199,25 @@ function SentBackPanelInner() {
  * resubmitted when it has both.
  */
 export type RowTurn = keyof typeof SENT_BACK_STATE | "Reapprove";
-export function useSentBackStates(by: "ApplicationId" | "BookingId"): Map<number, RowTurn> {
-  const { data } = useSentBack();
+/** Each list row's turn from the sent-back rows (pure — useSentBackStates feeds it the server's rows). */
+export function sentBackTurns(rows: any[], by: "ApplicationId" | "BookingId"): Map<number, RowTurn> {
   const m = new Map<number, RowTurn>();
-  for (const r of (data?.rows || []) as any[]) {
+  for (const r of rows || []) {
     if (r.Kind !== "booking" && r.Kind !== "review") continue;
-    // Sent back to an approval stage: that approver's turn, not a correction.
-    const turn: RowTurn = r.State === "SentBack" && r.Kind === "booking" && !bookingSendBack(r.Stage, r.FromStage).preparerCorrects
-      ? "Reapprove" : r.State;
+    // Sent back to an approval stage: that approver's turn, not a correction —
+    // a button only for someone who can approve it (r.CanApprove, from Approval
+    // Setup); everyone else just reads the row's note ("with Marketing Head").
+    const withApprover = r.State === "SentBack" && r.Kind === "booking" && !bookingSendBack(r.Stage, r.FromStage).preparerCorrects;
+    if (withApprover && !r.CanApprove) continue;
+    const turn: RowTurn = withApprover ? "Reapprove" : r.State;
     const had = m.get(r[by]);
     if (had !== "SentBack") m.set(r[by], had === "Reapprove" && turn === "Resubmitted" ? had : turn);
   }
   return m;
+}
+export function useSentBackStates(by: "ApplicationId" | "BookingId"): Map<number, RowTurn> {
+  const { data } = useSentBack();
+  return sentBackTurns((data?.rows || []) as any[], by);
 }
 
 /**

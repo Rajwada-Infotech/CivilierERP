@@ -22,6 +22,16 @@ router.get("/sent-back", requireAnyPageRight(["crm-dashboard", "crm-bookings", "
       SELECT r.* FROM (${sentBackRowsSql()}) r WHERE 1 = 1 ${scope} ORDER BY r.At DESC`)).recordset
       .map((r) => ({ ...r, ...describeSentBack(r) }))
       .filter((r) => r.path && (!req.query.path || r.path === req.query.path || r.also === req.query.path));
+    // A booking sent back to an approval stage waits on that stage's approver:
+    // whether the viewer is one (Approval Setup, same check as the booking's
+    // own Approve) decides who is offered "Re-approve". Asked once per stage.
+    const { canApproveStage } = require("../services/crmBookingStageService");
+    const canAt = {};
+    for (const r of rows) {
+      if (r.Kind !== "booking" || !r.Stage || r.Stage === "Review") continue;
+      if (!(r.Stage in canAt)) canAt[r.Stage] = await canApproveStage(req.user?.role, r.Stage, req.user?.userId ?? null).catch(() => false);
+      r.CanApprove = canAt[r.Stage];
+    }
     const byPath = {};
     for (const r of rows) {
       for (const p of [r.path, r.also].filter(Boolean)) {
