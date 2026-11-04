@@ -707,6 +707,12 @@ function ProtectedRoute({
   );
 }
 
+// The old Invoice address. Links arrive with ?view=<id> (Linked Documents, Trial Balance, reminders), and a plain redirect dropped it.
+const InvoiceRedirect = () => {
+  const { search } = useLocation();
+  return <Navigate to={`/finance/invoice${search}`} replace />;
+};
+
 // Redirects an old standalone pre-sale/AFS route into the merged Agreement
 // workspace, keeping ?bookingId= and forcing the right ?tab=.
 function AgreementTabRedirect({ tab }: { tab: string }) {
@@ -1715,7 +1721,7 @@ function AppRoutes() {
       />
       <Route
         path="/material/expense-booking"
-        element={<Navigate to="/finance/invoice" replace />}
+        element={<InvoiceRedirect />}
       />
       <Route
         path="/material/debit-note"
