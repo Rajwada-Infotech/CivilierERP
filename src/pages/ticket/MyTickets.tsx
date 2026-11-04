@@ -1,3 +1,4 @@
+import { KEY, KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import Webcam from "react-webcam";
 import { useNavigate } from "react-router-dom";
@@ -100,9 +101,9 @@ function IconUnhappy({ active }: { active: boolean }) {
         cx="18"
         cy="18"
         r="17"
-        fill={active ? "#fee2e2" : "currentColor"}
+        fill={active ? "hsl(var(--destructive) / 0.12)" : "currentColor"}
         fillOpacity={active ? 1 : 0.06}
-        stroke={active ? "#ef4444" : "currentColor"}
+        stroke={active ? "hsl(var(--destructive))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.2}
         strokeWidth="1.5"
       />
@@ -110,33 +111,33 @@ function IconUnhappy({ active }: { active: boolean }) {
         cx="13"
         cy="14"
         r="1.8"
-        fill={active ? "#ef4444" : "currentColor"}
+        fill={active ? "hsl(var(--destructive))" : "currentColor"}
         fillOpacity={active ? 1 : 0.5}
       />
       <circle
         cx="23"
         cy="14"
         r="1.8"
-        fill={active ? "#ef4444" : "currentColor"}
+        fill={active ? "hsl(var(--destructive))" : "currentColor"}
         fillOpacity={active ? 1 : 0.5}
       />
       <path
         d="M12 24c1.5-2.5 4-4 6-4s4.5 1.5 6 4"
-        stroke={active ? "#ef4444" : "currentColor"}
+        stroke={active ? "hsl(var(--destructive))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.5}
         strokeWidth="1.8"
         strokeLinecap="round"
       />
       <path
         d="M10 11.5 L13.5 13"
-        stroke={active ? "#ef4444" : "currentColor"}
+        stroke={active ? "hsl(var(--destructive))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.4}
         strokeWidth="1.4"
         strokeLinecap="round"
       />
       <path
         d="M26 11.5 L22.5 13"
-        stroke={active ? "#ef4444" : "currentColor"}
+        stroke={active ? "hsl(var(--destructive))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.4}
         strokeWidth="1.4"
         strokeLinecap="round"
@@ -157,9 +158,9 @@ function IconHappy({ active }: { active: boolean }) {
         cx="18"
         cy="18"
         r="17"
-        fill={active ? "#dcfce7" : "currentColor"}
+        fill={active ? "hsl(var(--foreground) / 0.08)" : "currentColor"}
         fillOpacity={active ? 1 : 0.06}
-        stroke={active ? "#22c55e" : "currentColor"}
+        stroke={active ? "hsl(var(--foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.2}
         strokeWidth="1.5"
       />
@@ -167,19 +168,19 @@ function IconHappy({ active }: { active: boolean }) {
         cx="13"
         cy="15"
         r="1.8"
-        fill={active ? "#22c55e" : "currentColor"}
+        fill={active ? "hsl(var(--foreground))" : "currentColor"}
         fillOpacity={active ? 1 : 0.5}
       />
       <circle
         cx="23"
         cy="15"
         r="1.8"
-        fill={active ? "#22c55e" : "currentColor"}
+        fill={active ? "hsl(var(--foreground))" : "currentColor"}
         fillOpacity={active ? 1 : 0.5}
       />
       <path
         d="M12 21c1.5 2.8 4 4.5 6 4.5s4.5-1.7 6-4.5"
-        stroke={active ? "#22c55e" : "currentColor"}
+        stroke={active ? "hsl(var(--foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.5}
         strokeWidth="1.8"
         strokeLinecap="round"
@@ -200,36 +201,36 @@ function IconExcellent({ active }: { active: boolean }) {
         cx="18"
         cy="18"
         r="17"
-        fill={active ? "#fef9c3" : "currentColor"}
+        fill={active ? "hsl(var(--muted-foreground) / 0.15)" : "currentColor"}
         fillOpacity={active ? 1 : 0.06}
-        stroke={active ? "#eab308" : "currentColor"}
+        stroke={active ? "hsl(var(--muted-foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.2}
         strokeWidth="1.5"
       />
       <path
         d="M11 14c.5-1 1.5-1.5 2.5-1s1.5 1.5 1 2.5"
-        stroke={active ? "#eab308" : "currentColor"}
+        stroke={active ? "hsl(var(--muted-foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.5}
         strokeWidth="1.6"
         strokeLinecap="round"
       />
       <path
         d="M25 14c-.5-1-1.5-1.5-2.5-1s-1.5 1.5-1 2.5"
-        stroke={active ? "#eab308" : "currentColor"}
+        stroke={active ? "hsl(var(--muted-foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.5}
         strokeWidth="1.6"
         strokeLinecap="round"
       />
       <path
         d="M10.5 21.5c1.5 4 4.5 6 7.5 6s6-2 7.5-6"
-        stroke={active ? "#eab308" : "currentColor"}
+        stroke={active ? "hsl(var(--muted-foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.5}
         strokeWidth="1.8"
         strokeLinecap="round"
       />
       <path
         d="M13 21.5h10"
-        stroke={active ? "#eab308" : "currentColor"}
+        stroke={active ? "hsl(var(--muted-foreground))" : "currentColor"}
         strokeOpacity={active ? 1 : 0.4}
         strokeWidth="1.4"
         strokeLinecap="round"
@@ -300,24 +301,24 @@ const priorityConfig: Record<
   { cls: string; dot: string; bar: string }
 > = {
   Urgent: {
-    cls: "bg-red-500/10 text-red-600 border-red-400/20",
-    dot: "bg-red-500",
-    bar: "bg-red-500",
+    cls: "bg-destructive/10 text-destructive border-destructive/20",
+    dot: "bg-destructive",
+    bar: "bg-destructive",
   },
   High: {
-    cls: "bg-orange-500/10 text-orange-600 border-orange-400/20",
-    dot: "bg-orange-500",
-    bar: "bg-orange-500",
+    cls: "bg-foreground/10 text-foreground border-foreground/20",
+    dot: "bg-foreground",
+    bar: "bg-foreground",
   },
   Medium: {
-    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
-    dot: "bg-amber-400",
-    bar: "bg-amber-400",
+    cls: "bg-muted text-muted-foreground border-border",
+    dot: "bg-muted-foreground",
+    bar: "bg-muted-foreground",
   },
   Low: {
-    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    dot: "bg-blue-400",
-    bar: "bg-blue-400",
+    cls: "bg-primary/10 text-primary border-primary/20",
+    dot: "bg-primary",
+    bar: "bg-primary",
   },
 };
 
@@ -326,22 +327,22 @@ const statusConfig: Record<
   { cls: string; label: string; icon: React.ElementType }
 > = {
   Pending: {
-    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
+    cls: "bg-muted text-muted-foreground border-border",
     label: "Pending",
     icon: Clock,
   },
   InProgress: {
-    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    cls: "bg-primary/10 text-primary border-primary/20",
     label: "In Progress",
     icon: RefreshCw,
   },
   Resolved: {
-    cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+    cls: "bg-foreground/10 text-foreground border-foreground/20",
     label: "Resolved",
     icon: CheckCircle2,
   },
   Closed: {
-    cls: "bg-slate-500/10 text-slate-500 border-slate-400/20",
+    cls: "bg-muted text-muted-foreground border-border",
     label: "Closed",
     icon: XCircle,
   },
@@ -604,7 +605,7 @@ function TicketListCard({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[0.625rem] text-muted-foreground/50">
+                <span className="tabular-nums text-[0.625rem] text-muted-foreground/50">
                   #{ticket.id}
                 </span>
                 <h3 className="text-sm font-semibold text-foreground leading-snug truncate">
@@ -899,7 +900,7 @@ function TicketDetailView({
 
   if (isError || !ticket) {
     return (
-      <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+      <div className="px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm border border-destructive/20 flex items-center gap-2">
         <AlertCircle size={14} /> Failed to load ticket.{" "}
         <button onClick={() => refetch()} className="underline">
           Retry
@@ -934,7 +935,7 @@ function TicketDetailView({
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[0.6875rem] text-muted-foreground/50">
+                <span className="tabular-nums text-[0.6875rem] text-muted-foreground/50">
                   #{ticket.id}
                 </span>
                 <h1 className="text-lg font-bold text-foreground leading-tight">
@@ -1004,18 +1005,18 @@ function TicketDetailView({
         <div
           className={`rounded-xl border px-4 py-3 mb-4 flex items-center gap-3 ${
             isClosed
-              ? "bg-slate-500/5 border-slate-400/20"
-              : "bg-emerald-500/5 border-emerald-400/20"
+              ? "bg-muted border-border"
+              : "bg-foreground/5 border-foreground/20"
           }`}
         >
           {isClosed ? (
-            <XCircle size={16} className="text-slate-500 shrink-0" />
+            <XCircle size={16} className="text-muted-foreground shrink-0" />
           ) : (
-            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <CheckCircle2 size={16} className="text-foreground shrink-0" />
           )}
           <div className="flex-1">
             <p
-              className={`text-xs font-semibold ${isClosed ? "text-slate-500" : "text-emerald-600"}`}
+              className={`text-xs font-semibold ${isClosed ? "text-muted-foreground" : "text-foreground"}`}
             >
               {isClosed ? "Ticket Closed" : "Ticket Resolved"}
             </p>
@@ -1035,7 +1036,7 @@ function TicketDetailView({
             <button
               onClick={() => reopenMutation.mutate()}
               disabled={reopenMutation.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-blue-400/30 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 transition-colors disabled:opacity-50 shrink-0"
+              className={`${KEY_LINE} h-8 px-3 shrink-0`}
             >
               {reopenMutation.isPending ? (
                 <Loader2 size={10} className="animate-spin" />
@@ -1085,8 +1086,8 @@ function TicketDetailView({
               if (isReview) {
                 return (
                   <div key={c.id} className="flex justify-center">
-                    <div className="bg-emerald-500/5 border border-emerald-400/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
-                      <p className="text-xs text-emerald-600 font-medium">
+                    <div className="bg-foreground/5 border border-foreground/15 rounded-xl px-4 py-2.5 max-w-sm text-center">
+                      <p className="text-xs text-foreground font-medium">
                         {textOnly || c.comment}
                       </p>
                       <p className="text-[0.625rem] text-muted-foreground/60 mt-0.5">
@@ -1229,7 +1230,7 @@ function TicketDetailView({
                   isSending ||
                   (!commentText.trim() && adminAttachFiles.length === 0)
                 }
-                className="w-9 h-9 flex items-center justify-center rounded-xl btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
+                className="w-9 h-9 flex items-center justify-center rounded-xl bg-foreground text-card hover:opacity-90 transition-opacity disabled:opacity-40 shrink-0"
               >
                 {isSending ? (
                   <Loader2 size={14} className="animate-spin" />
@@ -1253,8 +1254,8 @@ function TicketDetailView({
               </>
             ) : (
               <>
-                <CheckCircle2 size={13} className="text-emerald-500" />
-                <p className="text-xs text-emerald-600">
+                <CheckCircle2 size={13} className="text-foreground" />
+                <p className="text-xs text-foreground">
                   Ticket resolved — reopen to continue the conversation.
                 </p>
               </>
@@ -1268,14 +1269,14 @@ function TicketDetailView({
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowResolveFlow(true)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-400/30 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+            className={`${KEY_LINE} h-8 px-3`}
           >
             <CheckCircle2 size={12} /> Mark as Resolved
           </button>
           <button
             onClick={() => closeMutation.mutate()}
             disabled={closeMutation.isPending}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-400/20 bg-slate-500/5 text-slate-500 hover:bg-slate-500/10 transition-colors disabled:opacity-50"
+            className={`${KEY_LINE} h-8 px-3`}
           >
             {closeMutation.isPending ? (
               <Loader2 size={12} className="animate-spin" />
@@ -1289,10 +1290,10 @@ function TicketDetailView({
 
       {/* Resolve confirmation */}
       {showResolveFlow && (
-        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-5 py-4 space-y-3">
+        <div className="rounded-xl border border-foreground/20 bg-foreground/5 px-5 py-4 space-y-3">
           <div className="flex items-center gap-2">
-            <CheckCircle2 size={16} className="text-emerald-600" />
-            <p className="text-sm font-semibold text-emerald-700">
+            <CheckCircle2 size={16} className="text-foreground" />
+            <p className="text-sm font-semibold text-foreground">
               Confirm Resolution
             </p>
           </div>
@@ -1304,7 +1305,7 @@ function TicketDetailView({
             <button
               onClick={() => resolveMutation.mutate()}
               disabled={resolveMutation.isPending}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+              className={`${KEY_INK} h-8 px-3`}
             >
               {resolveMutation.isPending ? (
                 <Loader2 size={11} className="animate-spin" />
@@ -1315,7 +1316,7 @@ function TicketDetailView({
             </button>
             <button
               onClick={() => setShowResolveFlow(false)}
-              className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-8 px-3`}
             >
               Cancel
             </button>
@@ -1367,7 +1368,7 @@ function TicketDetailView({
             <button
               onClick={submitReview}
               disabled={reviewSubmitting}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+              className={`${KEY_INK} h-9 px-4`}
             >
               {reviewSubmitting ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1381,7 +1382,7 @@ function TicketDetailView({
                 setReviewDone(true);
                 setShowReviewSection(false);
               }}
-              className="px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors"
+              className={`${KEY_LINE} h-9 px-4`}
             >
               Skip
             </button>
@@ -1390,9 +1391,9 @@ function TicketDetailView({
       )}
 
       {reviewDone && (
-        <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2">
-          <CheckCircle2 size={14} className="text-emerald-600" />
-          <p className="text-xs text-emerald-600 font-medium">
+        <div className="rounded-xl border border-foreground/20 bg-foreground/5 px-4 py-3 flex items-center gap-2">
+          <CheckCircle2 size={14} className="text-foreground" />
+          <p className="text-xs text-foreground font-medium">
             Thank you for your feedback!
           </p>
         </div>
@@ -1400,8 +1401,8 @@ function TicketDetailView({
 
       {/* Camera modal — same as CreateTicket */}
       {showCamera && (
-        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Camera size={15} className="text-muted-foreground" />
@@ -1417,7 +1418,7 @@ function TicketDetailView({
             <div className="p-4">
               {cameraError ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
-                  <XCircle size={32} className="text-red-400" />
+                  <XCircle size={32} className="text-destructive" />
                   <p className="text-sm text-muted-foreground">{cameraError}</p>
                   <p className="text-xs text-muted-foreground/60">
                     Please allow camera access in your browser settings and try again.
@@ -1451,13 +1452,13 @@ function TicketDetailView({
               <button
                 onClick={capturePhoto}
                 disabled={!!cameraError}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+                className={`flex-1 ${KEY_INK} h-9 px-4`}
               >
                 <CheckCircle2 size={14} /> Capture
               </button>
               <button
                 onClick={() => setShowCamera(false)}
-                className="flex-1 px-4 py-2 rounded-xl text-sm border border-border text-muted-foreground hover:bg-muted transition-colors"
+                className={`flex-1 ${KEY_LINE} h-9 px-4`}
               >
                 Cancel
               </button>
@@ -1585,7 +1586,7 @@ const MyTickets: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate("/ticket/create")}
-            className="flex items-center gap-2 h-9 px-4 text-sm rounded-lg gradient-accent text-white shadow-sm font-heading font-semibold"
+            className={`${KEY_INK} h-9 px-4`}
           >
             <Plus size={15} /> New Ticket
           </button>
@@ -1601,7 +1602,7 @@ const MyTickets: React.FC = () => {
     >
 
         {isError && (
-          <div className="px-4 py-3 rounded-xl bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+          <div className="px-4 py-3 rounded-xl bg-destructive/10 text-destructive text-sm border border-destructive/20 flex items-center gap-2">
             <AlertCircle size={14} /> Failed to load tickets. Try refreshing.
           </div>
         )}
@@ -1612,18 +1613,18 @@ const MyTickets: React.FC = () => {
             <button
               key={tab}
               onClick={() => setStatusFilter(tab)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              className={`${KEY} h-8 px-3 ${
                 statusFilter === tab
-                  ? "btn-module text-white"
+                  ? "bg-foreground text-card"
                   : "border border-border text-muted-foreground hover:bg-muted"
               }`}
             >
               {STATUS_LABELS[tab]}
               {!isLoading && (
                 <span
-                  className={`text-[0.625rem] px-1.5 py-0.5 rounded-full font-mono ${
+                  className={`text-[0.625rem] px-1.5 py-0.5 rounded-full tabular-nums ${
                     statusFilter === tab
-                      ? "bg-white/20 text-white"
+                      ? "bg-card/20 text-card"
                       : "bg-muted text-muted-foreground"
                   }`}
                 >
@@ -1664,9 +1665,9 @@ const MyTickets: React.FC = () => {
               <button
                 key={p}
                 onClick={() => setPriorityFilter(p)}
-                className={`px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium transition-all ${
+                className={`${KEY} h-8 px-3 ${
                   priorityFilter === p
-                    ? "btn-module text-white"
+                    ? "bg-foreground text-card"
                     : "border border-border text-muted-foreground hover:bg-muted"
                 }`}
               >
@@ -1705,7 +1706,7 @@ const MyTickets: React.FC = () => {
             {!isFiltered && (
               <button
                 onClick={() => navigate("/ticket/create")}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg btn-module text-white hover:opacity-90 transition-opacity mt-1"
+                className={`${KEY_INK} h-8 px-3 mt-1`}
               >
                 <Plus size={12} /> Create first ticket
               </button>

@@ -2,7 +2,7 @@ import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { X, FileText, Receipt, CheckCircle2, AlertCircle, AlertTriangle, FileWarning, Printer, FileDown, BookOpen, Landmark } from "lucide-react";
 import { type UOM } from "@/api/grnApi";
 import { BodyPortal } from "@/components/ui/body-portal";
-import { GRNItemLine, RemainingItemsPanel, parseJsonArray, fmt, fmtQty, LinkedExpenseBookings, isTransferGRN } from "./config";
+import { GRNItemLine, RemainingItemsPanel, parseJsonArray, fmt, fmtQty, LinkedExpenseBookings, isTransferGRN, supplierChargesGst } from "./config";
 import type { GRNState } from "./useGRN";
 
 // One GRN opened: details and posting tabs, print / PDF, edit / delete.
@@ -419,7 +419,7 @@ export function GRNViewModal({ m }: { m: GRNState }) {
                                           colSpan={8}
                                           className="px-4 py-2 text-right text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
                                         >
-                                          PO Value (incl. GST)
+                                          PO Value{supplierChargesGst(viewingGrn.SupplierGstType, viewingGrn.SupplierGst) ? " (incl. GST)" : ""}
                                         </td>
                                         <td className="px-4 py-2 text-right text-xs font-semibold text-foreground">
                                           ₹{fmt(poTotal)}

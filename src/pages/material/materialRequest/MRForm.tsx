@@ -10,7 +10,7 @@ import type { MRState } from "./useMaterialRequest";
 
 // Create / edit a material request: header, items, save.
 export function MRForm({ m }: { m: MRState }) {
-  const { editingId, viewingRecord, header, setHeader, cart, setCart, woSource, setH, companies, filteredProjects, finYears, finYearStr, uoms, itemUomAlternates, mrDocTypes, mrDocTypesLoading, itemMap, availableSupplyDays, pickableItems, uomMap, maxDaysOfSupply, minRequiredByDate, updateCartItem, pickItem, addCartRow, removeCartRow, cartIsValid, canSave, isSaving, saved, goToList, resetFields, onSave } = m;
+  const { editingId, header, setHeader, cart, setCart, woSource, setH, companies, filteredProjects, finYears, finYearStr, uoms, itemUomAlternates, mrDocTypes, mrDocTypesLoading, itemMap, availableSupplyDays, pickableItems, uomMap, maxDaysOfSupply, minRequiredByDate, updateCartItem, pickItem, addCartRow, removeCartRow, cartIsValid, canSave, isSaving, saved, goToList, resetFields, onSave } = m;
   return (
     <div className="space-y-5">
       {woSource && !editingId && (
@@ -37,7 +37,7 @@ export function MRForm({ m }: { m: MRState }) {
             </span>
             {editingId ? (
               <span className="font-heading font-bold tracking-wide text-foreground text-sm break-all">
-                {viewingRecord?.DocNo ?? "Immutable after creation"}
+                {header.docNo || `MR-${editingId}`}
               </span>
             ) : (
               <div className="flex-1 flex flex-wrap items-center gap-3 min-w-0">

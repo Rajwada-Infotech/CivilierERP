@@ -507,6 +507,7 @@ export function useMaterialRequest() {
       finYearId: String(full.FinYearId ?? ""),
       docTypeId: full.DocTypeId ?? null,
       docNoPreview: "",
+      docNo: full.DocNo ?? "",
       requestDate: full.RequestDate
         ? String(full.RequestDate).slice(0, 10)
         : defaultHeader.requestDate,

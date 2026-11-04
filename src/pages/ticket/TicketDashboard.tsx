@@ -1,3 +1,4 @@
+import { KEY_INK, KEY_LINE } from "@/components/sheet/sheetParts";
 import React, { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
@@ -9,27 +10,9 @@ import { unwrapTicketList } from "@/lib/ticketListResponse";
 import { useTicketSync } from "@/hooks/useTicketSync";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import {
-  GlassShell,
-  GlassCard,
-  GlassSection,
-  GlassCardSkeleton,
-} from "@/components/dashboard/GlassShell";
-import {
-  AlertCircle,
-  BarChart3,
-  CheckCircle2,
-  ClipboardList,
-  Clock,
-  FileText,
-  Flame,
-  MessageSquare,
-  Plus,
-  RefreshCw,
-  ShieldAlert,
-  Tag,
-  User,
-} from "lucide-react";
+import { TicketShell } from "@/components/ticket/TicketShell";
+import { SheetSection, SheetStats } from "@/components/sheet/sheetParts";
+import { AlertCircle, CheckCircle2, MessageSquare, Plus, RefreshCw } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,8 +30,7 @@ interface Ticket {
   created_at?: string;
 }
 
-const ACCENT = "#ec4899"; // pink — matches Ticket's ModuleStrip color
-const SECONDARY = "#8b5cf6"; // violet bloom
+const ACCENT = "hsl(var(--foreground))";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,49 +45,40 @@ const fmtDate = (d?: string | null) =>
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SectionHeader({
-  icon: Icon,
-  title,
-  sub,
-  action,
-  onAction,
-}: {
-  icon: React.ElementType;
-  title: string;
-  sub?: string;
-  action?: string;
-  onAction?: () => void;
-}) {
+// A column's heading: its name on the sheet's rule, with a link to the full list.
+function ColumnHead({ title, sub, action, onAction }: { title: string; sub?: string; action?: string; onAction?: () => void }) {
   return (
-    <div className="flex items-center justify-between mb-4">
-      <div className="flex items-center gap-2.5">
-        <Icon size={16} className="text-muted-foreground" />
-        <span className="text-sm font-heading font-semibold text-foreground">
-          {title}
-        </span>
-        {sub && (
-          <span className="text-xs text-muted-foreground hidden sm:inline">
-            {sub}
-          </span>
-        )}
+    <div className="flex items-baseline justify-between gap-3 pb-2" style={{ borderBottom: "1px solid hsl(var(--foreground))" }}>
+      <div className="flex items-baseline gap-2.5 min-w-0">
+        <h3 className="label" style={{ color: "var(--ink)", margin: 0 }}>{title}</h3>
+        {sub && <span className="hidden sm:inline truncate" style={{ fontSize: 11.5, color: "var(--graphite)" }}>{sub}</span>}
       </div>
       {action && onAction && (
-        <button
-          onClick={onAction}
-          className="text-xs text-primary hover:underline font-heading"
-        >
-          {action} →
+        <button onClick={onAction} className="label link shrink-0">
+          {action}
         </button>
       )}
     </div>
   );
 }
 
-function EmptyState({ label }: { label: string }) {
+function EmptyRow({ label }: { label: string }) {
+  return <p className="py-3" style={{ fontSize: 13, color: "var(--graphite)", borderBottom: "1px solid var(--rule-soft)" }}>{label}</p>;
+}
+
+// One measured line: name, count and share, and a square bar under them.
+function Measure({ label, count, pct, color }: { label: string; count: number; pct: number; color: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
-      <ClipboardList size={28} className="mb-2 opacity-30" />
-      <span className="text-xs">{label}</span>
+    <div className="py-2.5" style={{ borderBottom: "1px solid var(--rule-soft)" }}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
+        <span className="tabular-nums" style={{ fontSize: 12, color: "var(--graphite)" }}>
+          <span className="font-heading" style={{ fontWeight: 600, color: "var(--ink)" }}>{count}</span> · {pct}%
+        </span>
+      </div>
+      <div className="mt-2 h-1 bg-muted overflow-hidden">
+        <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }
@@ -136,23 +109,23 @@ const priorityConfig: Record<
 > = {
   Urgent: {
     label: "Urgent",
-    cls: "bg-red-500/10 text-red-600 border-red-400/20",
-    bar: "bg-red-500",
+    cls: "bg-destructive/10 text-destructive border-destructive/20",
+    bar: "bg-destructive",
   },
   High: {
     label: "High",
-    cls: "bg-orange-500/10 text-orange-600 border-orange-400/20",
-    bar: "bg-orange-500",
+    cls: "bg-foreground/10 text-foreground border-foreground/20",
+    bar: "bg-foreground",
   },
   Medium: {
     label: "Medium",
-    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
-    bar: "bg-amber-500",
+    cls: "bg-muted text-muted-foreground border-border",
+    bar: "bg-muted-foreground",
   },
   Low: {
     label: "Low",
-    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
-    bar: "bg-blue-500",
+    cls: "bg-primary/10 text-primary border-primary/20",
+    bar: "bg-primary",
   },
 };
 
@@ -174,10 +147,10 @@ function PriorityBadge({ priority }: { priority: string }) {
 function StatusBadge({ status }: { status: string }) {
   const cls =
     status === "Resolved"
-      ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
+      ? "bg-foreground/10 text-foreground border-foreground/20"
       : status === "InProgress"
-        ? "bg-blue-500/10 text-blue-600 border-blue-400/20"
-        : "bg-[#ffe2021a] text-amber-600 border-amber-400/20";
+        ? "bg-primary/10 text-primary border-primary/20"
+        : "bg-muted text-muted-foreground border-border";
   const label = status === "InProgress" ? "Resolving" : status;
   return (
     <span
@@ -295,17 +268,15 @@ export default function TicketDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Tickets"]} />
-      <GlassShell
+      <TicketShell
         title="Ticket Overview"
         subtitle="Track, manage and resolve support tickets across all projects"
         icon={MessageSquare}
-        accentColor={ACCENT}
-        secondaryColor={SECONDARY}
         action={
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate("/ticket/create")}
-              className="flex items-center gap-2 h-9 px-4 text-sm rounded-lg gradient-accent text-white shadow-sm font-heading font-semibold"
+              className={`${KEY_INK} h-9 px-4`}
             >
               <Plus size={15} />
               New Ticket
@@ -313,8 +284,7 @@ export default function TicketDashboard() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 active:scale-90 disabled:opacity-50"
-              style={{ borderColor: `${ACCENT}4d`, color: ACCENT }}
+              className={`group ${KEY_LINE} h-9 px-4`}
             >
               <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
               Refresh
@@ -324,7 +294,7 @@ export default function TicketDashboard() {
       >
         {/* ── Error banner ────────────────────────────────────────────────── */}
         {isError && !tickets.length && (
-          <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
+          <div className="px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20 flex items-center gap-2">
             <AlertCircle size={15} />
             Failed to load ticket data
             {(error as Error)?.message ? `: ${(error as Error).message}` : ""}.
@@ -333,119 +303,49 @@ export default function TicketDashboard() {
         )}
 
         {/* ── Stat cards ──────────────────────────────────────────────────── */}
-        <GlassSection title="Overview" icon={MessageSquare} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {isLoading
-              ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
-              : [
-                  {
-                    label: "Total Tickets",
-                    value: stats.total,
-                    sub: `${stats.resolvedPct}% resolved`,
-                    icon: MessageSquare,
-                    accentColor: SECONDARY,
-                    onClick: () => navigate("/ticket/my-tickets"),
-                  },
-                  {
-                    label: "Pending",
-                    value: stats.pending + stats.inProgress,
-                    sub: `${stats.urgent} urgent · ${stats.high} high priority`,
-                    icon: Clock,
-                    accentColor: "#f59e0b",
-                    trend: (stats.pending + stats.inProgress > 0 ? "down" : "neutral") as "down" | "neutral" | "up",
-                    onClick: () => navigate("/ticket/pending"),
-                  },
-                  {
-                    label: "Resolved",
-                    value: stats.resolved,
-                    sub: `${stats.resolvedPct}% of all tickets`,
-                    icon: CheckCircle2,
-                    accentColor: "#10b981",
-                    trend: "up" as const,
-                    onClick: () => navigate("/ticket/resolved"),
-                  },
-                  {
-                    label: "Urgent / High",
-                    value: stats.urgent + stats.high,
-                    sub: `${stats.urgent} urgent · ${stats.high} high`,
-                    icon: Flame,
-                    accentColor: "#ef4444",
-                    trend: (stats.urgent + stats.high > 0 ? "down" : "neutral") as "down" | "neutral" | "up",
-                    onClick: () => navigate("/ticket/pending"),
-                  },
-                ].map((s) => <GlassCard key={s.label} {...s} />)}
-          </div>
-        </GlassSection>
+        <SheetSection tag="A" title="Overview">
+          <SheetStats
+            loading={isLoading}
+            items={[
+              { label: "Total Tickets", value: stats.total, note: `${stats.resolvedPct}% resolved`, onClick: () => navigate("/ticket/my-tickets") },
+              { label: "Pending", value: stats.pending + stats.inProgress, note: `${stats.urgent} urgent · ${stats.high} high priority`, onClick: () => navigate("/ticket/pending") },
+              { label: "Resolved", value: stats.resolved, note: `${stats.resolvedPct}% of all tickets`, onClick: () => navigate("/ticket/resolved") },
+              { label: "Urgent / High", value: stats.urgent + stats.high, red: stats.urgent + stats.high > 0, note: `${stats.urgent} urgent · ${stats.high} high`, onClick: () => navigate("/ticket/pending") },
+            ]}
+          />
+        </SheetSection>
 
         {/* ── Priority breakdown + Resolution rate ────────────────────────── */}
         {!isLoading && (
-          <GlassSection title="At a Glance" icon={BarChart3} accentColor={ACCENT}>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <GlassCard
-                label="Resolution Rate"
-                value={`${stats.resolvedPct}%`}
-                icon={CheckCircle2}
-                accentColor="#10b981"
-              />
-              <GlassCard
-                label="Open Tickets"
-                value={stats.pending + stats.inProgress}
-                icon={Clock}
-                accentColor="#f59e0b"
-              />
-              <GlassCard
-                label="Critical (Urgent + High)"
-                value={stats.urgent + stats.high}
-                icon={ShieldAlert}
-                accentColor="#ef4444"
-              />
-            </div>
-          </GlassSection>
+          <SheetSection tag="B" title="At a Glance">
+            <SheetStats
+              items={[
+                { label: "Resolution Rate", value: `${stats.resolvedPct}%` },
+                { label: "Open Tickets", value: stats.pending + stats.inProgress },
+                { label: "Critical (Urgent + High)", value: stats.urgent + stats.high, red: stats.urgent + stats.high > 0 },
+              ]}
+            />
+          </SheetSection>
         )}
 
         {/* ── Pending + Resolved tables ───────────────────────────────────── */}
-        <GlassSection title="Recent Activity" icon={Clock} accentColor={ACCENT}>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Pending tickets */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
-              <SectionHeader
-                icon={Clock}
-                title="Pending Tickets"
-                sub="Awaiting resolution"
-                action="View all"
-                onAction={() => navigate("/ticket/pending")}
-              />
-            </div>
-            {isLoading ? (
-              <TableSkeleton rows={4} cols={4} />
-            ) : !stats.recentPending.length ? (
-              <EmptyState label="No pending tickets — all clear!" />
-            ) : (
-              <div className="divide-y divide-border">
-                {stats.recentPending.map((t) => (
-                  <div
-                    key={t.id}
-                    className="px-5 py-3 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors group"
-                  >
+        <SheetSection tag="C" title="Recent Activity">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-6">
+            <div className="min-w-0">
+              <ColumnHead title="Pending Tickets" sub="Awaiting resolution" action="View all" onAction={() => navigate("/ticket/pending")} />
+              {isLoading ? (
+                <TableSkeleton rows={4} cols={4} />
+              ) : !stats.recentPending.length ? (
+                <EmptyRow label="No pending tickets." />
+              ) : (
+                stats.recentPending.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-3 py-2.5 hover:bg-primary/10 transition-colors group" style={{ borderBottom: "1px solid var(--rule-soft)" }}>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {t.subject}
+                      <p className="truncate" style={{ fontSize: 13.5, fontWeight: 600 }}>{t.subject}</p>
+                      <p className="truncate mt-0.5" style={{ fontSize: 11.5, color: "var(--graphite)" }}>
+                        {t.customer_name || "—"}
+                        {t.created_at ? ` · ${fmtDate(t.created_at)}` : ""}
                       </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <User
-                          size={10}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <span className="text-[0.6875rem] text-muted-foreground truncate">
-                          {t.customer_name || "—"}
-                        </span>
-                        {t.created_at && (
-                          <span className="text-[0.6875rem] text-muted-foreground hidden sm:inline">
-                            · {fmtDate(t.created_at)}
-                          </span>
-                        )}
-                      </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <PriorityBadge priority={t.priority} />
@@ -453,238 +353,99 @@ export default function TicketDashboard() {
                         onClick={() => resolveMutation.mutate(t.id)}
                         disabled={resolveMutation.isPending}
                         title="Mark as resolved"
-                        className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                        className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <CheckCircle2 size={14} />
                       </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Resolved tickets */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
-              <SectionHeader
-                icon={CheckCircle2}
-                title="Recently Resolved"
-                sub="Last 6 closures"
-                action="View all"
-                onAction={() => navigate("/ticket/resolved")}
-              />
+                ))
+              )}
             </div>
-            {isLoading ? (
-              <TableSkeleton rows={4} cols={4} />
-            ) : !stats.recentResolved.length ? (
-              <EmptyState label="No resolved tickets yet" />
-            ) : (
-              <div className="divide-y divide-border">
-                {stats.recentResolved.map((t) => (
-                  <div
-                    key={t.id}
-                    className="px-5 py-3 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors"
-                  >
+
+            <div className="min-w-0">
+              <ColumnHead title="Recently Resolved" sub="Last 6 closures" action="View all" onAction={() => navigate("/ticket/resolved")} />
+              {isLoading ? (
+                <TableSkeleton rows={4} cols={4} />
+              ) : !stats.recentResolved.length ? (
+                <EmptyRow label="No resolved tickets yet." />
+              ) : (
+                stats.recentResolved.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-3 py-2.5 hover:bg-primary/10 transition-colors" style={{ borderBottom: "1px solid var(--rule-soft)" }}>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {t.subject}
+                      <p className="truncate" style={{ fontSize: 13.5, fontWeight: 600 }}>{t.subject}</p>
+                      <p className="truncate mt-0.5" style={{ fontSize: 11.5, color: "var(--graphite)" }}>
+                        {t.customer_name || "—"}
+                        {t.created_at ? ` · ${fmtDate(t.created_at)}` : ""}
                       </p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <User
-                          size={10}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <span className="text-[0.6875rem] text-muted-foreground truncate">
-                          {t.customer_name || "—"}
-                        </span>
-                      </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <PriorityBadge priority={t.priority} />
                       <StatusBadge status={t.status} />
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        </GlassSection>
-
-        {/* ── Priority breakdown + Quick actions ─────────────────────────── */}
-        <GlassSection title="Breakdown & Actions" icon={Tag} accentColor={ACCENT}>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Priority breakdown */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader
-              icon={Tag}
-              title="Pending by Priority"
-              sub="open tickets only"
-            />
-            {isLoading ? (
-              <div className="space-y-2 animate-pulse">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="h-5 bg-muted rounded" />
-                ))}
-              </div>
-            ) : stats.pending + stats.inProgress === 0 ? (
-              <p className="text-xs text-muted-foreground py-2">
-                No pending tickets
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {(["Urgent", "High", "Medium", "Low"] as const).map((p) => {
-                  const count = stats.priorityCounts[p] ?? 0;
-                  const pct =
-                    stats.pending + stats.inProgress > 0
-                      ? Math.round(
-                          (count / (stats.pending + stats.inProgress)) * 100,
-                        )
-                      : 0;
-                  const cfg = priorityConfig[p];
-                  return (
-                    <div key={p} className="space-y-0.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-foreground font-medium">{p}</span>
-                        <span className="text-muted-foreground">
-                          {count} · {pct}%
-                        </span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${cfg.bar} transition-all duration-500`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                <p className="text-xs text-muted-foreground pt-1">
-                  {stats.pending + stats.inProgress} total open · {stats.total}{" "}
-                  total
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Status overview */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader icon={BarChart3} title="Status Overview" />
-            {isLoading ? (
-              <div className="space-y-2 animate-pulse">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <div key={i} className="h-5 bg-muted rounded" />
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {[
-                  {
-                    label: "Pending",
-                    count: stats.pending,
-                    color: "bg-amber-500",
-                  },
-                  {
-                    label: "Resolving",
-                    count: stats.inProgress,
-                    color: "bg-blue-500",
-                  },
-                  {
-                    label: "Resolved",
-                    count: stats.resolved,
-                    color: "bg-emerald-500",
-                  },
-                  {
-                    label: "Closed",
-                    count: stats.closed,
-                    color: "bg-muted-foreground",
-                  },
-                ].map(({ label, count, color }) => {
-                  const pct =
-                    stats.total > 0
-                      ? Math.round((count / stats.total) * 100)
-                      : 0;
-                  return (
-                    <div key={label} className="space-y-0.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-foreground font-medium">
-                          {label}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {count} · {pct}%
-                        </span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${color} transition-all duration-500`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                <p className="text-xs text-muted-foreground pt-1">
-                  {stats.resolvedPct}% resolution rate · {stats.total} total
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Quick actions */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader icon={BarChart3} title="Quick Actions" />
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                {
-                  label: "Create Ticket",
-                  icon: Plus,
-                  path: "/ticket/create",
-                  color: "text-violet-600",
-                  bg: "bg-violet-500/10",
-                },
-                {
-                  label: "My Tickets",
-                  icon: FileText,
-                  path: "/ticket/my-tickets",
-                  color: "text-blue-600",
-                  bg: "bg-blue-500/10",
-                },
-                {
-                  label: "Pending",
-                  icon: Clock,
-                  path: "/ticket/pending",
-                  color: "text-amber-600",
-                  bg: "bg-[#ffe2021a]",
-                },
-                {
-                  label: "Resolved",
-                  icon: CheckCircle2,
-                  path: "/ticket/resolved",
-                  color: "text-emerald-600",
-                  bg: "bg-emerald-500/10",
-                },
-              ].map(({ label, icon: Icon, path, color, bg }) => (
-                <button
-                  key={path}
-                  onClick={() => navigate(path)}
-                  className="flex flex-col items-center gap-2.5 py-4 px-2 rounded-2xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
-                >
-                  <div
-                    className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}
-                  >
-                    <Icon size={15} className={color} />
-                  </div>
-                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
-                    {label}
-                  </span>
-                </button>
-              ))}
+                ))
+              )}
             </div>
           </div>
-        </div>
-        </GlassSection>
-      </GlassShell>
+        </SheetSection>
+
+        <SheetSection tag="D" title="Breakdown">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-6">
+            <div className="min-w-0">
+              <ColumnHead title="Pending by Priority" sub="Open tickets only" />
+              {isLoading ? (
+                <TableSkeleton rows={4} cols={1} />
+              ) : (
+                <>
+                  {(["Urgent", "High", "Medium", "Low"] as const).map((p) => {
+                    const count = stats.priorityCounts[p] ?? 0;
+                    const open = stats.pending + stats.inProgress;
+                    return <Measure key={p} label={p} count={count} pct={open > 0 ? Math.round((count / open) * 100) : 0} color={priorityConfig[p].bar} />;
+                  })}
+                  <p className="pt-2.5" style={{ fontSize: 11.5, color: "var(--graphite)" }}>
+                    {stats.pending + stats.inProgress} total open · {stats.total} total
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <ColumnHead title="Status Overview" />
+              {isLoading ? (
+                <TableSkeleton rows={4} cols={1} />
+              ) : (
+                <>
+                  {[
+                    { label: "Pending", count: stats.pending, color: "bg-muted-foreground" },
+                    { label: "Resolving", count: stats.inProgress, color: "bg-primary" },
+                    { label: "Resolved", count: stats.resolved, color: "bg-foreground" },
+                    { label: "Closed", count: stats.closed, color: "bg-muted-foreground" },
+                  ].map(({ label, count, color }) => (
+                    <Measure key={label} label={label} count={count} pct={stats.total > 0 ? Math.round((count / stats.total) * 100) : 0} color={color} />
+                  ))}
+                  <p className="pt-2.5" style={{ fontSize: 11.5, color: "var(--graphite)" }}>
+                    {stats.resolvedPct}% resolution rate · {stats.total} total
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </SheetSection>
+
+        <SheetSection tag="E" title="Go to">
+          <div className="seg" style={{ flexWrap: "wrap" }}>
+            {[
+              { label: "Create Ticket", path: "/ticket/create" },
+              { label: "My Tickets", path: "/ticket/my-tickets" },
+              { label: "Pending", path: "/ticket/pending" },
+              { label: "Resolved", path: "/ticket/resolved" },
+            ].map((q) => (
+              <button key={q.path} type="button" onClick={() => navigate(q.path)} style={{ padding: "9px 16px" }}>{q.label}</button>
+            ))}
+          </div>
+        </SheetSection>
+      </TicketShell>
     </>
   );
 }

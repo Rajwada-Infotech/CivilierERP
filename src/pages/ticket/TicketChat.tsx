@@ -180,7 +180,7 @@ function AttachmentImage({ url, filename, isMine }: { url: string; filename: str
     return (
       <div className={cn(
         "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs",
-        isMine ? "border-white/20 bg-white/10 text-white" : "border-border bg-muted/30 text-muted-foreground"
+        isMine ? "border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground" : "border-border bg-muted/30 text-muted-foreground"
       )}>
         <Paperclip size={12} />
         <span className="max-w-[140px] truncate">{filename}</span>
@@ -258,20 +258,20 @@ function AttachmentPDF({ url, filename, isMine }: { url: string; filename: strin
         "group flex items-center gap-3 rounded-2xl border px-3.5 py-2.5 text-left transition-all",
         "hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
         isMine
-          ? "border-white/20 bg-white/10 text-white hover:bg-white/15"
+          ? "border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground hover:bg-primary-foreground/15"
           : "border-border bg-muted/30 text-foreground hover:bg-muted/50",
       )}
     >
       {/* Icon */}
       <div className={cn(
         "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
-        loading ? "bg-muted/50" : "bg-red-500/15",
+        loading ? "bg-muted/50" : "bg-destructive/15",
       )}>
         {loading
           ? <Loader2 size={15} className="animate-spin text-muted-foreground" />
           : error
           ? <Paperclip size={15} className="text-muted-foreground" />
-          : <FileText size={15} className="text-red-500" />
+          : <FileText size={15} className="text-destructive" />
         }
       </div>
 
@@ -282,7 +282,7 @@ function AttachmentPDF({ url, filename, isMine }: { url: string; filename: strin
         </p>
         <p className={cn(
           "mt-0.5 text-[0.625rem]",
-          isMine ? "text-white/50" : "text-muted-foreground/60",
+          isMine ? "text-primary-foreground/50" : "text-muted-foreground/60",
         )}>
           {loading ? "Loading…" : error ? "Failed to load" : "Click to open PDF"}
         </p>
@@ -391,10 +391,10 @@ function getInitials(name: string) {
 
 function roleTone(role: string | null | undefined) {
   const normalized = normalizeRole(role);
-  if (["admin", "super_admin", "dba"].includes(normalized)) return "bg-indigo-500 text-white";
-  if (normalized === "engineer") return "bg-emerald-500 text-white";
-  if (["customer", "user"].includes(normalized)) return "bg-sky-500 text-white";
-  return "bg-slate-500 text-white";
+  if (["admin", "super_admin", "dba"].includes(normalized)) return "bg-primary text-primary-foreground";
+  if (normalized === "engineer") return "bg-foreground text-card";
+  if (["customer", "user"].includes(normalized)) return "bg-primary text-primary-foreground";
+  return "bg-muted-foreground text-card";
 }
 
 function mergeMessages(
@@ -420,8 +420,8 @@ function mergeMessages(
 
 function bubbleStyles(message: TicketChatMessage, isMine: boolean) {
   const isInternal = message.is_internal === 1 || message.is_internal === true;
-  if (isInternal) return "border-amber-400/30 bg-[#ffe2021a] text-amber-950 dark:text-amber-100";
-  if (isMine) return "border-indigo-500/30 bg-indigo-600 text-white shadow-indigo-500/20";
+  if (isInternal) return "border-border bg-muted text-muted-foreground ";
+  if (isMine) return "border-primary/30 bg-primary text-primary-foreground";
   return "border-border/60 bg-card text-foreground shadow-sm";
 }
 
@@ -679,9 +679,9 @@ export function TicketChat({
         </div>
 
         {canWriteInternal && (
-          <div className="flex items-center gap-2 rounded-full border border-amber-400/20 bg-[#ffe2021a] px-3 py-1.5">
-            <ShieldAlert size={12} className="text-amber-700" />
-            <span className="text-[0.6875rem] font-medium text-amber-800">Internal</span>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5">
+            <ShieldAlert size={12} className="text-muted-foreground" />
+            <span className="text-[0.6875rem] font-medium text-muted-foreground">Internal</span>
             <Switch
               checked={isInternalNote}
               onCheckedChange={setIsInternalNote}
@@ -710,7 +710,7 @@ export function TicketChat({
         )}
 
         {joinError && (
-          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-600">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {joinError}
           </div>
         )}
@@ -765,7 +765,7 @@ export function TicketChat({
                           {(message.author_role || "user").replaceAll("_", " ")}
                         </Badge>
                         {internal && (
-                          <Badge className="h-4 rounded-full bg-amber-500/15 px-1.5 text-[0.5625rem] text-amber-700 hover:bg-amber-500/15 border-amber-400/20">
+                          <Badge className="h-4 rounded-full bg-muted px-1.5 text-[0.5625rem] text-muted-foreground hover:bg-muted border-border">
                             Internal
                           </Badge>
                         )}
@@ -780,7 +780,7 @@ export function TicketChat({
                           "relative rounded-2xl border px-3.5 py-2.5 shadow-sm transition-opacity",
                           bubbleClass,
                           isMine ? "rounded-tr-sm" : "rounded-tl-sm",
-                          internal && "border-amber-400/30 bg-[#ffe2021a] rounded-tr-sm",
+                          internal && "border-border bg-muted rounded-tr-sm",
                           message.pending && "opacity-60",
                         )}
                       >
@@ -819,7 +819,7 @@ export function TicketChat({
       {/* Input area */}
       <div className={cn(
         "border-t border-border/60 px-4 py-4",
-        isInternalNote ? "bg-amber-500/5" : "bg-muted/10"
+        isInternalNote ? "bg-muted" : "bg-muted/10"
       )}>
         {isClosed ? (
           <div className="rounded-2xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
@@ -844,7 +844,7 @@ export function TicketChat({
               rows={1}
               className={cn(
                 "min-h-[52px] resize-none rounded-2xl border-border bg-background px-4 py-3 text-sm shadow-sm focus-visible:ring-2 focus-visible:ring-primary/20",
-                isInternalNote && "border-amber-400/30 bg-amber-500/5",
+                isInternalNote && "border-border bg-muted",
               )}
               style={{ height: 52 }}
             />
@@ -857,8 +857,8 @@ export function TicketChat({
                 onClick={handleSend}
                 disabled={!draft.trim() || isSending || isClosed}
                 className={cn(
-                  "min-w-24 rounded-xl px-4",
-                  isInternalNote && "bg-amber-600 text-white hover:bg-amber-700",
+                  "min-w-24 h-9 px-4 bg-foreground text-card hover:bg-foreground/90",
+                  isInternalNote && "bg-muted-foreground text-card hover:bg-muted-foreground/90",
                 )}
               >
                 {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

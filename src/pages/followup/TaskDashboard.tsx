@@ -1,3 +1,5 @@
+import { KEY_LINE } from "@/components/sheet/sheetParts";
+import { SheetSection, SheetStats, PRIORITY_TONES, STATUS_TONES, SERIES_TONES } from "@/components/sheet/sheetParts";
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -26,12 +28,12 @@ import {
   Flag,
   Building2,
   FolderOpen,
-  RotateCcw,
+  Search,
+  ChevronDown,
 } from "lucide-react";
 import { Chart } from "iconsax-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -40,29 +42,20 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/task-performance-report";
-const ACCENT = "#0d9488";
+const ACCENT = "hsl(var(--foreground))";
 
 const STATUSES = ["Active", "Hold", "Cancel", "Closed"] as const;
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
 
-const STATUS_COLORS: Record<string, string> = {
-  Active: "#3b82f6",
-  Hold: "#f59e0b",
-  Cancel: "#64748b",
-  Closed: "#22c55e",
-};
+const STATUS_COLORS = STATUS_TONES;
 const STATUS_LABELS: Record<string, string> = {
   Active: "Ongoing",
   Hold: "Pending",
   Cancel: "Cancelled",
   Closed: "Completed",
 };
-const PRIORITY_COLORS: Record<string, string> = {
-  "Very Important": "#ef4444",
-  Important: "#22c55e",
-  Normal: "#3b82f6",
-};
-const USER_PALETTE = ["#0d9488", "#3b82f6", "#f59e0b", "#8b5cf6", "#ec4899", "#22c55e", "#ef4444", "#94a3b8"];
+const PRIORITY_COLORS = PRIORITY_TONES;
+const USER_PALETTE = SERIES_TONES;
 
 interface Company {
   id: number;
@@ -150,13 +143,8 @@ function useGlass() {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
   const cardStyle = {
-    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: `1px solid ${ACCENT}26`,
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : `0 4px 24px ${ACCENT}0f, inset 0 1px 0 rgba(255,255,255,0.9)`,
+    background: "hsl(var(--card))",
+    border: `1px solid hsl(var(--foreground) / 0.15)`,
   };
   return { isDark, cardStyle };
 }
@@ -179,8 +167,8 @@ const DonutCard: React.FC<{
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden" style={cardStyle}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
-        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `hsl(var(--foreground) / 0.15)` : `hsl(var(--foreground) / 0.12)` }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `hsl(var(--foreground) / 0.15)` }}>
           <Icon size={11} style={{ color: ACCENT }} />
         </div>
         <span className="text-xs font-heading font-semibold text-foreground">{title}</span>
@@ -254,8 +242,8 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
   const chartData = [...data].sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   return (
     <div className="rounded-xl overflow-hidden" style={cardStyle}>
-      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
-        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `hsl(var(--foreground) / 0.15)` : `hsl(var(--foreground) / 0.12)` }}>
+        <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `hsl(var(--foreground) / 0.15)` }}>
           <TrendingUp size={11} style={{ color: ACCENT }} />
         </div>
         <span className="text-xs font-heading font-semibold text-foreground">User Performance (Top 10 by workload)</span>
@@ -266,29 +254,29 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(260, chartData.length * 34)}>
             <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"} horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke={"hsl(var(--border))"} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
               <YAxis
                 type="category"
                 dataKey="name"
                 width={110}
-                tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
-                cursor={{ fill: isDark ? "rgba(148,163,184,0.06)" : "rgba(100,116,139,0.06)" }}
+                cursor={{ fill: "hsl(var(--foreground) / 0.05)" }}
                 contentStyle={{
-                  background: isDark ? "rgba(15,17,26,0.95)" : "rgba(255,255,255,0.95)",
-                  border: `1px solid ${ACCENT}30`,
+                  background: "hsl(var(--card))",
+                  border: `1px solid hsl(var(--foreground) / 0.19)`,
                   borderRadius: 8,
                   fontSize: 12,
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              <Bar dataKey="completed" name="Completed" fill={theme === "bw" ? "#008000" : "#22c55e"} radius={[0, 3, 3, 0]} />
-              <Bar dataKey="pending" name="Pending" fill={theme === "bw" ? "#FFA500" : "#f59e0b"} radius={[0, 3, 3, 0]} />
-              <Bar dataKey="overdue" name="Overdue" fill={theme === "bw" ? "#800000" : "#ef4444"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="completed" name="Completed" fill={"hsl(var(--foreground))"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="pending" name="Pending" fill={"hsl(var(--muted-foreground))"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="overdue" name="Overdue" fill={"hsl(var(--destructive))"} radius={[0, 3, 3, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}
@@ -316,10 +304,10 @@ function FilterField({ icon: Icon, label, children, className = "" }: { icon: Re
 
 const PERF_COLS: ColumnDef<UserPerf, unknown>[] = [
   { id: "name", accessorKey: "name", header: "User", size: 160 },
-  { id: "assigned", accessorKey: "assigned", header: "Assigned", size: 90, cell: ({ getValue }) => <span className="font-mono">{getValue() as number}</span> },
-  { id: "completed", accessorKey: "completed", header: "Completed", size: 90, cell: ({ getValue }) => <span className="font-mono text-emerald-500">{getValue() as number}</span> },
-  { id: "pending", accessorKey: "pending", header: "Pending", size: 90, cell: ({ getValue }) => <span className="font-mono text-amber-500">{getValue() as number}</span> },
-  { id: "overdue", accessorKey: "overdue", header: "Overdue", size: 90, cell: ({ getValue }) => <span className="font-mono text-red-500">{getValue() as number}</span> },
+  { id: "assigned", accessorKey: "assigned", header: "Assigned", size: 90, cell: ({ getValue }) => <span className="tabular-nums">{getValue() as number}</span> },
+  { id: "completed", accessorKey: "completed", header: "Completed", size: 90, cell: ({ getValue }) => <span className="tabular-nums text-foreground">{getValue() as number}</span> },
+  { id: "pending", accessorKey: "pending", header: "Pending", size: 90, cell: ({ getValue }) => <span className="tabular-nums text-muted-foreground">{getValue() as number}</span> },
+  { id: "overdue", accessorKey: "overdue", header: "Overdue", size: 90, cell: ({ getValue }) => <span className="tabular-nums text-destructive">{getValue() as number}</span> },
   {
     id: "completionPct",
     accessorKey: "completionPct",
@@ -332,7 +320,7 @@ const PERF_COLS: ColumnDef<UserPerf, unknown>[] = [
           <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
             <div className="h-full rounded-full" style={{ width: `${pct}%`, background: ACCENT }} />
           </div>
-          <span className="text-xs font-mono">{pct}%</span>
+          <span className="text-xs tabular-nums">{pct}%</span>
         </div>
       );
     },
@@ -343,6 +331,8 @@ const TaskDashboard: React.FC = () => {
   const { isDark, cardStyle } = useGlass();
   usePageRights("task-performance-report");
   const [filters, setFilters] = React.useState<Filters>(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = React.useState(false);
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const [dateError, setDateError] = React.useState<string | null>(null);
 
   const { data: dropdowns } = useQuery({
@@ -434,7 +424,7 @@ const TaskDashboard: React.FC = () => {
     const rest = sorted.slice(7);
     const points: DonutPoint[] = top.map(([name, value], i) => ({ name, value, color: USER_PALETTE[i % USER_PALETTE.length] }));
     if (rest.length) {
-      points.push({ name: "Others", value: rest.reduce((s, [, v]) => s + v, 0), color: "#475569" });
+      points.push({ name: "Others", value: rest.reduce((s, [, v]) => s + v, 0), color: "hsl(var(--muted-foreground))" });
     }
     return points;
   }, [rows]);
@@ -469,8 +459,7 @@ const TaskDashboard: React.FC = () => {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="group flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border transition-all duration-200 active:scale-90 disabled:opacity-50"
-          style={{ borderColor: `${ACCENT}4d`, color: ACCENT }}
+          className={`group ${KEY_LINE} h-9 px-4`}
         >
           <RefreshCw size={12} className={`transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`} />
           Refresh
@@ -478,7 +467,7 @@ const TaskDashboard: React.FC = () => {
       }
     >
       {isError && (
-        <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 flex items-center gap-2 text-sm text-red-600">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 flex items-center gap-2 text-sm text-destructive">
           <AlertCircle size={16} className="shrink-0" />
           <span>{(error as Error)?.message ?? "Failed to load dashboard data. Please refresh."}</span>
           <button onClick={() => refetch()} className="ml-auto text-xs underline hover:no-underline">Retry</button>
@@ -486,14 +475,41 @@ const TaskDashboard: React.FC = () => {
       )}
 
       {/* ── Filters ──────────────────────────────────────────────────────── */}
-      <div className="rounded-xl p-4" style={cardStyle}>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
-          <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors">
-            <RotateCcw size={11} /> Reset
-          </button>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7 gap-2.5">
+      <div className="bg-card overflow-hidden" style={{ border: "1px solid hsl(var(--foreground))" }}>
+        <button
+          type="button"
+          onClick={() => setShowFilters((v) => !v)}
+          aria-expanded={showFilters}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Search size={12} className="text-muted-foreground" />
+            <span className="font-heading text-[0.625rem] font-semibold text-foreground uppercase tracking-[0.12em]">Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[0.625rem] font-heading font-semibold bg-foreground text-card">
+                {activeFilterCount} active
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeFilterCount > 0 && (
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resetFilters();
+                }}
+                className="text-[0.6875rem] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
+              >
+                Clear all
+              </span>
+            )}
+            <ChevronDown size={13} className={`text-muted-foreground transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`} />
+          </div>
+        </button>
+        {showFilters && (
+        <div className="border-t border-border px-4 py-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
           <FilterField icon={Building2} label="Company">
             <select className={selectCls} value={filters.companyId} onChange={(e) => updateFilter({ companyId: e.target.value, projectId: "" })}>
               <option value="">All Companies</option>
@@ -532,53 +548,39 @@ const TaskDashboard: React.FC = () => {
             </div>
           </FilterField>
         </div>
-        {dateError && <p className="text-xs mt-2" style={{ color: "#ef4444" }}>{dateError}</p>}
+        {dateError && <p className="text-xs mt-2" style={{ color: "hsl(var(--destructive))" }}>{dateError}</p>}
+        </div>
+        )}
       </div>
 
       {/* ── KPI cards ────────────────────────────────────────────────────── */}
-      <GlassSection title="Overview" icon={ClipboardList} accentColor={ACCENT}>
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-          {isLoading
-            ? Array.from({ length: 6 }).map((_, i) => <GlassCardSkeleton key={i} />)
-            : [
-                { label: "Total Tasks", value: summary.total, icon: ClipboardList, accentColor: ACCENT },
-                { label: "Completed", value: summary.completed, icon: CheckCircle2, accentColor: "#22c55e" },
-                { label: "Ongoing", value: summary.ongoing, icon: Activity, accentColor: "#3b82f6" },
-                { label: "Pending", value: summary.pending, icon: Clock, accentColor: "#f59e0b" },
-                { label: "Overdue", value: summary.overdue, icon: AlertTriangle, accentColor: "#ef4444" },
-                { label: "Avg. Progress", value: `${summary.avgProgress}%`, icon: TrendingUp, accentColor: "#8b5cf6" },
-              ].map((s) => <GlassCard key={s.label} {...s} />)}
-        </div>
-      </GlassSection>
+      <SheetSection tag="A" title="Overview">
+        <SheetStats loading={isLoading} items={[
+                { label: "Total Tasks", value: summary.total },
+                { label: "Completed", value: summary.completed },
+                { label: "Ongoing", value: summary.ongoing },
+                { label: "Pending", value: summary.pending },
+                { label: "Overdue", value: summary.overdue, red: summary.overdue > 0 },
+                { label: "Avg. Progress", value: `${summary.avgProgress}%` },
+              ]} />
+      </SheetSection>
 
       {/* ── Priority-wise summary ───────────────────────────────────────── */}
-      <GlassSection title="Priority-wise Task Summary" icon={Flag} accentColor={ACCENT}>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {isLoading
-            ? Array.from({ length: 3 }).map((_, i) => <GlassCardSkeleton key={i} />)
-            : PRIORITIES.map((p) => (
-                <GlassCard
-                  key={p}
-                  label={p}
-                  value={rows.filter((r) => r.Priority === p).length}
-                  icon={Flag}
-                  accentColor={PRIORITY_COLORS[p]}
-                />
-              ))}
-        </div>
-      </GlassSection>
+      <SheetSection tag="B" title="Priority-wise Task Summary">
+        <SheetStats loading={isLoading} items={PRIORITIES.map((p) => ({ label: p, value: rows.filter((r) => r.Priority === p).length }))} />
+      </SheetSection>
 
       {/* ── Pie charts ───────────────────────────────────────────────────── */}
-      <GlassSection title="Distribution" icon={Chart} accentColor={ACCENT}>
+      <SheetSection tag="C" title="Distribution">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <DonutCard title="Tasks by Priority (%)" icon={Flag} data={priorityData} isDark={isDark} cardStyle={cardStyle} />
           <DonutCard title="Tasks by Status (%)" icon={Activity} data={statusData} isDark={isDark} cardStyle={cardStyle} />
           <DonutCard title="Tasks by User (%)" icon={Users} data={userPieData} isDark={isDark} cardStyle={cardStyle} />
         </div>
-      </GlassSection>
+      </SheetSection>
 
       {/* ── User performance ────────────────────────────────────────────── */}
-      <GlassSection title="User Performance" icon={TrendingUp} accentColor={ACCENT}>
+      <SheetSection tag="D" title="User Performance">
         <div className="space-y-4">
           <UserPerformanceChart data={userPerf} isDark={isDark} cardStyle={cardStyle} />
           <div className="rounded-xl overflow-hidden" style={cardStyle}>
@@ -592,7 +594,7 @@ const TaskDashboard: React.FC = () => {
             />
           </div>
         </div>
-      </GlassSection>
+      </SheetSection>
       </FollowupShell>
     </>
   );
