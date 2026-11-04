@@ -20,6 +20,8 @@ import { useReminders, formatRelative, formatDate, REMINDER_TYPE_MODULE } from "
 import { useModule } from "@/contexts/ModuleContext";
 import { getModuleAccent } from "@/lib/moduleColors";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { GENIE_CSS } from "./navPanelStyles";
+import { useGeniePanel } from "./useGeniePanel";
 
 type ReminderMeta = {
   icon: React.ElementType;
@@ -55,7 +57,7 @@ const ALL_TABS = [
 // title block under a strip in the current module's colour, squared filter tabs with counts, reminders split into
 // Overdue / Due today / Coming up, and numbered rows with a square due mark: red when overdue, solid when due today,
 // hatched when still to come. Colours come from the theme, so every theme matches.
-const RB_CSS = `
+const RB_CSS = GENIE_CSS + `
 @keyframes fullSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .animate-spin-full { animation: fullSpin 0.6s cubic-bezier(0.15, 0, 0, 1); }
 .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -147,6 +149,7 @@ export const ReminderBell = () => {
     pollingInterval: 0,
   });
 
+  const { closing, close } = useGeniePanel(open, setOpen);
   const bellButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -189,18 +192,20 @@ export const ReminderBell = () => {
       ) {
         return;
       }
-      setOpen(false);
+      close();
     };
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [open]);
+  }, [open, close]);
 
   const handleNotificationClick = useCallback(() => {
-    setOpen((prev) => {
-      if (!prev) refresh(true);
-      return !prev;
-    });
-  }, [refresh]);
+    if (open) {
+      close();
+    } else {
+      refresh(true);
+      setOpen(true);
+    }
+  }, [open, close, refresh]);
 
   // Home (activeModule === null) is the one consolidated view — everywhere
   // else the bell only ever shows the current module's own reminders, per
@@ -247,7 +252,7 @@ export const ReminderBell = () => {
       <button
         ref={bellButtonRef}
         onClick={handleNotificationClick}
-        className="relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+        className={`relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors ${open && !closing ? "genie-rub" : ""}`}
         title="Reminders"
       >
         <ChromeIcons.bell size={18} style={{ color: scoped.length > 0 ? "hsl(var(--foreground))" : undefined }} />
@@ -263,16 +268,17 @@ export const ReminderBell = () => {
           {/* Mobile scrim — tapping outside the panel closes it */}
           <BodyPortal><div
             className="fixed inset-0 z-40 sm:hidden"
-            onClick={() => setOpen(false)}
+            onClick={close}
           /></BodyPortal>
 
           <div
             ref={panelRef}
             // Width inline: the small-screen rule in index.css caps w-[…] boxes inside the fixed top bar to their
             // parent's width, which squeezed this panel to the 32px bell on tablets.
-            style={{ ...accentVars, width: "min(calc(100vw - 1.5rem), 440px)" }}
-            className="rb-sheet fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50 flex flex-col animate-in fade-in duration-200"
+            style={{ width: "min(calc(100vw - 1.5rem), 440px)" }}
+            className="fixed sm:absolute left-1/2 sm:left-auto sm:right-0 top-16 sm:top-auto -translate-x-1/2 sm:translate-x-0 sm:mt-3 z-50"
           >
+          <div style={accentVars} className={`rb-sheet genie ${closing ? "genie-close" : "genie-open"} flex flex-col`}>
             {/* Title block: what this is, how many are waiting, and refresh */}
             <div className="rb-head">
               <div className="min-w-0">
@@ -341,7 +347,7 @@ export const ReminderBell = () => {
                             key={r.id}
                             type="button"
                             onClick={() => {
-                              setOpen(false);
+                              close();
                               navigate(r.path);
                             }}
                             className="rb-row"
@@ -368,6 +374,7 @@ export const ReminderBell = () => {
                 )
               )}
             </div>
+          </div>
           </div>
         </>
       )}
