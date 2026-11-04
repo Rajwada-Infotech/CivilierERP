@@ -244,7 +244,7 @@ const MASTERS = {
     fields: [
       { name: "LandCode", label: "Land ID", type: "text", max: 30, auto: "LND" },
       { name: "LandName", label: "Land title / name", type: "text", required: true, max: 200 },
-      { name: "EntryType", label: "Entry type", type: "select", required: true, options: ["Newly Acquired", "Existing / Backlog"], default: "Newly Acquired" },
+      { name: "EntryType", label: "Entry type", type: "select", required: true, options: ["New Acquisition", "Existing / Backlog"], default: "New Acquisition" },
       { name: "DistrictId", label: "District", type: "ref", ref: "district", required: true },
       { name: "SubDivisionId", label: "Sub-division", type: "ref", ref: "sub-division", filterBy: "DistrictId" },
       { name: "BlockId", label: "Block", type: "ref", ref: "block", filterBy: "DistrictId" },
@@ -284,6 +284,13 @@ const MASTERS = {
       ACTIVE,
     ],
     afterWrite: async (pool, req, row, before) => {
+      // The land is the record once an enquiry is converted: keep the enquiry's location (district, mouza, GPS)
+      // showing what the land now says, so the two lists never disagree.
+      if (row.EnquiryId) {
+        await pool.request().input("Enq", row.EnquiryId).input("D", row.DistrictId).input("M", row.MouzaId)
+          .input("Lat", row.GpsLatitude).input("Lng", row.GpsLongitude)
+          .query("UPDATE dbo.LegalLandEnquiry SET DistrictId = @D, MouzaId = @M, GpsLatitude = @Lat, GpsLongitude = @Lng WHERE EnquiryId = @Enq");
+      }
       if (!before) {
         await pool.request().input("Id", row.LandId).query(`
           UPDATE dbo.LegalLand
@@ -326,6 +333,7 @@ const MASTERS = {
     label: "EnquiryNo + ' - ' + LandLocation", orderBy: "EnquiryDate DESC, EnquiryId DESC",
     unique: [["EnquiryNo"], "This enquiry number already exists"],
     noDelete: true,
+    extras: [{ name: "LandCode", label: "Converted to land", sql: "(SELECT l.LandCode FROM dbo.LegalLand l WHERE l.LandId = t.LandId)" }],
     guard: async (pool, id, values) => {
       const r = await pool.request().input("Id", id).query("SELECT EnquiryStatus, (SELECT LandCode FROM dbo.LegalLand l WHERE l.LandId = e.LandId) AS LandCode FROM dbo.LegalLandEnquiry e WHERE EnquiryId = @Id");
       const row = r.recordset[0];
@@ -349,7 +357,8 @@ const MASTERS = {
       { name: "ContactNumber", label: "Contact number", type: "text", max: 15, pattern: "^[+]?[0-9 -]{8,15}$", patternMsg: "Enter a valid phone number" },
       { name: "ExpectedPrice", label: "Expected price (₹)", type: "decimal" },
       { name: "AssignedUserId", label: "Assigned employee", type: "ref", ref: "user", required: true },
-      { name: "EnquiryStatus", label: "Enquiry status", type: "select", required: true, options: ["New", "Under Review", "Interested", "Rejected", "On Hold", "Converted to Land Record"], default: "New" },
+      // "Converted to Land Record" is set only by Convert to land (and such an enquiry is read-only), so it is not offered here.
+      { name: "EnquiryStatus", label: "Enquiry status", type: "select", required: true, options: ["New", "Under Review", "Interested", "Rejected", "On Hold"], default: "New" },
       { name: "InitialDocFileId", label: "Initial document", type: "file" },
       { name: "InitialNotes", label: "Initial notes", type: "textarea", max: 2000 },
       ACTIVE,
@@ -1524,14 +1533,31 @@ const MASTERS = {
   };
   MASTERS["land-sale"] = {
     ...txn, title: "Sale", scope: { column: "TxnType", value: "Sale" },
-    desc: "The company selling this land (or part of it) after acquiring it. The same area cannot be sold twice.",
-    // Only an acquired land can be sold (bought through the pipeline up to step 23, or already owned — backlog),
-    // and never more than its unsold area.
+    desc: "The company selling land it owns, in full or in part. The same area cannot be sold twice.",
+    // Money received (verified payments against this sale) and what is still due.
+    extras: [
+      { name: "Received", label: "Received ₹ (verified)", sql: "ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0)" },
+      { name: "BalanceDue", label: "Balance due ₹", sql: "t.TotalValue - ISNULL((SELECT SUM(p.Amount) FROM dbo.LegalPayment p WHERE p.TransactionId = t.TransactionId AND p.IsActive = 1 AND p.VerificationStatus = N'Verified'), 0)" },
+    ],
+    // Once the sold area (registered / completed sales) covers the whole land, the land is marked disposed;
+    // cancelling such a sale puts it back to Owned.
+    afterWrite: async (pool, _req, row) => {
+      await pool.request().input("Land", row.LandId).query(`
+        DECLARE @land FLOAT = (SELECT l.Area * u.SqFtFactor FROM dbo.LegalLand l JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId WHERE l.LandId = @Land);
+        DECLARE @sold FLOAT = ISNULL((SELECT SUM(t.TxnArea * u.SqFtFactor) FROM dbo.LegalLandTransaction t JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = t.AreaUnitId
+                                      WHERE t.LandId = @Land AND t.TxnType = N'Sale' AND t.IsActive = 1 AND t.TxnStatus IN (N'Registered', N'Completed')), 0);
+        IF @land > 0 AND @sold >= @land * 0.999
+          UPDATE dbo.LegalLand SET LandStatus = N'Disposed / Transferred' WHERE LandId = @Land AND LandStatus <> N'Disposed / Transferred';
+        ELSE
+          UPDATE dbo.LegalLand SET LandStatus = N'Owned' WHERE LandId = @Land AND LandStatus = N'Disposed / Transferred';`);
+    },
+    // Only land the company owns can be sold, and never more than its unsold area.
     check: async (pool, values, id) => {
       const acquired = (await pool.request().input("Land", values.LandId).query(`
         SELECT TOP 1 1 AS ok FROM dbo.LegalLand l WHERE l.LandId = @Land AND (l.EntryType = N'Existing / Backlog'
+          OR l.LandStatus IN (N'Owned', N'Active', N'Registered', N'Mutated', N'In Dispute')
           OR EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = l.LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed'))`)).recordset[0];
-      if (!acquired) return "This land is not acquired yet — complete the purchase up to the ownership transfer (step 23) first";
+      if (!acquired) return "This land is not owned by the company yet — set its Land status to Owned (or Registered / Mutated) once the purchase is registered";
       return txn.check(pool, { ...values, TxnType: "Sale" }, id);
     },
     fields: base.map((f) => (f.name === "SellerNames" ? { ...f, label: "Seller (the company)" } : f)),
@@ -1540,8 +1566,8 @@ const MASTERS = {
 
   // Only land the company owns can be sold: acquired through the pipeline (step 23) or already owned (backlog).
   MASTERS["acquired-land"] = {
-    ...MASTERS.land, title: "Land the company owns (acquired at step 23, or existing / backlog land)", lookupOnly: true, check: undefined,
-    where: "({t}EntryType = N'Existing / Backlog' OR EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = {t}LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed'))",
+    ...MASTERS.land, title: "Land the company owns", lookupOnly: true, check: undefined,
+    where: "({t}EntryType = N'Existing / Backlog' OR {t}LandStatus IN (N'Owned', N'Active', N'Registered', N'Mutated', N'In Dispute') OR EXISTS (SELECT 1 FROM dbo.LegalWorkflowStepState s WHERE s.LandId = {t}LandId AND s.StepCode = N'OWNERSHIP_TRANSFER' AND s.Status = N'Completed'))",
   };
   MASTERS["land-sale"].fields = MASTERS["land-sale"].fields.map((f) =>
     (f.name === "LandId" ? { ...f, ref: "acquired-land", label: "Acquired land property" } : f));

@@ -94,14 +94,17 @@ export interface LandStats {
   onHold: number;
   pendingVerification: number;
   completed: number;
-  /** Existing / backlog land (already owned; no pipeline). */
-  backlogLands: number;
+  /** Existing / backlog land (already owned). */
+  backlogLands?: number;
+  /** Sale transactions, disposed / inactive land, and RS / LR records across all land. */
+  sales?: number; disposed?: number; rsRecords?: number; lrRecords?: number;
   recent: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null; IsOnHold: boolean; MouzaName: string | null; JLNo: string | null }[];
   allLands?: LandSummaryItem[];
   pendingRegistration: number;
   mutationPending: number;
   approvals: { Kind: string; N: number }[];
-  appointments: { AppointmentDate: string; AppointmentTime: string | null; TokenNo: string | null; OfficeName: string | null; LandId: number; LandCode: string; LandName: string }[];
+  /** Land waiting for record approval (Data Verification → L1 → L2), oldest first. */
+  awaitingApproval: { LandId: number; LandCode: string; LandName: string; WorkflowStatus: string | null; Stage: string; Since: string }[];
   payments: { PaymentDate: string; Amount: number; TransactionRef: string | null; LandId: number; LandCode: string; LandName: string }[];
   cases: { CaseNumber: string; CourtName: string; NextHearingDate: string | null; Status: string; LandId: number; LandCode: string }[];
   transfers: { EventDate: string; FromName: string; ToName: string; TransferType: string | null; LandId: number; LandCode: string }[];
