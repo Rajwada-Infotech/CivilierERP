@@ -9,9 +9,10 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { convertEnquiry, setEnquiryStatus } from "@/api/legalLandApi";
 import { askLegal } from "@/components/legal/LegalAsk";
 import { LegalMasterTable } from "../LegalMasterPage";
+import { openLegalMap } from "@/components/legal/LegalDocumentPreview";
 import { legalMasterByKey } from "../legalMasters";
 
-// Step 1 of the pipeline: land enquiries. Converting one creates the Land ID and opens its pipeline;
+// Land enquiries: a new land opportunity. Converting one creates the Land ID and opens its Land Profile;
 // a converted enquiry stays as it was, linked to its land.
 export default function LandEnquiryPage() {
   const entry = legalMasterByKey("land-enquiry")!;
@@ -21,7 +22,7 @@ export default function LandEnquiryPage() {
   const rights = usePageRights(entry.pageKey);
 
   const convert = async (id: number, no: string) => {
-    if (!(await askLegal({ title: `Convert enquiry ${no}?`, message: "A new Land ID is created and its pipeline opens. The enquiry becomes read-only.", confirmText: "Convert to land" }))) return;
+    if (!(await askLegal({ title: `Convert enquiry ${no}?`, message: "A new Land ID is created and its Land Profile opens. The enquiry becomes read-only.", confirmText: "Convert to land" }))) return;
     try {
       const r = await convertEnquiry(id);
       toast.success(r.message);
@@ -65,7 +66,7 @@ export default function LandEnquiryPage() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Legal", "Land Management", entry.label]} />
-      <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and pipeline." icon={MessageQuestion}>
+      <LegalShell title={entry.label} subtitle="New land opportunities. Convert one to create its Land ID and Land Profile." icon={MessageQuestion}>
         <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {([["New", "#d4d4d8"], ["Under Review", "#0ea5e9"], ["Interested", "#10b981"], ["On Hold", "#f59e0b"], ["Rejected", "#f43f5e"], ["Converted", "#7c4a2e"]] as const).map(([l, c]) => (
             <span key={l} className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: c }} />{l}</span>
@@ -75,13 +76,15 @@ export default function LandEnquiryPage() {
         <LegalMasterTable
           entry={entry}
           rowClassName={(raw) => STATUS_ROW[String(raw.EnquiryStatus)]}
+          // A converted enquiry is history: its details are kept and changed on the land it became.
+          rowLock={(raw) => (raw.LandId ? `Converted to ${String(raw.LandCode ?? "a land")} — edit the land (Land Register → Edit), not the enquiry` : null)}
           rowActions={(raw) => {
             const id = Number(raw.EnquiryId);
             const no = String(raw.EnquiryNo);
             const st = String(raw.EnquiryStatus);
             // Latitude / longitude entered → open the plot on Google Maps.
             const map = raw.GpsLatitude != null && raw.GpsLongitude != null && (
-              <a href={`https://www.google.com/maps?q=${raw.GpsLatitude},${raw.GpsLongitude}`} target="_blank" rel="noopener noreferrer" className={small} title="Open this plot on Google Maps">Map ↗</a>
+              <button onClick={() => openLegalMap(raw.GpsLatitude, raw.GpsLongitude, `${no} · map`)} className={small} title="Show this plot on Google Maps in the side panel">Map</button>
             );
             if (raw.LandId) {
               return <span className="inline-flex gap-1.5">{map}<button onClick={() => navigate(`/legal/land/properties/${raw.LandId}`)} className={small}>Open land</button></span>;

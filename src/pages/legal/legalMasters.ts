@@ -1,8 +1,8 @@
 import {
   Map1, Building, Shield, Home2, Layer, Global, UserTick, UserMinus, Crown1, People, Eye, Judge, Note1, Grid5, DocumentText, Ruler,
-  Building4, Link21, Book1, TaskSquare, DocumentCopy, ClipboardTick, InfoCircle, Timer1, MessageQuestion,
+  Building4, Link21, Book1, DocumentCopy, ClipboardTick, InfoCircle, MessageQuestion,
   Location, Routing, Category, Profile, ArrowSwapHorizontal, Personalcard, Courthouse, Bank, Status, MoneySend, Receipt1,
-  Wallet, ReceiptText, Copy, TrendUp, ShieldTick,
+  Wallet, Copy, TrendUp, ShieldTick,
 } from "iconsax-react";
 
 // The Legal masters and land registers, in menu order. Keys and page keys match backend/routes/legal/masterConfig.js;
@@ -65,14 +65,10 @@ export const LEGAL_MASTERS: LegalMasterEntry[] = [
   S("registration-office", "Deed Registration Office", "Deed & Registration", Building4, "ADSR / DSR / ARA offices"),
   S("deed-type", "Deed Type", "Deed & Registration", Book1, "Sale, gift, partition, POA…"),
   S("document-type", "Legal Document Type", "Deed & Registration", DocumentCopy, "Evidence catalogue & retention"),
-  S("task-type", "Registration Task Type", "Deed & Registration", TaskSquare, "Deed type + checklist + approval route"),
-  S("fee-type", "Registration Fee Type", "Deed & Registration", ReceiptText, "Stamp duty, registration, scanning fee"),
   S("portal-link", "Official Portal Link", "Deed & Registration", Link21, "Verified government URLs"),
   S("checklist-template", "Document Checklist Template", "Deed & Registration", ClipboardTick, "Versioned document requirements"),
   S("checklist-item", "Checklist Item", "Deed & Registration", ClipboardTick, "Required / conditional / optional rules"),
   // ── Setup: Workflow ──
-  S("status-reason", "Status & Reason", "Workflow", InfoCircle, "Statuses, return & missing reasons"),
-  S("reminder-sla", "Reminder & SLA", "Workflow", Timer1, "Follow-up & escalation rules"),
   S("approval-authority", "Approval Control", "Workflow", ShieldTick, "Who verifies and who approves at L1 / L2 — admin only"),
   // ── Setup: Parties ──
   S("buyer", "Buyer", "Parties", UserTick, "PAN, Aadhaar & land documents"),

@@ -83,7 +83,7 @@ export default function LandPropertyListPage() {
           you have; ownership history, documents, legal records, loans, mutations, payments and tax can be added later from the
           Land Profile. <b className="text-foreground">Buying new land?</b> Start it from{" "}
           <button className="underline hover:text-foreground" onClick={() => navigate("/legal/land/enquiries")}>Land Enquiries</button>{" "}
-          — it joins this register as Newly Acquired once approved.
+          — it joins this register as New Acquisition once converted.
         </p>
         <div className="mb-3 flex flex-wrap items-center gap-1.5">
           <span className="mr-1 text-xs text-muted-foreground">Show in the list below:</span>
