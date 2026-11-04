@@ -221,9 +221,14 @@ async function submitForApproval(pool, bookingId, userEmail, userRole, userId) {
     if (locked.WorkflowStage !== STAGE_REVIEW) {
       throw Object.assign(new Error(`Booking has already been sent — it is at '${stageLabel(locked.WorkflowStage)}'`), { status: 409 });
     }
-    const open = (await tx.request().input("aid", sql.Int, row.ApplicationId).query(`
+    // Only the items that apply (ensureChecklistRows above) — a row left from
+    // data since removed (e.g. parking taken off) is not on the checklist and
+    // must not stop the send.
+    const lockReq = tx.request().input("aid", sql.Int, row.ApplicationId);
+    const keyParams = checklistItems.map((it, i) => { lockReq.input(`k${i}`, sql.NVarChar(50), it.ItemKey); return `@k${i}`; });
+    const open = keyParams.length ? (await lockReq.query(`
       SELECT COUNT(*) AS N FROM dbo.CrmApplicationVerificationChecklist WITH (UPDLOCK, HOLDLOCK)
-      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus <> 'Checked'`)).recordset[0].N;
+      WHERE ApplicationId = @aid AND Level = 1 AND CheckStatus <> 'Checked' AND ItemKey IN (${keyParams.join(", ")})`)).recordset[0].N : 0;
     if (open > 0) {
       throw Object.assign(new Error(`Complete the data review checklist first — ${open} item(s) still not checked`), { status: 400 });
     }

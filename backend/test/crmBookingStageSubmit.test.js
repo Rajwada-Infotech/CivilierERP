@@ -123,6 +123,33 @@ describe("crmBookingStageService.submitForApproval", () => {
     expect(mockTx.commit).not.toHaveBeenCalled();
   });
 
+  it("a leftover row for an item that no longer applies does not stop the send", async () => {
+    // The page shows 7 of 7; an 8th row (e.g. parking since removed) is still Pending.
+    let lockedQuery = null;
+    const { mockPool, mockTx } = createMockPool();
+    const req0 = mockTx.request;
+    mockTx.request = () => {
+      const r = req0();
+      const q = r.query;
+      r.query = jest.fn(async (s) => {
+        if (s.includes("CrmApplicationVerificationChecklist WITH (UPDLOCK, HOLDLOCK)")) {
+          lockedQuery = s;
+          return { recordset: [{ N: s.includes("ItemKey IN (@k0, @k1)") ? 0 : 1 }] };
+        }
+        return q(s);
+      });
+      return r;
+    };
+    ensureChecklistRows.mockResolvedValue([
+      { ItemKey: "ApplicantKyc", CheckStatus: "Checked" },
+      { ItemKey: "ProjectUnitRate", CheckStatus: "Checked" },
+    ]);
+    const res = await submitForApproval(mockPool, 10, "staff@example.com", "staff", 42);
+    expect(res.ok).toBe(true);
+    expect(lockedQuery).toMatch(/ItemKey IN \(@k0, @k1\)/);
+    expect(mockTx.commit).toHaveBeenCalled();
+  });
+
   it("blocks submission if total value is 0", async () => {
     const { mockPool } = createMockPool({ totalValue: 0 });
     ensureChecklistRows.mockResolvedValue([
