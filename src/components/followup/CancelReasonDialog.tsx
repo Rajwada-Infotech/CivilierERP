@@ -50,7 +50,7 @@ export const CancelReasonDialog: React.FC<{
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-red-600">
+          <DialogTitle className="flex items-center gap-2 text-destructive">
             <XCircle size={16} /> Cancel Task
           </DialogTitle>
           <DialogDescription>
@@ -60,7 +60,7 @@ export const CancelReasonDialog: React.FC<{
 
         <div>
           <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1.5">
-            Cancel Reason <span className="text-red-500">*</span>
+            Cancel Reason <span className="text-destructive">*</span>
           </label>
           <select
             value={reasonId}
@@ -74,7 +74,7 @@ export const CancelReasonDialog: React.FC<{
             ))}
           </select>
           {!isLoading && templates.length === 0 && (
-            <p className="text-xs text-amber-600 mt-1.5">
+            <p className="text-xs text-muted-foreground mt-1.5">
               No active Cancel Templates configured. Ask an admin to add one under Setup → Cancel Template.
             </p>
           )}

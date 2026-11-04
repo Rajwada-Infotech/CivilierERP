@@ -1,3 +1,4 @@
+import { SheetSection, SheetStats, STATUS_TONES } from "@/components/followup/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -24,7 +25,6 @@ import {
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ExportMenu } from "@/components/ExportMenu";
-import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +39,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const REPORT_API = "/api/entry-type-doc-followup-report";
-const ACCENT = "#0d9488";
+const ACCENT = "hsl(var(--foreground))";
 
 const STATUSES = ["Active", "Hold", "Cancel", "Closed"] as const;
 const STATUS_LABELS: Record<string, string> = {
@@ -48,12 +48,7 @@ const STATUS_LABELS: Record<string, string> = {
   Cancel: "Cancelled",
   Closed: "Completed",
 };
-const STATUS_COLORS: Record<string, string> = {
-  Active: "#3b82f6",
-  Hold: "#f59e0b",
-  Cancel: "#64748b",
-  Closed: "#22c55e",
-};
+const STATUS_COLORS = STATUS_TONES;
 
 interface Company {
   id: number;
@@ -169,13 +164,8 @@ function useGlass() {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
   const cardStyle = {
-    background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
-    border: `1px solid ${ACCENT}26`,
-    backdropFilter: "blur(16px) saturate(150%)",
-    WebkitBackdropFilter: "blur(16px) saturate(150%)",
-    boxShadow: isDark
-      ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : `0 4px 24px ${ACCENT}0f, inset 0 1px 0 rgba(255,255,255,0.9)`,
+    background: "hsl(var(--card))",
+    border: `1px solid hsl(var(--foreground) / 0.15)`,
   };
   return { isDark, cardStyle };
 }
@@ -184,7 +174,7 @@ function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
       className="inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
-      style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
+      style={{ borderColor: `color-mix(in srgb, ${color} 30%, transparent)`, color, background: `color-mix(in srgb, ${color} 10%, transparent)` }}
     >
       {label}
     </span>
@@ -384,28 +374,24 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
 
       <div id="etdf-printable">
         {!isLoading && rows.length === 0 && (
-          <div className="rounded-xl border border-amber-400/30 bg-[#ffe2021a] px-4 py-3 flex items-center gap-2 text-sm text-amber-600 mb-5">
+          <div className="rounded-xl border border-muted-foreground/30 bg-muted px-4 py-3 flex items-center gap-2 text-sm text-muted-foreground mb-5">
             <AlertCircle size={16} className="shrink-0" />
             <span>No follow-up records match the selected filters.</span>
           </div>
         )}
 
         {/* ── Summary ──────────────────────────────────────────────────── */}
-        <GlassSection title="Overview" icon={ClipboardList} accentColor={ACCENT}>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-            {isLoading
-              ? Array.from({ length: 7 }).map((_, i) => <GlassCardSkeleton key={i} />)
-              : [
-                  { label: "Entry Types", value: summary.totalEntryTypes, icon: Layers, accentColor: ACCENT },
-                  { label: "Documents", value: summary.totalDocuments, icon: FileText, accentColor: "#3b82f6" },
-                  { label: "Follow-Up Records", value: summary.totalFollowUps, icon: ClipboardList, accentColor: "#8b5cf6" },
-                  { label: "Pending", value: summary.pending, icon: Clock, accentColor: "#f59e0b" },
-                  { label: "Completed", value: summary.completed, icon: CheckCircle2, accentColor: "#22c55e" },
-                  { label: "Overdue", value: summary.overdue, icon: AlertTriangle, accentColor: "#ef4444" },
-                  { label: "Cancelled", value: summary.cancelled, icon: XCircle, accentColor: "#64748b" },
-                ].map((s) => <GlassCard key={s.label} {...s} />)}
-          </div>
-        </GlassSection>
+        <SheetSection tag="A" title="Overview">
+          <SheetStats loading={isLoading} items={[
+                  { label: "Entry Types", value: summary.totalEntryTypes },
+                  { label: "Documents", value: summary.totalDocuments },
+                  { label: "Follow-Up Records", value: summary.totalFollowUps },
+                  { label: "Pending", value: summary.pending },
+                  { label: "Completed", value: summary.completed },
+                  { label: "Overdue", value: summary.overdue, red: summary.overdue > 0 },
+                  { label: "Cancelled", value: summary.cancelled },
+                ]} />
+        </SheetSection>
 
         {/* ── Filters ──────────────────────────────────────────────────── */}
         <div className="no-print rounded-xl p-4 my-5" style={cardStyle}>
@@ -459,12 +445,12 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
               </div>
             </FilterField>
           </div>
-          {dateError && <p className="text-xs mt-2" style={{ color: "#ef4444" }}>{dateError}</p>}
+          {dateError && <p className="text-xs mt-2" style={{ color: "hsl(var(--destructive))" }}>{dateError}</p>}
         </div>
 
         {/* ── Drill-down tree ──────────────────────────────────────────── */}
         <div className="rounded-xl overflow-hidden" style={cardStyle}>
-          <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
+          <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: isDark ? `hsl(var(--foreground) / 0.15)` : `hsl(var(--foreground) / 0.12)` }}>
             <ListTree size={14} style={{ color: ACCENT }} />
             <span className="text-xs font-heading font-semibold text-foreground">Entry Type → Document → Follow-Ups</span>
           </div>
@@ -488,8 +474,8 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setDetailGroup({ title: g.label, rows: g.rows })}
-                        className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md hover:underline"
-                        style={{ color: ACCENT, background: `${ACCENT}1A` }}
+                        className="text-xs tabular-nums font-semibold px-2 py-0.5 rounded-md hover:underline"
+                        style={{ color: ACCENT, background: `hsl(var(--foreground) / 0.10)` }}
                       >
                         {g.rows.length}
                       </button>
@@ -503,8 +489,8 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setDetailGroup({ title: `${g.label} — ${d.label}`, rows: d.rows })}
-                              className="text-[0.6875rem] font-mono font-semibold px-2 py-0.5 rounded-md hover:underline"
-                              style={{ color: ACCENT, background: `${ACCENT}14` }}
+                              className="text-[0.6875rem] tabular-nums font-semibold px-2 py-0.5 rounded-md hover:underline"
+                              style={{ color: ACCENT, background: `hsl(var(--foreground) / 0.08)` }}
                             >
                               {d.rows.length}
                             </button>
@@ -558,17 +544,17 @@ const EntryTypeDocFollowUpReport: React.FC = () => {
                 {detailGroup?.rows.map((r) => (
                   <tr key={r.FollowUpId} className="border-b border-border/20 last:border-0 hover:bg-muted/30">
                     <td className="py-2 pr-3">
-                      <button type="button" onClick={() => setSelectedTaskId(String(r.TaskId))} className="font-mono hover:underline" style={{ color: ACCENT }} title="Open task">
+                      <button type="button" onClick={() => setSelectedTaskId(String(r.TaskId))} className="tabular-nums hover:underline" style={{ color: ACCENT }} title="Open task">
                         {r.DocumentId || `#${r.TaskId}`}
                       </button>
                     </td>
-                    <td className="py-2 pr-3 font-mono text-muted-foreground">{r.TaskId}</td>
+                    <td className="py-2 pr-3 tabular-nums text-muted-foreground">{r.TaskId}</td>
                     <td className="py-2 pr-3">{r.CompanyName || "—"}</td>
                     <td className="py-2 pr-3">{r.ProjectName || "—"}</td>
                     <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(r.FollowUpDate)}</td>
                     <td className="py-2 pr-3">{r.FollowUpUserName || "—"}</td>
-                    <td className="py-2 pr-3"><Badge label={STATUS_LABELS[r.TaskStatus] || r.TaskStatus} color={STATUS_COLORS[r.TaskStatus] || "#64748b"} /></td>
-                    <td className="py-2 pr-3 font-mono">{r.FollowUpAttendCount}</td>
+                    <td className="py-2 pr-3"><Badge label={STATUS_LABELS[r.TaskStatus] || r.TaskStatus} color={STATUS_COLORS[r.TaskStatus] || "hsl(var(--muted-foreground))"} /></td>
+                    <td className="py-2 pr-3 tabular-nums">{r.FollowUpAttendCount}</td>
                   </tr>
                 ))}
                 {!detailGroup?.rows.length && (

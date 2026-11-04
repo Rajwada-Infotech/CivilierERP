@@ -1,3 +1,4 @@
+import { PRIORITY_TONES } from "@/components/followup/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
@@ -16,15 +17,15 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"] as const;
 
-// Same teal identity as the rest of the Follow-Up module — kept in sync
+// Ink on paper, like the rest of the Follow-Up module
 // deliberately (see FollowUp.tsx/FollowupShell.tsx).
-const ACCENT = "#0d9488";
-const ACCENT_SOFT = "#2dd4bf";
+const ACCENT = "hsl(var(--foreground))";
+const ACCENT_SOFT = "hsl(var(--foreground))";
 
 const PRIORITY_COLORS: Record<(typeof PRIORITIES)[number], string> = {
-  "Very Important": "#ef4444",
-  Important: "#22c55e",
-  Normal: "#3b82f6",
+  "Very Important": "hsl(var(--destructive))",
+  Important: "hsl(var(--foreground))",
+  Normal: "hsl(var(--primary))",
 };
 
 interface ClosedTask {
@@ -69,18 +70,12 @@ function useGlass() {
   const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
-        background: "rgba(6, 20, 19, 0.45)",
-        border: "1px solid rgba(13,148,136,0.18)",
-        backdropFilter: "blur(20px) saturate(160%)",
-        WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.18)",
       }
     : {
-        background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(13,148,136,0.20)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow: "0 8px 32px rgba(13,148,136,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.20)",
       };
   return { isDark, glassCard };
 }
@@ -116,9 +111,9 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
       <td className="pl-3 pr-2 py-2.5 align-top relative">
         <div
           className="absolute left-0 top-0 bottom-0 w-0.5"
-          style={{ background: "linear-gradient(to bottom, transparent 10%, #64748b 30%, #64748b 70%, transparent 90%)" }}
+          style={{ background: "transparent" }}
         />
-        <span className="font-mono text-[0.625rem] text-muted-foreground uppercase tracking-widest">
+        <span className="tabular-nums text-[0.625rem] text-muted-foreground uppercase tracking-widest">
           {task.TaskNo || "—"}
         </span>
         <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
@@ -137,7 +132,7 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
               <span
                 key={tag.Id}
                 className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.5625rem] font-medium truncate max-w-[100px]"
-                style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
+                style={{ background: "hsl(var(--foreground) / 0.12)", border: "1px solid hsl(var(--foreground) / 0.3)", color: ACCENT }}
                 title={tag.Name}
               >
                 {tag.Name}
@@ -149,7 +144,7 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
       <td className="px-2 py-2.5 align-top text-xs font-medium text-muted-foreground whitespace-nowrap">
         <span
           className="inline-flex items-center gap-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md mb-1"
-          style={{ background: "rgba(100,116,139,0.14)", color: "#64748b" }}
+          style={{ background: "hsl(var(--muted-foreground) / 0.14)", color: "hsl(var(--muted-foreground))" }}
         >
           <CheckCircle2 size={10} /> Closed
         </span>
@@ -158,12 +153,12 @@ const ClosedTaskRow: React.FC<{ task: ClosedTask; index: number; onClick: () => 
       <td className="px-2 py-2.5 align-top">
         <span
           className="inline-flex items-center gap-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
-          style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
+          style={{ borderColor: `color-mix(in srgb, ${color} 30%, transparent)`, color, background: `color-mix(in srgb, ${color} 10%, transparent)` }}
         >
           {task.Priority}
         </span>
       </td>
-      <td className="px-2 py-2.5 align-top text-xs text-muted-foreground font-mono whitespace-nowrap">
+      <td className="px-2 py-2.5 align-top text-xs text-muted-foreground tabular-nums whitespace-nowrap">
         {task.CaseNumber || "—"}
       </td>
       <td className="pl-2 pr-3 py-2.5 align-top w-[150px]" onClick={(e) => e.stopPropagation()}>
@@ -278,7 +273,7 @@ const ClosedTasks: React.FC = () => {
         <div className="flex items-center justify-center py-16">
           <div
             className="w-5 h-5 rounded-full border-2 animate-spin"
-            style={{ borderColor: "rgba(13,148,136,0.2)", borderTopColor: ACCENT }}
+            style={{ borderColor: "hsl(var(--foreground) / 0.2)", borderTopColor: ACCENT }}
           />
         </div>
       ) : filtered.length === 0 ? (
@@ -290,7 +285,7 @@ const ClosedTasks: React.FC = () => {
         >
           <div
             className="w-11 h-11 rounded-xl flex items-center justify-center mb-1"
-            style={{ background: "rgba(13,148,136,0.14)", border: "1px solid rgba(13,148,136,0.3)" }}
+            style={{ background: "hsl(var(--foreground) / 0.14)", border: "1px solid hsl(var(--foreground) / 0.3)" }}
           >
             <ClipboardList size={18} style={{ color: ACCENT_SOFT }} />
           </div>
@@ -304,13 +299,13 @@ const ClosedTasks: React.FC = () => {
               Closed
             </p>
             <span className="text-[0.625rem] text-muted-foreground">{filtered.length}</span>
-            <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(13,148,136,0.25), transparent)" }} />
+            <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, hsl(var(--foreground) / 0.25), transparent)" }} />
           </div>
           <div className="rounded-xl overflow-hidden" style={glassCard}>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px]">
                 <thead>
-                  <tr className="border-b" style={{ borderColor: "rgba(13,148,136,0.15)" }}>
+                  <tr className="border-b" style={{ borderColor: "hsl(var(--foreground) / 0.15)" }}>
                     <th className={`${TABLE_HEAD_CLS} pl-3`}>Task</th>
                     <th className={TABLE_HEAD_CLS}>Status / Closed</th>
                     <th className={TABLE_HEAD_CLS}>Priority</th>

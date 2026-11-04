@@ -1,3 +1,4 @@
+import { PRIORITY_TONES } from "@/components/followup/sheetParts";
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -35,14 +36,10 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const API = "/api/task-transfer";
-const ACCENT = "#0d9488";
-const ACCENT_SOFT = "#2dd4bf";
+const ACCENT = "hsl(var(--foreground))";
+const ACCENT_SOFT = "hsl(var(--foreground))";
 
-const PRIORITY_COLORS: Record<string, string> = {
-  "Very Important": "#ef4444",
-  Important: "#22c55e",
-  Normal: "#3b82f6",
-};
+const PRIORITY_COLORS = PRIORITY_TONES;
 
 interface TransferUser {
   id: number;
@@ -122,18 +119,12 @@ function useGlass() {
   const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
-        background: "rgba(6, 20, 19, 0.45)",
-        border: "1px solid rgba(13,148,136,0.18)",
-        backdropFilter: "blur(20px) saturate(160%)",
-        WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.18)",
       }
     : {
-        background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(13,148,136,0.20)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
-        boxShadow: "0 8px 32px rgba(13,148,136,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--foreground) / 0.20)",
       };
   return { isDark, glassCard };
 }
@@ -147,17 +138,17 @@ const TaskRow: React.FC<{
   return (
     <label
       className="flex items-start gap-2.5 rounded-lg px-2.5 py-2 cursor-pointer transition-colors hover:bg-primary/5"
-      style={checked ? { background: "rgba(13,148,136,0.10)" } : undefined}
+      style={checked ? { background: "hsl(var(--foreground) / 0.10)" } : undefined}
     >
       <Checkbox checked={checked} onCheckedChange={onToggle} className="mt-0.5" />
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[0.6875rem] font-mono text-muted-foreground uppercase tracking-widest truncate">
+          <span className="text-[0.6875rem] tabular-nums text-muted-foreground uppercase tracking-widest truncate">
             {task.TaskNo || `#${task.Id}`}
           </span>
           <span
             className="shrink-0 inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border"
-            style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
+            style={{ borderColor: `color-mix(in srgb, ${color} 30%, transparent)`, color, background: `color-mix(in srgb, ${color} 10%, transparent)` }}
           >
             {task.Priority}
           </span>
@@ -166,7 +157,7 @@ const TaskRow: React.FC<{
         <div className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
           <span
             className="inline-flex items-center px-1.5 py-0.5 rounded-md"
-            style={{ background: "rgba(100,116,139,0.14)", color: "#64748b" }}
+            style={{ background: "hsl(var(--muted-foreground) / 0.14)", color: "hsl(var(--muted-foreground))" }}
           >
             {task.Status}
           </span>
@@ -385,7 +376,7 @@ const TaskTransfer: React.FC = () => {
             variant="outline"
             size="icon"
             className="rounded-full h-11 w-11 border-2"
-            style={{ borderColor: `${ACCENT}55` }}
+            style={{ borderColor: `hsl(var(--foreground) / 0.33)` }}
             disabled={!bothSelected || checkedA.size === 0}
             onClick={() => setConfirmDirection("AtoB")}
             title={`Transfer selected tasks to ${userBName}`}
@@ -396,7 +387,7 @@ const TaskTransfer: React.FC = () => {
             variant="outline"
             size="icon"
             className="rounded-full h-11 w-11 border-2"
-            style={{ borderColor: `${ACCENT}55` }}
+            style={{ borderColor: `hsl(var(--foreground) / 0.33)` }}
             disabled={!bothSelected || checkedB.size === 0}
             onClick={() => setConfirmDirection("BtoA")}
             title={`Transfer selected tasks to ${userAName}`}
@@ -422,7 +413,7 @@ const TaskTransfer: React.FC = () => {
       </div>
 
       {sameUserPicked && (
-        <p className="text-xs text-center" style={{ color: "#ef4444" }}>
+        <p className="text-xs text-center" style={{ color: "hsl(var(--destructive))" }}>
           User 1 and User 2 must be different.
         </p>
       )}
@@ -459,7 +450,7 @@ const TaskTransfer: React.FC = () => {
                 {history.map((h) => (
                   <tr key={h.Id} className="border-b border-border/20 last:border-0">
                     <td className="py-2 pr-3">
-                      <span className="font-mono text-muted-foreground">{h.TaskNo || `#${h.TaskId}`}</span>
+                      <span className="tabular-nums text-muted-foreground">{h.TaskNo || `#${h.TaskId}`}</span>
                       <span className="block text-foreground truncate max-w-[220px]">{h.TaskSubject}</span>
                     </td>
                     <td className="py-2 pr-3 text-foreground">{h.FromUserName || "—"}</td>
