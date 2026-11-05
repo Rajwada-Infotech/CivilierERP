@@ -414,6 +414,57 @@ router.get("/stats", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   }
 });
 
+// GET /api/legal/land/project-map: every company land with the project it serves. Complete = fully approved (L2);
+// everything else is under process. Cancelled lands are left out; sold / transferred ones are marked.
+router.get("/project-map", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
+  try {
+    const pool = getPool();
+    const lands = (await pool.request().query(`
+      SELECT l.LandId, l.LandCode, l.LandName, l.ProjectId, p.name AS ProjectName, m.MouzaName, d.DistrictName,
+             CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName, l.EntryType, l.LandStatus, l.WorkflowStatus,
+             l.VerificationStatus, l.L1Status, l.L2Status, l.IsOnHold,
+             CAST(CASE WHEN l.L2Status = 'Approved' THEN 1 ELSE 0 END AS BIT) AS IsComplete,
+             (SELECT COUNT(*) FROM dbo.LegalLandDocument x WHERE x.LandId = l.LandId AND x.IsActive = 1) AS Documents,
+             (SELECT STRING_AGG(r.OwnerName, ', ') FROM dbo.LegalOwnershipRecord r WHERE r.LandId = l.LandId AND r.IsActive = 1 AND r.ValidTo IS NULL) AS CurrentOwners
+      FROM dbo.LegalLand l
+      LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId
+      LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
+      LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
+      WHERE l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0
+      ORDER BY p.name, l.LandCode`)).recordset;
+    const projects = (await pool.request().query("SELECT id, name FROM dbo.enterprise WHERE business_type = 'P' ORDER BY name")).recordset;
+    res.json({ lands, projects });
+  } catch (err) {
+    console.error("[legal-land] project-map:", err.message);
+    res.status(500).json({ error: "Could not load the land-project map" });
+  }
+});
+
+// PUT /api/legal/land/:id/project { projectId | null }: put a land under a project, or take it off.
+router.put("/:id/project", requirePageRight(LAND_PAGE, "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const projectId = req.body?.projectId ? parseInt(req.body.projectId, 10) : null;
+  if (!id) return res.status(400).json({ error: "Invalid land" });
+  try {
+    const pool = getPool();
+    if (projectId) {
+      const ok = await pool.request().input("p", sql.Int, projectId).query("SELECT 1 AS x FROM dbo.enterprise WHERE id = @p AND business_type = 'P'");
+      if (!ok.recordset.length) return res.status(400).json({ error: "Project not found" });
+    }
+    const old = (await pool.request().input("id", sql.Int, id).query("SELECT ProjectId, L2Status FROM dbo.LegalLand WHERE LandId = @id AND IsActive = 1")).recordset[0];
+    if (!old) return res.status(404).json({ error: "Land not found" });
+    // Only fully approved land (L2) goes under a project; taking a land off its project is always allowed.
+    if (projectId && old.L2Status !== "Approved") return res.status(400).json({ error: "Only approved land (L2 approved) can be mapped to a project" });
+    await pool.request().input("id", sql.Int, id).input("p", sql.Int, projectId).input("u", sql.Int, req.user?.userId || null)
+      .query("UPDATE dbo.LegalLand SET ProjectId = @p, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @u WHERE LandId = @id");
+    await writeAudit(pool, req, { action: projectId ? "Land mapped to project" : "Land removed from project", entityType: "Land Property", entityId: id, landId: id, oldValue: { projectId: old.ProjectId }, newValue: { projectId } });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[legal-land] set project:", err.message);
+    res.status(500).json({ error: "Could not change the land's project" });
+  }
+});
+
 // GET /api/legal/land/pending-queue: All land records waiting for Verification or L1/L2 Approval
 router.get("/pending-queue", requirePageRight(LAND_PAGE, "view"), async (_req, res) => {
   try {
