@@ -21,6 +21,14 @@ const REPORTS = [
               FROM dbo.LegalOwnershipRecord r WHERE r.LandId = l.LandId AND r.IsActive = 1 AND r.ValidTo IS NULL) AS [Current owners]
     FROM dbo.LegalLand l LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId LEFT JOIN dbo.LegalDistrict d ON d.DistrictId = l.DistrictId
     LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId WHERE l.IsActive = 1 ORDER BY l.LandCode` },
+  { key: "project-land", group: "Land", title: "Project-wise Land", sql: `
+    SELECT ISNULL(p.name, N'(not mapped)') AS Project, ${LAND}, m.MouzaName AS Mouza, CAST(l.Area AS DECIMAL(18,4)) AS Area, u.UnitName AS Unit,
+           CASE WHEN l.L2Status = 'Approved' THEN N'Complete' ELSE N'Under process' END AS [Position],
+           CASE WHEN l.IsOnHold = 1 THEN N'On hold' ELSE l.WorkflowStatus END AS [Approval status], l.LandStatus AS [Land status],
+           (SELECT COUNT(*) FROM dbo.LegalLandDocument x WHERE x.LandId = l.LandId AND x.IsActive = 1) AS Documents
+    FROM dbo.LegalLand l LEFT JOIN dbo.enterprise p ON p.id = l.ProjectId LEFT JOIN dbo.LegalMouza m ON m.MouzaId = l.MouzaId
+    LEFT JOIN dbo.LegalAreaUnit u ON u.AreaUnitId = l.AreaUnitId
+    WHERE l.IsActive = 1 AND ISNULL(l.IsCancelled, 0) = 0 ORDER BY CASE WHEN p.name IS NULL THEN 1 ELSE 0 END, p.name, l.LandCode` },
   { key: "enquiry-register", group: "Land", title: "Land Enquiry Register", sql: `
     SELECT e.EnquiryNo AS [Enquiry], e.EnquiryDate AS [Date], s.Name AS Source, e.LandLocation AS Location, m.MouzaName AS Mouza,
            e.ContactPerson AS Contact, e.ExpectedPrice AS [Expected price], e.EnquiryStatus AS Status, l.LandCode AS [Land ID]

@@ -23,6 +23,7 @@ const legal = (key: string, label: string, description: string, columns: string[
 
 export const LEGAL_REPORTS: ReportDef[] = [
   legal("land-register", "Land Property Register", "Every land with location, area, entry type and status", ["Land ID","Land","Mouza","District","Area","Unit","Entry type","Land status","Approval status","Current owners"]),
+  legal("project-land", "Project-wise Land", "Which land is under which project, complete or under process", ["Project","Land ID","Land","Mouza","Area","Unit","Position","Approval status","Land status","Documents"]),
   legal("enquiry-register", "Land Enquiry Register", "All land enquiries with source, status and the land they became", ["Enquiry","Date","Source","Location","Mouza","Contact","Expected price","Status","Land ID"]),
   legal("current-ownership", "Current Ownership", "Who owns each land now, with shares", ["Land ID","Land","Owner","Father / husband","Share %","Since","Verification"]),
   legal("ownership-history", "Complete Ownership History", "The full chain of owners of each land", ["Land ID","Land","Date","Transfer","From","To","Share %","Document no.","Verification"]),
