@@ -16,7 +16,7 @@ const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking
 const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
-const { areEarlierMilestonesCoveredByOnAccount, getBookingOnAccountCoverage, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
+const { areEarlierMilestonesCoveredByOnAccount, getMilestoneMoneyStages, pendingVerificationEntries, returnedEntries } = require("../services/crmOnAccountCoverage");
 const { getBookingFunding, onAccountAvailableSql, onAccountWithAvailableSql } = require("../services/crmPaymentFunding");
 const { bulkDemandSchema } = require("../validation/crmBookingSchemas");
 const ON_ACCOUNT_AVAILABLE_SQL = onAccountAvailableSql("o");
@@ -1271,25 +1271,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
     // once the WHOLE booking is funded — surfaced per-row so the UI can show
     // "customer has paid this" transparently instead of a misleading
     // Pending/Overdue on money that's already, verifiably, in hand.
-    const { milestones: coverage } = await getBookingOnAccountCoverage(pool, bid);
-    const coverageById = new Map(coverage.map((c) => [c.Id, c.VirtuallyCovered]));
-    // The same, counting money entered but not yet verified by Finance.
-    const { milestones: entered } = await getBookingOnAccountCoverage(pool, bid, { withPendingVerification: true });
-    const enteredById = new Map(entered.map((c) => [c.Id, c.VirtuallyCovered]));
-
-    // Each milestone's money stage — one answer, so the screen never guesses:
-    //   Adjusted        settled on the milestone
-    //   Verified        Finance-verified money held On Account covers it
-    //   InVerification  covered once the entries waiting for Finance are verified
-    //   null            nothing entered for it yet
-    const stageOf = (m) => {
-      if (m.Status === "Waived") return "Waived";
-      if (m.Status === CrmStatus.PAID || Number(m.AmountPaid || 0) >= Number(m.AmountDue || 0)) return "Adjusted";
-      if (coverageById.get(m.Id)) return "Verified";
-      if (enteredById.get(m.Id)) return "InVerification";
-      return null;
-    };
-    const milestones = milRes.recordset.map((m) => ({ ...m, VirtuallyCovered: !!coverageById.get(m.Id), MoneyStage: stageOf(m) }));
+    // Each milestone's money stage (getMilestoneMoneyStages: the one rule every screen uses).
+    const { milestones: staged } = await getMilestoneMoneyStages(pool, bid);
+    const stageById = new Map(staged.map((c) => [c.Id, c]));
+    const milestones = milRes.recordset.map((m) => {
+      const c = stageById.get(m.Id);
+      return { ...m, VirtuallyCovered: !!c?.VirtuallyCovered, HeldOnAccount: c?.HeldOnAccount || 0, MoneyStage: c ? c.MoneyStage : null };
+    });
     // Overdue = past due with no money for it, verified or entered.
     const overdue = milestones.filter((m) => m.MoneyStage == null && m.DueDate && new Date(m.DueDate) < new Date()).length;
 

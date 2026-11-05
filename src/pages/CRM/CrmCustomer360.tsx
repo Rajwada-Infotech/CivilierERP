@@ -20,6 +20,7 @@ import {
 } from "@/components/crm/CrmDataTable";
 import { fmtRupees } from "@/components/crm/FinancialStatusBar";
 import { round2 } from "@/lib/crmPriceQuote";
+import { MONEY_STAGE, isOverdue } from "./payments/config";
 
 const API = "/api/crm/customer-360";
 const PREFS_KEY = "crm-customer-360-grid";
@@ -75,7 +76,6 @@ const fmt = (n: number | null | undefined) => (n != null ? fmtRupees(Number(n)) 
 const dt = (v: any) => (v ? new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const num = "tabular-nums";
 const unitLabel = (u: Unit) => [u.ProjectName, u.UnitNo].filter(Boolean).join(" · ") || "—";
-const isOverdue = (m: any, today: Date) => m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < today;
 
 // ── Customer list columns (also the Excel export's columns) ───────────────────
 const GRID_COLS: GridCol<CustomerRow>[] = [
@@ -289,9 +289,9 @@ const CustomerTimeline: React.FC<{ data: any }> = ({ data }) => {
 // ── One booking with its ledger ──────────────────────────────────────────────
 const BookingLedger: React.FC<{ b: any; expanded: boolean; onToggle: () => void }> = ({ b, expanded, onToggle }) => {
   const navigate = useNavigate();
-  const today = new Date();
   const milestones = b.milestones || [];
-  const overdueCount = milestones.filter((m: any) => isOverdue(m, today)).length;
+  const coveredCount = milestones.filter((m: any) => m.MoneyStage === "Verified").length;
+  const overdueCount = milestones.filter((m: any) => isOverdue(m)).length;
   const pendingCount = milestones.filter((m: any) => m.Status !== CrmStatus.PAID && m.Status !== "Waived").length;
   const ledgerCount = (b.receipts?.length || 0) + (b.invoices?.length || 0) + (b.onAccount?.length || 0) + (b.brokerage?.length || 0) + (b.creditNotes?.length || 0);
 
@@ -324,7 +324,7 @@ const BookingLedger: React.FC<{ b: any; expanded: boolean; onToggle: () => void 
           <Field l="Booked on" v={<span className={num}>{dt(b.BookingDate)}</span>} />
           <Field l="Milestones" v={milestones.length ? (
             <span className={cn(num, overdueCount > 0 && "text-destructive font-semibold")}>
-              {milestones.length - pendingCount}/{milestones.length} paid{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
+              {milestones.length - pendingCount}/{milestones.length} paid{coveredCount > 0 ? ` · ${coveredCount} ${MONEY_STAGE.Verified.label.toLowerCase()} on account` : ""}{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}
             </span>) : "—"} />
           <Field l="Agreement" v={b.AgreementStatus || "—"} />
           <Field l="Legal" v={b.LegalMilestoneStatus || "—"} />
@@ -348,9 +348,21 @@ const BookingLedger: React.FC<{ b: any; expanded: boolean; onToggle: () => void 
             { header: "Due date", cell: (m: any) => <span className={num}>{dt(m.DueDate)}</span> },
             { header: "%", align: "right", cell: (m: any) => <span className={num}>{m.Percent != null ? `${m.Percent}%` : "—"}</span> },
             { header: "Amount", align: "right", cell: (m: any) => <span className={num}>{fmt(m.AmountDue)}</span> },
-            { header: "Paid", align: "right", cell: (m: any) => <span className={num}>{fmt(m.AmountPaid)}</span> },
-            { header: "Balance", align: "right", cell: (m: any) => { const bal = round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0)); return <span className={cn(num, bal > 0 ? "font-semibold" : "text-muted-foreground")}>{fmt(bal)}</span>; } },
-            { header: "Status", cell: (m: any) => isOverdue(m, today) ? <span className="text-destructive font-semibold">Overdue</span> : <GridStatusPill status={m.Status} /> },
+            // Paid = settled on the milestone; money held On Account against it (in milestone order) is shown under it,
+            // so what the customer has paid is visible while it is held. The balance counts both.
+            { header: "Paid", align: "right", cell: (m: any) => (
+              <span className="inline-flex flex-col items-end leading-tight">
+                <span className={num}>{fmt(m.AmountPaid)}</span>
+                {Number(m.HeldOnAccount) > 0 && <span className={cn(num, "text-[0.6875rem] text-emerald-700 dark:text-emerald-300")} title={MONEY_STAGE.Verified.hint}>+{fmt(m.HeldOnAccount)} on account</span>}
+              </span>
+            ) },
+            { header: "Balance", align: "right", cell: (m: any) => { const bal = Math.max(0, round2(Number(m.AmountDue || 0) - Number(m.AmountPaid || 0) - Number(m.HeldOnAccount || 0))); return <span className={cn(num, bal > 0 ? "font-semibold" : "text-muted-foreground")}>{fmt(bal)}</span>; } },
+            { header: "Status", cell: (m: any) => {
+              const stage = MONEY_STAGE[m.MoneyStage as string];
+              if (stage) return <span title={stage.hint}><GridStatusPill status={stage.label} /></span>;
+              if (isOverdue(m)) return <span className="text-destructive font-semibold">Overdue{Number(m.HeldOnAccount) > 0 ? " · part held" : ""}</span>;
+              return <GridStatusPill status={m.Status} />;
+            } },
           ]} />
 
           <SubHead icon={Receipt} title="Payment receipts" count={b.receipts?.length} />
