@@ -1,5 +1,6 @@
 const express = require("express");
 const { sumMoney } = require("../services/bookingUnits");
+const { getMilestoneMoneyStages } = require("../services/crmOnAccountCoverage");
 const { CrmStatus, DEAD_BOOKING_STATUSES, DEAD_BOOKING_SQL } = require("../constants/crmStatuses");
 const { projectPredicate, crmCustomerGuard } = require("../services/projectScope");
 const router = express.Router();
@@ -320,6 +321,17 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
       for (const oa of onAccountRes.recordset) (onAccountByBooking[oa.BookingId] ??= []).push(oa);
       for (const br of brokerageRes.recordset) (brokerageByBooking[br.BookingId] ??= []).push(br);
       for (const m of milestonesRes.recordset) (milestonesByBooking[m.BookingId] ??= []).push(m);
+      // Each milestone's money stage and the on-account money held against it — the same rule the Payments page
+      // uses, so a customer's payments show on the plan while they are held On Account.
+      const staged = await Promise.all(bookingIds.map((id) => getMilestoneMoneyStages(pool, id)));
+      const stageById = new Map(staged.flatMap((s) => s.milestones).map((c) => [c.Id, c]));
+      for (const list of Object.values(milestonesByBooking)) {
+        for (const m of list) {
+          const c = stageById.get(m.Id);
+          m.MoneyStage = c ? c.MoneyStage : null;
+          m.HeldOnAccount = c?.HeldOnAccount || 0;
+        }
+      }
     }
 
     const enrichedBookings = bookingRows.map((b) => ({
