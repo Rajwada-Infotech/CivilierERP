@@ -13,6 +13,8 @@ export const SectionFilters: React.FC<{
   onChange: (patch: Partial<FilterState>) => void;
   activeFilters: ActiveFilter[];
   onClearAll: () => void;
+  /** Hide Company / Project (sections whose data is not split by them, e.g. Legal). */
+  datesOnly?: boolean;
 }> = ({
   companies,
   projects,
@@ -21,9 +23,11 @@ export const SectionFilters: React.FC<{
   onChange,
   activeFilters,
   onClearAll,
+  datesOnly,
 }) => (
   <div className="rounded-xl border border-border bg-card/60 p-3 space-y-2.5">
     <div className="flex flex-wrap items-end gap-2.5">
+      {!datesOnly && (<>
       {/* Company */}
       <div className="min-w-[160px] flex-1 max-w-[210px]">
         <label className="block text-[0.625rem] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
@@ -81,6 +85,8 @@ export const SectionFilters: React.FC<{
           />
         </div>
       </div>
+
+      </>)}
 
       {/* Fin Year */}
       <div className="min-w-[140px] flex-1 max-w-[180px]">

@@ -1,4 +1,4 @@
-import { Judge, Global, Note1, DocumentText, MessageQuestion, MoneySend, ClipboardTick } from "iconsax-react";
+import { Judge, Global, Note1, DocumentText, MessageQuestion, MoneySend, ClipboardTick, Building } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Company Land Record Management System navigation:
@@ -7,6 +7,7 @@ import { NavItem } from "./SidebarPrimitives";
 // - Land Register (all company properties)
 // - Pending Approvals (Land Verification & Two-Level L1/L2 Approvals)
 // - Register Existing / Backlog Land
+// - Land & Projects (which land serves which project; complete vs under process)
 // - Land Sales (sale/disposal transactions)
 // - Registers of RS & LR records
 // - Reports live on the top Reports page (Legal section), like every other module
@@ -18,6 +19,7 @@ export const legalNavItems: NavItem[] = [
   { label: "Land Enquiries", icon: MessageQuestion, path: "/legal/land/enquiries", pageKey: "legal-land-enquiry" },
   { label: "Land Register", icon: Global, path: "/legal/land/properties", pageKey: "legal-land-master" },
   { label: "Pending Approvals", icon: ClipboardTick, path: "/legal/approvals", pageKey: "legal-approvals" },
+  { label: "Land & Projects", icon: Building, path: "/legal/land/projects", pageKey: "legal-land-master" },
   { label: "Land Sales", icon: MoneySend, path: "/legal/land/sales", pageKey: "legal-land-master" },
   { label: "RS Record Register", icon: Note1, path: "/legal/land/rs-register", pageKey: "legal-land-master" },
   { label: "LR RoR Register", icon: DocumentText, path: "/legal/land/lr-register", pageKey: "legal-land-master" },

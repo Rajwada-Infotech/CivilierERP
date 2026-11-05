@@ -230,3 +230,15 @@ export const getLandPendingQueue = async () =>
 /** Delete a land and everything recorded on it. `confirmCode` must be the land's Land ID. */
 export const deleteLand = async (id: number, confirmCode: string) =>
   handle<{ message: string }>(await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmCode }) }));
+
+/** Land ↔ project map: every company land with the project it serves. Complete = fully approved (L2). */
+export interface ProjectLand {
+  LandId: number; LandCode: string; LandName: string; ProjectId: number | null; ProjectName: string | null;
+  MouzaName: string | null; DistrictName: string | null; Area: number | null; UnitName: string | null;
+  EntryType: string | null; LandStatus: string; WorkflowStatus: string | null; VerificationStatus: string | null;
+  L1Status: string | null; L2Status: string | null; IsOnHold: boolean; IsComplete: boolean; Documents: number; CurrentOwners: string | null;
+}
+export const getLandProjectMap = async () =>
+  handle<{ lands: ProjectLand[]; projects: { id: number; name: string }[] }>(await fetchWithAuth(`${BASE}/project-map`));
+export const setLandProject = async (landId: number, projectId: number | null) =>
+  handle<{ ok: true }>(await fetchWithAuth(`${BASE}/${landId}/project`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId }) }));

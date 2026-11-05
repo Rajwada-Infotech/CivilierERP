@@ -260,7 +260,7 @@ const MASTERS = {
       { name: "AreaUnitId", label: "Area unit", type: "ref", ref: "area-unit", required: true },
       { name: "LandTypeId", label: "Land classification", type: "ref", ref: "land-type" },
       { name: "LocationTypeId", label: "Location type", type: "ref", ref: "location-type" },
-      { name: "ProjectId", label: "Project", type: "ref", ref: "project" },
+      // Project: not in this form — only approved land is mapped, on Land & Projects (PUT /api/legal/land/:id/project).
       { name: "LandStatus", label: "Land status", type: "select", required: true, options: ["Owned", "Active", "Identified", "Under Negotiation", "Agreement Done", "Registered", "Mutated", "In Dispute", "On Hold", "Disposed / Transferred", "Inactive"], default: "Owned" },
       { name: "PossessionStatus", label: "Possession status", type: "select", options: ["In Possession", "Partly in Possession", "Not in Possession", "Disputed", "Unknown"], default: "In Possession" },
       { name: "VerificationStatus", label: "Verification status", type: "select", options: ["Draft", "Verified", "Rejected"], default: "Draft" },
