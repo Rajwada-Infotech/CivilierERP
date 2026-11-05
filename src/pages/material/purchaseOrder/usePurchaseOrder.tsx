@@ -2147,13 +2147,17 @@ export function usePurchaseOrder() {
 
     // Snapshot items at call time — avoids stale closure issues
     const itemsSnapshot = items;
+    // A non-GST (Unregistered) supplier can't charge GST, whatever the item is tagged with. Decided from the PO's own record,
+    // because a PO opened straight from a link has no supplier details loaded yet.
+    const supplierChargesNoGst = raw.SupplierGstType === "Unregistered" || (!raw.SupplierGstType && raw.SupplierGst !== undefined && !String(raw.SupplierGst ?? "").trim());
 
     if (poItems.length > 0) {
       setLineItems(
         poItems.map((pi: any) => {
           const qty = Number(pi.quantity ?? pi.Quantity ?? 0);
           const rate = Number(pi.rate ?? pi.Rate ?? 0);
-          const totalTaxRate = Number(pi.tax ?? pi.Tax ?? 0);
+          const storedTax = pi.tax ?? pi.Tax ?? pi.TaxPct;
+          const totalTaxRate = Number(storedTax ?? 0);
 
           // Priority 1: use stored split fields (saved by toPayload)
           const storedCgst = Number(pi.cgstRate ?? 0);
@@ -2164,7 +2168,9 @@ export function usePurchaseOrder() {
             resolvedSgst = 0,
             resolvedIgst = 0;
 
-          if (storedCgst > 0 || storedSgst > 0) {
+          if (supplierChargesNoGst || (storedTax != null && totalTaxRate === 0)) {
+            // No GST on this PO, as saved: the item master's rate must not be added back on top of it.
+          } else if (storedCgst > 0 || storedSgst > 0) {
             resolvedCgst = storedCgst;
             resolvedSgst = storedSgst;
           } else if (storedIgst > 0) {
