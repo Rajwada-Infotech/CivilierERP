@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Download, KeyRound, Loader2, Lock, Play, Plus, RefreshCw, Save, Square, Trash2, X } from "lucide-react";
+import { Check, Copy, Download, KeyRound, Loader2, Lock, Play, Plus, RefreshCw, Save, Square, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { SheetShell, SheetMark, MarkSquare, type MarkTone } from "@/components/sheet/Sheet";
 import { fmtIstDateTime } from "@/lib/istTime";
@@ -16,9 +16,32 @@ import {
 const LBL = "font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground";
 const HEAD = "font-heading text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-foreground";
 const RULE = "1px solid hsl(var(--foreground))";
-const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-const KEY_INK = `${KEY} bg-foreground text-card border border-foreground`;
+const KEY = "font-heading text-[0.625rem] font-semibold uppercase tracking-[0.1em] inline-flex items-center justify-center gap-1.5 transition-[color,background-color,border-color,transform] duration-100 active:scale-[0.96] active:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed";
+const KEY_INK = `${KEY} bg-foreground text-card border border-foreground hover:bg-foreground/85`;
 const KEY_LINE = `${KEY} border border-foreground text-foreground hover:bg-primary/10`;
+
+function CopyKey({ text, label, className, iconSize, doneMessage }: { text: string; label: string; className: string; iconSize: number; doneMessage: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const copy = async () => {
+    if (!text) return toast.error("Nothing to copy yet.");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setCopied(false), 1800);
+      toast.success(doneMessage);
+    } catch {
+      toast.error("Couldn't copy. Your browser blocked it.");
+    }
+  };
+  return (
+    <button type="button" className={className} onClick={() => void copy()} aria-live="polite">
+      {copied ? <Check size={iconSize} /> : <Copy size={iconSize} />} {copied ? "Copied" : label}
+    </button>
+  );
+}
 const INPUT = "border border-foreground/40 focus:border-foreground bg-card text-foreground placeholder:text-muted-foreground/60 outline-none";
 const TAGBOX = "inline-flex items-center gap-1.5 border border-foreground/40 px-2 py-1 font-heading text-[0.5625rem] font-semibold uppercase tracking-[0.1em] text-foreground";
 
@@ -98,9 +121,7 @@ function KeyReveal({ vaultKey, onDone, doneLabel }: { vaultKey: string; onDone: 
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" className={`${KEY_LINE} h-9 px-4`} onClick={() => { void navigator.clipboard.writeText(vaultKey); toast.success("Key copied. Paste it somewhere safe, then clear your clipboard."); }}>
-          <Copy size={12} /> Copy key
-        </button>
+        <CopyKey text={vaultKey} label="Copy key" className={`${KEY_LINE} h-9 px-4`} iconSize={12} doneMessage="Key copied. Paste it somewhere safe, then clear your clipboard." />
         <button
           type="button"
           className={`${KEY_INK} h-9 px-4`}
@@ -329,9 +350,10 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
       setRunId(r.id); setChunks([]); setRunStatus("running"); setExitCode(null); setStartedAt(r.startedAt); setFinishedAt(null);
       nextRef.current = 0;
       void qc.invalidateQueries({ queryKey: ["script-console", "history"] });
+      toast.success("Script started.");
     } catch (e) { guard(e); }
   };
-  const stop = async () => { if (runId) try { await stopRun(runId); } catch (e) { guard(e); } };
+  const stop = async () => { if (runId) try { await stopRun(runId); toast.success("Stopping the script."); } catch (e) { guard(e); } };
 
   const save = async (asNew: boolean) => {
     const label = name.trim();
@@ -343,10 +365,10 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
       void qc.invalidateQueries({ queryKey: ["script-console", "library"] });
     } catch (e) { guard(e); }
   };
-  const load = (s: SavedScript) => { setViewing(null); setLibId(s.id); setName(s.name); setScript(s.script); setEnv(s.env); setSide("saved"); };
+  const load = (s: SavedScript) => { setViewing(null); setLibId(s.id); setName(s.name); setScript(s.script); setEnv(s.env); toast.success(`Loaded "${s.name}" into the editor.`); setSide("saved"); };
   const remove = async (s: SavedScript) => {
     if (!window.confirm(`Delete the saved script "${s.name}"?`)) return;
-    try { await deleteScript(s.id); if (libId === s.id) setLibId(null); void qc.invalidateQueries({ queryKey: ["script-console", "library"] }); } catch (e) { guard(e); }
+    try { await deleteScript(s.id); if (libId === s.id) setLibId(null); toast.success(`Deleted "${s.name}".`); void qc.invalidateQueries({ queryKey: ["script-console", "library"] }); } catch (e) { guard(e); }
   };
   const openHistory = async (id: string) => { try { setViewing(await getHistoryRun(id)); } catch (e) { guard(e); } };
 
@@ -410,9 +432,9 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
               )}
             </span>
             <span className="flex gap-2">
-              {viewing && <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => { setName(viewing.name ?? ""); setScript(viewing.script); setEnv(viewing.env); setLibId(null); setViewing(null); }}>Load into editor</button>}
-              <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => void navigator.clipboard.writeText(shownChunks.map((c) => c.t).join(""))}><Copy size={10} /> Copy</button>
-              {!viewing && !running && chunks.length > 0 && <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => { setChunks([]); setRunStatus(null); }}><Trash2 size={10} /> Clear</button>}
+              {viewing && <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => { setName(viewing.name ?? ""); setScript(viewing.script); setEnv(viewing.env); setLibId(null); setViewing(null); toast.success("Loaded into the editor."); }}>Load into editor</button>}
+              <CopyKey text={shownChunks.map((c) => c.t).join("")} label="Copy" className={`${KEY_LINE} h-7 px-2.5`} iconSize={10} doneMessage="Output copied." />
+              {!viewing && !running && chunks.length > 0 && <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => { setChunks([]); setRunStatus(null); toast.success("Output cleared."); }}><Trash2 size={10} /> Clear</button>}
               {viewing && <button type="button" className={`${KEY_LINE} h-7 px-2.5`} onClick={() => setViewing(null)}><X size={10} /> Close</button>}
             </span>
           </div>
@@ -450,7 +472,7 @@ function Runner({ idleMinutes, onLocked }: { idleMinutes: number; onLocked: () =
           : (
             <>
               <div className="flex justify-end px-4 py-2" style={{ borderBottom: "1px solid hsl(var(--border) / 0.55)" }}>
-                <button type="button" className={`${KEY_LINE} h-6 px-2`} onClick={() => void history.refetch()}><RefreshCw size={10} /> Refresh</button>
+                <button type="button" className={`${KEY_LINE} h-6 px-2`} disabled={history.isFetching} onClick={() => void history.refetch().then((r) => { if (!r.isError) toast.success("History refreshed."); })}><RefreshCw size={10} className={history.isFetching ? "animate-spin" : ""} /> Refresh</button>
               </div>
               {history.data.map((h) => (
                 <button key={h.RunId} type="button" onClick={() => void openHistory(h.RunId)} className="block w-full px-4 py-3 text-left hover:bg-primary/5" style={{ borderBottom: "1px solid hsl(var(--border) / 0.55)" }}>
@@ -482,7 +504,7 @@ export default function ScriptConsole() {
   const [rotateError, setRotateError] = useState("");
 
   const refresh = useCallback(() => qc.invalidateQueries({ queryKey: ["script-console"] }), [qc]);
-  const lock = async () => { try { await lockVault(); } finally { await refresh(); } };
+  const lock = async () => { try { await lockVault(); toast.success("Vault locked."); } catch (e) { toast.error(message(e)); } finally { await refresh(); } };
   const rotate = async () => {
     setRotateError("");
     try { setNewKey((await rotateVaultKey(currentKey)).key); setCurrentKey(""); } catch (e) { setRotateError(message(e)); }
